@@ -5,6 +5,7 @@ import Cities from "./Cities";
 import MarkersLayer from "./MarkersLayer.jsx";
 import Units from "./Units";
 import GlobeEffects from "./GlobeEffects.jsx";
+import LayerOrder from "./LayerOrder.jsx";
 import RegionPopup from "../Selection/Regions";
 import CountryInfoPanel from "../Selection/CountryPanel.jsx";
 import UnitPopup from "../Selection/Units";
@@ -42,6 +43,7 @@ const MapScene = ({ isGlobe = false }) => {
           <Nations isGlobe={isGlobe} />
           <Cities />
           <MarkersLayer />
+          <LayerOrder />
         </>
       )}
       {/* Units is deliberately NOT swapped. The beta unit system postdates the
