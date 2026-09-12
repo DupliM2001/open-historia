@@ -169,3 +169,17 @@ test("a quote mid-string is content; only a quote before a separator closes the 
 test("quotes that were escaped properly are left exactly as they were", () => {
   assert.deepEqual(extractJsonPayload('{"note":"a \\"b\\" c"}'), { note: 'a "b" c' });
 });
+
+test("extractJsonArray: strict first, then the repairs, then the first balanced array in the text", async () => {
+  const { extractJsonArray } = await import("./jsonSalvage.js");
+  assert.deepEqual(extractJsonArray("[]"), []);
+  assert.deepEqual(extractJsonArray('[{"a":1}]'), [{ a: 1 }]);
+  assert.deepEqual(extractJsonArray('[{"a":1},]'), [{ a: 1 }], "a trailing comma is repaired");
+  assert.deepEqual(extractJsonArray("[{“a”:“b”}]"), [{ a: "b" }], "smart quotes are repaired");
+  assert.deepEqual(extractJsonArray('[{"a":1}] // nothing else moved'), [{ a: 1 }], "a remark after the array is ignored");
+  assert.deepEqual(extractJsonArray('Here you go: [{"a":1}] and [{"b":2}]'), [{ a: 1 }], "the first array wins");
+  assert.deepEqual(extractJsonArray('{"wrapper":true} [{"a":1}]'), [{ a: 1 }], "an object before the array is skipped");
+  assert.equal(extractJsonArray('{"a":1}'), null, "an object alone is not an array");
+  assert.equal(extractJsonArray("no json here"), null);
+  assert.equal(extractJsonArray(""), null);
+});

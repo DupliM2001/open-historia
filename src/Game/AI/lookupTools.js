@@ -211,11 +211,12 @@ export const LOOKUP_DIRECTIVE = [
   "[Lookup tools]",
   "You have lookup functions beside your output function. They answer from the live campaign and the rendered map, and every name they return is spelled exactly as the map spells it.",
   "Rules:",
-  "1. Before you write ANY regionTransfers, regionControlOps or regionClaims entry, look the region up (find_region or list_regions) and copy its id and exact name into the entry. Never guess a region name.",
+  "1. Before you write ANY regionTransfers, regionControlOps or regionClaims entry, look the region up (find_region or list_regions) and copy its id and exact name into the entry. Never guess a region name. And the reverse holds: an event that narrates a capture, occupation, liberation or cession MUST carry that entry, with the id you looked up — narration alone never moves the map.",
   "2. Every owner field (fromCode, toCode, ownerCode, claimantCode, actorCode) must be a power's exact name as returned by list_powers or power_info. A short form, a translation or a code names nobody.",
   "3. Use region_info to learn who borders a region before moving forces or borders there; use find_city when you know the city but not the region.",
   "4. What is already in motion is on the ledgers: storylines, list_projects, war_ledger, relations_between, spy_network. Continue those rather than restarting them.",
-  "5. Look up what you need, then call the output function once with the complete answer. Do not narrate your lookups.",
+  "5. Ask for everything you need in as few rounds as you can: call several functions in the same turn (every region you will name, every power you will check) rather than one per turn.",
+  "6. Then call the output function once with the complete answer. Do not narrate your lookups.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------

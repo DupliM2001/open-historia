@@ -1,4 +1,5 @@
 import { EVENT_TAG_ENUM, MAX_EVENT_TAGS } from "../../runtime/eventTags.js";
+import { extractJsonArray } from "./jsonSalvage.js";
 const textSchema = (description) => ({
   type: "string",
   description,
@@ -1794,10 +1795,19 @@ const parseGameMasterTransportArray = (value, field) => {
   const text = String(value ?? "").trim();
   if (!text) return [];
   let parsed;
+  let strictError = null;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new Error(`$.${field} must contain valid JSON array text: ${error?.message || error}.`);
+    strictError = error;
+    // The same salvage the task runner gives a whole answer (jsonSalvage.js):
+    // a trailing remark after the array, a smart quote, a trailing comma or a
+    // second array must not cost the whole transaction. Only after the strict
+    // parse failed, so well-formed text is never touched.
+    parsed = extractJsonArray(text);
+    if (parsed === null) {
+      throw new Error(`$.${field} must contain valid JSON array text: ${strictError?.message || strictError}.`);
+    }
   }
   if (!Array.isArray(parsed)) {
     throw new Error(`$.${field} must decode to a JSON array.`);
