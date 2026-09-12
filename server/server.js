@@ -62,7 +62,7 @@ import {
   relayTargetAllowed,
   sanitizeRelayHeaders,
 } from "./security.js";
-import { appendLog, appendLogBatch, readLogTail, logFilePath } from "./logStore.js";
+import { appendLog, clearLog, readLogSince } from "./logStore.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 import { DATA_DIR } from "./dataDir.js";
@@ -384,31 +384,33 @@ app.put("/api/ui-settings", jsonParser, (req, res) => {
   }
 });
 
-// ---- Diagnostics log ------------------------------------------------------
-// The page, the AI layer and the Electron main process all write here, so a bug
-// report can carry what actually happened instead of "it broke". Redaction and
-// rotation live in logStore.js. This sits behind the same cross-origin write
-// guard as every other POST, so a random page cannot stuff the player's log.
-app.post("/api/log", largeJsonParser, (req, res) => {
-  try {
-    const body = req.body ?? {};
-    const written = Array.isArray(body.entries)
-      ? appendLogBatch(body.entries)
-      : (appendLog(body), 1);
-    res.json({ ok: true, written });
-  } catch (error) {
-    sendError(res, 400, error);
-  }
-});
-
+// ---- Desktop log ----------------------------------------------------------
+// Where this server and the Electron process write their own entries
+// (logStore.js). The page keeps its own Diagnostics log and never writes here;
+// it reads these entries back to merge into the Logging file a player sends.
+//
+// Readable by any device that can reach this server — in practice the host
+// player's own phone, whose report should carry the host's errors — which is
+// only this machine unless the host turned on LAN play.
 app.get("/api/log", (req, res) => {
   try {
-    const limit = Number.parseInt(String(req.query.limit ?? "500"), 10);
     res.setHeader("Cache-Control", "no-store");
-    res.json({ file: logFilePath(), entries: readLogTail(Number.isFinite(limit) ? limit : 500) });
+    res.json({ entries: readLogSince(String(req.query.since ?? "")) });
   } catch (error) {
     sendError(res, 500, error);
   }
+});
+
+// The player turned Logging off. Only this machine may do that to its own files:
+// another device's switch covers that device's log, and "the log on this
+// device is deleted" is what Settings promises. Not through sendError, which
+// would write the refusal into the log it refused to clear.
+app.delete("/api/log", (req, res) => {
+  if (!isLoopbackAddress(req.socket?.remoteAddress)) {
+    res.status(403).json({ error: "Only the machine running the server can clear its Desktop log." });
+    return;
+  }
+  res.json({ ok: true, removed: clearLog() });
 });
 
 app.get("/api/scenarios", (_req, res) => {

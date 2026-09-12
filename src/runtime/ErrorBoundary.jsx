@@ -1,7 +1,6 @@
 /*! Open Historia — React error boundary (recoverable render-crash fallback) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import React from "react";
-import { logEvent } from "./logClient.js";
-import { flushDebugLog, logDebugEvent } from "./debugLog.js";
+import { flushDebugLog, logDebugEvent, withConsoleCaptureMuted } from "./debugLog.js";
 
 // Catches render/lifecycle/constructor throws in the map, game UI and panels so a
 // crash shows a recoverable fallback (with a Reload) instead of React unmounting the
@@ -21,16 +20,12 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    console.error("Render crash caught by ErrorBoundary:", error, info?.componentStack);
-    logEvent({
-      level: "error",
-      event: "render.crash",
-      message: String(error?.message ?? error),
-      data: { stack: String(error?.stack ?? "").slice(0, 8000), componentStack: info?.componentStack },
-    });
-    // The console line above is already captured by the diagnostics log, but a
-    // render crash is the one entry a reader should never have to hunt for, so
-    // it gets its own category — and the first few frames of the component
+    // For a developer with DevTools open, and kept out of the diagnostics log:
+    // the crash entry below is the log's one record of it, so it is not read as
+    // two crashes.
+    withConsoleCaptureMuted(() => console.error("Render crash caught by ErrorBoundary:", error, info?.componentStack));
+    // A render crash is the one entry a reader should never have to hunt for,
+    // so it gets its own category — and the first few frames of the component
     // stack, which name the panel that blew up.
     logDebugEvent("crash", "Render crash caught by the error boundary.", {
       error: `${error?.name || "Error"}: ${error?.message || String(error)}`,

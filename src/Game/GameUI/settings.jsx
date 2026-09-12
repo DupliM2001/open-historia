@@ -44,12 +44,14 @@ import { announceMapRerender } from "../../runtime/mapReadiness.js";
 import { readGameData, writeGameData } from "../../runtime/gameState.js";
 import { copyToClipboard } from "../../runtime/clipboard.js";
 import {
-    buildDebugLogReport,
+    buildLoggingFile,
     clearDebugLog,
+    fetchDesktopLog,
     formatLogSize,
     getDebugLogBytes,
     getDebugLogLimitBytes,
     getDebugLogSize,
+    getLoggingFileEntries,
     isDebugLogEnabled,
     isDebugLogVerbose,
     setDebugLogEnabled,
@@ -1171,6 +1173,82 @@ const NetworkSharing = () => {
     );
 };
 
+// Settings → Diagnostics → View log: the Logging file's entries, newest first,
+// so a player can look before they send — the page's own and, on desktop, the
+// desktop app's and server's, exactly as the file would hold them
+// (getLoggingFileEntries). Read once on opening and on Refresh rather than live:
+// the Desktop log is a request away, and a list that reorders under the reader
+// while a turn runs cannot be read.
+const DiagnosticsLogViewer = () => {
+    const [shown, setShown] = useState(null);
+    const [desktopStatus, setDesktopStatus] = useState("");
+    const [onlyProblems, setOnlyProblems] = useState(false);
+    const [expanded, setExpanded] = useState(null);
+
+    const show = (desktop) => {
+        setDesktopStatus(desktop.status);
+        setShown(getLoggingFileEntries({ desktop }));
+        setExpanded(null);
+    };
+    const load = () => fetchDesktopLog().then(show);
+
+    // Read once on opening. `cancelled` because the menu can close before the
+    // Desktop log answers.
+    useEffect(() => {
+        let cancelled = false;
+        fetchDesktopLog().then((desktop) => { if (!cancelled) show(desktop); });
+        return () => { cancelled = true; };
+    }, []);
+
+    const entries = (shown ?? []).filter((entry) => !onlyProblems || entry.problem);
+
+    return (
+        <div style={{ marginBottom: "0.8rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.4rem" }}>
+        <button type="button" onClick={load} style={{ ...diagnosticsButton, flex: 1 }}>Refresh</button>
+        <button type="button" onClick={() => setOnlyProblems((value) => !value)} style={{ ...diagnosticsButton, flex: 1 }}>
+        {onlyProblems ? "Showing problems only" : "Showing everything"}
+        </button>
+        </div>
+        {desktopStatus === "unavailable" && (
+            <div style={{ fontSize: "0.68rem", color: "rgba(255,200,97,0.8)", marginBottom: "0.4rem" }}>
+            The desktop app&apos;s own entries could not be read just now.
+            </div>
+        )}
+        <div style={{ maxHeight: "18rem", overflowY: "auto", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "6px" }}>
+        {shown === null && <div style={viewerNoteStyle}>Reading the log…</div>}
+        {shown !== null && entries.length === 0 && (
+            <div style={viewerNoteStyle}>{onlyProblems ? "No problems logged." : "Nothing logged yet."}</div>
+        )}
+        {entries.map((entry, index) => (
+            <div key={`${entry.at}-${index}`} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "0.3rem 0.45rem" }}>
+            <div
+            onClick={() => entry.detail && setExpanded(expanded === index ? null : index)}
+            style={{ cursor: entry.detail ? "pointer" : "default", display: "flex", gap: "0.45rem", fontSize: "0.72rem", alignItems: "baseline" }}
+            >
+            <span style={{ color: "rgba(255,255,255,0.4)", whiteSpace: "nowrap" }}>{String(entry.at || "").slice(11, 19)}</span>
+            <span style={{ color: entry.problem ? "#ffb35c" : "rgba(255,255,255,0.55)", fontWeight: 700, whiteSpace: "nowrap" }}>{entry.category}</span>
+            <span style={{ color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+            {entry.message}{entry.repeat > 1 ? ` (×${entry.repeat})` : ""}
+            </span>
+            {entry.detail && <span style={{ color: "rgba(255,255,255,0.35)" }}>{expanded === index ? "▾" : "▸"}</span>}
+            </div>
+            {expanded === index && (
+                <pre style={{
+                    background: "rgba(0,0,0,0.35)", borderRadius: 6, color: "rgba(255,255,255,0.8)",
+                    fontSize: "0.68rem", margin: "0.3rem 0 0", maxHeight: "12rem", overflow: "auto", padding: "0.45rem",
+                    whiteSpace: "pre-wrap", wordBreak: "break-word",
+                }}>{entry.detail}</pre>
+            )}
+            </div>
+        ))}
+        </div>
+        </div>
+    );
+};
+
+const viewerNoteStyle = { padding: "0.6rem", fontSize: "0.72rem", color: "rgba(255,255,255,0.45)" };
+
 // Settings → Advanced → Diagnostics: the log a player pastes into a bug report.
 //
 // Two ways out, because the two report routes want different things. Copy is for
@@ -1189,6 +1267,7 @@ const NetworkSharing = () => {
 const DiagnosticsPanel = () => {
     const [copyState, setCopyState] = useState("idle");
     const [cleared, setCleared] = useState(false);
+    const [viewing, setViewing] = useState(false);
     // The count is the whole reason this section is visible when nothing is
     // wrong: "Entries: 0" after a crash means the log is not recording and the
     // player should say so, rather than pasting an empty report.
@@ -1225,7 +1304,7 @@ const DiagnosticsPanel = () => {
         // Through the shared helper: navigator.clipboard needs a secure context
         // and a browser reaching this game over plain http on the LAN (Settings →
         // Network) does not have one. Same reason clipboard.js exists at all.
-        const ok = await copyToClipboard(buildDebugLogReport());
+        const ok = await copyToClipboard(await buildLoggingFile());
         setCopyState(ok ? "copied" : "failed");
         setTimeout(() => setCopyState("idle"), 2500);
     };
@@ -1264,6 +1343,15 @@ const DiagnosticsPanel = () => {
         </button>
         </div>
 
+        <button
+        type="button"
+        onClick={() => setViewing((value) => !value)}
+        style={{ ...diagnosticsButton, width: "100%", marginBottom: "0.5rem" }}
+        >
+        {viewing ? "Hide log" : "🔎 View log"}
+        </button>
+        {viewing && <DiagnosticsLogViewer />}
+
         <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
         <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)" }}>
         {/* The size, not just the count, because the cap is otherwise invisible:
@@ -1295,7 +1383,7 @@ const DiagnosticsPanel = () => {
 
         <Toggle label="Keep a diagnostics log" enabled={enabled} onToggle={toggleEnabled} />
         <div style={helperTextStyle}>
-        On by default. Off: nothing is recorded, and the log stored on this device is deleted. Remembered across save changes and restarts.
+        On by default. Off: nothing is recorded and the log on this device is deleted. The desktop app still notes its own start-up and server errors, which never include your campaign. Remembered across save changes and restarts.
         </div>
 
         <Toggle label="Detailed logging" enabled={verbose} onToggle={toggleVerbose} />
@@ -1313,7 +1401,7 @@ const DiagnosticsPanel = () => {
         <li>The game&apos;s routine console messages</li>
         </ul>
         <div style={{ marginTop: "0.3rem" }}>
-        The log gets a bigger allowance while this is on, but still fills faster. It now quotes your conversations word for word — read it before posting it somewhere public.
+        The log fills much faster while this is on, so it reaches less far back. It quotes your conversations word for word — read it before posting it somewhere public.
         </div>
         </div>
 

@@ -1,6 +1,5 @@
 /*! Open Historia — portions (briefing dossiers + timeout/fallback hardening) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import { callAI, providerSupportsBatch, retrieveAIBatch, sendDiplomaticMessageOnceOff, submitAIBatch } from "./main.jsx";
-import { logAi } from "../../runtime/logClient.js";
 import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
 import { NATIVE_GAME_MASTER_PROMPT, normalizePromptPack } from "./gameplayPrompts.js";
 import { directGeneratedUnitOps } from "./nativeUnitDirector.js";
@@ -34,7 +33,7 @@ import {
   stripWorldSweepAudit,
   validateWorldExplorationAudit,
 } from "./nativeWorldIntegrity.js";
-import { isContextDiagnosticsEnabled, logContextDiagnostics, resolveTemplateVariableDemand } from "./contextDiagnostics.js";
+import { buildPromptFingerprint, isContextDiagnosticsEnabled, logContextDiagnostics, resolveTemplateVariableDemand } from "./contextDiagnostics.js";
 import {
   SEGMENTED_JUMP_MIN_DAYS,
   buildSegmentInstruction,
@@ -170,7 +169,7 @@ import { difficultyDirective } from "../../runtime/difficulty.js";
 import { MAP_SETTING_KEYS, getMapSetting, isBetaUnits } from "../../runtime/mapSettings.js";
 import { AI_FIRST_BYTE_TIMEOUT_MS, AI_IDLE_TIMEOUT_MS, createIdleDeadline } from "./idleDeadline.js";
 import { REPAIR_STOP_TIME_BUDGET, runBoundedRepairCall } from "./repairCall.js";
-import { logDebugEvent } from "../../runtime/debugLog.js";
+import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
 import { isProviderConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
@@ -2017,15 +2016,20 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       // Per attempt, not per task: a retry re-sends the whole prompt and so
       // re-does the wait for a first byte.
       idle.start();
-      logAi("ai.request", `${taskKey} attempt ${outputAttempt}`, {
-        task: taskKey,
-        attempt: outputAttempt,
-        promptChars: systemPrompt.length,
-        historyMessages: Array.isArray(history) ? history.length : 0,
-        // The whole context, so "what does the AI actually know here" is
-        // answerable from the log rather than by re-deriving it.
-        systemPrompt,
-      });
+      // What the AI was actually given, as sizes and hashes rather than the
+      // prompt itself: rebuild the prompt from the save, fingerprint it, and a
+      // mismatch names the section that differed (contextDiagnostics.js). Only
+      // computed in detailed mode — hashing a jump's prompt is cheap but not
+      // free, and the entry is dropped otherwise.
+      if (isDebugLogVerbose()) {
+        logDebugEvent("ai", `Task "${taskKey}" attempt ${outputAttempt} prompt fingerprint.`, buildPromptFingerprint({
+          history,
+          promptTemplate,
+          systemPrompt,
+          userMessage,
+          variables,
+        }), { verbose: true });
+      }
       // Telemetry: the record for THIS attempt comes back through the sink, so
       // the validation outcome below lands on the call that produced it.
       const attemptSink = {};
@@ -2378,11 +2382,10 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     failureReason = firstFailureReason
       ? `${firstFailureReason}${transportReason ? ` The retry then failed: ${transportReason}` : ""}`
       : transportReason || failureReason;
-    logAi("ai.failed", `${taskKey}: ${failureReason}`, {
-      task: taskKey,
-      aborted: controller.signal.aborted,
-      stack: actualError?.stack ? String(actualError.stack).slice(0, 4000) : undefined,
-    }, "error");
+    // Always recorded, not only in detailed mode: a task that failed is what a
+    // report is about. The error itself carries the stack — one frame normally,
+    // a real call path in detailed mode.
+    logDebugEvent("ai", `Task "${taskKey}" failed${controller.signal.aborted ? " (aborted)" : ""}: ${failureReason}`, actualError instanceof Error ? actualError : undefined);
   } finally {
     idle.cancel();
   }
