@@ -2602,6 +2602,7 @@ const generateProjectOps = async (bundle, events, { signal, hiddenEvents = [] } 
     : "";
 
   const { generation, payload } = await runJsonTask("projects", {
+    lookups: buildTaskLookups(bundle),
     signal,
     userMessage:
       `These events have just been simulated. Move the board to match them, and return `
@@ -3979,6 +3980,7 @@ const resolveRegionTransfers = async (containers, world, {
 
     try {
       const response = await runJsonTask("geographyResolver", {
+        lookups: buildTaskLookups({ world }),
         fallback,
         validatePayload: validateGeographyResolution,
         userMessage:
@@ -4944,6 +4946,7 @@ const applySimulationResult = async ({
   // repair's supplemental ones.
   const curatorAnalyzeBatch = ({ candidates, priorHistory }) =>
     runJsonTask("timelineCurator", {
+      lookups: buildTaskLookups({ world: baseWorld, events: baseEvents, chats: baseChats, game: baseGame }),
       fallback: () => ({
         judgments: candidates.map((event, index) => ({
           index,
@@ -5961,7 +5964,7 @@ const buildWorldInitiativeContextBackground = async (bundle, options = {}, signa
 // `hardLimitMs` when the caller has a time budget to keep. The abort is on a
 // local controller: the caller's `signal` stays un-aborted, so its catch sees an
 // ordinary failure, while the player's Cancel still cancels.
-const callRepairAI = async ({ systemPrompt, userMessage, taskKey, tool, signal, reasoningEnabled, hardLimitMs } = {}) => {
+const callRepairAI = async ({ systemPrompt, userMessage, taskKey, tool, signal, reasoningEnabled, hardLimitMs, lookups = null } = {}) => {
   const now = () =>
     typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now()
@@ -5979,6 +5982,7 @@ const callRepairAI = async ({ systemPrompt, userMessage, taskKey, tool, signal, 
           signal: callSignal,
           taskKey,
           tool,
+          lookups,
         }),
       { taskKey, signal, hardLimitMs },
     );
@@ -6174,6 +6178,7 @@ const runTargetedWorldMotionRepair = async ({
       hardLimitMs,
       taskKey: "worldMotionRepair",
       tool: getGameplayTool("worldMotionRepair"),
+      lookups: buildTaskLookups(bundle),
     });
 
     const rawText =
@@ -8156,6 +8161,7 @@ export const gatherIntelligence = async (target, { signal } = {}) => {
     : "";
 
   const { payload } = await runJsonTask("spyIntercept", {
+    lookups: buildTaskLookups(bundle),
     signal,
     userMessage: [
       `Report what the spy in ${name} intercepted this period.`,
@@ -8761,6 +8767,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
 
   const statsAiStartedAt = typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
   const { payload } = await runJsonTask("countryStatSheet", {
+    lookups: buildTaskLookups(bundle),
     signal,
     userMessage: [
       `Compile the persistent national stat sheet for ${target}${statCode ? ` (canonical polity ${statCode})` : ""}.`,
@@ -9080,6 +9087,7 @@ export const createCatalyst = async ({ force = true } = {}) => {
   const bundle = await readGameStateBundle({ force });
   const variables = await buildTemplateVariables(bundle);
   const { payload } = await runJsonTask("catalystCreation", {
+    lookups: buildTaskLookups(bundle),
     fallback: () => ({
       choices: [
         "Intervene decisively",
@@ -11614,6 +11622,7 @@ export const maybeGeneratePregameHistory = async () => {
         : "No current polity vocabulary was available.",
     };
     const { payload } = await runJsonTask("pregameHistory", {
+      lookups: buildTaskLookups(bundle),
       userMessage: `Write the pre-game historical timeline AND the canonical Round-One bootstrap for ${startDate} as JSON only. ` +
         "Put every war, bilateral relation, formal agreement and unresolved non-war storyline already true on the start date into canonicalUpdates with the correct kind, using ONLY the supplied current polity identities; do not invent event indexes. " +
         "Prioritise every active war and formal agreement first, then the materially important bilateral climates among the central actors. A relation or standing agreement does NOT need its own event card merely to exist; include historical events because they are important timeline anchors, not as bookkeeping padding.",

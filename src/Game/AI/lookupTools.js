@@ -45,6 +45,13 @@ export const LOOKUP_TOOL_NAMES = Object.freeze([
   "chat_history",
   "list_units",
   "contested_regions",
+  "list_projects",
+  "relations_between",
+  "storylines",
+  "region_history",
+  "path_between",
+  "spy_network",
+  "list_cities",
 ]);
 
 export const LOOKUP_TOOLS = Object.freeze([
@@ -134,6 +141,69 @@ export const LOOKUP_TOOLS = Object.freeze([
       + "occupations, disputes, irredentist claims — the map's non-normal territorial state.",
     schema: object("No arguments.", {}),
   },
+  {
+    name: "list_projects",
+    description:
+      "The Projects & Operations board: long-running programmes with owner, status, priority, progress, target date, "
+      + "next milestone, last update and what completing them changes on the map. Open entries by default.",
+    schema: object("Optional filters.", {
+      owner: text("Optional exact power name; omit for every power's projects."),
+      status: text("open (default), closed, or all."),
+    }),
+  },
+  {
+    name: "relations_between",
+    description:
+      "The diplomatic relation between two exact powers: score (-100..100), status, summary, when it last moved; "
+      + "the agreements between them and whether they are at war with each other.",
+    schema: object("The two powers.", { a: text("One power's exact name."), b: text("The other power's exact name.") }, ["a", "b"]),
+  },
+  {
+    name: "storylines",
+    description:
+      "The world's persistent storylines (the processes already in motion): id, kind, title, status, participants, "
+      + "pressure and momentum, when they started, their current state, drivers and constraints. Continue these rather than restarting them.",
+    schema: object("Optional filters.", {
+      participant: text("Optional exact power name: only storylines it takes part in."),
+      status: text("Optional status filter (active, dormant, resolved...)."),
+    }),
+  },
+  {
+    name: "region_history",
+    description:
+      "How one region changed hands over the campaign: every recorded transfer, control change and claim, oldest first, "
+      + "with the event that carried it; plus who holds it now.",
+    schema: object("Which region.", { regionId: text("The region id (from list_regions / find_region).") }, ["regionId"]),
+  },
+  {
+    name: "path_between",
+    description:
+      "The shortest chain of neighbouring regions from one region to another, each with its owner: whose land a force "
+      + "must cross, whether two powers touch, how far a front is. Adjacency is the map's own.",
+    schema: object("Endpoints.", {
+      fromRegionId: text("Start region id."),
+      toRegionId: text("Destination region id."),
+      maxSteps: integer("Give up beyond this many steps (default 12, max 40)."),
+    }, ["fromRegionId", "toRegionId"]),
+  },
+  {
+    name: "spy_network",
+    description:
+      "Espionage as the ledger records it: the agents a power runs abroad (target, status, cover, since when, whether suspected) "
+      + "and the foreign agents known or suspected on its soil. All powers when no owner is given.",
+    schema: object("Optional filter.", { owner: text("Optional exact power name.") }),
+  },
+  {
+    name: "list_cities",
+    description:
+      "Cities on the map with the region each sits in and that region's owner, largest first; optionally one power's, "
+      + "optionally capitals only.",
+    schema: object("Optional filters.", {
+      owner: text("Optional exact power name: only cities in its regions."),
+      capitalsOnly: { type: "boolean", description: "Only cities marked as capitals." },
+      limit: integer("How many (default 40, max 200)."),
+    }),
+  },
 ]);
 
 // The instruction that goes with the tools.
@@ -144,7 +214,8 @@ export const LOOKUP_DIRECTIVE = [
   "1. Before you write ANY regionTransfers, regionControlOps or regionClaims entry, look the region up (find_region or list_regions) and copy its id and exact name into the entry. Never guess a region name.",
   "2. Every owner field (fromCode, toCode, ownerCode, claimantCode, actorCode) must be a power's exact name as returned by list_powers or power_info. A short form, a translation or a code names nobody.",
   "3. Use region_info to learn who borders a region before moving forces or borders there; use find_city when you know the city but not the region.",
-  "4. Look up what you need, then call the output function once with the complete answer. Do not narrate your lookups.",
+  "4. What is already in motion is on the ledgers: storylines, list_projects, war_ledger, relations_between, spy_network. Continue those rather than restarting them.",
+  "5. Look up what you need, then call the output function once with the complete answer. Do not narrate your lookups.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------
@@ -366,12 +437,95 @@ const eventBrief = (event) => {
   };
 };
 
-const warBrief = (war) => ({
-  id: clean(war?.id),
-  status: clean(war?.status) || "active",
-  title: clean(war?.title || war?.name),
-  participants: [...new Set(stringsIn(war?.sides ?? war?.participants ?? war?.belligerents ?? war?.aggressors ?? war))].slice(0, 12),
-  since: clean(war?.startedAt || war?.startDate || war?.since),
+const warSides = (war) => {
+  const sideA = array(war?.sideA).map(clean).filter(Boolean);
+  const sideB = array(war?.sideB).map(clean).filter(Boolean);
+  if (sideA.length || sideB.length) return { sideA, sideB };
+  const named = stringsIn(war?.sides ?? war?.participants ?? war?.belligerents ?? war?.aggressors ?? war);
+  return { sideA: [...new Set(named)].slice(0, 12), sideB: [] };
+};
+const warBrief = (war) => {
+  const { sideA, sideB } = warSides(war);
+  return {
+    id: clean(war?.id),
+    status: clean(war?.status) || "active",
+    title: clean(war?.title || war?.name),
+    ...(sideB.length ? { sideA, sideB } : {}),
+    participants: [...new Set([...sideA, ...sideB])].slice(0, 24),
+    since: clean(war?.startedDate || war?.startedAt || war?.startDate || war?.since),
+    ...(war?.cause ? { cause: clean(war.cause).slice(0, 300) } : {}),
+    ...(war?.note ? { note: clean(war.note).slice(0, 300) } : {}),
+  };
+};
+const warBetween = (war, a, b) => {
+  const { sideA, sideB } = warSides(war);
+  const has = (side, name) => side.some((entry) => foldRegionKey(entry) === foldRegionKey(name));
+  return (has(sideA, a) && has(sideB, b)) || (has(sideA, b) && has(sideB, a));
+};
+
+const projectBrief = (project) => {
+  const effects = project?.onComplete && typeof project.onComplete === "object" ? project.onComplete : null;
+  const mapEffects = effects ? [
+    ...array(effects.regionTransfers).map((t) => `transfer ${t.regionName || t.regionId} -> ${t.toCode}`),
+    ...array(effects.regionClaims).map((c) => `claim ${c.regionName || c.regionId} by ${c.claimantCode}`),
+    ...array(effects.polityChanges).map((p) => `polity ${p.code || p.name}`),
+  ] : [];
+  return {
+    id: clean(project?.id),
+    name: clean(project?.name),
+    kind: clean(project?.kind),
+    owner: clean(project?.ownerCode || project?.owner),
+    status: clean(project?.status) || "active",
+    priority: clean(project?.priority),
+    progress: Number(project?.progress) || 0,
+    ...(project?.secrecy && clean(project.secrecy) !== "public" ? { secrecy: clean(project.secrecy) } : {}),
+    summary: clean(project?.summary).slice(0, 300),
+    startedAt: clean(project?.startedAt),
+    ...(project?.ongoing ? { ongoing: true } : { targetDate: clean(project?.targetDate) }),
+    ...(project?.nextMilestone ? { nextMilestone: { title: clean(project.nextMilestone.title), date: clean(project.nextMilestone.date), status: clean(project.nextMilestone.status) } } : {}),
+    lastUpdate: clean(project?.lastUpdate).slice(0, 300),
+    ...(mapEffects.length ? { onComplete: mapEffects.slice(0, 12) } : {}),
+  };
+};
+const OPEN_PROJECT_STATUSES = new Set(["active", "planned", "stalled", "paused", "in-progress", "ongoing"]);
+const projectIsOpen = (project) => {
+  const status = clean(project?.status).toLowerCase();
+  return !status || OPEN_PROJECT_STATUSES.has(status);
+};
+
+const storylineBrief = (storyline) => ({
+  id: clean(storyline?.id),
+  kind: clean(storyline?.kind),
+  title: clean(storyline?.title),
+  status: clean(storyline?.status) || "active",
+  participants: array(storyline?.participants).map(clean).filter(Boolean),
+  pressure: Number(storyline?.pressure) || 0,
+  momentum: Number(storyline?.momentum) || 0,
+  startedDate: clean(storyline?.startedDate),
+  lastUpdatedDate: clean(storyline?.lastUpdatedDate),
+  state: clean(storyline?.state).slice(0, 500),
+  ...(array(storyline?.drivers).length ? { drivers: array(storyline.drivers).map(clean) } : {}),
+  ...(array(storyline?.constraints).length ? { constraints: array(storyline.constraints).map(clean) } : {}),
+});
+
+const spyBrief = (spy) => ({
+  id: clean(spy?.id),
+  owner: clean(spy?.owner),
+  target: clean(spy?.target),
+  status: clean(spy?.status),
+  ...(spy?.deployedAt ? { since: clean(spy.deployedAt) } : {}),
+  ...(spy?.coverStory ? { cover: clean(spy.coverStory).slice(0, 200) } : {}),
+  ...(spy?.suspected ? { suspected: true } : {}),
+});
+
+const agreementBrief = (agreement) => ({
+  id: clean(agreement?.id),
+  kind: clean(agreement?.kind || agreement?.type),
+  title: clean(agreement?.title || agreement?.name),
+  status: clean(agreement?.status),
+  parties: [...new Set(stringsIn(agreement?.parties ?? agreement?.participants ?? agreement?.members ?? []))].slice(0, 12),
+  ...(agreement?.terms ? { terms: clean(agreement.terms).slice(0, 300) } : {}),
+  ...(agreement?.startedDate ? { since: clean(agreement.startedDate) } : {}),
 });
 
 export const executeLookup = (context, name, args = {}) => {
@@ -507,10 +661,7 @@ export const executeLookup = (context, name, args = {}) => {
       const world = context.world ?? {};
       return {
         wars: array(world.wars).map(warBrief),
-        agreements: array(world.agreements).slice(0, 40).map((agreement) => ({
-          id: clean(agreement?.id), kind: clean(agreement?.kind || agreement?.type), title: clean(agreement?.title || agreement?.name),
-          status: clean(agreement?.status), parties: [...new Set(stringsIn(agreement?.parties ?? agreement?.participants ?? agreement?.members ?? []))].slice(0, 12),
-        })),
+        agreements: array(world.agreements).slice(0, 40).map(agreementBrief),
       };
     }
     case "chat_history": {
@@ -551,6 +702,147 @@ export const executeLookup = (context, name, args = {}) => {
         rows.push({ ...regionBrief(row), sovereign: sovereign || "unowned", ...(claimants.length ? { claimants } : {}) });
       }
       return { count: rows.length, regions: rows.slice(0, 120) };
+    }
+    case "list_projects": {
+      const world = context.world ?? {};
+      let owner = "";
+      if (clean(a.owner)) {
+        owner = context.resolveOwner(a.owner);
+        if (!owner) return unknownPower(context, a.owner);
+      }
+      const status = clean(a.status).toLowerCase() || "open";
+      const projects = array(world.projects)
+        .filter((project) => !owner || foldRegionKey(project?.ownerCode || project?.owner) === foldRegionKey(owner))
+        .filter((project) => status === "all" || (status === "closed" ? !projectIsOpen(project) : projectIsOpen(project)));
+      return { ...(owner ? { owner } : {}), status, count: projects.length, projects: projects.slice(0, 60).map(projectBrief) };
+    }
+    case "relations_between": {
+      const first = context.resolveOwner(a.a);
+      if (!first) return unknownPower(context, a.a);
+      const second = context.resolveOwner(a.b);
+      if (!second) return unknownPower(context, a.b);
+      const world = context.world ?? {};
+      const pair = new Set([foldRegionKey(first), foldRegionKey(second)]);
+      const relation = array(world.relations).find((entry) => entry && pair.has(foldRegionKey(entry.a)) && pair.has(foldRegionKey(entry.b)) && pair.size === 2);
+      const agreements = array(world.agreements).filter((agreement) => {
+        const parties = stringsIn(agreement?.parties ?? agreement?.participants ?? agreement?.members ?? []).map(foldRegionKey);
+        return parties.includes(foldRegionKey(first)) && parties.includes(foldRegionKey(second));
+      });
+      const wars = array(world.wars).filter((war) => warBetween(war, first, second));
+      return {
+        a: first,
+        b: second,
+        relation: relation
+          ? { score: Number(relation.score) || 0, status: clean(relation.status), summary: clean(relation.summary).slice(0, 400), lastUpdatedDate: clean(relation.lastUpdatedDate) }
+          : null,
+        ...(relation ? {} : { hint: "No relation is recorded between these two powers; treat them as neutral unless a war or agreement below says otherwise." }),
+        agreements: agreements.slice(0, 12).map(agreementBrief),
+        wars: wars.map(warBrief),
+        atWar: wars.some((war) => clean(war?.status).toLowerCase() !== "ended"),
+      };
+    }
+    case "storylines": {
+      const world = context.world ?? {};
+      let participant = "";
+      if (clean(a.participant)) {
+        participant = context.resolveOwner(a.participant);
+        if (!participant) return unknownPower(context, a.participant);
+      }
+      const status = clean(a.status).toLowerCase();
+      const list = array(world.storylines)
+        .filter((storyline) => !participant || array(storyline?.participants).some((name) => foldRegionKey(name) === foldRegionKey(participant)))
+        .filter((storyline) => !status || clean(storyline?.status).toLowerCase() === status);
+      return { ...(participant ? { participant } : {}), count: list.length, storylines: list.slice(0, 40).map(storylineBrief) };
+    }
+    case "region_history": {
+      const row = context.byId.get(clean(a.regionId));
+      if (!row) return { error: `No region with id "${clean(a.regionId)}". Use find_region or list_regions to get ids.` };
+      const keys = new Set([foldRegionKey(row.id), foldRegionKey(row.name), ...row.aliases.map(foldRegionKey)]);
+      const matches = (entry) => keys.has(foldRegionKey(entry?.regionId)) || keys.has(foldRegionKey(entry?.regionName));
+      const changes = [];
+      for (const event of context.events) {
+        const impacts = event?.impacts ?? {};
+        for (const transfer of array(impacts.regionTransfers)) {
+          if (matches(transfer)) changes.push({ date: clean(event.date), event: clean(event.title), change: `transfer${transfer.fromCode ? ` from ${transfer.fromCode}` : ""} to ${transfer.toCode}` });
+        }
+        for (const op of array(impacts.regionControlOps)) {
+          if (matches(op)) changes.push({ date: clean(event.date), event: clean(event.title), change: `${clean(op.op) || "control"}${op.toCode ? ` -> ${op.toCode}` : ""}${op.actorCode ? ` by ${op.actorCode}` : ""}` });
+        }
+        for (const claim of array(impacts.regionClaims)) {
+          if (matches(claim)) changes.push({ date: clean(event.date), event: clean(event.title), change: `${claim.drop ? "claim dropped" : "claim"} by ${claim.claimantCode}` });
+        }
+      }
+      return { ...regionBrief(row), sovereign: row.sovereign || row.owner || "unowned", changes: changes.slice(-40), ...(changes.length === 0 ? { hint: "No recorded change of hands in this campaign." } : {}) };
+    }
+    case "path_between": {
+      const from = context.byId.get(clean(a.fromRegionId));
+      const to = context.byId.get(clean(a.toRegionId));
+      if (!from) return { error: `No region with id "${clean(a.fromRegionId)}".` };
+      if (!to) return { error: `No region with id "${clean(a.toRegionId)}".` };
+      const maxSteps = clampInt(a.maxSteps, 1, 40, 12);
+      if (from === to) return { steps: 0, path: [regionBrief(from)] };
+      const previous = new Map([[from.id, null]]);
+      let frontier = [from];
+      let found = null;
+      for (let depth = 0; depth < maxSteps && frontier.length && !found; depth += 1) {
+        const next = [];
+        for (const row of frontier) {
+          for (const neighbour of context.neighboursOf(row)) {
+            if (previous.has(neighbour.id)) continue;
+            previous.set(neighbour.id, row);
+            if (neighbour === to) { found = neighbour; break; }
+            next.push(neighbour);
+          }
+          if (found) break;
+        }
+        frontier = next;
+      }
+      if (!found) {
+        return { error: `No chain of neighbouring regions within ${maxSteps} steps (the regions may be separated by sea, or the map declares no adjacency for one of them).` };
+      }
+      const path = [];
+      for (let row = found; row; row = previous.get(row.id)) path.unshift(regionBrief(row));
+      const crossed = [...new Set(path.slice(1, -1).map((entry) => entry.owner))];
+      return { steps: path.length - 1, path, ...(crossed.length ? { crosses: crossed } : {}) };
+    }
+    case "spy_network": {
+      const world = context.world ?? {};
+      const spies = array(world.spies);
+      if (clean(a.owner)) {
+        const owner = context.resolveOwner(a.owner);
+        if (!owner) return unknownPower(context, a.owner);
+        const key = foldRegionKey(owner);
+        return {
+          owner,
+          agentsAbroad: spies.filter((spy) => foldRegionKey(spy?.owner) === key).map(spyBrief),
+          foreignAgentsAtHome: spies.filter((spy) => foldRegionKey(spy?.target) === key).map(spyBrief),
+        };
+      }
+      return { count: spies.length, agents: spies.slice(0, 120).map(spyBrief) };
+    }
+    case "list_cities": {
+      let owner = "";
+      if (clean(a.owner)) {
+        owner = context.resolveOwner(a.owner);
+        if (!owner) return unknownPower(context, a.owner);
+      }
+      const limit = clampInt(a.limit, 1, 200, 40);
+      const capitalsOnly = a.capitalsOnly === true;
+      const placed = context.cityRows
+        .filter((city) => !capitalsOnly || city.capital)
+        .map((city) => ({ city, row: context.regionOfCity(city) }))
+        .filter(({ row }) => !owner || (row && row.owner === owner))
+        .sort((x, y) => y.city.population - x.city.population);
+      return {
+        ...(owner ? { owner } : {}),
+        count: placed.length,
+        cities: placed.slice(0, limit).map(({ city, row }) => ({
+          name: city.name,
+          population: city.population,
+          ...(city.capital ? { capital: city.capital } : {}),
+          ...(row ? { regionId: row.id, regionName: row.name, owner: row.owner || "unowned" } : { regionId: null }),
+        })),
+      };
     }
     default:
       return { error: `Unknown lookup "${clean(name)}". Available: ${LOOKUP_TOOL_NAMES.join(", ")}.` };

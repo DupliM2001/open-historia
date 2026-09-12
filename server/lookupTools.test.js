@@ -42,9 +42,21 @@ const WORLD = {
     Ukraine: { name: "Ukraine", aliases: ["UKR"], note: "Fighting for its eastern regions.", tags: ["defensive"] },
     RUS: { name: "Russian Federation", aliases: [] },
   },
-  wars: [{ id: "w1", status: "active", title: "War in the east", sides: { aggressors: ["Russian Federation"], defenders: ["Ukraine"] }, startedAt: "2014-02-27" }],
+  wars: [{ id: "w1", status: "active", title: "War in the east", sideA: ["Russian Federation"], sideB: ["Ukraine"], startedDate: "2014-02-27", cause: "Border crisis." }],
   agreements: [{ id: "a1", kind: "ceasefire", title: "Minsk", status: "active", parties: ["Ukraine", "Russian Federation"] }],
-  relations: [{ a: "Ukraine", b: "Russian Federation", stance: "hostile" }],
+  relations: [{ id: "r1", a: "Russian Federation", b: "Ukraine", score: -70, status: "hostile", summary: "Open war.", lastUpdatedDate: "2014-03-01" }],
+  projects: [
+    { id: "p1", name: "Northern Shield", kind: "military", ownerCode: "Ukraine", status: "active", priority: "high", progress: 40, targetDate: "2014-06-01", lastUpdate: "Digging in.", nextMilestone: { title: "Second line", date: "2014-04-01", status: "pending" }, onComplete: { regionClaims: [{ regionId: "ukr-zap", regionName: "Zaporizhzhia", claimantCode: "Ukraine" }] } },
+    { id: "p2", name: "Pipeline", kind: "industry", ownerCode: "Russian Federation", status: "completed", progress: 100 },
+  ],
+  storylines: [
+    { id: "s1", kind: "war", title: "Eastern front", status: "active", participants: ["Ukraine", "Russian Federation"], pressure: 70, momentum: 20, startedDate: "2014-03-01", state: "Stalemate along the river.", drivers: ["mobilisation"] },
+    { id: "s2", kind: "politics", title: "Moscow succession", status: "dormant", participants: ["Russian Federation"], pressure: 10, momentum: 0 },
+  ],
+  spies: [
+    { id: "spy-1", owner: "Ukraine", target: "Russian Federation", status: "active", deployedAt: "2014-01-10", coverStory: "Trade attache", suspected: true },
+    { id: "spy-2", owner: "Russian Federation", target: "Ukraine", status: "discovered" },
+  ],
   internationalReputation: { Ukraine: 62 },
   intelligence: { Ukraine: 4 },
   units: [],
@@ -252,4 +264,70 @@ test("a city with no containing polygon is placed by the nearest centroid, marke
   assert.equal(near.regionId, "a");
   assert.equal(near.approximate, true);
   assert.equal(executeLookup(ctx, "find_city", { name: "Far Away" }).matches[0].regionId, null);
+});
+
+test("list_projects: the board by owner and status, with what completion moves on the map", () => {
+  const open = run("list_projects", {});
+  assert.deepEqual(open.projects.map((project) => project.id), ["p1"]);
+  assert.equal(open.projects[0].owner, "Ukraine");
+  assert.deepEqual(open.projects[0].onComplete, ["claim Zaporizhzhia by Ukraine"]);
+  assert.equal(open.projects[0].nextMilestone.title, "Second line");
+  assert.deepEqual(run("list_projects", { status: "all" }).projects.map((project) => project.id), ["p1", "p2"]);
+  assert.deepEqual(run("list_projects", { owner: "Russian Federation", status: "closed" }).projects.map((project) => project.id), ["p2"]);
+  assert.match(run("list_projects", { owner: "Russia" }).error, /not a power/);
+});
+
+test("relations_between: the pairwise ledger, agreements and whether they are at war", () => {
+  const pair = run("relations_between", { a: "Ukraine", b: "Russian Federation" });
+  assert.equal(pair.relation.score, -70);
+  assert.equal(pair.relation.status, "hostile");
+  assert.deepEqual(pair.agreements.map((agreement) => agreement.id), ["a1"]);
+  assert.equal(pair.atWar, true);
+  assert.deepEqual(pair.wars[0].sideA, ["Russian Federation"]);
+  assert.equal(pair.wars[0].cause, "Border crisis.");
+  assert.equal(run("relations_between", { a: "Russian Federation", b: "Ukraine" }).relation.score, -70);
+  assert.match(run("relations_between", { a: "Ukraine", b: "Russia" }).error, /not a power/);
+});
+
+test("storylines: filtered by participant and status", () => {
+  assert.deepEqual(run("storylines", {}).storylines.map((storyline) => storyline.id), ["s1", "s2"]);
+  const ukraine = run("storylines", { participant: "Ukraine" });
+  assert.deepEqual(ukraine.storylines.map((storyline) => storyline.id), ["s1"]);
+  assert.deepEqual(ukraine.storylines[0].drivers, ["mobilisation"]);
+  assert.deepEqual(run("storylines", { status: "dormant" }).storylines.map((storyline) => storyline.id), ["s2"]);
+});
+
+test("region_history: every recorded change of hands, oldest first", () => {
+  const zap = run("region_history", { regionId: "ukr-zap" });
+  assert.deepEqual(zap.changes, [{ date: "2014-03-01", event: "Russian Federation moves on Zaporizhzhia", change: "transfer from Ukraine to Russian Federation" }]);
+  assert.equal(zap.sovereign, "Ukraine");
+  assert.match(run("region_history", { regionId: "ukr-kharkiv" }).hint, /No recorded change/);
+  assert.match(run("region_history", { regionId: "nope" }).error, /No region with id/);
+});
+
+test("path_between: neighbouring chains, with whose land is crossed", () => {
+  const one = run("path_between", { fromRegionId: "ukr-kharkiv", toRegionId: "rus-belgorod" });
+  assert.equal(one.steps, 1);
+  assert.deepEqual(one.path.map((entry) => entry.id), ["ukr-kharkiv", "rus-belgorod"]);
+  assert.equal(run("path_between", { fromRegionId: "ukr-kn", toRegionId: "ukr-ks" }).steps, 1);
+  assert.equal(run("path_between", { fromRegionId: "ukr-kn", toRegionId: "ukr-kn" }).steps, 0);
+  assert.match(run("path_between", { fromRegionId: "ukr-kharkiv", toRegionId: "rus-moscow" }).error, /No chain/);
+  assert.match(run("path_between", { fromRegionId: "x", toRegionId: "rus-moscow" }).error, /No region/);
+});
+
+test("spy_network: agents abroad and foreign agents at home", () => {
+  const ukraine = run("spy_network", { owner: "Ukraine" });
+  assert.deepEqual(ukraine.agentsAbroad.map((spy) => [spy.target, spy.status, spy.suspected]), [["Russian Federation", "active", true]]);
+  assert.equal(ukraine.agentsAbroad[0].cover, "Trade attache");
+  assert.deepEqual(ukraine.foreignAgentsAtHome.map((spy) => spy.owner), ["Russian Federation"]);
+  assert.equal(run("spy_network", {}).count, 2);
+  assert.match(run("spy_network", { owner: "Russia" }).error, /not a power/);
+});
+
+test("list_cities: placed in regions, largest first, by owner", () => {
+  const russia = run("list_cities", { owner: "Russian Federation" });
+  assert.deepEqual(russia.cities.map((city) => [city.name, city.regionId]), [["Belgorod", "rus-belgorod"], ["Novomoskovsk", "rus-moscow"]]);
+  assert.deepEqual(run("list_cities", { owner: "Ukraine" }).cities.map((city) => city.name), ["Kharkiv"]);
+  assert.equal(run("list_cities", { limit: 1 }).cities.length, 1);
+  assert.equal(run("list_cities", { capitalsOnly: true }).count, 0);
 });
