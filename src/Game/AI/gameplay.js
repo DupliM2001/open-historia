@@ -50,6 +50,7 @@ import { withoutPlayerParticipant } from "./chatVisibility.js";
 import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKernel.js";
 import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
+import { foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
 import {
   describeDoubtedForPrompt,
   doubtedAwaitingFreshSource,
@@ -3279,17 +3280,38 @@ const resolveRegionTransfers = async (containers, world, {
     }
   }
 
+  // Standardised polity names. An owner field resolves only to a name this map
+  // declares: an owner token actually on the map, a polity record's key, its
+  // declared display name, or one of its declared aliases (a stock CODE is
+  // first turned into its stock name, which then has to be declared like any
+  // other). Nothing is inferred: "Russia" on a world whose power is the
+  // "Russian Federation" — and nothing called "Russia" — names nobody, and a
+  // world that has both has two different countries. The identity resolver's
+  // core-word and stock-country stages used to fold one onto the other here.
+  const ownerNameIndex = new Map(); // folded name -> the owner label as the map spells it
+  const declareOwner = (rawName, canonical) => {
+    const key = regionKey(rawName);
+    if (key && canonical && !ownerNameIndex.has(key)) ownerNameIndex.set(key, canonical);
+  };
+  for (const [token, entry] of Object.entries(worldState.polityOverrides ?? {})) {
+    declareOwner(token, token);
+    declareOwner(entry?.name, token);
+    for (const alias of normalizeArray(entry?.aliases)) declareOwner(alias, token);
+  }
+  for (const owner of Object.values(controlOwners)) declareOwner(owner, normalizeString(owner));
+  for (const owner of Object.values(sovereigntyOwners)) declareOwner(owner, normalizeString(owner));
+  for (const region of catalog) {
+    const baked = normalizeString(region?.country) || toCountryName(normalizeString(region?.countryCode));
+    declareOwner(baked, baked);
+  }
+  const knownOwnerLabels = [...new Set(ownerNameIndex.values())].sort((a, b) => a.localeCompare(b));
+
   const resolveOwnerName = (token) => {
     const raw = toCountryName(normalizeString(token));
     if (!raw) return "";
-    const resolution = resolvePolityIdentity(raw, worldState, {
-      allowUnknown: false,
-      requireActive: false,
-      allowCoreMatch: true,
-      allowStockBase: true,
-    });
-    return resolution.resolved || raw;
+    return ownerNameIndex.get(regionKey(raw)) ?? "";
   };
+  const ownerIsKnown = (token) => Boolean(resolveOwnerName(token));
 
   const canonicalOwnerKey = (token) => {
     const key = regionKey(resolveOwnerName(token));
@@ -3526,6 +3548,27 @@ const resolveRegionTransfers = async (containers, world, {
     }));
   };
 
+  // The regions a transfer can legitimately mean: the losing side's when the
+  // model named one, else everything the recipient does not already hold.
+  const transferPool = (transfer) => {
+    const fromKey = canonicalOwnerKey(transfer?.fromCode);
+    if (fromKey) return regionsOwnedBy(transfer.fromCode);
+    const toKey = canonicalOwnerKey(transfer?.toCode);
+    return catalog.filter((region) => ownerKeyOf(region.id) !== toKey);
+  };
+
+  // Bounded candidates for the semantic pass when the losing side is unknown:
+  // the regions whose (affix-stripped) names start like the label, so the
+  // model is never handed the whole planet.
+  const similarRegions = (label, transfer) => {
+    const stem = stripRegionAffixes(foldRegionKey(label)).slice(0, 4);
+    if (stem.length < 4) return [];
+    return transferPool(transfer).filter((region) => {
+      const name = stripRegionAffixes(foldRegionKey(region.name)) || foldRegionKey(region.name);
+      return name.startsWith(stem);
+    });
+  };
+
   const deterministicResolve = (transfer, event) => {
     const requestedId = normalizeString(transfer?.regionId);
     if (byId.has(requestedId)) {
@@ -3561,16 +3604,15 @@ const resolveRegionTransfers = async (containers, world, {
         if (owned.length === 1) return owned[0].id;
       }
 
-      // This is intentionally the LAST deterministic fuzzy-ish rule. Substring
-      // matching inside the losing side is safe only when exactly one map region
-      // survives. Anything harder belongs to the bounded semantic geography pass.
-      if (fromKey && query.length >= 4) {
-        const contains = regionsOwnedBy(transfer.fromCode).filter((region) => {
-          const name = regionKey(region.name);
-          return name.includes(query) || query.includes(name);
-        });
-        if (contains.length === 1) return contains[0].id;
-      }
+      // The shared matcher (regionMatch.js): an appended "Oblast", a stripped
+      // "the ... region", a transliteration one edit away — each accepted only
+      // when a single region survives. Inside the losing side when the model
+      // named it; otherwise among every region the recipient does not already
+      // hold, because a transfer without fromCode used to be dropped outright
+      // even when its name was on the map. Anything harder belongs to the
+      // bounded semantic geography pass.
+      const matched = matchRegionName(candidate, transferPool(transfer), { maxFuzzy: fromKey ? 2 : 1 });
+      if (matched) return matched.region.id;
     }
 
     return "";
@@ -3594,6 +3636,23 @@ const resolveRegionTransfers = async (containers, world, {
   const semanticPending = [];
   const deterministicDestinations = new Map();
 
+  // Polities this payload itself brings into being may be named before the
+  // world knows them: a creation, restoration or rename in any event's
+  // polityChanges declares the name for every transfer in the transaction.
+  const payloadDeclared = new Set();
+  for (const { impacts } of containers) {
+    for (const change of normalizeArray(impacts?.polityChanges)) {
+      for (const rawName of [change?.code, change?.name]) {
+        const key = regionKey(rawName);
+        if (key) payloadDeclared.add(key);
+      }
+    }
+  }
+  const payloadDeclares = (token) => payloadDeclared.has(regionKey(toCountryName(normalizeString(token))));
+  // resolveRegionControlOps proxies an op with no owner at all under this
+  // sentinel; the ownership rules below judge it, not the name check.
+  const OWNERLESS_SENTINEL = "Unresolved polity";
+
   for (const [containerIndex, container] of containers.entries()) {
     const { impacts, path, event } = container;
     const transfers = normalizeArray(impacts?.regionTransfers);
@@ -3604,6 +3663,20 @@ const resolveRegionTransfers = async (containers, world, {
     deterministicDestinations.set(path, destinationByRegion);
 
     for (const [transferIndex, transfer] of transfers.entries()) {
+      const unknownOwner = [transfer?.toCode, transfer?.fromCode]
+        .map(normalizeString)
+        .find((token) => token && token !== OWNERLESS_SENTINEL && !ownerIsKnown(token) && !payloadDeclares(token));
+      if (unknownOwner) {
+        unresolved.push({
+          label: normalizeString(transfer?.regionName) || normalizeString(transfer?.regionId),
+          fromCode: normalizeString(transfer?.fromCode),
+          path,
+          candidates: [],
+          unknownOwner,
+          knownOwners: knownOwnerLabels,
+        });
+        continue;
+      }
       if (transfer?.wholeCountry === true) {
         const expanded = expandWholeCountry(transfer);
         if (expanded.length) {
@@ -3661,10 +3734,12 @@ const resolveRegionTransfers = async (containers, world, {
         continue;
       }
 
-      const candidates = regionsOwnedBy(transfer?.fromCode);
       const label =
         normalizeString(transfer?.regionName) ||
         normalizeString(transfer?.regionId);
+      const candidates = canonicalOwnerKey(transfer?.fromCode)
+        ? regionsOwnedBy(transfer?.fromCode)
+        : similarRegions(label, transfer);
 
       const record = {
         candidates,
@@ -4057,11 +4132,22 @@ const buildTransferFeedback = (unresolved) => {
   const lines = [];
   for (const entry of unresolved.slice(0, 3)) {
     const target = entry.label || "(blank)";
+    if (entry.unknownOwner) {
+      const powers = normalizeArray(entry.knownOwners);
+      const listed = powers.slice(0, 80).map((name) => `"${name}"`).join(", ");
+      lines.push(
+        `${entry.path}.regionTransfers: "${entry.unknownOwner}" is not a power on this map. Owner names must match a power's name ` +
+          `exactly as the map spells it — no short forms, translations or codes. Powers on the map: ${listed}` +
+          `${powers.length > 80 ? `, +${powers.length - 80} more` : ""}. Use one of these exact names in fromCode/toCode, ` +
+          "or create the polity in polityChanges in the same response.",
+      );
+      continue;
+    }
     if (entry.candidates.length > 0) {
-      const listed = entry.candidates.slice(0, 40)
+      const listed = entry.candidates.slice(0, 200)
         .map((region) => `${region.name} (${region.id})`)
         .join(", ");
-      const more = entry.candidates.length > 40 ? `, +${entry.candidates.length - 40} more` : "";
+      const more = entry.candidates.length > 200 ? `, +${entry.candidates.length - 200} more` : "";
       lines.push(
         `${entry.path}.regionTransfers: no map region matches "${target}". ` +
           `Regions currently owned by ${entry.fromCode}: ${listed}${more}.`,
