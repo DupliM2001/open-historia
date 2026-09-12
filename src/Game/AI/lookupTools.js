@@ -51,9 +51,9 @@ export const LOOKUP_TOOL_NAMES = Object.freeze([
   "region_history",
   "path_between",
   "spy_network",
-  "list_cities",
   "border_between",
   "map_around",
+  "list_cities",
 ]);
 
 export const LOOKUP_TOOLS = Object.freeze([
