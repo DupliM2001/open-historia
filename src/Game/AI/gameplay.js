@@ -10400,6 +10400,12 @@ const verifyGameMasterTerritoryPostconditions = (events, world) => {
         const claimants = normalizeArray(normalizedWorld.regionClaimants?.[regionId])
           .map((value) => gameMasterCanonicalPolityKey(value, normalizedWorld))
           .filter(Boolean);
+        // A contest by the polity that controls the region after this
+        // transaction is moot — the apply seam skips it on purpose (a
+        // controller cannot claim its own region), most often because the same
+        // transaction also transferred the region to that polity. Not a failure.
+        const controller = gameMasterCanonicalPolityKey(normalizedWorld.regionOwnershipOverrides?.[regionId], normalizedWorld);
+        if (expected && controller && expected === controller) continue;
         if (!expected || !claimants.includes(expected)) {
           return `contest operation ${eventIndex}:${controlIndex} did not take effect for ${regionId} (expected claimant ${normalizeString(control?.actorCode || control?.claimantCode) || "unknown"}).`;
         }

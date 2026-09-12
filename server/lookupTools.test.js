@@ -331,3 +331,25 @@ test("list_cities: placed in regions, largest first, by owner", () => {
   assert.equal(run("list_cities", { limit: 1 }).cities.length, 1);
   assert.equal(run("list_cities", { capitalsOnly: true }).count, 0);
 });
+
+test("border_between: where two powers' regions touch, both sides named", () => {
+  const front = run("border_between", { a: "Ukraine", b: "Russian Federation" });
+  assert.equal(front.count, 1);
+  assert.deepEqual(front.pairs[0], { Ukraine: { id: "ukr-kharkiv", name: "Kharkiv" }, "Russian Federation": { id: "rus-belgorod", name: "Belgorod" } });
+  assert.equal(run("border_between", { a: "Russian Federation", b: "Ukraine" }).pairs[0]["Russian Federation"].id, "rus-belgorod");
+  assert.match(run("border_between", { a: "Ukraine", b: "Ukraine" }).error, /two different/);
+  assert.match(run("border_between", { a: "Ukraine", b: "Russia" }).error, /not a power/);
+});
+
+test("map_around: the neighbourhood of a region grouped by owner, with sovereigns where they differ", () => {
+  const around = run("map_around", { regionId: "ukr-kharkiv" });
+  assert.equal(around.centre.id, "ukr-kharkiv");
+  assert.deepEqual(Object.keys(around.byOwner).sort(), ["Russian Federation", "Ukraine"]);
+  assert.deepEqual(around.byOwner.Ukraine.map((entry) => [entry.id, entry.steps]), [["ukr-kharkiv", 0]]);
+  assert.deepEqual(around.byOwner["Russian Federation"].map((entry) => [entry.id, entry.steps]), [["rus-belgorod", 1]]);
+  const wider = run("map_around", { regionId: "ukr-kn", steps: 2 });
+  assert.equal(wider.regions, 2);
+  const occupied = run("map_around", { regionId: "ukr-zap" });
+  assert.equal(occupied.byOwner["Russian Federation"][0].sovereign, "Ukraine");
+  assert.match(run("map_around", { regionId: "nope" }).error, /No region/);
+});

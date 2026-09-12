@@ -52,6 +52,8 @@ export const LOOKUP_TOOL_NAMES = Object.freeze([
   "path_between",
   "spy_network",
   "list_cities",
+  "border_between",
+  "map_around",
 ]);
 
 export const LOOKUP_TOOLS = Object.freeze([
@@ -194,6 +196,28 @@ export const LOOKUP_TOOLS = Object.freeze([
     schema: object("Optional filter.", { owner: text("Optional exact power name.") }),
   },
   {
+    name: "border_between",
+    description:
+      "The frontier between two powers: every pair of neighbouring regions where one power's region touches the "
+      + "other's, with ids and names on both sides. Use it to see where two powers meet before writing an offensive, "
+      + "a border incident or a cession; an empty result means they share no land border.",
+    schema: object("The two powers.", {
+      a: text("One power's exact name."),
+      b: text("The other power's exact name."),
+      limit: integer("How many pairs (default 40, max 120)."),
+    }, ["a", "b"]),
+  },
+  {
+    name: "map_around",
+    description:
+      "Who owns what around one region: the region itself and every region within a few neighbour steps, each with "
+      + "its owner and sovereign, grouped by owner. A bounded local map — use it instead of asking for whole powers.",
+    schema: object("The centre and the radius.", {
+      regionId: text("The centre region id (from find_region / list_regions)."),
+      steps: integer("How many neighbour steps out (default 1, max 3)."),
+    }, ["regionId"]),
+  },
+  {
     name: "list_cities",
     description:
       "Cities on the map with the region each sits in and that region's owner, largest first; optionally one power's, "
@@ -213,7 +237,7 @@ export const LOOKUP_DIRECTIVE = [
   "Rules:",
   "1. Before you write ANY regionTransfers, regionControlOps or regionClaims entry, look the region up (find_region or list_regions) and copy its id and exact name into the entry. Never guess a region name. And the reverse holds: an event that narrates a capture, occupation, liberation or cession MUST carry that entry, with the id you looked up — narration alone never moves the map.",
   "2. Every owner field (fromCode, toCode, ownerCode, claimantCode, actorCode) must be a power's exact name as returned by list_powers or power_info. A short form, a translation or a code names nobody.",
-  "3. Use region_info to learn who borders a region before moving forces or borders there; use find_city when you know the city but not the region.",
+  "3. Who owns what around a place comes from map_around (one region and its surroundings, grouped by owner) and border_between (where two powers' regions touch); region_info for one region's neighbours; find_city when you know the city but not the region. Never ask for a whole power's regions just to see a front.",
   "4. What is already in motion is on the ledgers: storylines, list_projects, war_ledger, relations_between, spy_network. Continue those rather than restarting them.",
   "5. Ask for everything you need in as few rounds as you can: call several functions in the same turn (every region you will name, every power you will check) rather than one per turn.",
   "6. Then call the output function once with the complete answer. Do not narrate your lookups.",
@@ -844,6 +868,51 @@ export const executeLookup = (context, name, args = {}) => {
           ...(row ? { regionId: row.id, regionName: row.name, owner: row.owner || "unowned" } : { regionId: null }),
         })),
       };
+    }
+    case "border_between": {
+      const first = context.resolveOwner(a.a);
+      if (!first) return unknownPower(context, a.a);
+      const second = context.resolveOwner(a.b);
+      if (!second) return unknownPower(context, a.b);
+      if (first === second) return { error: "Name two different powers." };
+      const limit = clampInt(a.limit, 1, 120, 40);
+      const pairs = [];
+      for (const row of context.ownerRows.get(first) ?? []) {
+        for (const neighbour of context.neighboursOf(row)) {
+          if (neighbour.owner !== second) continue;
+          pairs.push({ [first]: { id: row.id, name: row.name }, [second]: { id: neighbour.id, name: neighbour.name } });
+        }
+      }
+      return {
+        a: first, b: second, count: pairs.length, pairs: pairs.slice(0, limit),
+        ...(pairs.length === 0 ? { hint: "No region of one touches a region of the other: they share no land border on this map (or the map declares no adjacency there)." } : {}),
+      };
+    }
+    case "map_around": {
+      const centre = context.byId.get(clean(a.regionId));
+      if (!centre) return { error: `No region with id "${clean(a.regionId)}". Use find_region or list_regions to get ids.` };
+      const steps = clampInt(a.steps, 1, 3, 1);
+      const distance = new Map([[centre.id, 0]]);
+      let frontier = [centre];
+      for (let depth = 1; depth <= steps && frontier.length; depth += 1) {
+        const next = [];
+        for (const row of frontier) {
+          for (const neighbour of context.neighboursOf(row)) {
+            if (distance.has(neighbour.id)) continue;
+            distance.set(neighbour.id, depth);
+            next.push(neighbour);
+          }
+        }
+        frontier = next;
+      }
+      const byOwner = {};
+      for (const [id, depth] of distance) {
+        const row = context.byId.get(id);
+        const owner = row.owner || "unowned";
+        (byOwner[owner] ??= []).push({ id: row.id, name: row.name, steps: depth, ...(row.sovereign && row.sovereign !== row.owner ? { sovereign: row.sovereign } : {}) });
+      }
+      for (const list of Object.values(byOwner)) list.sort((x, y) => x.steps - y.steps || x.name.localeCompare(y.name));
+      return { centre: regionBrief(centre), steps, regions: distance.size, byOwner };
     }
     default:
       return { error: `Unknown lookup "${clean(name)}". Available: ${LOOKUP_TOOL_NAMES.join(", ")}.` };
