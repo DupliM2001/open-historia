@@ -19,6 +19,9 @@ const root = process.cwd();
 const wikiOut = path.join(root, "public", "wiki");
 const cssFile = path.join(root, "public", "wiki.css");
 const logoFile = path.join(root, "public", "logo.png");
+// The header and footer brand mark. Without a local copy the catch-all rewrite below would
+// point it at the live site, so a preview opened offline would show a broken image.
+const markFile = path.join(root, "public", "icon-192.png");
 const outDir = path.join(root, "dist-wiki-preview");
 const LIVE = "https://openhistoria.com";
 
@@ -32,6 +35,7 @@ mkdirSync(outDir, { recursive: true });
 cpSync(wikiOut, outDir, { recursive: true });
 if (existsSync(cssFile)) cpSync(cssFile, path.join(outDir, "wiki.css"));
 if (existsSync(logoFile)) cpSync(logoFile, path.join(outDir, "logo.png"));
+if (existsSync(markFile)) cpSync(markFile, path.join(outDir, "icon-192.png"));
 
 const walk = (dir) => readdirSync(dir).flatMap((name) => {
   const full = path.join(dir, name);
@@ -56,6 +60,7 @@ for (const file of pages) {
     .replace(/(href|src)="\/wiki\/"/g, `$1="${up}index.html"`)
     .replace(/(href|src)="\/wiki\.css"/g, `$1="${up}wiki.css"`)
     .replace(/(href|src)="\/logo\.png"/g, `$1="${up}logo.png"`)
+    .replace(/(href|src)="\/icon-192\.png"/g, `$1="${up}icon-192.png"`)
     // Anything still absolute belongs to the live site, not to this bundle.
     .replace(/(href|src)="\/(#[^"]*)"/g, `$1="${LIVE}/$2"`)
     .replace(/(href|src)="\/"/g, `$1="${LIVE}/"`)
@@ -73,7 +78,7 @@ for (const file of pages) {
   // screenshot away from someone quoting it as though it were published.
   html = html.replace(/<body>/,
     `<body>
-<div style="background:#8a2331;color:#fbf3dc;font:600 0.85rem/1.4 system-ui,sans-serif;padding:0.5rem 1rem;text-align:center">` +
+<div style="background:#a8394a;color:#f7eccf;font:600 0.85rem/1.4 system-ui,sans-serif;padding:0.5rem 1rem;text-align:center">` +
     `Preview build — not the live site. The published wiki is at ` +
     `<a href="${LIVE}/wiki/" style="color:#ffe9b8">openhistoria.com/wiki/</a>.</div>`);
 

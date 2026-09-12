@@ -1,41 +1,57 @@
 /*! Open Historia — wiki & guides stylesheet © 2026 Nicholas Krol, AGPL-3.0-or-later. */
-/* The parchment/bronze theme, shared with the landing page so the wiki reads as part of the
-   site rather than a bolted-on doc host. Tokens, the fluid root size, the header and the
+/* The dark parchment/bronze theme, shared with the landing page so the wiki reads as part of
+   the site rather than a bolted-on doc host. Tokens, the fluid root size, the header and the
    footer are ported verbatim from site/index.html — if that page's palette moves, move these
-   with it. The guides component classes (.card, .step, .comparison-table, …) keep their names
-   from the old dark stylesheet so migrated guide markup renders unchanged; only colours moved.
+   with it. The landing page went dark in "Website improvements"; everything below followed it,
+   which is why a handful of rules that used to name a light value now name a dark one.
+   The guides component classes (.card, .step, .comparison-table, …) keep their names from the
+   pre-wiki guides stylesheet so migrated guide markup renders unchanged; only colours moved.
    public/guides.css is a one-line @import of this file, for anything still linking the old
    name (older desktop installs, cached pages). */
 
 :root {
-  --parch: #e9dcc0;
-  --parch2: #e2d2b1;
-  --marble: #f6efdc;
-  --marble2: #fbf6e9;
-  --ink: #2c2216;
-  --sepia: #6c5a3c;
-  --sepia2: #87754f;
-  --line: rgba(74, 54, 24, .18);
-  --line2: rgba(74, 54, 24, .30);
-  --bronze: #9a6b2f;
-  --bronze-d: #7c531d;
-  --gold: #b8860b;
-  --gold-l: #caa53f;
-  --red: #8a2331;
-  --red-d: #6d1a25;
-  --green: #4c7a3d;
-  --grad-gold: linear-gradient(100deg, #7c4f18 0%, #b8860b 52%, #8f6a22 100%);
-  --shadow: 0 1.125rem 2.625rem -1.375rem rgba(60, 40, 14, .55);
+  --parch: #111113;
+  --parch2: #17171a;
+  --marble: #1a1a1f;
+  --marble2: #212128;
+  --ink: #ece4d2;
+  --sepia: #a4987f;
+  --sepia2: #877c66;
+  --line: rgba(233, 220, 192, .14);
+  --line2: rgba(233, 220, 192, .26);
+  --bronze: #c9932f;
+  --bronze-d: #a57a22;
+  --gold: #c9932f;
+  --gold-l: #dcb954;
+  --red: #a8394a;
+  --red-d: #7a1e2b;
+  --green: #5d9149;
+  --grad-gold: linear-gradient(100deg, #a7761f 0%, #e0b44a 52%, #b98f2e 100%);
+  --shadow: 0 1.125rem 2.625rem -1.375rem rgba(0, 0, 0, .8);
   --radius: 0.875rem;
   --serif: 'EB Garamond', Georgia, 'Times New Roman', serif;
   --display: 'Cinzel', Georgia, 'Times New Roman', serif;
   --mono: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+
+  /* Wiki-only, and not on the landing page because it never needs them: --red and --green are
+     panel and border colours there, but here they are set on TEXT — a ✓, a ✗, a beta badge —
+     where neither clears 4.5:1 against the page. These are the same hues lifted to that bar. */
+  --red-l: #d4677a;
+  --green-l: #86bb6d;
 }
+
+/* Native controls — the sidebar search box, its scrollbar, a focus ring — are painted by the
+   browser, and on a dark page a light default reads as a bug. */
+:root { color-scheme: dark; }
 
 *, *::before, *::after { box-sizing: border-box; }
 
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
 html {
-  scroll-behavior: smooth;
+  /* Clears the sticky header, so a heading jumped to from the contents list is not hidden
+     under it — the same offset the landing page uses for its in-page anchors. */
+  scroll-padding-top: 5.5rem;
   /* Fluid root size, identical to the landing page: everything below is rem, so this scales
      the page as one. Clamped to 1rem at/below ~90rem, so nothing changes on a laptop. */
   font-size: clamp(1rem, 0.536vw + 0.51812rem, 1.5rem);
@@ -49,15 +65,15 @@ body {
   line-height: 1.62;
   -webkit-font-smoothing: antialiased;
   background:
-    radial-gradient(75rem 33.75rem at 50% -12%, rgba(184, 134, 11, .12), transparent 60%),
-    radial-gradient(62.5rem 35rem at 100% 2%, rgba(138, 35, 49, .06), transparent 55%),
-    repeating-linear-gradient(112deg, rgba(120, 90, 40, .028) 0 0.125rem, transparent 0.125rem 0.4375rem),
+    radial-gradient(75rem 33.75rem at 50% -12%, rgba(201, 147, 47, .14), transparent 60%),
+    radial-gradient(62.5rem 35rem at 100% 2%, rgba(168, 57, 74, .08), transparent 55%),
+    repeating-linear-gradient(112deg, rgba(233, 220, 192, .02) 0 0.125rem, transparent 0.125rem 0.4375rem),
     var(--parch);
   overflow-x: hidden;
 }
 
-a { color: var(--bronze-d); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a { color: var(--bronze); text-decoration: none; }
+a:hover { color: var(--gold-l); text-decoration: underline; }
 
 .wrap { max-width: 65rem; margin: 0 auto; padding: 0 1.5rem; }
 
@@ -79,7 +95,14 @@ header {
   font-weight: 700; font-size: 1.12rem; letter-spacing: .04em; color: var(--ink);
 }
 .brand:hover { text-decoration: none; }
-.brand .globe { font-size: 1.3rem; }
+/* Icon instead of an emoji: same glyph cross-platform, stays in palette. /icon-192.png is in
+   assemble-site.mjs's ROOT_ASSETS, so it resolves both on the site and inside the desktop app,
+   which serves public/ at its own root. */
+.mark { width: 1.75rem; height: 1.75rem; display: block; border-radius: 0.375rem; object-fit: contain; flex: none; }
+footer .mark {
+  width: 1.35rem; height: 1.35rem; display: inline-block;
+  vertical-align: -0.3em; margin-right: 0.25rem; border-radius: 0.25rem;
+}
 .nav-links { display: flex; align-items: center; gap: 1.75rem; font-size: 1.02rem; }
 .nav-links a { color: var(--sepia); transition: color .15s; }
 .nav-links a:hover { color: var(--ink); text-decoration: none; }
@@ -87,8 +110,13 @@ header {
   font-family: var(--display); font-size: .86rem; letter-spacing: .08em;
   text-transform: uppercase; font-weight: 700;
   padding: 0.5625rem 1.125rem; border-radius: 0.5rem;
-  background: var(--grad-gold); color: #fbf3dc; border: 1px solid rgba(255, 225, 160, .35);
+  background: linear-gradient(180deg, #98283a, var(--red-d));
+  color: #f7eccf;
+  border: 1px solid rgba(255, 222, 160, .4);
+  box-shadow: 0 0.375rem 0.875rem -0.375rem rgba(0, 0, 0, .8);
+  transition: background .2s, box-shadow .2s;
 }
+.nav-cta:hover { background: linear-gradient(180deg, #a12b3e, #7a1e2b); color: #f7eccf; text-decoration: none; }
 /* There is no hamburger menu, so below 720px the nav collapses to the Play button plus
    anything explicitly marked .nav-keep — the wiki link has to survive on a phone. */
 @media (max-width: 720px) {
@@ -146,9 +174,9 @@ header {
   border-left: 2px solid transparent;
   transition: color .15s, background .15s;
 }
-.wiki-nav li a:hover { color: var(--ink); background: rgba(255, 250, 235, .6); text-decoration: none; }
+.wiki-nav li a:hover { color: var(--ink); background: rgba(233, 220, 192, .07); text-decoration: none; }
 .wiki-nav li a.on {
-  color: var(--bronze-d);
+  color: var(--gold-l);
   font-weight: 600;
   background: var(--marble2);
   border-left-color: var(--gold);
@@ -167,6 +195,7 @@ header {
   border-radius: 0.5rem;
   background: var(--marble2);
 }
+.wiki-search input::placeholder { color: var(--sepia2); opacity: 1; }
 .wiki-search input:focus { outline: 2px solid var(--gold-l); outline-offset: 1px; }
 .wiki-search ul {
   position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 0.35rem);
@@ -181,7 +210,7 @@ header {
   display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem;
   padding: 0.35rem 0.5rem; border-radius: 0.375rem; color: var(--ink); font-size: 0.92rem;
 }
-.wiki-search li a:hover { background: var(--parch2); text-decoration: none; }
+.wiki-search li a:hover { background: var(--parch2); color: var(--ink); text-decoration: none; }
 .wiki-search li a span { color: var(--sepia2); font-size: 0.76rem; white-space: nowrap; }
 .wiki-search li.none { padding: 0.35rem 0.5rem; color: var(--sepia2); font-size: 0.9rem; }
 
@@ -193,11 +222,11 @@ header {
   font-size: 1.5rem; margin: 2.4rem 0 0.7rem;
   padding-bottom: 0.35rem; border-bottom: 1px solid var(--line);
 }
-.wiki-main h3 { font-size: 1.15rem; margin: 1.7rem 0 0.5rem; color: var(--bronze-d); }
+.wiki-main h3 { font-size: 1.15rem; margin: 1.7rem 0 0.5rem; color: var(--bronze); }
 .wiki-main p { margin: 0 0 1rem; }
 .wiki-main ul, .wiki-main ol { margin: 0 0 1rem; padding-left: 1.5rem; }
 .wiki-main li { margin-bottom: 0.4rem; }
-.wiki-main img { max-width: 100%; height: auto; border-radius: 0.5rem; border: 1px solid var(--line); }
+.wiki-main img { max-width: 100%; height: auto; border-radius: 0.5rem; border: 1px solid var(--line2); background: var(--marble); }
 
 /* Markdown renders "![alt](src)" then an italic caption line as ONE paragraph, so the image is
    an inline box with the caption flowing after it. On a wide screenshot that wraps and looks
@@ -228,9 +257,9 @@ header {
 .tagline { font-size: 1.15rem; color: var(--sepia); margin-bottom: 1.6rem; }
 .subtitle { font-size: 1.1rem; color: var(--sepia2); margin-bottom: 2rem; }
 .muted { color: var(--sepia); }
-.highlight { color: var(--bronze-d); font-weight: 600; }
-.check { color: var(--green); font-weight: 700; }
-.cross { color: var(--red); font-weight: 700; }
+.highlight { color: var(--bronze); font-weight: 600; }
+.check { color: var(--green-l); font-weight: 700; }
+.cross { color: var(--red-l); font-weight: 700; }
 
 /* ---------- standalone guide pages ---------- */
 
@@ -248,7 +277,7 @@ header {
   font-size: 1.5rem; margin: 2.4rem 0 0.7rem;
   padding-bottom: 0.35rem; border-bottom: 1px solid var(--line);
 }
-.page h3 { font-size: 1.15rem; margin: 1.7rem 0 0.5rem; color: var(--bronze-d); }
+.page h3 { font-size: 1.15rem; margin: 1.7rem 0 0.5rem; color: var(--bronze); }
 .page p { margin: 0 0 1rem; }
 .page ul, .page ol { margin: 0 0 1rem; padding-left: 1.5rem; }
 .page li { margin-bottom: 0.4rem; }
@@ -266,8 +295,8 @@ header {
 /* Crimson rather than bronze: everything else on the page is warm, so a notice that says
    "your build may not have this" has to read as an exception at a glance. */
 .beta-note, p.beta-note {
-  background: rgba(138, 35, 49, .07);
-  border: 1px solid rgba(138, 35, 49, .28);
+  background: rgba(168, 57, 74, .12);
+  border: 1px solid rgba(168, 57, 74, .34);
   border-left: 3px solid var(--red);
   border-radius: 0 0.5rem 0.5rem 0;
   padding: 0.7rem 1rem;
@@ -275,7 +304,7 @@ header {
   font-size: 0.98rem;
   color: var(--sepia);
 }
-.beta-note b { color: var(--red-d); }
+.beta-note b { color: var(--red-l); }
 
 .wiki-nav li a em {
   font-family: var(--display);
@@ -283,8 +312,8 @@ header {
   font-size: .6rem;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--red);
-  border: 1px solid rgba(138, 35, 49, .35);
+  color: var(--red-l);
+  border: 1px solid rgba(168, 57, 74, .45);
   border-radius: 0.25rem;
   padding: 0 0.25rem;
   margin-left: 0.3rem;
@@ -309,7 +338,7 @@ header {
 .wiki-toc li { margin: 0.15rem 0; }
 .wiki-toc li.d3 { padding-left: 1rem; font-size: 0.9rem; }
 .wiki-toc a { color: var(--sepia); }
-.wiki-toc a:hover { color: var(--bronze-d); }
+.wiki-toc a:hover { color: var(--gold-l); }
 
 /* ---------- cards, steps, grids (names kept from the old guides stylesheet) ---------- */
 
@@ -330,7 +359,7 @@ header {
   padding: 1.1rem 1.4rem;
   margin-bottom: 1rem;
 }
-.step strong { display: block; color: var(--bronze-d); font-family: var(--display); margin-bottom: 0.3rem; }
+.step strong { display: block; color: var(--bronze); font-family: var(--display); margin-bottom: 0.3rem; }
 .step p { margin: 0; font-size: 0.98rem; }
 
 .feature-grid {
@@ -385,12 +414,14 @@ code {
   font-size: 0.86em;
   background: var(--marble2);
   border: 1px solid var(--line);
-  color: var(--bronze-d);
+  color: var(--gold-l);
   padding: 0.1em 0.35em;
   border-radius: 0.25rem;
 }
 pre {
-  background: #2c2216;
+  /* Below the page rather than above it: on a dark ground a lighter panel would pull the eye
+     to the commands and away from the prose that explains them. */
+  background: #0b0b0d;
   border: 1px solid var(--line2);
   border-radius: 0.5rem;
   padding: 1rem 1.2rem;
@@ -399,7 +430,7 @@ pre {
 }
 pre code {
   background: none; border: 0; padding: 0;
-  color: #ede0c4; font-size: 0.85rem; line-height: 1.55;
+  color: var(--ink); font-size: 0.85rem; line-height: 1.55;
 }
 
 /* ---------- calls to action ---------- */
@@ -416,17 +447,20 @@ pre code {
   margin: 0.4rem 0.5rem 0.4rem 0;
 }
 .cta {
-  background: var(--grad-gold);
-  color: #fbf3dc;
-  border: 1px solid rgba(255, 225, 160, .35);
+  background: linear-gradient(180deg, #98283a, var(--red-d));
+  color: #f7eccf;
+  border: 1px solid rgba(255, 222, 160, .4);
+  box-shadow: 0 0.75rem 1.875rem -0.75rem rgba(0, 0, 0, .8);
+  transition: background .2s;
 }
-.cta:hover { color: #fff8e6; text-decoration: none; filter: brightness(1.08); }
+.cta:hover { background: linear-gradient(180deg, #a12b3e, #7a1e2b); color: #f7eccf; text-decoration: none; }
 .cta-secondary {
   background: var(--marble);
-  color: var(--bronze-d);
+  color: var(--ink);
   border: 1px solid var(--line2);
+  box-shadow: none;
 }
-.cta-secondary:hover { background: var(--marble2); text-decoration: none; }
+.cta-secondary:hover { background: var(--marble2); color: var(--ink); text-decoration: none; }
 
 /* ---------- prev / next ---------- */
 
@@ -467,7 +501,6 @@ footer {
 }
 footer a { color: var(--sepia); }
 footer a:hover { color: var(--ink); }
-footer .globe { font-size: 1.05rem; }
 
 /* ---------- narrow screens ---------- */
 
@@ -507,14 +540,14 @@ footer .globe { font-size: 1.05rem; }
 .wiki-stale {
   margin: 2rem 0 0;
   padding-top: 1rem;
-  border-top: 1px solid rgba(120, 90, 50, 0.22);
+  border-top: 1px solid var(--line);
   font-size: 0.85rem;
   line-height: 1.55;
   color: var(--sepia);
 }
 .wiki-stale code {
   font-size: 0.9em;
-  background: rgba(120, 90, 50, 0.1);
+  background: rgba(233, 220, 192, 0.07);
   padding: 0.05em 0.3em;
   border-radius: 3px;
 }
