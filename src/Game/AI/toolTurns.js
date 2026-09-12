@@ -141,3 +141,17 @@ export const appendLookupRound = (history, calls, results) => {
 
 // How much of a history is lookup traffic, for logs.
 export const lookupRoundCount = (history) => array(history).filter((entry) => callsOf(entry).length > 0).length;
+
+// One line for a call, the way a log reads it: name(key="value", n=3). Long
+// strings are cut so a list of calls stays a list and not a transcript.
+const argValue = (value, max) => {
+  if (typeof value === "string") return JSON.stringify(value.length > max ? `${value.slice(0, max)}…` : value);
+  if (value == null || typeof value === "number" || typeof value === "boolean") return String(value);
+  const text = serialise(value);
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
+export const describeLookupCall = (call, { maxValue = 60 } = {}) => {
+  const args = call?.args && typeof call.args === "object" && !Array.isArray(call.args) ? call.args : {};
+  const inner = Object.entries(args).map(([key, value]) => `${key}=${argValue(value, maxValue)}`).join(", ");
+  return `${clean(call?.name) || "?"}(${inner})`;
+};

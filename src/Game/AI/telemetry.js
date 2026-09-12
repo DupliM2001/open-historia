@@ -166,6 +166,9 @@ export const startAiRecord = (meta = {}) => {
     error: "",
     validationError: "",
     parsedSummary: null,
+    // what the model asked for on the way (lookupTools.js): every function call
+    // it made and what it was told, round by round — see attachLookupRound
+    lookups: null,
     // human feedback
     rating: null,
     ratedAt: null,
@@ -187,6 +190,38 @@ export const attachCallMetrics = (record, { model, usage, firstByteMs } = {}) =>
   if (model) record.model = String(model);
   if (usage && typeof usage === "object") record.usage = usage;
   if (Number.isFinite(firstByteMs)) record.firstByteMs = firstByteMs;
+};
+
+// One lookup round: the calls the model made in one turn and what each was
+// answered. Kept whole, like the prompt — a dropped transfer is diagnosed from
+// exactly these answers ("it asked for Russia and was told there is none").
+// `calls` is [{ name, args, label?, response, ms?, error? }]; `usage` is the
+// request that produced the calls, so the rounds add up to the record's usage.
+export const attachLookupRound = (record, { round, calls = [], elapsedMs = null, usage = null } = {}) => {
+  if (!record) return;
+  const ledger = record.lookups && typeof record.lookups === "object"
+    ? record.lookups
+    : { rounds: 0, calls: 0, chars: 0, entries: [], roundUsage: [] };
+  const roundNumber = Number.isInteger(round) ? round : ledger.rounds + 1;
+  ledger.rounds += 1;
+  for (const call of Array.isArray(calls) ? calls : []) {
+    const response = typeof call?.response === "string" ? call.response : JSON.stringify(call?.response ?? null);
+    const entry = {
+      round: roundNumber,
+      name: String(call?.name ?? ""),
+      args: call?.args && typeof call.args === "object" ? call.args : {},
+      label: String(call?.label ?? call?.name ?? ""),
+      response,
+      responseChars: response.length,
+      ms: Number.isFinite(call?.ms) ? call.ms : null,
+      error: Boolean(call?.error),
+    };
+    ledger.entries.push(entry);
+    ledger.calls += 1;
+    ledger.chars += entry.responseChars;
+  }
+  ledger.roundUsage.push({ round: roundNumber, elapsedMs: Number.isFinite(elapsedMs) ? elapsedMs : null, ...(usage && typeof usage === "object" ? usage : {}) });
+  record.lookups = ledger;
 };
 
 export const finishAiRecord = (record, { ok = true, error = "", rawResponse = "" } = {}) => {
@@ -322,7 +357,7 @@ const CSV_COLUMNS = [
   "batch", "simulatedDays", "promptTokens", "outputTokens", "cachedTokens",
   "thinkingTokens", "latencyMs", "firstByteMs", "systemPromptChars",
   "responseChars", "staticPrefixEnd", "ok", "validationError", "rating",
-  "eventCount", "stopDate",
+  "eventCount", "stopDate", "lookupRounds", "lookupCalls", "lookupNames",
 ];
 
 const csvCell = (value) => {
@@ -357,6 +392,9 @@ export const exportTelemetryCsv = (records) => {
       record.rating ?? "",
       record.parsedSummary?.eventCount ?? "",
       record.parsedSummary?.stopDate ?? "",
+      record.lookups?.rounds ?? "",
+      record.lookups?.calls ?? "",
+      (record.lookups?.entries ?? []).map((entry) => entry.name).join(" "),
     ].map(csvCell).join(","));
   }
   return rows.join("\n");

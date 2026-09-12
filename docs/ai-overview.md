@@ -197,7 +197,9 @@ The loop lives in `callAI` (`runWithLookups`, `main.jsx`). `runJsonTask` passes 
 | OpenAI / compatible | `tools: [output, ...lookups]` | `tool_choice: "required"` | only the output tool declared | `lookupCallsFromOpenAI` |
 | Anthropic / compatible | `tools: [output, ...lookups]` | `tool_choice: {type:"any"}` | `tool_choice: {type:"tool", name}` | `lookupCallsFromAnthropic` |
 
-Tests: `server/lookupTools.test.js`, `server/toolTurns.test.js`, `src/Game/AI/streamAssembly.test.js`.
+Every round is tracked: `callAI` attaches each call (name, arguments, the whole answer, milliseconds) to the telemetry record (`attachLookupRound`, shown in the AI debug console as a **Function calls** section, a lookups card and a per-task column, and exported in the CSV as `lookupRounds` / `lookupCalls` / `lookupNames`), sums the usage of all rounds into the record (`sumUsage`), and writes one diagnostics-log line per round (`ai-call`: the calls with their arguments and how many characters each was answered) with the full arguments and answers as a detailed-mode entry.
+
+Tests: `server/lookupTools.test.js`, `server/toolTurns.test.js`, `src/Game/AI/streamAssembly.test.js`, `src/Game/AI/telemetry.test.js`, `src/Game/AI/usageStats.test.js`.
 
 ### The structured-output ladder
 

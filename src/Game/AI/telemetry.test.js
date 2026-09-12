@@ -129,7 +129,7 @@ test("the CSV export is one row per record with quoted free text", async () => {
   assert.ok(row.includes(",openai,gpt-x,jumpForward,"));
   assert.ok(row.includes(",100,20,60,"));
   assert.ok(row.includes('"bad ""shape"", really"'));
-  assert.ok(row.endsWith(",failed,\"bad \"\"shape\"\", really\",,2,"));
+  assert.ok(row.endsWith(",failed,\"bad \"\"shape\"\", really\",,2,,,,"), row);
 });
 
 test("clearing forgets the session", async () => {
@@ -151,4 +151,39 @@ test("a record keeps a system prompt longer than 80,000 characters whole", () =>
   assert.equal(record.systemPrompt.length, record.systemPromptChars);
   assert.equal(record.userMessage.length, 30000);
   assert.equal(record.rawResponse.length, 70000);
+});
+
+test("lookup rounds are kept on the record, whole, and exported", async () => {
+  const record = startAiRecord({ taskKey: "jumpForward", provider: "gemini", awaitingOutcome: true });
+  const { attachLookupRound } = await import("./telemetry.js");
+  attachLookupRound(record, {
+    round: 1,
+    elapsedMs: 900,
+    usage: { promptTokens: 1000, outputTokens: 40 },
+    calls: [
+      { name: "list_powers", args: {}, label: "list_powers()", response: "{\"count\":2}", ms: 3 },
+      { name: "list_regions", args: { owner: "Russia" }, label: "list_regions(owner=\"Russia\")", response: { error: "\"Russia\" is not a power on this map." }, ms: 1, error: true },
+    ],
+  });
+  attachLookupRound(record, { round: 2, calls: [{ name: "region_info", args: { regionId: "2026" }, response: "{\"id\":\"2026\"}" }] });
+  assert.equal(record.lookups.rounds, 2);
+  assert.equal(record.lookups.calls, 3);
+  assert.deepEqual(record.lookups.entries.map((entry) => [entry.round, entry.name, entry.error]), [[1, "list_powers", false], [1, "list_regions", true], [2, "region_info", false]]);
+  assert.equal(record.lookups.entries[1].response, "{\"error\":\"\\\"Russia\\\" is not a power on this map.\"}");
+  assert.equal(record.lookups.chars, record.lookups.entries.reduce((sum, entry) => sum + entry.responseChars, 0));
+  assert.deepEqual(record.lookups.roundUsage[0], { round: 1, elapsedMs: 900, promptTokens: 1000, outputTokens: 40 });
+  finishAiRecord(record, { ok: true, rawResponse: "{}" });
+  attachAttemptOutcome(record, { ok: true });
+  const csv = exportTelemetryCsv(await getAiRecords());
+  assert.match(csv.split("\n")[0], /lookupRounds,lookupCalls,lookupNames$/);
+  assert.match(csv, /,2,3,list_powers list_regions region_info$/m);
+});
+
+test("a record without lookups exports empty lookup columns and attachLookupRound tolerates no record", async () => {
+  const { attachLookupRound } = await import("./telemetry.js");
+  attachLookupRound(null, { round: 1, calls: [] });
+  const record = startAiRecord({ taskKey: "advisor", provider: "gemini" });
+  finishAiRecord(record, { ok: true, rawResponse: "hi" });
+  assert.equal(record.lookups, null);
+  assert.match(exportTelemetryCsv([record]), /,,,$/m);
 });

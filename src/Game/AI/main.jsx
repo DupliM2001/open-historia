@@ -10,7 +10,7 @@ import {
 } from "./providerConfig.js";
 import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
-import { attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord } from "./telemetry.js";
+import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import {
@@ -43,12 +43,13 @@ import {
 } from "./providerErrors.js";
 import { ANSWER_SENTINEL_DIRECTIVE } from "./jsonSalvage.js";
 import { createModeObserver, nextStructuredMode, startingStructuredMode } from "./structuredMode.js";
-import { createFirstByteTimer, normalizeUsage } from "./usageStats.js";
+import { createFirstByteTimer, normalizeUsage, sumUsage } from "./usageStats.js";
 import { toGeminiSchema } from "./geminiSchema.js";
 import { readAnthropicStreamedResponse, readGeminiStreamedResponse, readOpenAIStreamedResponse } from "./streamAssembly.js";
 import {
     anthropicMessagesFromHistory,
     appendLookupRound,
+    describeLookupCall,
     geminiContentsFromHistory,
     lookupCallsFromAnthropic,
     lookupCallsFromGemini,
@@ -2019,11 +2020,15 @@ const elapsedSeconds = (startedAt) => `${((Date.now() - startedAt) / 1000).toFix
 // system prompt is byte-identical across rounds, so a cached prefix pays off.
 const DEFAULT_LOOKUP_ROUNDS = 8;
 
-async function runWithLookups(lookups, history, dispatch, { label, provider }) {
+// Every round the model spends asking is reported to `onRound` — callAI
+// writes it to the telemetry record and the diagnostics log — so "what did
+// the model look up before it answered" is answerable from the console.
+async function runWithLookups(lookups, history, dispatch, { label, provider, onRound = null }) {
     const tools = Array.isArray(lookups?.tools) ? lookups.tools.filter((entry) => entry?.name && entry?.schema) : [];
     if (!tools.length || typeof lookups?.execute !== "function") return dispatch(history, {});
     const maxRounds = Number.isInteger(lookups.maxRounds) && lookups.maxRounds >= 0 ? lookups.maxRounds : DEFAULT_LOOKUP_ROUNDS;
     let conversation = Array.isArray(history) ? history : [];
+    let roundStartedAt = Date.now();
     for (let round = 0; ; round += 1) {
         const requireOutputTool = round >= maxRounds;
         if (round > 0) lookups.onRound?.(round);
@@ -2033,13 +2038,16 @@ async function runWithLookups(lookups, history, dispatch, { label, provider }) {
         // round still asking questions falls through to the runner's retry).
         if (!calls.length || result?.toolInput || requireOutputTool) {
             if (round > 0) {
-                logDebugEvent("ai-call", `${label}: ${provider} answered after ${round} lookup round${round === 1 ? "" : "s"}.`,
-                    { lookupRounds: lookupRoundCount(conversation), answered: Boolean(result?.toolInput) }, { verbose: true });
+                logDebugEvent("ai-call", `${label}: ${provider} answered after ${round} lookup round${round === 1 ? "" : "s"}${result?.toolInput ? "" : " without calling the output function"}.`,
+                    { lookupRounds: lookupRoundCount(conversation), answered: Boolean(result?.toolInput), forcedOutput: requireOutputTool });
             }
             return result;
         }
+        const elapsedMs = Date.now() - roundStartedAt;
         const results = [];
+        const answered = [];
         for (const call of calls) {
+            const startedAt = Date.now();
             let response;
             try {
                 response = await lookups.execute(call.name, call.args);
@@ -2048,12 +2056,31 @@ async function runWithLookups(lookups, history, dispatch, { label, provider }) {
             }
             if (response == null || typeof response !== "object" || Array.isArray(response)) response = { result: response ?? null };
             results.push({ id: call.id, name: call.name, response });
+            answered.push({
+                name: call.name,
+                args: call.args,
+                label: describeLookupCall(call),
+                response: JSON.stringify(response),
+                ms: Date.now() - startedAt,
+                error: typeof response.error === "string" && response.error.length > 0,
+            });
         }
-        logDebugEvent("ai-call", `${label}: lookup round ${round + 1}: ${calls.map((call) => call.name).join(", ")}.`, {
-            calls: calls.map((call) => ({ name: call.name, args: call.args })),
-            replyChars: results.reduce((sum, entry) => sum + JSON.stringify(entry.response).length, 0),
-        }, { verbose: true });
+        // Always logged: the calls and what they cost, one line. The full
+        // arguments and answers ride along only in detailed mode.
+        logDebugEvent("ai-call", `${label}: lookup round ${round + 1} on ${provider}: ${answered.map((entry) => entry.label).join("; ")}.`, {
+            answers: answered.map((entry) => `${entry.name} ${entry.error ? "ERROR " : ""}${entry.response.length} chars`).join("; "),
+            modelMs: elapsedMs,
+        });
+        logDebugEvent("ai-call", `${label}: lookup round ${round + 1} in full.`, answered.map((entry) => ({
+            call: entry.label, args: entry.args, response: entry.response,
+        })), { verbose: true });
+        try {
+            onRound?.({ round: round + 1, calls: answered, elapsedMs });
+        } catch (error) {
+            console.warn("[ai] a lookup-round observer threw; continuing.", error);
+        }
         conversation = appendLookupRound(conversation, calls, results);
+        roundStartedAt = Date.now();
     }
 }
 
@@ -2118,20 +2145,41 @@ export async function callAI(systemPrompt, history, opts = {}) {
     // The timer wraps the caller's own onActivity (runJsonTask passes the idle
     // watchdog's note()), so it observes the first chunk without displacing it.
     const timer = createFirstByteTimer(providerOpts.onActivity);
+    // Summed across the rounds of a lookup conversation (each round is a
+    // whole request); the latest round's own figure is what a lookup round
+    // is recorded with.
     let usage = null;
+    let roundUsage = null;
+    let lookupRounds = 0;
+    let lookupCalls = 0;
 
     try {
         const result = await runWithLookups(lookups, history, (roundHistory, roundOpts) => dispatchToProvider(provider, systemPrompt, roundHistory, {
             ...providerOpts,
             ...roundOpts,
             onActivity: timer.note,
-            onUsage: (data) => { usage = normalizeUsage(data) ?? usage; },
+            onUsage: (data) => {
+                const reported = normalizeUsage(data);
+                if (!reported) return;
+                roundUsage = reported;
+                usage = sumUsage(usage, reported);
+            },
             // The model the provider actually resolved (overrides, discovery).
             onModel: (model) => { if (record) record.model = String(model ?? ""); },
-        }), { label, provider });
+        }), {
+            label,
+            provider,
+            onRound: ({ round, calls, elapsedMs }) => {
+                lookupRounds = round;
+                lookupCalls += calls.length;
+                attachLookupRound(record, { round, calls, elapsedMs, usage: roundUsage });
+                roundUsage = null;
+            },
+        });
         logDebugEvent("ai-call", `${label}: ${provider} answered in ${elapsedSeconds(startedAt)}.`, {
             replyChars: typeof result === "string" ? result.length : String(result?.rawText ?? "").length,
             viaToolCall: Boolean(result?.toolInput),
+            ...(lookupRounds ? { lookupRounds, lookupCalls } : {}),
             // Omitted rather than zeroed when unknown: a buffered call never
             // fires onActivity, and plenty of gateways report no usage at all.
             ...(timer.firstByteMs === null ? {} : { firstByteMs: timer.firstByteMs }),

@@ -137,3 +137,12 @@ test("a second round appends after the first, and the count follows", () => {
   assert.equal(lookupRoundCount(history), 2);
   assert.equal(openAiMessagesFromHistory("S", history).length, 1 + 1 + 1 + 2 + 1 + 1);
 });
+
+test("a call is described on one line, long strings cut", async () => {
+  const { describeLookupCall } = await import("../src/Game/AI/toolTurns.js");
+  assert.equal(describeLookupCall({ name: "list_powers", args: {} }), "list_powers()");
+  assert.equal(describeLookupCall({ name: "find_region", args: { name: "Kharkiv Oblast", owner: "Ukraine" } }), "find_region(name=\"Kharkiv Oblast\", owner=\"Ukraine\")");
+  assert.equal(describeLookupCall({ name: "list_regions", args: { owner: "Ukraine", limit: 5, nested: { a: 1 } } }), "list_regions(owner=\"Ukraine\", limit=5, nested={\"a\":1})");
+  assert.equal(describeLookupCall({ name: "recent_events", args: { about: "x".repeat(80) } }, { maxValue: 10 }), "recent_events(about=\"xxxxxxxxxx…\")");
+  assert.equal(describeLookupCall({}), "?()");
+});
