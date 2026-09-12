@@ -7,6 +7,8 @@ import {
     setDebugLogContext,
     withConsoleCaptureMuted,
 } from "./runtime/debugLog.js";
+// Registers the Logging file's settings snapshot (every setting's current value).
+import "./runtime/settingsLog.js";
 import App from "./App.jsx";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";

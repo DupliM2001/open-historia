@@ -435,6 +435,91 @@ export const logDebugEvent = (category, message, detail, { verbose = false, prob
     emit();
 };
 
+// ---------------------------------------------------------------------------
+// Game settings
+// ---------------------------------------------------------------------------
+//
+// Two halves, because a report needs both. The CHANGES go in the log as they
+// happen (logSettingChange), so a reader sees "turned the globe on, then the
+// turn broke". The STATE goes in the Logging file as it is saved (the settings
+// snapshot), because a switch flipped last month — or never touched, sitting at
+// its default — is in no log at all, and "was X on?" is the first question.
+
+// How long a typed setting — a model name, a font, an endpoint — must sit still
+// before its change is logged. The fields save on every keystroke, and "Label
+// font set to T", "…Ti", "…Tim" is noise that buries the one line that matters.
+const SETTING_SETTLE_MS = 1500;
+const settlingSettings = new Map();
+
+// A setting's change as a line of its own wording — for the ones that must not
+// say their value (an API key is "set" or "cleared", never shown). `key` names
+// the setting for settling, so two fields typed at once settle separately.
+export const logSettingMessage = (key, message, { settle = false } = {}) => {
+    if (!settle) {
+        logDebugEvent("setting", message);
+        return;
+    }
+    clearTimeout(settlingSettings.get(key));
+    settlingSettings.set(key, setTimeout(() => {
+        settlingSettings.delete(key);
+        logDebugEvent("setting", message);
+    }, SETTING_SETTLE_MS));
+};
+
+// One line per change, in words: a switch "turned on/off", anything else "set
+// to" its new value. `settle` holds the line until the value stops changing.
+export const logSettingChange = (label, value, { settle = false } = {}) =>
+    logSettingMessage(label, typeof value === "boolean"
+        ? `${label} turned ${value ? "on" : "off"}.`
+        : `${label} set to ${value}.`, { settle });
+
+// The snapshot: each part of the game that owns settings registers a reader for
+// its section (src/runtime/settingsLog.js registers them all), and the Logging
+// file calls every reader as it is built, so the values are the ones in force
+// at that moment. A reader returns `[label, value]` pairs, or a promise of them
+// (the server's network setting is a request away), or null when the section
+// means nothing here. Registration rather than imports because the settings
+// modules import this one.
+const settingsReaders = new Map();
+
+export const registerSettingsSnapshot = (section, read) => {
+    settingsReaders.set(section, read);
+    return () => settingsReaders.delete(section);
+};
+
+// Never throws, and never waits longer than the Desktop log does. A section that
+// fails says so in the file rather than vanishing — "could not be read" and "was
+// off" are different answers.
+const readSettingsSnapshot = async ({ timeoutMs = DESKTOP_LOG_TIMEOUT_MS } = {}) => {
+    const sections = await Promise.all([...settingsReaders].map(async ([section, read]) => {
+        let timer = null;
+        try {
+            const items = await Promise.race([
+                Promise.resolve().then(read),
+                new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("timed out")), timeoutMs); }),
+            ]);
+            return Array.isArray(items) && items.length ? { section, items } : null;
+        } catch (error) {
+            return { section, items: [[`(could not be read: ${error?.message || error})`]] };
+        } finally {
+            clearTimeout(timer);
+        }
+    }));
+    return sections.filter(Boolean);
+};
+
+const settingsLines = (settings) => {
+    if (!Array.isArray(settings) || !settings.length) return [];
+    const lines = ["", "-- Settings when this file was saved --"];
+    for (const { section, items } of settings) {
+        lines.push(`${section}:`);
+        for (const [label, value] of items) {
+            lines.push(value === undefined ? `  ${label}` : `  ${label}: ${value}`);
+        }
+    }
+    return lines.map(redactSecrets);
+};
+
 // Campaign context for the report header, set by whoever knows it: library.js
 // when the active game changes, time.jsx as the date advances. Merged rather
 // than replaced so no caller has to know the other callers' fields.
@@ -873,7 +958,7 @@ const cutReportedProblem = (text, allowed) => {
 // The Logging file in parts: header lines, the reported problem, and the entries
 // it has room for, oldest first. One composition behind both the file and View
 // log, so what a player looks at is what they send.
-const composeLoggingFile = ({ incident, desktop } = {}) => {
+const composeLoggingFile = ({ incident, desktop, settings } = {}) => {
     const header = [
         "OPEN HISTORIA — DIAGNOSTICS LOG",
         `Generated: ${new Date().toISOString()}`,
@@ -923,7 +1008,8 @@ const composeLoggingFile = ({ incident, desktop } = {}) => {
     // The log's own ceiling in the file, over and above the buffer's: header
     // and every entry, not counting the reported problem. The oldest entries go
     // first, for the same reason as in trimToBudget.
-    let logTotal = [...header, "-- Log (oldest first) --", ...FILE_FOOTER].join("\n").length
+    const settingsBlock = settingsLines(settings);
+    let logTotal = [...header, ...settingsBlock, "-- Log (oldest first) --", ...FILE_FOOTER].join("\n").length
         + FILE_NOTE_RESERVE_CHARS
         + logLines.reduce((sum, line) => sum + line.length + 1, 0);
     let leftOut = 0;
@@ -942,13 +1028,18 @@ const composeLoggingFile = ({ incident, desktop } = {}) => {
         ? [cutReportedProblem(incidentText, incidentRoom)]
         : incidentBlock;
 
-    return { header, incidentBlock: reportedProblem, entries: logEntries.slice(leftOut), lines: logLines.slice(leftOut) };
+    return {
+        header: [...header, ...settingsBlock],
+        incidentBlock: reportedProblem,
+        entries: logEntries.slice(leftOut),
+        lines: logLines.slice(leftOut),
+    };
 };
 
 const FILE_FOOTER = ["", "-- End of log --"];
 
-export const buildDebugLogReport = ({ incident, desktop } = {}) => {
-    const { header, incidentBlock, lines } = composeLoggingFile({ incident, desktop });
+export const buildDebugLogReport = ({ incident, desktop, settings } = {}) => {
+    const { header, incidentBlock, lines } = composeLoggingFile({ incident, desktop, settings });
     const body = lines.length
         ? lines
         // Said outright when logging is off: the Save buttons beside a fallback
@@ -1000,8 +1091,13 @@ export const fetchDesktopLog = async ({ fetchImpl = globalThis.fetch, timeoutMs 
 // The Logging file, Desktop log included. Every way out goes through here —
 // Settings' Copy and Save and every failure button — so they all hand over the
 // same thing.
-export const buildLoggingFile = async ({ incident, fetchImpl, timeoutMs } = {}) =>
-    buildDebugLogReport({ incident, desktop: await fetchDesktopLog({ fetchImpl, timeoutMs }) });
+export const buildLoggingFile = async ({ incident, fetchImpl, timeoutMs } = {}) => {
+    const [desktop, settings] = await Promise.all([
+        fetchDesktopLog({ fetchImpl, timeoutMs }),
+        readSettingsSnapshot({ timeoutMs }),
+    ]);
+    return buildDebugLogReport({ incident, desktop, settings });
+};
 
 // The incident on its own, for when there is no log to attach it to.
 //

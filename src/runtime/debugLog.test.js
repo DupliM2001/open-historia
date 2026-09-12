@@ -32,7 +32,9 @@ const {
     isDebugLogEnabled,
     isDebugLogVerbose,
     logDebugEvent,
+    logSettingChange,
     redactSecrets,
+    registerSettingsSnapshot,
     setDebugLogContext,
     setDebugLogEnabled,
     setDebugLogVerbose,
@@ -864,6 +866,80 @@ test("D13 View log shows the entries the file holds, newest first, with the prob
         ["Loaded save", false],
     ]);
     assert.equal(shown.find((entry) => entry.message.includes("Disk full")).category, "server");
+});
+
+// ---- Group G: game settings in the Logging file -----------------------------
+
+test("G1 the file lists every setting's value as it was saved, by section", () => {
+    reset();
+    logDebugEvent("turn", "Jump started");
+    const report = buildDebugLogReport({
+        settings: [
+            { section: "Map", items: [["Hide country labels", "on"], ["Basemap", "scenario default"]] },
+            { section: "AI", items: [["Model", "gemini-3.5-flash-lite"], ["API key", "set"]] },
+        ],
+    });
+    const block = report.slice(report.indexOf("-- Settings when this file was saved --"), report.indexOf("-- Log (oldest first) --"));
+    assert.match(block, /^Map:\n {2}Hide country labels: on\n {2}Basemap: scenario default$/m);
+    assert.match(block, /^AI:\n {2}Model: gemini-3\.5-flash-lite\n {2}API key: set$/m);
+});
+
+test("G2 building the file reads every registered setting at that moment, and one that fails does not stop it", async () => {
+    reset();
+    let font = "Georgia";
+    const off = [
+        registerSettingsSnapshot("Map", () => [["Label font", font]]),
+        registerSettingsSnapshot("Network", async () => [["Let other devices connect", "on"]]),
+        registerSettingsSnapshot("Broken", () => { throw new Error("storage blocked"); }),
+        // A section with nothing to say on this platform (the web build has no
+        // server to share) is left out rather than printed empty.
+        registerSettingsSnapshot("Nothing here", () => null),
+    ];
+    try {
+        font = "Times New Roman";
+        const report = await buildLoggingFile({ fetchImpl: async () => new Response("{}", { status: 404 }) });
+        assert.match(report, /^ {2}Label font: Times New Roman$/m, "read when the file is built, not when registered");
+        assert.match(report, /^ {2}Let other devices connect: on$/m);
+        assert.match(report, /^Broken:\n {2}\(could not be read: storage blocked\)$/m);
+        assert.equal(report.includes("Nothing here"), false);
+    } finally {
+        off.forEach((unregister) => unregister());
+    }
+});
+
+test("G3 a setting's value is redacted like everything else", () => {
+    reset();
+    store.set("openai_compatible_api_key", "hunter2hunter2");
+    const report = buildDebugLogReport({ settings: [{ section: "AI", items: [["Endpoint", "http://u:hunter2hunter2@gateway.local"]] }] });
+    assert.equal(report.includes("hunter2hunter2"), false);
+});
+
+test("G4 a change is logged in words: switches turn on or off, values are set", () => {
+    reset();
+    logSettingChange("3D Globe", true);
+    logSettingChange("Record AI telemetry", false);
+    logSettingChange("Basemap", "World Imagery");
+    assert.deepEqual(getDebugLogEntries().map((entry) => [entry.category, entry.message]), [
+        ["setting", "3D Globe turned on."],
+        ["setting", "Record AI telemetry turned off."],
+        ["setting", "Basemap set to World Imagery."],
+    ]);
+});
+
+test("G5 a typed setting is logged once it settles, not once per keystroke", () => {
+    reset();
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+        for (const typed of ["T", "Ti", "Times", "Times New", "Times New Roman"]) {
+            logSettingChange("Label font", typed, { settle: true });
+            mock.timers.tick(200);
+        }
+        assert.equal(getDebugLogEntries().length, 0, "nothing while the player is still typing");
+        mock.timers.tick(2000);
+    } finally {
+        mock.timers.reset();
+    }
+    assert.deepEqual(getDebugLogEntries().map((entry) => entry.message), ["Label font set to Times New Roman."]);
 });
 
 test("M1 a console line written under a mute is not captured a second time", () => {

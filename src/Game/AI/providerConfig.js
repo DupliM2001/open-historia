@@ -1,5 +1,5 @@
 /*! Open Historia — portions (reasoning-effort toggle persistence) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
+import { logDebugEvent, logSettingMessage, setDebugLogContext } from "../../runtime/debugLog.js";
 
 export const DEFAULT_PROVIDER = "gemini";
 
@@ -245,8 +245,53 @@ export function setProviderField(provider, field, value) {
         }
     }
 
+    const before = readStoredValue(setting);
     localStorage.setItem(setting.storageKey, value ?? "");
+    if (String(before ?? "") !== String(value ?? "")) logProviderFieldChange(provider, field, value);
     syncAiDebugContext();
+}
+
+// The host of an endpoint, for the diagnostics log: "localhost:11434" or
+// "openrouter.ai" says which server a report is about; the path, the query and
+// any credentials in the URL say nothing a reader needs and can carry a token.
+export function endpointHostForLog(value) {
+    const text = String(value ?? "").trim();
+    if (!text) return "(none)";
+    try {
+        return new URL(text).host || "(not a URL)";
+    } catch {
+        return "(not a URL)";
+    }
+}
+
+// Every provider setting change, into the diagnostics log (runtime/debugLog.js).
+// The fields save on every keystroke, so each line waits for its field to settle.
+// What a line may say is decided per field: a model name is not a secret and is
+// the most useful line in an AI report; a key is only ever "set" or "cleared";
+// custom parameters can carry headers, so only their size; an endpoint only its
+// host.
+function logProviderFieldChange(provider, field, value) {
+    const name = getProviderMeta(provider)?.label || normalizeProvider(provider);
+    const text = String(value ?? "").trim();
+    const settle = { settle: true };
+    const key = `${normalizeProvider(provider)}:${field}`;
+    const taskMatch = TASK_MODEL_FIELD.exec(String(field ?? ""));
+    if (taskMatch) {
+        const task = AI_TASK_ROUTING.find((entry) => entry.key === taskMatch[1])?.label || taskMatch[1];
+        logSettingMessage(key, `${name} ${task} model set to ${text || "the default model"}.`, settle);
+    } else if (field === "model") {
+        logSettingMessage(key, `${name} model set to ${text || "(provider default)"}.`, settle);
+    } else if (field === "apiKey") {
+        logSettingMessage(key, `${name} API key ${text ? "set" : "cleared"}.`, settle);
+    } else if (field === "endpoint") {
+        logSettingMessage(key, `${name} endpoint set to ${endpointHostForLog(text)}.`, settle);
+    } else if (field === "customParams") {
+        logSettingMessage(key, `${name} custom parameters ${text ? `set (${text.length} characters)` : "cleared"}.`, settle);
+    } else if (field === "structuredMode") {
+        logSettingMessage(key, `${name} structured output set to ${text || "auto"}.`, settle);
+    } else if (field === "toolStrict") {
+        logSettingMessage(key, `${name} strict tool schema turned ${text === "1" ? "on" : "off"}.`, settle);
+    }
 }
 
 // Which provider and model the game is pointed at, into the diagnostics log's
@@ -437,6 +482,7 @@ export function updatePreset(id, name, settings) {
     if (settings) next.settings = normalizePresetSettings(settings);
     presets[index] = next;
     writeStoredPresets(presets);
+    logDebugEvent("setting", `AI profile "${next.name}" updated for ${next.provider}.`);
     return true;
 }
 
@@ -445,6 +491,8 @@ export function deletePreset(id) {
     const remaining = presets.filter((preset) => preset.id !== id);
     if (remaining.length === presets.length) return false;
     writeStoredPresets(remaining);
+    const removed = presets.find((preset) => preset.id === id);
+    logDebugEvent("setting", `AI profile "${removed?.name || id}" deleted.`);
     return true;
 }
 

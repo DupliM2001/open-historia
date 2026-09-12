@@ -329,6 +329,17 @@ Every way out goes through `buildLoggingFile({ incident })`: Settings' Copy and 
 * **Fetching** (`fetchDesktopLog`) waits at most 2 s, so a dead server never holds the save and the save or copy still counts as the player's click.
 * **Phones and LAN browsers** are served their page by the host, so the read reaches the host's Desktop log with no extra plumbing, and their file carries the host's errors.
 
+### Game settings in the file
+
+A report needs settings two ways, and gets both:
+
+* **Every change, as it happens**, as a `setting` entry in words — "3D Globe turned on.", "Basemap set to World Imagery.", "Gemini model set to gemini-3.5-pro." — through `logSettingChange(label, value, { settle })` (or `logSettingMessage` for a line of its own wording). Fields that save on every keystroke (model names, per-task models, the endpoint, custom parameters, the label font) pass `settle`, so the line is written once the value has been still for 1.5 s, not once per keystroke.
+* **Every setting's value as the file is saved**, in a `-- Settings when this file was saved --` block after the header, by section: Display, Map, AI, This save, Network, Diagnostics. A switch flipped before the log's span, or never touched, is in no log — and "was X on?" is the first question a report gets. `src/runtime/settingsLog.js` registers one reader per section (`registerSettingsSnapshot(section, read)`), each reading through the getter its owner already exports; `buildLoggingFile` calls them all as it builds the file (async ones — the server's LAN setting — within the same 2 s as the Desktop log), and a reader that throws says `(could not be read: …)` rather than vanishing. It is imported by `src/main.jsx` at boot, so the block is there however the file is saved.
+
+Labels match the Settings panel word for word; `diagnosticsLogGuard.test.js` fails if a switch in the panel is missing from the snapshot. What a line may say is decided per setting: an API key is only ever `set` / `not set` (a change: "set" / "cleared"), custom parameters only their size (they can carry headers), an endpoint only its host (`endpointHostForLog`) — the path, the query and any URL credentials can carry a token. Everything is redacted again as the file is built.
+
+Where changes are logged: `mapSettings.js` (every switch, the basemap and the label font), `providerConfig.js` (provider, every provider field, reasoning, AI profiles saved/updated/deleted), `GameUI/main.jsx` (Fullscreen, 3D Globe, 3D Terrain), `settings.jsx` (both languages, telemetry and ratings — `telemetry.js` imports nothing on purpose — and LAN sharing), `debugLog.js` (its own two switches).
+
 **View log** (Settings → Diagnostics, `DiagnosticsLogViewer` in `settings.jsx`) lists `getLoggingFileEntries({ desktop })`: the same entries the file holds, newest first, each with `problem` for the problems-only filter (page `error`/`warn`/`crash` entries, any page entry logged with `{ problem: true }` — a failed AI task — and desktop `error`/`warn` levels). It replaced the Cheats panel's old "Diagnostics Log" tool, which read only the Desktop log.
 
 ### Two settings, both persisted
@@ -408,6 +419,8 @@ localStorage is a ~5 MB budget per origin, shared with the translator cache and 
 | `flushDebugLog()` | Persist now, skipping the debounce |
 | `getDebugLogEntries()` / `getDebugLogSize()` / `getDebugLogContext()` | Reads |
 | `subscribeToDebugLog(listener)` | Returns an unsubscribe. Drives the entry count in the settings panel |
+| `logSettingChange(label, value, { settle }?)` / `logSettingMessage(key, message, { settle }?)` | A setting change as a line: a boolean "turned on/off", anything else "set to"; `settle` waits for a typed value to stop changing |
+| `registerSettingsSnapshot(section, read)` | Adds a section to the file's settings block; `read` returns `[label, value]` pairs (or a promise, or null to leave the section out). Returns an unregister |
 | `redactSecrets(text)` | Exported for the tests; called internally on every entry |
 
 ### Hook sites
@@ -421,8 +434,9 @@ Always recorded:
 | `src/runtime/assets.js` | `save` | **Failed** `writeJson` — world, game, actions, events and chats all persist through there, so a failure is the campaign not reaching disk. It previously threw into callers that only surface it as a toast |
 | `src/Game/GameUI/time.jsx` | `turn` | Jump/auto-jump start, finish (with elapsed seconds, event count, source), **fallback with its reason**, cancel, undo; keeps the in-game date and round in the context |
 | `src/Game/GameUI/actions.jsx` | `action` | Orders queued (manual and from suggestions) and removed |
-| `src/runtime/mapSettings.js` | `setting` | Every map/AI/experimental toggle, by its UI label |
-| `src/Game/AI/providerConfig.js` | `setting` | Provider switches, reasoning toggle; syncs provider + model into the header |
+| `src/runtime/mapSettings.js` | `setting` | Every map/AI/experimental toggle, by its UI label; the basemap and label font |
+| `src/Game/AI/providerConfig.js` | `setting` | Provider switches, every provider field (model, per-task models, key set/cleared, endpoint host, custom-parameter size, structured output, strict tool schema), reasoning toggle, AI profiles; syncs provider + model into the header |
+| `src/Game/GameUI/main.jsx`, `settings.jsx` | `setting` | Fullscreen, 3D Globe, 3D Terrain; UI and chat language, telemetry, ratings, LAN sharing |
 | `src/Game/AI/gameplay.js` | `ai` | **Every AI task that failed**, with its reason and the error (and whether it was aborted), marked as a problem |
 | `src/runtime/ErrorBoundary.jsx` | `crash` | Render crashes with the component stack, then flushes |
 | `window` / `console` | `crash`, `error`, `warn` | Uncaught errors, unhandled rejections, and everything the game already logged |
@@ -440,7 +454,7 @@ Detailed mode only (`{ verbose: true }`):
 
 **Prompt fingerprint** (`buildPromptFingerprint`, `src/Game/AI/contextDiagnostics.js`). For one structured AI attempt: the size and an 8-hex-digit FNV-1a hash of the whole system prompt, the prompt template, the instruction, the conversation history (with a message count), and every filled-in section by variable name. No text. Rebuild the prompt from the save, fingerprint it, and a mismatch names the section that differed. Only computed while detailed mode is on.
 
-Tests: `src/runtime/debugLog.test.js` (redaction, buffer, coalescing, report, both switches and their persistence, the size budget, and the Desktop log merged into the Logging file), `src/runtime/diagnosticsLogGuard.test.js` (the page never writes to the Desktop log; no whole prompts), `src/Game/AI/contextDiagnostics.test.js` (the fingerprint).
+Tests: `src/runtime/debugLog.test.js` (redaction, buffer, coalescing, report, both switches and their persistence, the size budget, the Desktop log merged into the Logging file, and the settings block and settled change lines), `src/runtime/diagnosticsLogGuard.test.js` (the page never writes to the Desktop log; no whole prompts; every Settings switch is in the snapshot), `src/Game/AI/providerConfig.test.js` (provider changes logged, a key never), `src/Game/AI/contextDiagnostics.test.js` (the fingerprint).
 
 ---
 

@@ -33,6 +33,7 @@ import {
 } from "../AI/structuredMode.js";
 import {
     getLanguageOptions,
+    languageDisplayName,
     getStoredChatLanguage,
     getStoredLanguage,
     setStoredChatLanguage,
@@ -54,6 +55,7 @@ import {
     getLoggingFileEntries,
     isDebugLogEnabled,
     isDebugLogVerbose,
+    logSettingChange,
     setDebugLogEnabled,
     setDebugLogVerbose,
     subscribeToDebugLog,
@@ -226,6 +228,8 @@ const LanguageSelector = () => {
         }
 
         setSaving(true);
+        // Before the reload below; the log is flushed on pagehide.
+        logSettingChange("UI language", languageDisplayName(code));
         // Saves on the server too, so the phone app follows the same choice.
         await setStoredLanguage(code);
         // Reload so the translator starts (or stops) cleanly and every
@@ -249,6 +253,7 @@ const ChatLanguageSelector = () => {
 
         setStoredChatLanguage(code);
         setCurrent(code);
+        logSettingChange("AI chat language", languageDisplayName(code));
     };
 
     return (
@@ -1102,6 +1107,7 @@ const NetworkSharing = () => {
             const data = await response.json();
             if (!response.ok) throw new Error(data?.error || "Could not change this.");
             setState(data);
+            logSettingChange("Let other devices connect", Boolean(data?.lanEnabled));
         } catch (nextError) {
             setError(nextError.message);
         } finally {
@@ -2011,8 +2017,9 @@ const SettingsMenu = ({
     // Telemetry switches (telemetry.js): their own keys, both on by default.
     const [telemetryOn, setTelemetryOn] = useState(() => isTelemetryEnabled());
     const [ratingOn, setRatingOn] = useState(() => isRatingEnabled());
-    const toggleTelemetry = () => { const next = !telemetryOn; setTelemetryOn(next); setTelemetryEnabled(next); };
-    const toggleRating = () => { const next = !ratingOn; setRatingOn(next); setRatingEnabled(next); };
+    // Logged here rather than in telemetry.js, which imports nothing on purpose.
+    const toggleTelemetry = () => { const next = !telemetryOn; setTelemetryOn(next); setTelemetryEnabled(next); logSettingChange("Record AI telemetry", next); };
+    const toggleRating = () => { const next = !ratingOn; setRatingOn(next); setRatingEnabled(next); logSettingChange("Rate AI generations", next); };
 
     // The save's own value arrives asynchronously (library.js reads game.json),
     // and it changes again whenever a different save is activated — both of them

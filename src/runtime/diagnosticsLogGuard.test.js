@@ -72,6 +72,25 @@ test("a failed AI task is logged as a problem", () => {
     assert.match(gameplay, /logDebugEvent\("ai", `Task "\$\{taskKey\}" failed[^\n]*\{ problem: true \}\);/);
 });
 
+test("every switch in the Settings panel is in the Logging file's settings snapshot", () => {
+    // A setting added to the panel and forgotten here would be the one a report
+    // could not answer "was it on?" for.
+    const settings = files.find(({ file }) => file === "Game/GameUI/settings.jsx").text;
+    const snapshot = files.find(({ file }) => file === "runtime/settingsLog.js")?.text ?? "";
+    const toggles = [...settings.matchAll(/<Toggle[\s\S]{0,40}?label="([^"]+)"/g)].map((match) => match[1]);
+    assert.ok(toggles.length >= 15, `found only ${toggles.length} toggles; this guard needs updating`);
+    const missing = [...new Set(toggles)].filter((label) => !snapshot.includes(`"${label}"`));
+    assert.deepEqual(missing, []);
+    for (const label of ["UI language", "AI chat language", "Basemap", "Label font", "Model", "Structured output", "Custom parameters", "API key"]) {
+        assert.ok(snapshot.includes(`"${label}"`), `${label} is missing from the snapshot`);
+    }
+});
+
+test("the settings snapshot is registered at boot, not only when Settings is opened", () => {
+    const main = files.find(({ file }) => file === "main.jsx").text;
+    assert.match(main, /import "\.\/runtime\/settingsLog\.js";/);
+});
+
 test("the AI layer never logs a whole system prompt", () => {
     const gameplay = files.find(({ file }) => file === "Game/AI/gameplay.js").text;
     assert.equal(gameplay.includes("logAi("), false);
