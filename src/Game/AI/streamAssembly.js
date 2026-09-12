@@ -77,10 +77,8 @@ async function readSSE(response, onFrame, onActivity) {
 export const createOpenAIStreamState = () => ({
     content: "",
     reasoning: "",
-    // One entry per tool call, in stream order. A jump makes one call; a task
-    // with lookup functions (lookupTools.js) may make several in one turn,
-    // each arriving under its own `index` in the tool_calls deltas.
-    toolCalls: [],
+    toolName: "",
+    toolArguments: "",
     finishReason: null,
     streamError: null,
     usage: null,
@@ -104,21 +102,9 @@ export function applyOpenAIFrame(state, chunk) {
     // separate reasoning field; keep it so an all-reasoning delta isn't lost (#540).
     if (typeof delta.reasoning === "string") state.reasoning += delta.reasoning;
     else if (typeof delta.reasoning_content === "string") state.reasoning += delta.reasoning_content;
-    for (const call of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
-        if (!call || typeof call !== "object") continue;
-        // Deltas name their call by index. A gateway that sends none is taken
-        // to be continuing the latest call — unless it opens a new one by id,
-        // as a buffered message with several complete calls does.
-        const latest = state.toolCalls.length - 1;
-        let position = Number.isInteger(call.index) ? call.index : latest;
-        if (position < 0) position = 0;
-        else if (!Number.isInteger(call.index) && call.id && state.toolCalls[position]?.id && state.toolCalls[position].id !== call.id) position = latest + 1;
-        while (state.toolCalls.length <= position) state.toolCalls.push({ id: "", name: "", arguments: "" });
-        const entry = state.toolCalls[position];
-        if (call.id && !entry.id) entry.id = String(call.id);
-        if (call.function?.name) entry.name = call.function.name;
-        if (typeof call.function?.arguments === "string") entry.arguments += call.function.arguments;
-    }
+    const call = Array.isArray(delta.tool_calls) ? delta.tool_calls[0] : null;
+    if (call?.function?.name) state.toolName = call.function.name;
+    if (typeof call?.function?.arguments === "string") state.toolArguments += call.function.arguments;
     if (choice.finish_reason) state.finishReason = choice.finish_reason;
     return state;
 }
@@ -130,12 +116,8 @@ export function finishOpenAIStream(state) {
             message: {
                 content: state.content,
                 ...(state.reasoning ? { reasoning: state.reasoning } : {}),
-                ...(state.toolCalls.length
-                    ? { tool_calls: state.toolCalls.map((call) => ({
-                        ...(call.id ? { id: call.id } : {}),
-                        type: "function",
-                        function: { name: call.name, arguments: call.arguments },
-                    })) }
+                ...(state.toolName || state.toolArguments
+                    ? { tool_calls: [{ type: "function", function: { name: state.toolName, arguments: state.toolArguments } }] }
                     : {}),
             },
         }],

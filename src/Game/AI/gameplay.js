@@ -57,7 +57,6 @@ import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKern
 import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
 import { foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
-import { LOOKUP_DIRECTIVE, LOOKUP_TOOLS, buildLookupContext, executeLookup } from "./lookupTools.js";
 import {
   describeDoubtedForPrompt,
   doubtedAwaitingFreshSource,
@@ -79,7 +78,6 @@ import {
   buildDetailedChatHistoryText,
   buildEventHistoryText,
   buildPromptContext,
-  filterToRenderedRegions,
   formatDateReadable,
   getUnconsolidatedEvents,
   resolveHelperValues,
@@ -1389,71 +1387,6 @@ const abortableWait = (ms, signal) => new Promise((resolve, reject) => {
   }, { once: true });
 });
 
-// The campaign behind function calls (lookupTools.js). A task that produces
-// map operations gets these declared beside its output function, so the model
-// can ask for the exact powers, a power's regions, a region by name, a region's
-// neighbours, a city's region, a power's situation, the recent events, the war
-// ledger, a chat, the units, instead of guessing names from a summary and
-// having the guess dropped by the resolver. Built lazily: the indexes cost a
-// catalog load and a city read, paid only when the model actually asks.
-// `bundle` is what the task is shown (a jump segment passes the ledgers as the
-// segments in hand left them), so lookups and prompt never disagree.
-const buildTaskLookups = (bundle, { maxRounds } = {}) => {
-  let contextPromise = null;
-  const context = () => {
-    if (!contextPromise) {
-      contextPromise = (async () => {
-        const world = normalizeWorldState(bundle?.world);
-        // The catalog carries names, owners, centroids and declared adjacencies;
-        // the rendered geojson (already parsed once for the map, shared here
-        // rather than cloned) adds the polygons that place cities and, failing
-        // declared adjacencies, find neighbours.
-        const [catalogRows, renderedGeojson, citiesGeojson] = await Promise.all([
-          loadRegionCatalog().catch(() => []),
-          readJson(JSON_URLS.regionsGeojson, { defaultValue: null, clone: false }).catch(() => null),
-          readJson(JSON_URLS.citiesGeojson, { defaultValue: null }).catch(() => null),
-        ]);
-        const geometryById = new Map();
-        for (const feature of normalizeArray(renderedGeojson?.features)) {
-          const props = feature?.properties ?? {};
-          const id = normalizeString(props.id ?? props.GID_1 ?? props.gid_1 ?? props.HASC_1 ?? feature?.id);
-          if (id && feature?.geometry) geometryById.set(id, feature.geometry);
-        }
-        const catalog = filterToRenderedRegions(catalogRows, world).map((region) => (
-          geometryById.has(region.id) ? { ...region, geometry: geometryById.get(region.id) } : region
-        ));
-        const cities = normalizeArray(citiesGeojson?.features).map((feature) => {
-          const props = feature?.properties ?? {};
-          const name = normalizeString(props.city || props.name);
-          const renamed = normalizeString(world.cityRenames?.[name.toLowerCase()]);
-          return {
-            name: renamed || name,
-            aliases: renamed ? [name] : [],
-            coordinates: feature?.geometry?.type === "Point" ? feature.geometry.coordinates : null,
-            population: Number(props.population) || 0,
-            capital: normalizeString(props.capital),
-          };
-        });
-        return buildLookupContext({
-          regions: catalog,
-          world,
-          cities,
-          events: bundle?.events,
-          chats: bundle?.chats,
-          units: normalizeArray(world.units),
-          player: normalizeString(bundle?.game?.country),
-        });
-      })();
-    }
-    return contextPromise;
-  };
-  return {
-    tools: LOOKUP_TOOLS,
-    ...(Number.isInteger(maxRounds) ? { maxRounds } : {}),
-    execute: async (name, args) => executeLookup(await context(), name, args),
-  };
-};
-
 const runJsonTask = async (taskKey, {
   fallback,
   signal,
@@ -1468,11 +1401,6 @@ const runJsonTask = async (taskKey, {
   // fails. Everything else takes the normal synchronous path, unchanged.
   sync = true,
   onBatchResult,
-  // Lookup functions for this task (buildTaskLookups): { tools, execute,
-  // maxRounds? }. Declared beside the output function on every provider; the
-  // model's calls are answered inside callAI and the answers go back as the
-  // next turns of the same conversation (main.jsx runWithLookups).
-  lookups = null,
 }) => {
   const prompts = await loadPromptCatalog();
   // The GM operational contract is native behaviour: a campaign's frozen
@@ -1989,12 +1917,6 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   // them from those tasks entirely.
   systemPrompt = collapseRepeatedWorldContext(systemPrompt, variables);
 
-  // Lookup functions: tell the model they exist and what they are for. Last,
-  // so it stands next to the output contract rather than under the campaign.
-  if (Array.isArray(lookups?.tools) && lookups.tools.length) {
-    systemPrompt = `${systemPrompt}\n\n${LOOKUP_DIRECTIVE}`;
-  }
-
   // Batch routing (see the parameter): a deferred task leaves here with no
   // answer and no attempt loop; its result arrives through pollPendingBatches.
   if (!sync && typeof onBatchResult === "function" && batchBackgroundTasksEnabled()) {
@@ -2124,11 +2046,6 @@ This live instruction supersedes older frozen country-stat prompts and all earli
           onActivity: idle.note,
           signal: controller.signal,
           tool,
-          // Lookup rounds re-evaluate the prompt, so each one restarts the long
-          // first-byte window rather than being timed as a stalled answer.
-          lookups: Array.isArray(lookups?.tools) && lookups.tools.length
-            ? { ...lookups, onRound: () => { idle.cancel(); idle.start(); } }
-            : null,
           // Names this call in the ai-call transport entries, so a task's own
           // entries and the request/response pair underneath them line up.
           logLabel: `task "${taskKey}"`,
@@ -5660,7 +5577,6 @@ export const generateActionSuggestions = async ({ force = true } = {}) => {
   const bundle = await readGameStateBundle({ force });
   const variables = await buildTemplateVariables(bundle);
   const { payload } = await runJsonTask("actions", {
-    lookups: buildTaskLookups(bundle),
     fallback: () => fallbackActionSuggestions(bundle),
     userMessage: "Generate current strategic action suggestions as JSON only.",
     variables,
@@ -9001,7 +8917,6 @@ export const refinePlayerAction = async (rawInput, { persist = true, signal } = 
   const bundle = await readGameStateBundle({ force: true });
   const variables = await buildTemplateVariables(bundle, { actionInput: rawInput });
   const { payload } = await runJsonTask("descriptionToAction", {
-    lookups: buildTaskLookups(bundle),
     fallback: () => fallbackDescriptionToAction(rawInput, bundle),
     // Improve can be stopped mid-generation, exactly like a timeline jump.
     // runJsonTask already links an external signal to the controller it hands
@@ -9132,7 +9047,6 @@ export const advanceActiveCatalyst = async (choiceText) => {
   });
 
   const { payload } = await runJsonTask("catalystExecutor", {
-    lookups: buildTaskLookups(bundle),
     fallback: () => {
       const resolved = normalizeArray(catalyst.history).length >= 1;
       const existingChoices = normalizeArray(catalyst.choices)
@@ -9331,7 +9245,6 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       reportProgress(segmentIndex);
 
       const { generation: segmentGeneration, payload } = await runJsonTask(mode === "auto" ? "autoJumpForward" : "jumpForward", {
-        lookups: buildTaskLookups(segmentBundle),
         // Only a single-call jump falls back on its own. A failing SEGMENT throws
         // instead, so the catch below can hold the turn and hand the player the
         // choice rather than quietly deciding for them.
@@ -9516,7 +9429,6 @@ const finishTimelineJump = async ({ context, signal, state }) => {
       world: bundle.world,
       analyzeBatch: ({ candidates, units }) =>
         runJsonTask("unitDirector", {
-          lookups: buildTaskLookups(bundle),
           fallback: () => ({ eventOrders: [], summary: "Unit director unavailable; existing simulator unitOps preserved." }),
           signal,
           userMessage:
@@ -9549,7 +9461,6 @@ const finishTimelineJump = async ({ context, signal, state }) => {
       world: bundle.world,
       analyzeBatch: async ({ candidates, territorialState }) =>
         runJsonTask("territoryDirector", {
-          lookups: buildTaskLookups(bundle),
           fallback: () => ({
             eventOrders: [],
             summary: "Territory director unavailable; existing legal/control impacts preserved.",
@@ -10597,7 +10508,6 @@ export const previewGameMasterCommand = async (requestText, { mode = "world-inte
     };
 
     const { generation, payload } = await runJsonTask("gameMaster", {
-      lookups: buildTaskLookups(bundle),
       userMessage: `Generate a ${selectedMode} GM transaction preview for the administrator request. Do not apply anything.`,
       validatePayload: (candidate) => validateGameMasterPreviewPayload(candidate, {
         mode: selectedMode,
@@ -11068,7 +10978,6 @@ export const processPendingEventOutreach = async ({ debug = false } = {}) => {
     let payload;
     try {
       ({ payload } = await runJsonTask("idleDiplomacy", {
-        lookups: buildTaskLookups(bundle),
         userMessage:
           "Evaluate the supplied canonical event once. Decide whether one AI-controlled polity or a genuinely joint small group would naturally send the player a diplomatic note about it right now, or whether silence is the natural outcome. Return unitOps as an empty array and no sighting."
           + conversationContext
@@ -11847,7 +11756,6 @@ export const maybeSendIdleDiplomacy = async ({ chance = IDLE_PULSE_CHANCE } = {}
       + " write, return {\"chat\": null}.",
     ].join("\n");
     const { payload } = await runJsonTask("idleDiplomacy", {
-      lookups: buildTaskLookups(bundle),
       userMessage: allowChat
         ? "A quiet moment between rounds. Decide whether any single polity would send the player a short diplomatic note right now, and whether any forces would visibly move."
           + conversationContext
