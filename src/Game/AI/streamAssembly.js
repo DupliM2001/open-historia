@@ -313,7 +313,16 @@ export function applyGeminiFrame(state, chunk) {
         // NOT trimmed: the parts are joined verbatim and only trimmed once at the
         // end, or a chunk boundary that falls on a space runs two words together.
         if (typeof part?.text === "string") state.text += part.text;
-        if (part?.functionCall) state.calls.push(part.functionCall);
+        // A Gemini 3 call carries a thoughtSignature beside it, which the API
+        // demands back when the call is echoed in the next request. Kept on the
+        // rebuilt part exactly as it arrived.
+        if (part?.functionCall) {
+            state.calls.push({
+                functionCall: part.functionCall,
+                ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+                ...(part.thought_signature ? { thought_signature: part.thought_signature } : {}),
+            });
+        }
     }
     if (candidate.finishReason) state.finishReason = candidate.finishReason;
     return state;
@@ -330,7 +339,7 @@ export function finishGeminiStream(state) {
                 role: "model",
                 parts: [
                     ...(state.text ? [{ text: state.text }] : []),
-                    ...state.calls.map((functionCall) => ({ functionCall })),
+                    ...state.calls,
                 ],
             },
             finishReason: state.finishReason,

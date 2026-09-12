@@ -371,3 +371,17 @@ test("openai: a buffered message with complete calls and no indexes still yields
   const calls = finishOpenAIStream(state).choices[0].message.tool_calls;
   assert.deepEqual(calls.map((call) => [call.id, call.function.name]), [["call_1", "list_powers"], ["call_2", "war_ledger"]]);
 });
+
+test("gemini: a signed function call keeps its thoughtSignature on the rebuilt part", () => {
+  const state = runGemini([
+    { candidates: [{ content: { parts: [
+      { functionCall: { name: "list_powers", args: {} }, thoughtSignature: "sig-one" },
+      { functionCall: { name: "find_region", args: { name: "Kharkiv" } } },
+    ] }, finishReason: "STOP" }] },
+  ]);
+  const parts = finishGeminiStream(state).candidates[0].content.parts;
+  assert.deepEqual(parts, [
+    { functionCall: { name: "list_powers", args: {} }, thoughtSignature: "sig-one" },
+    { functionCall: { name: "find_region", args: { name: "Kharkiv" } } },
+  ]);
+});

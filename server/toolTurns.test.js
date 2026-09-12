@@ -146,3 +146,22 @@ test("a call is described on one line, long strings cut", async () => {
   assert.equal(describeLookupCall({ name: "recent_events", args: { about: "x".repeat(80) } }, { maxValue: 10 }), "recent_events(about=\"xxxxxxxxxx…\")");
   assert.equal(describeLookupCall({}), "?()");
 });
+
+test("gemini: a thoughtSignature travels from the answer, through the round, back into contents", () => {
+  const data = { candidates: [{ content: { parts: [
+    { functionCall: { name: "list_powers", args: {} }, thoughtSignature: "sig-one" },
+    { functionCall: { name: "find_region", args: { name: "Kharkiv" } } },
+  ] } }] };
+  const calls = lookupCallsFromGemini(data, OUTPUT);
+  assert.equal(calls[0].thoughtSignature, "sig-one");
+  assert.equal("thoughtSignature" in calls[1], false);
+  const history = appendLookupRound([{ role: "user", parts: [{ text: "go" }] }], calls, calls.map((call) => ({ id: call.id, name: call.name, response: { ok: true } })));
+  assert.equal(history[1].parts[0].thoughtSignature, "sig-one");
+  assert.equal("thoughtSignature" in history[1].parts[1], false);
+  const contents = geminiContentsFromHistory(history);
+  assert.deepEqual(contents[1].parts[0], { functionCall: { name: "list_powers", args: {} }, thoughtSignature: "sig-one" });
+  assert.deepEqual(contents[1].parts[1], { functionCall: { name: "find_region", args: { name: "Kharkiv" } } });
+  // The other providers never see it.
+  assert.equal(JSON.stringify(openAiMessagesFromHistory("S", history)).includes("sig-one"), false);
+  assert.equal(JSON.stringify(anthropicMessagesFromHistory(history)).includes("sig-one"), false);
+});
