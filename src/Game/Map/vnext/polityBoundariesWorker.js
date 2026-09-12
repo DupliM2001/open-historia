@@ -1,14 +1,33 @@
-/*! Open Historia — Map vNext polity-boundary worker © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-import { derivePolityBoundaries } from "./polityBoundaries.js";
-import { derivePolitySurfaces } from "./politySurfaces.js";
+/*! Open Historia — Political Cartography Pipeline v2 worker © 2026 Open Historia contributors, AGPL-3.0-or-later (see LICENSE). */
+import { toCountryName } from "../../../runtime/ownerNames.js";
+import {
+  affectedOwnersForRegionChanges,
+  buildPoliticalBoundaryTopology,
+  createPoliticalBoundaryState,
+  politicalBoundaryStateCollection,
+  updatePoliticalBoundaryState,
+} from "./politicalBoundaryTopology.js";
+import {
+  aggregatePolityGeometry,
+  aggregatePolityGeometryForOwners,
+} from "./polityGeometry.js";
+import { buildPolityLabelCollections } from "./polityLabels.js";
 
-const EMPTY_FC = { type: "FeatureCollection", features: [] };
+const EMPTY_FC = Object.freeze({ type: "FeatureCollection", features: [] });
+
 let cachedRegions = EMPTY_FC;
 let cachedRegionsUrl = "";
 let cachedMetadata = null;
+let cachedTopology = null;
+let boundaryState = null;
+let labelGeometryByOwner = new Map();
+let labelsByOwner = new Map();
+let currentOwnershipOverrides = {};
+let currentLabelNames = {};
 
-const toStringArray = (value) =>
-  Array.isArray(value) ? value.map((entry) => String(entry ?? "")).filter(Boolean) : [];
+const toStringArray = (value) => Array.isArray(value)
+  ? value.map((entry) => String(entry ?? "")).filter(Boolean)
+  : [];
 
 const buildMetadata = (regions) => {
   const records = [];
@@ -19,25 +38,15 @@ const buildMetadata = (regions) => {
 
   for (const feature of regions?.features ?? []) {
     const props = feature?.properties ?? {};
-    const id = props.id != null
-      ? String(props.id)
-      : props.GID_1 != null
-        ? String(props.GID_1)
-        : "";
+    const id = props.id != null ? String(props.id) : props.GID_1 != null ? String(props.GID_1) : "";
     if (!id) continue;
-
     const dotted = id.includes(".");
     if (dotted) stockCount += 1;
     else drawnCount += 1;
     if (props.edited === true && dotted) editedStockIds.push(id);
 
-    const gid0 = props.gid0 != null
-      ? String(props.gid0)
-      : props.GID_0 != null
-        ? String(props.GID_0)
-        : "";
-    if (props.owner && gid0) ownedCountryCodes.add(gid0);
-
+    const gid0 = String(props.gid0 ?? props.GID_0 ?? "").trim().toUpperCase();
+    if (gid0) ownedCountryCodes.add(gid0);
     const centroid = props?.centroid?.coordinates;
     const lng = Number(Array.isArray(centroid) ? centroid[0] : props?.lng ?? props?.longitude);
     const lat = Number(Array.isArray(centroid) ? centroid[1] : props?.lat ?? props?.latitude);
@@ -65,7 +74,6 @@ const buildMetadata = (regions) => {
     editedStockIds,
     featureCount: records.length,
     hasDrawnGeometry: drawnCount > 0,
-    // A fully authored map does not need the stock GADM regions PMTiles at all.
     fullyAuthoredGeometry: records.length > 0 && stockCount === 0,
   };
 };
@@ -74,15 +82,10 @@ const deriveDisputedData = (ownershipOverrides = {}, regionClaimants = {}) => {
   const features = [];
   for (const feature of cachedRegions?.features ?? []) {
     const props = feature?.properties ?? {};
-    const id = props.id != null
-      ? String(props.id)
-      : props.GID_1 != null
-        ? String(props.GID_1)
-        : "";
+    const id = props.id != null ? String(props.id) : props.GID_1 != null ? String(props.GID_1) : "";
     if (!id) continue;
-    const claimants = toStringArray(regionClaimants?.[id]).length
-      ? toStringArray(regionClaimants[id])
-      : toStringArray(props.claimants);
+    const live = toStringArray(regionClaimants?.[id]);
+    const claimants = live.length ? live : toStringArray(props.claimants);
     if (!claimants.length) continue;
     features.push({
       ...feature,
@@ -95,6 +98,15 @@ const deriveDisputedData = (ownershipOverrides = {}, regionClaimants = {}) => {
     });
   }
   return { type: "FeatureCollection", features };
+};
+
+const resetDerivedCaches = () => {
+  cachedTopology = null;
+  boundaryState = null;
+  labelGeometryByOwner = new Map();
+  labelsByOwner = new Map();
+  currentOwnershipOverrides = {};
+  currentLabelNames = {};
 };
 
 const loadRegionsFromUrl = async (url) => {
@@ -112,28 +124,212 @@ const loadRegionsFromUrl = async (url) => {
   cachedRegions = parsed;
   cachedRegionsUrl = url;
   cachedMetadata = buildMetadata(parsed);
+  resetDerivedCaches();
+  return { bytes: text.length, fetchMs, parseMs };
+};
+
+const labelName = (owner) => String(currentLabelNames?.[owner] ?? owner).trim() || owner;
+
+const buildOwnerLabels = (geometryFeature) => {
+  if (!geometryFeature) return null;
+  const owner = toCountryName(geometryFeature?.properties?.owner ?? "");
+  if (!owner) return null;
+  const collections = buildPolityLabelCollections(
+    { type: "FeatureCollection", features: [geometryFeature] },
+    { nameResolver: () => labelName(owner) },
+  );
   return {
-    bytes: text.length,
-    fetchMs,
-    parseMs,
+    labelData: collections.labelData ?? EMPTY_FC,
+    pointLabelData: collections.pointLabelData ?? EMPTY_FC,
+    lineLabelData: collections.lineLabelData ?? EMPTY_FC,
   };
 };
 
-const derive = ({ ownershipOverrides = {}, regionClaimants = {} } = {}) => {
-  const startedAt = performance.now();
-  const { data, stats } = derivePolityBoundaries(cachedRegions, ownershipOverrides);
-  const { data: polityData, stats: polityStats } = derivePolitySurfaces(
-    cachedRegions,
-    ownershipOverrides,
-  );
-  const disputedData = deriveDisputedData(ownershipOverrides, regionClaimants);
+const setInitialLabelGeometry = (collection) => {
+  labelGeometryByOwner = new Map();
+  labelsByOwner = new Map();
+  for (const feature of collection?.features ?? []) {
+    const owner = toCountryName(feature?.properties?.owner ?? "");
+    if (!owner) continue;
+    labelGeometryByOwner.set(owner, feature);
+    const labels = buildOwnerLabels(feature);
+    if (labels) labelsByOwner.set(owner, labels);
+  }
+};
+
+const patchLabelGeometryForOwners = (collection, affectedOwners) => {
+  const normalized = [...new Set((affectedOwners ?? []).map(toCountryName).filter(Boolean))];
+  for (const owner of normalized) {
+    labelGeometryByOwner.delete(owner);
+    labelsByOwner.delete(owner);
+  }
+  for (const feature of collection?.features ?? []) {
+    const owner = toCountryName(feature?.properties?.owner ?? "");
+    if (!owner) continue;
+    labelGeometryByOwner.set(owner, feature);
+    const labels = buildOwnerLabels(feature);
+    if (labels) labelsByOwner.set(owner, labels);
+  }
+};
+
+const rebuildLabelsForOwners = (owners) => {
+  for (const rawOwner of owners ?? []) {
+    const owner = toCountryName(rawOwner);
+    if (!owner) continue;
+    const geometry = labelGeometryByOwner.get(owner);
+    if (!geometry) labelsByOwner.delete(owner);
+    else {
+      const labels = buildOwnerLabels(geometry);
+      if (labels) labelsByOwner.set(owner, labels);
+    }
+  }
+};
+
+const combinedLabels = () => {
+  const logical = [];
+  const points = [];
+  const lines = [];
+  for (const collections of labelsByOwner.values()) {
+    logical.push(...(collections?.labelData?.features ?? []));
+    points.push(...(collections?.pointLabelData?.features ?? []));
+    lines.push(...(collections?.lineLabelData?.features ?? []));
+  }
   return {
-    data,
-    polityData,
-    disputedData,
+    labelData: { type: "FeatureCollection", features: logical },
+    pointLabelData: { type: "FeatureCollection", features: points },
+    lineLabelData: { type: "FeatureCollection", features: lines },
+  };
+};
+
+const fullSnapshotFromCurrentCaches = ({ ownershipOverrides = {}, regionClaimants = {}, rebuildLabels = false } = {}) => {
+  ensureTopology();
+  if (!boundaryState) boundaryState = createPoliticalBoundaryState(cachedTopology, ownershipOverrides);
+  if (rebuildLabels) {
+    // Recovery after an unpublished specialized revision must not assume the
+    // renderer saw the worker's prior label cache. Rebuild the complete current
+    // label set against the newest names/ownership before publishing one
+    // self-contained renderer snapshot. This is rare recovery work, not the
+    // ordinary incremental path.
+    setInitialLabelGeometry(aggregatePolityGeometry(cachedRegions, ownershipOverrides));
+  }
+  return {
+    boundaryPatch: {
+      removeAll: true,
+      upsert: politicalBoundaryStateCollection(boundaryState).features,
+    },
+    labels: combinedLabels(),
+    disputedData: deriveDisputedData(ownershipOverrides, regionClaimants),
+  };
+};
+
+const ensureTopology = () => {
+  if (cachedTopology) return { elapsedMs: 0, reused: true, ...(cachedTopology.stats ?? {}) };
+  const startedAt = performance.now();
+  cachedTopology = buildPoliticalBoundaryTopology(cachedRegions);
+  return { elapsedMs: performance.now() - startedAt, reused: false, ...(cachedTopology.stats ?? {}) };
+};
+
+const inferChangedRegionIds = (previousOverrides = {}, nextOverrides = {}) => {
+  const ids = new Set([...Object.keys(previousOverrides ?? {}), ...Object.keys(nextOverrides ?? {})]);
+  const changed = [];
+  for (const id of ids) {
+    const index = cachedTopology?.regionIndexById?.get(String(id));
+    const baseOwner = index == null ? "" : cachedTopology.baseOwners[index];
+    const before = toCountryName(previousOverrides?.[id] ?? baseOwner ?? "");
+    const after = toCountryName(nextOverrides?.[id] ?? baseOwner ?? "");
+    if (before !== after) changed.push(String(id));
+  }
+  return changed;
+};
+
+const initializePoliticalCartography = ({ ownershipOverrides, regionClaimants }) => {
+  const startedAt = performance.now();
+  const topologyStats = ensureTopology();
+
+  const boundaryStartedAt = performance.now();
+  boundaryState = createPoliticalBoundaryState(cachedTopology, ownershipOverrides);
+  const boundaryData = politicalBoundaryStateCollection(boundaryState);
+  const boundaryMs = performance.now() - boundaryStartedAt;
+
+  const labelGeometryStartedAt = performance.now();
+  const labelGeometry = aggregatePolityGeometry(cachedRegions, ownershipOverrides);
+  const labelGeometryMs = performance.now() - labelGeometryStartedAt;
+  const labelStartedAt = performance.now();
+  setInitialLabelGeometry(labelGeometry);
+  const labels = combinedLabels();
+  const labelMs = performance.now() - labelStartedAt;
+
+  return {
+    boundaryPatch: { removeAll: true, upsert: boundaryData.features },
+    labels,
+    disputedData: deriveDisputedData(ownershipOverrides, regionClaimants),
     stats: {
-      ...stats,
-      ...polityStats,
+      topologyMs: topologyStats.elapsedMs,
+      boundaryMs,
+      boundaryGroupCount: boundaryData.features.length,
+      labelGeometryMs,
+      labelMs,
+      elapsedMs: performance.now() - startedAt,
+    },
+  };
+};
+
+const updateOwnershipCartography = ({
+  previousOwnershipOverrides,
+  ownershipOverrides,
+  regionClaimants,
+  affectedOwners = [],
+  changedRegionIds = [],
+  forceFullSnapshot = false,
+}) => {
+  const startedAt = performance.now();
+  ensureTopology();
+  if (!boundaryState) boundaryState = createPoliticalBoundaryState(cachedTopology, previousOwnershipOverrides);
+
+  // A full recovery snapshot is defined by the worker's last actual ownership
+  // state versus the newest canonical ownership snapshot. Do not trust an
+  // incremental changed-id hint here: intermediate UI revisions may have been
+  // coalesced before they ever reached the worker.
+  const exactChangedIds = forceFullSnapshot
+    ? inferChangedRegionIds(previousOwnershipOverrides, ownershipOverrides)
+    : changedRegionIds?.length
+      ? [...new Set(changedRegionIds.map(String).filter(Boolean))]
+      : inferChangedRegionIds(previousOwnershipOverrides, ownershipOverrides);
+
+  const normalizedAffected = new Set(
+    (affectedOwners ?? []).map(toCountryName).filter(Boolean),
+  );
+  for (const owner of affectedOwnersForRegionChanges(
+    cachedTopology,
+    previousOwnershipOverrides,
+    ownershipOverrides,
+    exactChangedIds,
+  )) normalizedAffected.add(owner);
+  const ownerList = [...normalizedAffected];
+
+  const boundaryStartedAt = performance.now();
+  const boundaryResult = updatePoliticalBoundaryState(boundaryState, ownershipOverrides, exactChangedIds);
+  const boundaryMs = performance.now() - boundaryStartedAt;
+
+  const labelGeometryStartedAt = performance.now();
+  const labelGeometry = aggregatePolityGeometryForOwners(cachedRegions, ownershipOverrides, ownerList);
+  const labelGeometryMs = performance.now() - labelGeometryStartedAt;
+  const labelStartedAt = performance.now();
+  patchLabelGeometryForOwners(labelGeometry, ownerList);
+  const labels = combinedLabels();
+  const labelMs = performance.now() - labelStartedAt;
+
+  return {
+    boundaryPatch: boundaryResult.patch,
+    labels,
+    disputedData: deriveDisputedData(ownershipOverrides, regionClaimants),
+    stats: {
+      ...boundaryResult.stats,
+      affectedOwnerCount: ownerList.length,
+      changedRegionCount: exactChangedIds.length,
+      boundaryMs,
+      labelGeometryMs,
+      labelMs,
       elapsedMs: performance.now() - startedAt,
     },
   };
@@ -146,6 +342,11 @@ self.onmessage = async ({ data: message }) => {
     ownershipOverrides = {},
     regionClaimants = {},
     regionsUrl = "",
+    labelNames = {},
+    affectedOwners = [],
+    changedRegionIds = [],
+    geometryEpoch = "",
+    forceFullSnapshot = false,
   } = message ?? {};
   if (!requestId) return;
 
@@ -153,10 +354,10 @@ self.onmessage = async ({ data: message }) => {
     let loadStats = null;
     if (type === "initialize") {
       if (message.regions?.features) {
-        // Legacy/test compatibility. R5.0 production sends only regionsUrl.
         cachedRegions = message.regions;
         cachedRegionsUrl = "";
         cachedMetadata = buildMetadata(cachedRegions);
+        resetDerivedCaches();
       } else if (regionsUrl) {
         if (regionsUrl !== cachedRegionsUrl || !cachedRegions?.features?.length) {
           loadStats = await loadRegionsFromUrl(regionsUrl);
@@ -165,24 +366,127 @@ self.onmessage = async ({ data: message }) => {
         cachedRegions = EMPTY_FC;
         cachedRegionsUrl = "";
         cachedMetadata = buildMetadata(cachedRegions);
+        resetDerivedCaches();
       }
-    } else if (type !== "update-ownership") {
+
+      // Geometry/catalog readiness is intentionally independent of political
+      // cartography. Exact region identity becomes available as soon as the
+      // authored GeoJSON parses; topology/labels may continue for much longer.
+      self.postMessage({
+        messageType: "catalog-ready",
+        requestId,
+        geometryEpoch,
+        metadata: cachedMetadata,
+        stats: loadStats ?? {},
+      });
+    } else if (!["update-ownership", "update-claims", "update-labels"].includes(type)) {
       return;
     }
 
-    const derived = derive({ ownershipOverrides, regionClaimants });
+    currentLabelNames = { ...(labelNames ?? {}) };
+
+    if (type === "update-claims") {
+      currentOwnershipOverrides = ownershipOverrides;
+      const startedAt = performance.now();
+      const owners = [...new Set((affectedOwners ?? []).map(toCountryName).filter(Boolean))];
+      let recoverySnapshot = null;
+      let labels = null;
+      if (forceFullSnapshot) {
+        recoverySnapshot = fullSnapshotFromCurrentCaches({
+          ownershipOverrides,
+          regionClaimants,
+          // The superseding claim request may also carry newer display names
+          // than the discarded revision, so make the recovery snapshot fully
+          // current rather than merely replaying worker-local label caches.
+          rebuildLabels: true,
+        });
+      } else if (owners.length) {
+        // Claims and display-name changes can be coalesced into one React
+        // revision. Rebuild only the explicitly dirty labels and publish them
+        // with the new dispute state so neither domain is lost.
+        rebuildLabelsForOwners(owners);
+        labels = combinedLabels();
+      }
+      self.postMessage({
+        messageType: "cartography-result",
+        requestId,
+        geometryEpoch,
+        ...(recoverySnapshot ?? {
+          disputedData: deriveDisputedData(ownershipOverrides, regionClaimants),
+          ...(labels ? { labels } : {}),
+        }),
+        stats: {
+          claimsOnly: true,
+          forceFullSnapshot,
+          affectedOwnerCount: owners.length,
+          elapsedMs: performance.now() - startedAt,
+        },
+      });
+      return;
+    }
+
+    if (type === "update-labels") {
+      currentOwnershipOverrides = ownershipOverrides;
+      const startedAt = performance.now();
+      const owners = [...new Set((affectedOwners ?? []).map(toCountryName).filter(Boolean))];
+      const recoverySnapshot = forceFullSnapshot
+        ? fullSnapshotFromCurrentCaches({ ownershipOverrides, regionClaimants, rebuildLabels: true })
+        : null;
+      if (!recoverySnapshot) rebuildLabelsForOwners(owners);
+      self.postMessage({
+        messageType: "cartography-result",
+        requestId,
+        geometryEpoch,
+        ...(recoverySnapshot ?? { labels: combinedLabels() }),
+        stats: {
+          labelsOnly: true,
+          forceFullSnapshot,
+          affectedOwnerCount: owners.length,
+          elapsedMs: performance.now() - startedAt,
+        },
+      });
+      return;
+    }
+
+    const previousOwnershipOverrides = currentOwnershipOverrides;
+    let derived = type === "initialize"
+      ? initializePoliticalCartography({ ownershipOverrides, regionClaimants })
+      : updateOwnershipCartography({
+          previousOwnershipOverrides,
+          ownershipOverrides,
+          regionClaimants,
+          affectedOwners,
+          changedRegionIds,
+          forceFullSnapshot,
+        });
+    currentOwnershipOverrides = ownershipOverrides;
+
+    // A superseded initialize still primed worker caches. The first accepted
+    // ownership revision can promote a complete CURRENT boundary/label snapshot
+    // without rerunning unrelated polity work.
+    if (forceFullSnapshot && type !== "initialize") {
+      derived = {
+        ...derived,
+        boundaryPatch: {
+          removeAll: true,
+          upsert: politicalBoundaryStateCollection(boundaryState).features,
+        },
+        labels: combinedLabels(),
+      };
+    }
+
     self.postMessage({
+      messageType: "cartography-result",
       requestId,
+      geometryEpoch,
       ...derived,
-      metadata: type === "initialize" ? cachedMetadata : undefined,
-      stats: {
-        ...derived.stats,
-        ...(loadStats ?? {}),
-      },
+      stats: { ...derived.stats, ...(loadStats ?? {}) },
     });
   } catch (error) {
     self.postMessage({
+      messageType: "cartography-result",
       requestId,
+      geometryEpoch,
       error: error instanceof Error ? error.message : String(error),
     });
   }

@@ -68,9 +68,12 @@ import { renderTemplateCached, staticPrefixEndOf } from "./promptLayout.js";
 import { attachAttemptOutcome, finishAiRecord, normalizeParsedSummary } from "./telemetry.js";
 import {
   JSON_URLS,
+  getPrimedScenarioRegionCatalog,
   loadCountryNames,
   loadRegionCatalog,
   loadScenarioRegionCatalog,
+  primeCustomRegionCatalog,
+  primeCustomRegionCatalogEntries,
   readJson,
   writeJson,
 } from "../../runtime/assets.js";
@@ -3056,15 +3059,29 @@ const resolveRegionTransfers = async (containers, world, {
   // pay to reopen/parse the full scenario geometry and reinterpret friendly
   // place names a second time. The preview path has already resolved every
   // territorial operation to canonical ids. The compact region catalog is
-  // primed by Nations during normal play and is enough to prove those ids still
-  // exist. If it is unavailable (cold/non-map path), fall back to the merged
-  // catalog rather than silently trusting unknown ids.
+  // primed by Nations/Preview and is enough to prove those ids still exist. If
+  // it is unavailable, fail closed rather than silently trusting unknown ids or
+  // reopening heavyweight geography during Apply.
   if (exactRegionIdsOnly) {
-    let exactCatalog = await loadScenarioRegionCatalog({ force: false }).catch(() => []);
+    // Apply is intentionally forbidden from reopening/parsing the giant authored
+    // GeoJSON. Preview already resolved every territory operation to exact ids,
+    // and Nations/Preview primes this compact catalog as soon as geometry parses.
+    // If the map asset changed, assets.js invalidates the primed catalog and Apply
+    // fails closed instead of silently trusting stale ids or blocking the UI.
+    const exactCatalog = getPrimedScenarioRegionCatalog() ?? [];
     if (!Array.isArray(exactCatalog) || exactCatalog.length === 0) {
-      exactCatalog = await loadRegionCatalog().catch(() => []);
+      return containers.flatMap(({ impacts, path }) =>
+        normalizeArray(impacts?.regionTransfers).map((transfer, transferIndex) => ({
+          candidates: [],
+          fromCode: normalizeString(transfer?.fromCode),
+          label: normalizeString(transfer?.regionName) || normalizeString(transfer?.regionId) || "unknown region",
+          path,
+          reason: "the compact scenario region catalog is not primed; regenerate the preview after the map finishes loading",
+          transferIndex,
+          wholeCountry: Boolean(transfer?.wholeCountry),
+        }))
+      );
     }
-    if (!Array.isArray(exactCatalog) || exactCatalog.length === 0) return [];
 
     const exactById = new Map(
       exactCatalog
@@ -3124,12 +3141,23 @@ const resolveRegionTransfers = async (containers, world, {
   // The current regionsGeojson is the map truth. Use it as the primary corpus
   // whenever it exists, retaining stock catalog data only as a compatibility
   // fallback for maps that do not expose rendered region features.
-  const [mergedCatalog, renderedRegionsGeojson] = await Promise.all([
-    loadRegionCatalog().catch(() => []),
-    readJson(JSON_URLS.regionsGeojson, { defaultValue: null, force: true }).catch(() => null),
-  ]);
-
+  // Read the authored scenario geography once for Preview. When it exists it is
+  // already the authoritative resolution corpus, so do not simultaneously build
+  // the merged stock catalog (which can trigger a second large scenario read).
+  // Prime the compact id/name catalog from this unavoidable parse so Apply can
+  // strictly revalidate exact previewed ids without reopening tens of MB of GeoJSON.
+  const renderedRegionsGeojson = await readJson(JSON_URLS.regionsGeojson, {
+    defaultValue: null,
+    force: true,
+    clone: false,
+  }).catch(() => null);
   const renderedFeatures = normalizeArray(renderedRegionsGeojson?.features);
+  if (renderedFeatures.length) {
+    primeCustomRegionCatalog(renderedRegionsGeojson, {
+      url: JSON_URLS.regionsGeojson,
+      invalidateCatalog: false,
+    });
+  }
   const renderedCatalog = renderedFeatures
     .map((feature) => {
       const props = feature?.properties ?? {};
@@ -3169,7 +3197,20 @@ const resolveRegionTransfers = async (containers, world, {
     })
     .filter(Boolean);
 
+  const mergedCatalog = renderedCatalog.length > 0
+    ? []
+    : await loadRegionCatalog().catch(() => []);
   const catalog = renderedCatalog.length > 0 ? renderedCatalog : mergedCatalog;
+  if (!renderedCatalog.length && mergedCatalog.length) {
+    // Preview may legitimately resolve against the compatibility/stock catalog
+    // when no authored scenario features are available. Prime the exact corpus
+    // that Preview actually used so Apply can revalidate those approved IDs
+    // without performing a second geography load.
+    primeCustomRegionCatalogEntries(mergedCatalog, {
+      url: JSON_URLS.regionsGeojson,
+      invalidateCatalog: false,
+    });
+  }
 
   // Without a catalog we cannot tell a good id from a bad one, and dropping real
   // transfers would be worse than phantom keys — leave the payload alone.
@@ -4093,6 +4134,41 @@ const resolveRegionControlOps = async (containers, world, { exactRegionIdsOnly =
   return unresolved;
 };
 
+// Preview resolves claim geography too. Apply must therefore verify the exact
+// approved claim ids against the same compact scenario catalog without reopening
+// authored GeoJSON, resolving friendly names again, or silently dropping a claim
+// the administrator already approved. Ordinary AI generation may still salvage an
+// unresolvable claim because claims do not move borders; this exact-id guard is GM
+// transaction integrity, not a broader turn-failure rule.
+const validateExactApprovedRegionClaims = (containers) => {
+  const claimEntries = [];
+  for (const { impacts, path } of containers) {
+    for (const [claimIndex, claim] of normalizeArray(impacts?.regionClaims).entries()) {
+      claimEntries.push({ claim, claimIndex, path });
+    }
+  }
+  if (claimEntries.length === 0) return "";
+
+  const exactCatalog = getPrimedScenarioRegionCatalog() ?? [];
+  if (!Array.isArray(exactCatalog) || exactCatalog.length === 0) {
+    return "Approved region claims cannot be revalidated because the compact scenario region catalog is not primed; regenerate the GM preview after the map finishes loading.";
+  }
+
+  const exactIds = new Set(
+    exactCatalog
+      .map((region) => normalizeString(region?.id))
+      .filter(Boolean),
+  );
+
+  for (const { claim, claimIndex, path } of claimEntries) {
+    const regionId = normalizeString(claim?.regionId);
+    if (!regionId || !exactIds.has(regionId)) {
+      return `${path}.regionClaims[${claimIndex}].regionId "${regionId || "(blank)"}" is not present in the primed scenario region catalog. Regenerate the GM preview; Apply will not reinterpret or silently drop an approved claim.`;
+    }
+  }
+  return "";
+};
+
 // One retry's worth of corrective vocabulary: the exact regions the losing side
 // currently owns, so a model that wrote "Pomerania" can resend the same answer
 // with the real names/ids ("Pomorskie (POL.11_1)") instead of losing the map
@@ -4263,6 +4339,10 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
   });
   if (strict && unresolvedControlOps.length > 0) {
     return buildControlFeedback(unresolvedControlOps);
+  }
+  if (resolvedRegionIdsOnly) {
+    const exactClaimError = validateExactApprovedRegionClaims(containers);
+    if (exactClaimError) return exactClaimError;
   }
   // Reluctance guard (strict attempt only): events that NARRATE a capture while
   // the whole payload ships ZERO regionTransfers are the recurring field report
@@ -11100,42 +11180,52 @@ export const applyGameMasterPreview = async (preview) => {
       });
     }
 
-    const warMerge = applyWarUpdates({
-      world: nextWorld,
-      updates: normalizeArray(transaction.warUpdates),
-      events,
-      stopDate: bundle.game.gameDate || bundle.game.startDate || "",
-      round: bundle.game.round || 0,
-    });
-    if (warMerge.appliedIds.length !== normalizeArray(transaction.warUpdates).length) {
+    const warUpdatesForApply = normalizeArray(transaction.warUpdates);
+    const warMerge = warUpdatesForApply.length
+      ? applyWarUpdates({
+          world: nextWorld,
+          updates: warUpdatesForApply,
+          events,
+          stopDate: bundle.game.gameDate || bundle.game.startDate || "",
+          round: bundle.game.round || 0,
+        })
+      : { world: nextWorld, appliedIds: [] };
+    if (warMerge.appliedIds.length !== warUpdatesForApply.length) {
       throw new Error("A canonical war operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
     nextWorld = warMerge.world;
 
-    const diplomaticMerge = applyDiplomaticUpdates({
-      world: nextWorld,
-      relationUpdates: normalizeArray(transaction.relationUpdates),
-      agreementUpdates: normalizeArray(transaction.agreementUpdates),
-      events,
-      stopDate: bundle.game.gameDate || bundle.game.startDate || "",
-      round: bundle.game.round || 0,
-    });
-    if (diplomaticMerge.appliedRelationIds.length !== normalizeArray(transaction.relationUpdates).length) {
+    const relationUpdatesForApply = normalizeArray(transaction.relationUpdates);
+    const agreementUpdatesForApply = normalizeArray(transaction.agreementUpdates);
+    const diplomaticMerge = relationUpdatesForApply.length || agreementUpdatesForApply.length
+      ? applyDiplomaticUpdates({
+          world: nextWorld,
+          relationUpdates: relationUpdatesForApply,
+          agreementUpdates: agreementUpdatesForApply,
+          events,
+          stopDate: bundle.game.gameDate || bundle.game.startDate || "",
+          round: bundle.game.round || 0,
+        })
+      : { world: nextWorld, appliedRelationIds: [], appliedAgreementIds: [] };
+    if (diplomaticMerge.appliedRelationIds.length !== relationUpdatesForApply.length) {
       throw new Error("A canonical relation operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
-    if (diplomaticMerge.appliedAgreementIds.length !== normalizeArray(transaction.agreementUpdates).length) {
+    if (diplomaticMerge.appliedAgreementIds.length !== agreementUpdatesForApply.length) {
       throw new Error("A canonical agreement operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
     nextWorld = diplomaticMerge.world;
 
-    const storylineMerge = applyWorldStorylineUpdates({
-      world: nextWorld,
-      updates: normalizeArray(transaction.storylineUpdates),
-      events,
-      stopDate: bundle.game.gameDate || bundle.game.startDate || "",
-      round: bundle.game.round || 0,
-    });
-    if (storylineMerge.appliedIds.length !== normalizeArray(transaction.storylineUpdates).length) {
+    const storylineUpdatesForApply = normalizeArray(transaction.storylineUpdates);
+    const storylineMerge = storylineUpdatesForApply.length
+      ? applyWorldStorylineUpdates({
+          world: nextWorld,
+          updates: storylineUpdatesForApply,
+          events,
+          stopDate: bundle.game.gameDate || bundle.game.startDate || "",
+          round: bundle.game.round || 0,
+        })
+      : { world: nextWorld, appliedIds: [] };
+    if (storylineMerge.appliedIds.length !== storylineUpdatesForApply.length) {
       throw new Error("A canonical storyline operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
     nextWorld = storylineMerge.world;

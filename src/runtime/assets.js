@@ -1408,6 +1408,16 @@ export const primeCustomRegionCatalog = (
   return primeCustomRegionCatalogEntries(rawEntries, options);
 };
 
+export const getPrimedScenarioRegionCatalog = ({ url = JSON_URLS.regionsGeojson } = {}) => {
+  if (
+    primedCustomRegionCatalog
+    && primedCustomRegionCatalogKey === String(url || "")
+  ) {
+    return primedCustomRegionCatalog;
+  }
+  return null;
+};
+
 export const loadScenarioRegionCatalog = async ({ force = false } = {}) => {
   if (
     !force &&

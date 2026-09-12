@@ -8,11 +8,45 @@ const gameStatePath = new URL("../src/runtime/gameState.js", import.meta.url);
 
 const sourceText = async (url) => readFile(url, "utf8");
 
-test("GM Apply revalidates already-previewed territory through exact region ids only", async () => {
+test("GM Apply revalidates already-previewed territory through the primed exact-id catalog only", async () => {
   const source = await sourceText(gameplayPath);
   assert.match(source, /resolvedRegionIdsOnly:\s*true/);
-  assert.match(source, /loadScenarioRegionCatalog\(\{ force: false \}\)/);
-  assert.match(source, /wholeCountry must already be expanded to exact region ids before Apply/);
+  const start = source.indexOf("if (exactRegionIdsOnly)");
+  const end = source.indexOf("// Phase 8B.2.10", start);
+  assert.ok(start >= 0 && end > start, "exact-id Apply branch must be isolated");
+  const branch = source.slice(start, end);
+  assert.match(branch, /getPrimedScenarioRegionCatalog\(\)/);
+  assert.doesNotMatch(branch, /loadScenarioRegionCatalog|loadRegionCatalog|readJson\(/,
+    "Apply must never cold-load or reparse scenario geography");
+  assert.match(branch, /compact scenario region catalog is not primed/);
+  assert.match(branch, /wholeCountry must already be expanded to exact region ids before Apply/);
+});
+
+test("GM Preview primes the compact scenario catalog from its one authoritative geography parse", async () => {
+  const source = await sourceText(gameplayPath);
+  const start = source.indexOf("// Phase 8B.2.10");
+  const end = source.indexOf("// Without a catalog", start);
+  assert.ok(start >= 0 && end > start);
+  const branch = source.slice(start, end);
+  assert.match(branch, /readJson\(JSON_URLS\.regionsGeojson/);
+  assert.match(branch, /primeCustomRegionCatalog\(renderedRegionsGeojson/);
+  assert.match(branch, /renderedCatalog\.length > 0\s*\? \[\]\s*:\s*await loadRegionCatalog/s,
+    "stock/merged catalog work should be fallback-only when rendered scenario geography exists");
+  assert.match(branch, /primeCustomRegionCatalogEntries\(mergedCatalog/,
+    "Preview must prime the exact fallback corpus it used so Apply never needs a second geography load");
+});
+
+test("GM Apply exact path verifies approved region claims without name re-resolution", async () => {
+  const source = await sourceText(gameplayPath);
+  const start = source.indexOf("const validateExactApprovedRegionClaims");
+  const end = source.indexOf("// One retry's worth", start);
+  assert.ok(start >= 0 && end > start, "exact approved-claim guard must exist");
+  const branch = source.slice(start, end);
+  assert.match(branch, /getPrimedScenarioRegionCatalog\(\)/);
+  assert.match(branch, /exactIds\.has\(regionId\)/);
+  assert.doesNotMatch(branch, /loadScenarioRegionCatalog|loadRegionCatalog|readJson\(/,
+    "Apply claim validation must stay compact and exact-id only");
+  assert.match(source, /if \(resolvedRegionIdsOnly\) \{\s*const exactClaimError = validateExactApprovedRegionClaims\(containers\)/s);
 });
 
 test("failed whole-country expansion cannot fall through to one province", async () => {
