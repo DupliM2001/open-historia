@@ -1394,7 +1394,9 @@ export const primeCustomRegionCatalog = (
     if (!id) continue;
     const centroid = props?.centroid?.coordinates;
     rawEntries.push({
-      country: props.country ? String(props.country) : "",
+      // A drawn region's baked owner is its `owner` property; carrying it as the
+      // catalog's base country lets the prompt tell a real change from the seed.
+      country: props.country ? String(props.country) : props.owner ? String(props.owner) : "",
       countryCode: props.gid0 ? String(props.gid0) : props.GID_0 ? String(props.GID_0) : "",
       id,
       name: props.name ?? props.NAME_1 ?? props.name_1 ?? id,
