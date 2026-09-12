@@ -272,24 +272,31 @@ const searchInputStyle = {
   padding: "0 0.9rem",
 };
 
+const DEFAULT_SCENARIO_COVER = "/scenario-placeholder.png";
+
+const handleScenarioCoverError = (event) => {
+  const image = event.currentTarget;
+  if (image.dataset.scenarioCoverFallback === "true") return;
+  image.dataset.scenarioCoverFallback = "true";
+  image.src = DEFAULT_SCENARIO_COVER;
+};
+
 const ScenarioCard = ({ post, busy, onImport, onSelect }) => (
   <div
     style={{ ...cardSurface, cursor: "pointer" }}
     onClick={() => onSelect(post)}
   >
-    {post.coverImageUrl && (
-      <img
-        src={post.coverImageUrl}
-        alt=""
-        onError={(event) => { event.currentTarget.style.display = "none"; }}
-        style={{
-          aspectRatio: "16 / 9",
-          borderRadius: "10px",
-          objectFit: "cover",
-          width: "100%",
-        }}
-      />
-    )}
+    <img
+      src={post.coverImageUrl || DEFAULT_SCENARIO_COVER}
+      alt=""
+      onError={handleScenarioCoverError}
+      style={{
+        aspectRatio: "16 / 9",
+        borderRadius: "10px",
+        objectFit: "cover",
+        width: "100%",
+      }}
+    />
     <div style={{ alignItems: "center", display: "flex", gap: "0.55rem" }}>
       {post.avatarUrl && (
         <img src={post.avatarUrl} alt={post.author} style={{ borderRadius: "50%", height: "1.6rem", width: "1.6rem" }} />
@@ -415,20 +422,18 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
 
     <StatusBanner notice={notice} error={error} />
 
-    {post.coverImageUrl && (
-      <img
-        src={post.coverImageUrl}
-        alt=""
-        onError={(event) => { event.currentTarget.style.display = "none"; }}
-        style={{
-          aspectRatio: "16 / 9",
-          borderRadius: "14px",
-          marginBottom: "0.9rem",
-          objectFit: "cover",
-          width: "100%",
-        }}
-      />
-    )}
+    <img
+      src={post.coverImageUrl || DEFAULT_SCENARIO_COVER}
+      alt=""
+      onError={handleScenarioCoverError}
+      style={{
+        aspectRatio: "16 / 9",
+        borderRadius: "14px",
+        marginBottom: "0.9rem",
+        objectFit: "cover",
+        width: "100%",
+      }}
+    />
 
     <div style={{ alignItems: "center", display: "flex", gap: "0.6rem", marginBottom: "0.3rem" }}>
       {post.avatarUrl && (

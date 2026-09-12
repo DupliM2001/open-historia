@@ -113,6 +113,8 @@ export const useMainMenuOpen = () => useSyncExternalStore(subscribeMainMenu, isM
 // widget, forces panel, editor drawer) starts at the screen edge.
 const TOP_BAR_OFFSET = "0.5rem";
 
+const DEFAULT_SCENARIO_COVER = "/scenario-placeholder.png";
+
 const surfaceStyle = {
   background:
     "linear-gradient(180deg, rgba(50, 50, 55, 0.58) 0%, rgba(17, 17, 19, 0.48) 100%)",
@@ -373,7 +375,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
   const assetBadges = Object.entries(scenarioBadgeLabels)
     .filter(([key]) => scenario.assetStatus?.[key])
     .map(([, label]) => label.replace(" PMTiles", "").replace(" JSON", ""));
-  const cardImageUrl = scenario.coverImageUrl || "/loading_screen.jpg";
+  const cardImageUrl = scenario.coverImageUrl || DEFAULT_SCENARIO_COVER;
 
   return (
     <div
@@ -405,7 +407,8 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
           background:
             `linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.72) 100%), ` +
             `radial-gradient(circle at 14% 18%, ${scenario.accentColor}bb, transparent 34%), ` +
-            `url("${cardImageUrl}") center/cover`,
+            `url("${cardImageUrl}") center/cover, ` +
+            `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
           inset: 0,
           opacity: 0.92,
           position: "absolute",
@@ -528,7 +531,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
 };
 
 const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
-  const cardImageUrl = game.coverImageUrl || "/loading_screen.jpg";
+  const cardImageUrl = game.coverImageUrl || DEFAULT_SCENARIO_COVER;
 
   return (
     <div
@@ -547,7 +550,8 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
           background:
             `linear-gradient(180deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.72) 100%), ` +
             `radial-gradient(circle at 16% 20%, ${game.accentColor}aa, transparent 32%), ` +
-            `url("${cardImageUrl}") center/cover`,
+            `url("${cardImageUrl}") center/cover, ` +
+            `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
           inset: 0,
           opacity: 0.96,
           position: "absolute",
