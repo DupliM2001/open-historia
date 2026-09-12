@@ -14,7 +14,7 @@ import { Toolbar } from "./chat";
 import { Search } from "./search";
 import { ForcesPanel } from "./forces";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
-import { logDebugEvent } from "../../runtime/debugLog.js";
+import { logDebugEvent, logSettingChange } from "../../runtime/debugLog.js";
 import {
   describeProviderSetupNeed,
   getProviderMeta,
@@ -545,9 +545,16 @@ const Main = ({
             const newState = !isFullscreenEnabled;
             setIsFullscreenEnabled(newState);
             toggleFullscreen(newState);
+            logSettingChange("Fullscreen", newState);
           }}
-          onToggleGlobe={() => setIsGlobeEnabled(!isGlobeEnabled)}
-          onToggleTerrain={() => setIsTerrainEnabled(!isTerrainEnabled)}
+          onToggleGlobe={() => {
+            setIsGlobeEnabled(!isGlobeEnabled);
+            logSettingChange("3D Globe", !isGlobeEnabled);
+          }}
+          onToggleTerrain={() => {
+            setIsTerrainEnabled(!isTerrainEnabled);
+            logSettingChange("3D Terrain", !isTerrainEnabled);
+          }}
           apiProvider={apiProvider}
           onApiProviderChange={setApiProvider}
           providerSettings={providerSettings}

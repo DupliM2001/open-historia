@@ -6,7 +6,7 @@
 // secret lookup on every entry) and the whole point of several of these tests
 // is that the stored API keys are found and redacted.
 
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 
 const store = new Map();
@@ -22,17 +22,23 @@ globalThis.localStorage = {
 const {
     buildDebugLogReport,
     buildIncidentReport,
+    buildLoggingFile,
     clearDebugLog,
     debugLogFilename,
     getDebugLogBytes,
     getDebugLogEntries,
+    getLoggingFileEntries,
+    installDebugLogCapture,
     isDebugLogEnabled,
     isDebugLogVerbose,
     logDebugEvent,
+    logSettingChange,
     redactSecrets,
+    registerSettingsSnapshot,
     setDebugLogContext,
     setDebugLogEnabled,
     setDebugLogVerbose,
+    withConsoleCaptureMuted,
 } = await import("./debugLog.js");
 
 const reset = () => {
@@ -162,10 +168,10 @@ test("L4 an enormous detail is truncated rather than filling the buffer", () => 
 
 test("L5 the buffer is capped and keeps the newest entries", () => {
     reset();
-    for (let index = 0; index < 500; index += 1) logDebugEvent("turn", `entry ${index}`);
+    for (let index = 0; index < 5500; index += 1) logDebugEvent("turn", `entry ${index}`);
     const list = getDebugLogEntries();
-    assert.equal(list.length, 400);
-    assert.equal(list[list.length - 1].message, "entry 499");
+    assert.equal(list.length, 5000);
+    assert.equal(list[list.length - 1].message, "entry 5499");
 });
 
 test("L6 the in-game date is stamped per entry, not only in the header", () => {
@@ -276,6 +282,38 @@ test("S5 turning it back on records again and says so", () => {
     assert.deepEqual(messages, ["Diagnostics logging turned on.", "after"]);
 });
 
+test("S7 turning it off also asks the server to clear the Desktop log", () => {
+    reset();
+    const calls = mock.method(globalThis, "fetch", async () => new Response("{}"));
+    try {
+        setDebugLogEnabled(false);
+        assert.deepEqual(calls.mock.calls.map(({ arguments: [url, init] }) => [url, init?.method]), [["/api/log", "DELETE"]]);
+        // Turning it back on clears nothing.
+        setDebugLogEnabled(true);
+        assert.equal(calls.mock.callCount(), 1);
+    } finally {
+        calls.mock.restore();
+    }
+});
+
+test("S8 a refused or failed clear never breaks the switch", async () => {
+    reset();
+    const refused = mock.method(globalThis, "fetch", async () => new Response("{}", { status: 403 }));
+    try {
+        assert.doesNotThrow(() => setDebugLogEnabled(false));
+        assert.equal(isDebugLogEnabled(), false);
+    } finally {
+        refused.mock.restore();
+    }
+    setDebugLogEnabled(true);
+    const failing = mock.method(globalThis, "fetch", () => { throw new TypeError("no fetch here"); });
+    try {
+        assert.doesNotThrow(() => setDebugLogEnabled(false));
+    } finally {
+        failing.mock.restore();
+    }
+});
+
 test("S6 setting it to the value it already has is a no-op", () => {
     reset();
     logDebugEvent("turn", "kept");
@@ -346,10 +384,11 @@ test("V7 the report states which mode produced it", () => {
 
 // ---- Group B: the size budget -----------------------------------------------
 
-// The two budgets these tests work against: 192 KB normally, 1 MB while
-// detailed logging is on. Detailed mode carries whole advisor and diplomatic
-// exchanges, so it is given room for a session's worth of them.
-const NORMAL_BUDGET = 192 * 1024;
+// One budget for both modes, 1 MB — the size of the Logging file itself. The
+// modes differ in what they record, not in how much of it they keep; a normal
+// log simply reaches much further back. The old normal budget is kept here to
+// show the normal log now holds more than it.
+const OLD_NORMAL_BUDGET = 192 * 1024;
 const VERBOSE_BUDGET = 1024 * 1024;
 
 test("B1 a big log drops its OLDEST entries and keeps the newest", () => {
@@ -378,31 +417,32 @@ test("B3 the report says entries were dropped rather than leaving a silent gap",
     assert.match(buildDebugLogReport(), /older entries were dropped to stay inside that budget/);
 });
 
-test("B3b detailed mode gets a bigger budget than normal mode", () => {
+test("B3b a normal-mode log keeps the same 1 MB as a detailed one", () => {
     reset();
-    setDebugLogVerbose(true);
-    // ~400 KB: over the normal budget, comfortably inside the detailed one.
+    // ~300 KB of normal entries (details clipped to 600): past the old 192 KB
+    // normal budget, well inside the shared one.
     for (let index = 0; index < 400; index += 1) logDebugEvent("ai", `entry ${index}`, "y".repeat(1000));
-    assert.ok(getDebugLogBytes() > NORMAL_BUDGET,
-        `expected a detailed log to be allowed past ${NORMAL_BUDGET} chars, held ${getDebugLogBytes()}`);
+    assert.ok(getDebugLogBytes() > OLD_NORMAL_BUDGET,
+        `expected a normal log to be allowed past ${OLD_NORMAL_BUDGET} chars, held ${getDebugLogBytes()}`);
     assert.ok(getDebugLogEntries().some((entry) => entry.message === "entry 0"),
-        "nothing should have been dropped yet at ~400 KB in detailed mode");
+        "nothing should have been dropped yet at ~300 KB");
 });
 
-test("B3c leaving detailed mode trims the buffer down to the smaller budget", () => {
+test("B3c leaving detailed mode keeps everything that was collected", () => {
     reset();
     setDebugLogVerbose(true);
     for (let index = 0; index < 400; index += 1) logDebugEvent("ai", `entry ${index}`, "y".repeat(1000));
-    // The switch must not leave a 400 KB buffer sitting in a 192 KB budget until
-    // the next entry happens along to trim it.
+    const before = getDebugLogEntries().length;
+    // Same budget either side of the switch, so switching throws nothing away.
     setDebugLogVerbose(false);
-    assert.ok(getDebugLogBytes() <= NORMAL_BUDGET, `buffer was ${getDebugLogBytes()} chars after switching off`);
+    assert.equal(getDebugLogEntries().length, before + 1, "only the 'turned off' note is added");
+    assert.ok(getDebugLogBytes() <= VERBOSE_BUDGET);
 });
 
 test("B4 a normal-mode log stays under the entry ceiling", () => {
     reset();
-    for (let index = 0; index < 900; index += 1) logDebugEvent("turn", `entry ${index}`);
-    assert.equal(getDebugLogEntries().length, 400);
+    for (let index = 0; index < 5200; index += 1) logDebugEvent("turn", `entry ${index}`);
+    assert.equal(getDebugLogEntries().length, 5000);
 });
 
 test("B5 the size is reported in the header", () => {
@@ -525,6 +565,395 @@ test("I6 the copied incident report carries the context and every field", () => 
     assert.match(report, /^Round: 4$/m);
     assert.match(report, /Raw model response: \{"events": \[/);
     assert.equal(buildIncidentReport(null), "");
+});
+
+// ---- Group D: the Desktop log merged into the Logging file -----------------
+//
+// The page's clock is mocked so page entries and Desktop log entries can be
+// interleaved at known times: the Desktop log is written by other processes, and
+// the only thing tying the two together is the timestamp.
+
+const T0 = Date.parse("2026-09-12T10:00:00.000Z");
+const at = (seconds) => new Date(T0 + seconds * 1000).toISOString();
+
+const withClock = (run) => {
+    mock.timers.enable({ apis: ["Date"], now: T0 });
+    try {
+        return run();
+    } finally {
+        mock.timers.reset();
+    }
+};
+
+// A page entry at `seconds` past T0.
+const pageEntryAt = (seconds, category, message, detail) => {
+    mock.timers.setTime(T0 + seconds * 1000);
+    logDebugEvent(category, message, detail);
+};
+
+const desktopEntry = (seconds, source, event, message, data) => ({
+    at: at(seconds), level: "error", source, event, message, ...(data === undefined ? {} : { data }),
+});
+
+const logSection = (report) => report.slice(report.indexOf("-- Log (oldest first) --"));
+
+test("D1 Desktop log entries are merged into the file in time order, labelled by source", () => {
+    reset();
+    const report = withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        pageEntryAt(20, "turn", "Jump started");
+        return buildDebugLogReport({
+            desktop: {
+                status: "included",
+                entries: [
+                    desktopEntry(30, "main", "updater", "Update download failed"),
+                    desktopEntry(10, "server", "http.500", "Could not write world.json"),
+                ],
+            },
+        });
+    });
+    const log = logSection(report);
+    const order = ["Loaded save", "Could not write world.json", "Jump started", "Update download failed"]
+        .map((message) => log.indexOf(message));
+    assert.ok(order.every((index) => index > 0), `every entry is in the log: ${order}`);
+    assert.deepEqual([...order].sort((a, b) => a - b), order, "entries are in time order");
+    assert.match(log, /\[server\] http\.500: Could not write world\.json/);
+    assert.match(log, /\[desktop app\] updater: Update download failed/);
+});
+
+test("D2 only Desktop log entries inside the page log's span get in", () => {
+    reset();
+    const report = withClock(() => {
+        pageEntryAt(100, "game", "Loaded save");
+        return buildDebugLogReport({
+            desktop: {
+                status: "included",
+                entries: [
+                    desktopEntry(50, "server", "http.500", "Before the log begins"),
+                    desktopEntry(150, "server", "http.500", "Inside the span"),
+                ],
+            },
+        });
+    });
+    assert.equal(report.includes("Before the log begins"), false);
+    assert.equal(report.includes("Inside the span"), true);
+});
+
+test("D3 page copies and AI prompts that older builds wrote to the Desktop log never get in", () => {
+    reset();
+    const report = withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        return buildDebugLogReport({
+            desktop: {
+                status: "included",
+                entries: [
+                    desktopEntry(10, "client", "debug.turn", "A page entry copied by an older build"),
+                    desktopEntry(20, "ai", "ai.request", "world-simulation attempt 1", "{\"systemPrompt\":\"...\"}"),
+                    desktopEntry(30, "main", "main.bootFailed", "Port in use"),
+                ],
+            },
+        });
+    });
+    assert.equal(report.includes("copied by an older build"), false);
+    assert.equal(report.includes("world-simulation attempt 1"), false);
+    assert.equal(report.includes("Port in use"), true);
+});
+
+test("D4 a storm of identical Desktop log entries folds into one line", () => {
+    reset();
+    const report = withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        const storm = Array.from({ length: 30 }, (_, index) =>
+            desktopEntry(1 + index, "server", "http.404", "Flag not found"));
+        return buildDebugLogReport({ desktop: { status: "included", entries: storm } });
+    });
+    assert.equal(logSection(report).split("Flag not found").length - 1, 1);
+    assert.match(report, /Flag not found \(×30, last 10:00:30\)/);
+});
+
+test("D5 an oversized Desktop log entry is trimmed like a page entry", () => {
+    reset();
+    const report = withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        return buildDebugLogReport({
+            desktop: {
+                status: "included",
+                entries: [desktopEntry(5, "server", "http.500", "Stack follows", `{"stack":"${"s".repeat(50_000)}"}`)],
+            },
+        });
+    });
+    const detailLine = logSection(report).split("\n").find((line) => line.includes("sss"));
+    assert.ok(detailLine.length < 1000, `detail was ${detailLine.length} chars`);
+    assert.match(detailLine, /\+\d+ chars\)$/);
+});
+
+test("D6 keys inside Desktop log entries are redacted, stored and shaped alike", () => {
+    reset();
+    store.set("openai_compatible_api_key", "hunter2hunter2");
+    const report = withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        return buildDebugLogReport({
+            desktop: {
+                status: "included",
+                entries: [
+                    desktopEntry(5, "server", "http.401", "Relay refused hunter2hunter2"),
+                    desktopEntry(6, "main", "updater", "Token ghp_abcdefghijklmnopqrstuvwxyz rejected", "{\"key\":\"sk-abcdefghijklmnopqrst\"}"),
+                ],
+            },
+        });
+    });
+    for (const secret of ["hunter2hunter2", "ghp_abcdefghijklmnopqrstuvwxyz", "sk-abcdefghijklmnopqrst"]) {
+        assert.equal(report.includes(secret), false, secret);
+    }
+});
+
+test("D7 the player's home folder becomes ~ on Windows, macOS and Linux", () => {
+    reset();
+    const report = withClock(() => {
+        // A page entry can quote a server error, so the page's own entries are
+        // covered too.
+        pageEntryAt(0, "api", "PUT failed: EPERM, open 'C:\\Users\\Jane Doe\\AppData\\Roaming\\open-historia\\x.json'");
+        return buildDebugLogReport({
+            desktop: {
+                status: "included",
+                entries: [
+                    // As the store holds it: `data` is JSON text, so a Windows
+                    // path's backslashes arrive doubled.
+                    desktopEntry(5, "server", "http.500", "boom", "{\"stack\":\"at C:\\\\Users\\\\jdoe\\\\AppData\\\\Local\\\\server.js:1\"}"),
+                    desktopEntry(6, "main", "main.bootFailed", "ENOENT /Users/jane/Library/Application Support/open-historia"),
+                    desktopEntry(7, "main", "main.bootFailed", "ENOENT /home/jane/.config/open-historia"),
+                ],
+            },
+        });
+    });
+    for (const name of ["Jane Doe", "jdoe", "/Users/jane", "/home/jane"]) {
+        assert.equal(report.includes(name), false, name);
+    }
+    assert.match(report, /~\\AppData\\Roaming\\open-historia/);
+    assert.match(report, /~\/Library\/Application Support/);
+    assert.match(report, /~\/\.config\/open-historia/);
+});
+
+test("D8 the log stays within 1 MB, dropping the oldest entries and saying how many; the reported problem comes on top", () => {
+    reset();
+    const LOG_LIMIT = 1024 * 1024;
+    const report = withClock(() => {
+        setDebugLogVerbose(true);
+        // A full detailed buffer, then a Desktop log and a big reported problem
+        // on top of it: together well past what the file may hold.
+        for (let index = 0; index < 1200; index += 1) pageEntryAt(index, "ai", `page ${index}`, "p".repeat(1000));
+        const desktopEntries = Array.from({ length: 150 }, (_, index) =>
+            desktopEntry(1200 + index, "server", "http.500", `desktop ${index}`, "d".repeat(1000)));
+        return buildDebugLogReport({
+            desktop: { status: "included", entries: desktopEntries },
+            incident: fallbackIncident("r".repeat(100_000)),
+        });
+    });
+    const withoutProblem = report.replace("r".repeat(100_000), "");
+    assert.ok(withoutProblem.length <= LOG_LIMIT, `everything but the reported problem was ${withoutProblem.length} chars`);
+    assert.ok(report.length > LOG_LIMIT, "the reported problem is not squeezed into the log's 1 MB");
+    assert.match(report, /desktop 149\b/, "the newest entry is kept");
+    assert.ok(report.includes("r".repeat(100_000)), "the reported problem is kept whole");
+    const kept = getDebugLogEntries().map((entry) => entry.message).filter((message) => report.includes(`] ${message}\n`));
+    assert.ok(kept.length < getDebugLogEntries().length, "some page entries had to go");
+    assert.equal(kept.includes(getDebugLogEntries()[0].message), false, "the oldest go first");
+    assert.equal(kept.includes(getDebugLogEntries().at(-1).message), true);
+    assert.match(report, /NOTE: \d+ older entries were left out to keep this log within 1 MB/);
+});
+
+test("D15 a reported problem over 1 MB is kept whole while the file stays within 2 MB", () => {
+    reset();
+    logDebugEvent("turn", "Jump started");
+    const raw = `{"events": [${"q".repeat(1_500_000)}`;
+    const report = buildDebugLogReport({ incident: fallbackIncident(raw) });
+    assert.ok(report.includes(raw), "nothing of the problem is cut");
+    assert.ok(report.length <= 2 * 1024 * 1024, `file was ${report.length} chars`);
+    assert.match(report, /Jump started/);
+});
+
+test("D16 past 2 MB the reported problem is cut in the middle, keeping its start and end, and says so", () => {
+    reset();
+    logDebugEvent("turn", "Jump started");
+    const raw = `START${"q".repeat(3_000_000)}END`;
+    const report = buildDebugLogReport({ incident: fallbackIncident(raw) });
+    assert.ok(report.length <= 2 * 1024 * 1024, `file was ${report.length} chars`);
+    assert.match(report, /Raw model response: STARTq/);
+    assert.match(report, /qEND/);
+    assert.match(report, /\[… \d+ characters of the reported problem cut here to keep this file within 2 MB …\]/);
+    assert.match(report, /Jump started/, "the log is kept");
+});
+
+test("D14 an entry logged as a problem shows under problems only, whatever its category", () => {
+    reset();
+    logDebugEvent("ai", "Task \"world-simulation\" failed: timed out", undefined, { problem: true });
+    logDebugEvent("ai", "Task \"world-simulation\" started.");
+    const shown = getLoggingFileEntries({});
+    assert.deepEqual(shown.map((entry) => [entry.message.slice(0, 30), entry.problem]), [
+        ["Task \"world-simulation\" starte", false],
+        ["Task \"world-simulation\" failed", true],
+    ]);
+});
+
+test("D9 the header says whether the Desktop log was included, unavailable or absent", () => {
+    reset();
+    withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        const included = buildDebugLogReport({
+            desktop: { status: "included", entries: [desktopEntry(5, "server", "http.500", "a"), desktopEntry(6, "main", "updater", "b")] },
+        });
+        assert.match(included, /^Desktop log: included \(2 entries from the desktop app and server\)$/m);
+        assert.match(buildDebugLogReport({ desktop: { status: "unavailable", entries: [] } }),
+            /^Desktop log: unavailable — the local server did not answer/m);
+        assert.match(buildDebugLogReport({ desktop: { status: "none", entries: [] } }),
+            /^Desktop log: none on this platform$/m);
+    });
+});
+
+test("D10 building the file asks the server for the Desktop log from the span's start", async () => {
+    reset();
+    logDebugEvent("game", "Loaded save");
+    const spanStart = getDebugLogEntries()[0].at;
+    const requested = [];
+    const fetchImpl = async (url) => {
+        requested.push(url);
+        return new Response(JSON.stringify({ entries: [{ at: new Date().toISOString(), level: "error", source: "server", event: "http.500", message: "Disk full" }] }));
+    };
+    const report = await buildLoggingFile({ fetchImpl });
+    assert.deepEqual(requested, [`/api/log?since=${encodeURIComponent(spanStart)}`]);
+    assert.match(report, /\[server\] http\.500: Disk full/);
+    assert.match(report, /^Desktop log: included \(1 entry from the desktop app and server\)$/m);
+});
+
+test("D11 a dead or silent server still gives a file, marked unavailable", async () => {
+    reset();
+    logDebugEvent("game", "Loaded save");
+    const dead = await buildLoggingFile({ fetchImpl: async () => { throw new TypeError("fetch failed"); } });
+    assert.match(dead, /^Desktop log: unavailable/m);
+    assert.match(dead, /Loaded save/);
+    const failing = await buildLoggingFile({ fetchImpl: async () => new Response("{}", { status: 500 }) });
+    assert.match(failing, /^Desktop log: unavailable/m);
+    const silent = await buildLoggingFile({ fetchImpl: () => new Promise(() => {}), timeoutMs: 20 });
+    assert.match(silent, /^Desktop log: unavailable/m);
+});
+
+test("D12 a 404 means this platform has no Desktop log", async () => {
+    reset();
+    logDebugEvent("game", "Loaded save");
+    const report = await buildLoggingFile({ fetchImpl: async () => new Response("{}", { status: 404 }) });
+    assert.match(report, /^Desktop log: none on this platform$/m);
+});
+
+test("D13 View log shows the entries the file holds, newest first, with the problems marked", () => {
+    reset();
+    const desktop = {
+        status: "included",
+        entries: [
+            desktopEntry(5, "server", "http.500", "Disk full"),
+            { ...desktopEntry(15, "main", "updater", "Checking for update"), level: "info" },
+        ],
+    };
+    const shown = withClock(() => {
+        pageEntryAt(0, "game", "Loaded save");
+        pageEntryAt(10, "warn", "Tile host slow");
+        pageEntryAt(20, "crash", "Render crash caught by the error boundary.");
+        return getLoggingFileEntries({ desktop });
+    });
+    assert.deepEqual(shown.map((entry) => [entry.message, entry.problem]), [
+        ["Render crash caught by the error boundary.", true],
+        ["updater: Checking for update", false],
+        ["Tile host slow", true],
+        ["http.500: Disk full", true],
+        ["Loaded save", false],
+    ]);
+    assert.equal(shown.find((entry) => entry.message.includes("Disk full")).category, "server");
+});
+
+// ---- Group G: game settings in the Logging file -----------------------------
+
+test("G1 the file lists every setting's value as it was saved, by section", () => {
+    reset();
+    logDebugEvent("turn", "Jump started");
+    const report = buildDebugLogReport({
+        settings: [
+            { section: "Map", items: [["Hide country labels", "on"], ["Basemap", "scenario default"]] },
+            { section: "AI", items: [["Model", "gemini-3.5-flash-lite"], ["API key", "set"]] },
+        ],
+    });
+    const block = report.slice(report.indexOf("-- Settings when this file was saved --"), report.indexOf("-- Log (oldest first) --"));
+    assert.match(block, /^Map:\n {2}Hide country labels: on\n {2}Basemap: scenario default$/m);
+    assert.match(block, /^AI:\n {2}Model: gemini-3\.5-flash-lite\n {2}API key: set$/m);
+});
+
+test("G2 building the file reads every registered setting at that moment, and one that fails does not stop it", async () => {
+    reset();
+    let font = "Georgia";
+    const off = [
+        registerSettingsSnapshot("Map", () => [["Label font", font]]),
+        registerSettingsSnapshot("Network", async () => [["Let other devices connect", "on"]]),
+        registerSettingsSnapshot("Broken", () => { throw new Error("storage blocked"); }),
+        // A section with nothing to say on this platform (the web build has no
+        // server to share) is left out rather than printed empty.
+        registerSettingsSnapshot("Nothing here", () => null),
+    ];
+    try {
+        font = "Times New Roman";
+        const report = await buildLoggingFile({ fetchImpl: async () => new Response("{}", { status: 404 }) });
+        assert.match(report, /^ {2}Label font: Times New Roman$/m, "read when the file is built, not when registered");
+        assert.match(report, /^ {2}Let other devices connect: on$/m);
+        assert.match(report, /^Broken:\n {2}\(could not be read: storage blocked\)$/m);
+        assert.equal(report.includes("Nothing here"), false);
+    } finally {
+        off.forEach((unregister) => unregister());
+    }
+});
+
+test("G3 a setting's value is redacted like everything else", () => {
+    reset();
+    store.set("openai_compatible_api_key", "hunter2hunter2");
+    const report = buildDebugLogReport({ settings: [{ section: "AI", items: [["Endpoint", "http://u:hunter2hunter2@gateway.local"]] }] });
+    assert.equal(report.includes("hunter2hunter2"), false);
+});
+
+test("G4 a change is logged in words: switches turn on or off, values are set", () => {
+    reset();
+    logSettingChange("3D Globe", true);
+    logSettingChange("Record AI telemetry", false);
+    logSettingChange("Basemap", "World Imagery");
+    assert.deepEqual(getDebugLogEntries().map((entry) => [entry.category, entry.message]), [
+        ["setting", "3D Globe turned on."],
+        ["setting", "Record AI telemetry turned off."],
+        ["setting", "Basemap set to World Imagery."],
+    ]);
+});
+
+test("G5 a typed setting is logged once it settles, not once per keystroke", () => {
+    reset();
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+        for (const typed of ["T", "Ti", "Times", "Times New", "Times New Roman"]) {
+            logSettingChange("Label font", typed, { settle: true });
+            mock.timers.tick(200);
+        }
+        assert.equal(getDebugLogEntries().length, 0, "nothing while the player is still typing");
+        mock.timers.tick(2000);
+    } finally {
+        mock.timers.reset();
+    }
+    assert.deepEqual(getDebugLogEntries().map((entry) => entry.message), ["Label font set to Times New Roman."]);
+});
+
+test("M1 a console line written under a mute is not captured a second time", () => {
+    reset();
+    installDebugLogCapture();
+    // The originals still run; keep this test's lines out of the test output.
+    const quiet = mock.method(process.stderr, "write", () => true);
+    try {
+        withConsoleCaptureMuted(() => console.error("Render crash caught by ErrorBoundary:", "boom"));
+        console.error("An ordinary failure");
+    } finally {
+        quiet.mock.restore();
+    }
+    assert.deepEqual(getDebugLogEntries().map((entry) => entry.message), ["An ordinary failure"]);
 });
 
 test("I7 the filename says what the log was saved for", () => {

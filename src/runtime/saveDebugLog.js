@@ -20,17 +20,18 @@
 import { useState, useSyncExternalStore } from "react";
 import { copyToClipboard } from "./clipboard.js";
 import {
-    buildDebugLogReport,
     buildIncidentReport,
+    buildLoggingFile,
     debugLogFilename,
     isDebugLogEnabled,
     subscribeToDebugLog,
 } from "./debugLog.js";
 import { isNativeApp } from "./web/nativeBoot.js";
 
-// Resolves to "saved", "copied" (the clipboard fallback) or "failed".
+// Resolves to "saved", "copied" (the clipboard fallback) or "failed". The file
+// carries the Desktop log too, where there is one (see buildLoggingFile).
 export const saveDebugLogFile = async ({ incident } = {}) => {
-    const report = buildDebugLogReport({ incident });
+    const report = await buildLoggingFile({ incident });
     if (!isNativeApp()) {
         try {
             const blob = new Blob([report], { type: "text/plain;charset=utf-8" });

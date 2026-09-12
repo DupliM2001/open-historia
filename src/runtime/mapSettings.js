@@ -5,7 +5,7 @@
 // GameUI/main.jsx, mirroring how useCountryDisplayName (polityNames.js) sits
 // beside the data it subscribes to.
 import { useEffect, useState } from "react";
-import { logDebugEvent, setDebugLogContext } from "./debugLog.js";
+import { logDebugEvent, logSettingChange, setDebugLogContext } from "./debugLog.js";
 
 // Immediate source of truth for string-valued settings. This also keeps a
 // runtime override functional in privacy/file contexts where localStorage
@@ -150,8 +150,19 @@ export function getMapSettingValue(key, fallback = "") {
     }
 }
 
+// The value settings' names in the diagnostics log, as the Settings panel shows
+// them; an empty value is the scenario author's choice.
+const VALUE_SETTING_LABELS = {
+    [MAP_SETTING_KEYS.basemapStyle]: "Basemap",
+    [MAP_SETTING_KEYS.labelFont]: "Label font",
+};
+
 export function setMapSettingValue(key, value) {
     const normalized = String(value ?? "").trim();
+    // Logged once it settles: the label font is typed, and saves per keystroke.
+    if (normalized !== getMapSettingValue(key, "")) {
+        logSettingChange(VALUE_SETTING_LABELS[key] || key, normalized || "scenario default", { settle: true });
+    }
     valueSettingMemory.set(key, normalized);
     try {
         if (normalized) localStorage.setItem(key, normalized);

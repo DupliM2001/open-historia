@@ -40,6 +40,28 @@ _Avoid_: Accepted card
 A Canonical event kept off the timeline because it was routine, low-value or already covered. It still happened. Distinct from a rejected event, which the simulation judged untrue and which never happened.
 _Avoid_: Dropped event (for anything that still happened)
 
+### Diagnostics
+
+**Diagnostics log**:
+The one log a player sends with a bug report: what they did and what went wrong, in order. It is kept on every platform, and on desktop it also carries the Desktop log's entries.
+_Avoid_: Debug log, app log, server log
+
+**Desktop log**:
+Where the desktop app itself and its local server note their own start-up, update and server errors, because they cannot reach the Diagnostics log directly. It is not a second log: its entries appear in the Diagnostics log.
+_Avoid_: app.log (as the name of a log), server log
+
+**Detailed logging**:
+The switch that adds whole AI exchanges, conversations and world changes to the Diagnostics log. Off by default.
+_Avoid_: Verbose mode, debug mode
+
+**Logging file**:
+The single text file a player saves from the Diagnostics log to attach to a report: at most 1 MB of log, with the problem being reported on top, and never more than 2 MB in all.
+_Avoid_: Debug report, bug report (for the file itself)
+
+**Prompt fingerprint**:
+The size and a short hash of each section of a prompt sent to the model, noted for every attempt under Detailed logging, so a prompt rebuilt from the save can be checked against the one actually sent.
+_Avoid_: Prompt dump
+
 ---
 
 ## 1. Storage model: the runtime JSON assets

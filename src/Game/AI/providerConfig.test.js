@@ -23,8 +23,35 @@ globalThis.localStorage = {
 };
 
 const config = await import("./providerConfig.js");
+const { clearDebugLog, getDebugLogEntries } = await import("../../runtime/debugLog.js");
 
 test.beforeEach(() => store.clear());
+
+// Settings changes reach the diagnostics log (runtime/debugLog.js), once each
+// typed value settles, and a key never does.
+test("a provider setting change is logged once it settles, and an API key only as set or cleared", () => {
+  clearDebugLog({ silent: true });
+  test.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    for (const typed of ["gemini-3", "gemini-3.5", "gemini-3.5-pro"]) config.setProviderField("gemini", "model", typed);
+    config.setProviderField("gemini", "model_jumpForward", "gemini-3.5-ultra");
+    config.setProviderField("gemini", "apiKey", "AIzaSECRETSECRETSECRETSECRET12345");
+    config.setProviderField("openai-compatible", "endpoint", "http://user:pw@gateway.local:8080/v1?token=abc");
+    config.setProviderField("gemini", "customParams", "{\"headers\":{\"x-api-key\":\"zzzzzzzz\"}}");
+    test.mock.timers.tick(5000);
+  } finally {
+    test.mock.timers.reset();
+  }
+  const messages = getDebugLogEntries().map((entry) => entry.message);
+  assert.ok(messages.includes("Gemini model set to gemini-3.5-pro."), messages.join(" | "));
+  assert.equal(messages.filter((message) => message.startsWith("Gemini model set to")).length, 1, "once, after typing stopped");
+  assert.ok(messages.includes("Gemini Time skip model set to gemini-3.5-ultra."));
+  assert.ok(messages.includes("Gemini API key set."));
+  assert.ok(messages.includes("OpenAI Compatible endpoint set to gateway.local:8080."), "the host only");
+  assert.ok(messages.includes("Gemini custom parameters set (36 characters)."), "never their contents");
+  const all = messages.join("\n");
+  for (const secret of ["AIzaSECRET", "pw@", "token=abc", "zzzzzzzz"]) assert.equal(all.includes(secret), false, secret);
+});
 
 test("a task without an override runs on the provider default", () => {
   config.setProviderField("gemini", "model", "gemini-default");
