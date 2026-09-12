@@ -2383,9 +2383,10 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       ? `${firstFailureReason}${transportReason ? ` The retry then failed: ${transportReason}` : ""}`
       : transportReason || failureReason;
     // Always recorded, not only in detailed mode: a task that failed is what a
-    // report is about. The error itself carries the stack — one frame normally,
-    // a real call path in detailed mode.
-    logDebugEvent("ai", `Task "${taskKey}" failed${controller.signal.aborted ? " (aborted)" : ""}: ${failureReason}`, actualError instanceof Error ? actualError : undefined);
+    // report is about, so it is also a problem for View log's "problems only".
+    // The error itself carries the stack — one frame normally, a real call path
+    // in detailed mode.
+    logDebugEvent("ai", `Task "${taskKey}" failed${controller.signal.aborted ? " (aborted)" : ""}: ${failureReason}`, actualError instanceof Error ? actualError : undefined, { problem: true });
   } finally {
     idle.cancel();
   }

@@ -1,3 +1,4 @@
+/*! Open Historia — portions (Desktop log store and routes tests) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The Desktop log store: where the desktop app's Electron process and its local
 // server write their own entries, and what the Logging file reads back.
 //

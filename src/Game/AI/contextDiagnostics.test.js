@@ -1,3 +1,4 @@
+/*! Open Historia — portions (prompt fingerprint tests) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The prompt fingerprint: what Detailed logging records about each AI attempt in
 // place of the prompt itself.
 //

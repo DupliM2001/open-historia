@@ -55,7 +55,7 @@ The switch that adds whole AI exchanges, conversations and world changes to the 
 _Avoid_: Verbose mode, debug mode
 
 **Logging file**:
-The single text file a player saves from the Diagnostics log to attach to a report. At most 1 MB.
+The single text file a player saves from the Diagnostics log to attach to a report: at most 1 MB of log, with the problem being reported on top, and never more than 2 MB in all.
 _Avoid_: Debug report, bug report (for the file itself)
 
 **Prompt fingerprint**:

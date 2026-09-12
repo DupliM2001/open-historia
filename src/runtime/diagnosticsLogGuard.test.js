@@ -1,3 +1,4 @@
+/*! Open Historia — portions (Diagnostics log and Desktop log guards) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // Guards that keep the two logs from growing back into one another.
 //
 // Run: node --test src/runtime/diagnosticsLogGuard.test.js
@@ -47,6 +48,28 @@ test("the log is looked at in Settings, not in Cheats", () => {
     assert.equal(/Diagnostics Log/.test(cheats), false);
     const settings = files.find(({ file }) => file === "Game/GameUI/settings.jsx").text;
     assert.match(settings, /getLoggingFileEntries/, "View log shows the same entries the file holds");
+});
+
+test("React's own report of a caught crash is kept out of the log, so a crash appears once", () => {
+    // React 19 console.errors every error a boundary catches, before
+    // componentDidCatch runs; the console capture would record that as a second
+    // entry beside the boundary's own crash entry.
+    const main = files.find(({ file }) => file === "main.jsx").text;
+    assert.match(main, /onCaughtError[\s\S]{0,300}withConsoleCaptureMuted/);
+});
+
+test("the prompt fingerprint is only recorded in detailed mode", () => {
+    const gameplay = files.find(({ file }) => file === "Game/AI/gameplay.js").text;
+    const at = gameplay.indexOf("buildPromptFingerprint({");
+    assert.notEqual(at, -1, "the fingerprint call has moved; this guard needs updating");
+    assert.match(gameplay.slice(Math.max(0, at - 400), at), /if \(isDebugLogVerbose\(\)\) \{\s*logDebugEvent\(/,
+        "hashing a jump's prompt is not free, and nothing reads the result outside detailed mode");
+    assert.match(gameplay.slice(at, at + 400), /\{ verbose: true \}/);
+});
+
+test("a failed AI task is logged as a problem", () => {
+    const gameplay = files.find(({ file }) => file === "Game/AI/gameplay.js").text;
+    assert.match(gameplay, /logDebugEvent\("ai", `Task "\$\{taskKey\}" failed[^\n]*\{ problem: true \}\);/);
 });
 
 test("the AI layer never logs a whole system prompt", () => {

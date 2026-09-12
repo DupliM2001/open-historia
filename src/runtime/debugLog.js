@@ -85,7 +85,7 @@
 // The buffer is bounded by SIZE, not only by entry count, and drops its oldest
 // entries to stay there — see trimToBudget.
 
-import { redactLogText } from "../../server/logRedaction.js";
+import { escapeForRegExp, redactLogText } from "../../server/logRedaction.js";
 
 // Two ceilings, and the size one is the one that really governs. Both modes
 // share them: they differ in WHAT they record, not in how much of it they keep.
@@ -286,8 +286,6 @@ const storedSecretValues = () => {
     return values;
 };
 
-const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 // Run over every entry as it is recorded, and over every Desktop log entry as it
 // enters the Logging file. The literal pass first, then the shared rules
 // (server/logRedaction.js) — the key shapes and the player's home folder — for
@@ -373,12 +371,27 @@ function trimToBudget() {
     return dropped;
 }
 
+// The recent entry that `entry` repeats — same category, message and detail,
+// within COALESCE_WINDOW entries and COALESCE_MS of its last occurrence — or
+// null. One test for both foldings: the page's, as entries are recorded, and the
+// Desktop log's, as the Logging file is built.
+const findRepeatOf = (list, entry, now) => {
+    for (let index = list.length - 1; index >= Math.max(0, list.length - COALESCE_WINDOW); index -= 1) {
+        const candidate = list[index];
+        if (candidate.category !== entry.category || candidate.message !== entry.message || candidate.detail !== entry.detail) continue;
+        return now - Date.parse(candidate.lastAt || candidate.at) <= COALESCE_MS ? candidate : null;
+    }
+    return null;
+};
+
 // The one way anything gets into the log.
 //
 // `category` is a short tag the reader scans down the left margin ("game",
 // "turn", "ai", "action", "error"). `message` is what happened, in the past
-// tense. `detail` is optional and gets flattened and truncated.
-export const logDebugEvent = (category, message, detail, { verbose = false } = {}) => {
+// tense. `detail` is optional and gets flattened and truncated. `problem: true`
+// marks an entry View log's "problems only" should keep even though its
+// category is not an error one — a failed AI task is logged as `ai`.
+export const logDebugEvent = (category, message, detail, { verbose = false, problem = false } = {}) => {
     // Both gates first, before any of the work below: a disabled log must cost
     // nothing at all, and a verbose-only entry must cost nothing while detailed
     // mode is off. Every call site can then log unconditionally and let this
@@ -393,16 +406,13 @@ export const logDebugEvent = (category, message, detail, { verbose = false } = {
     const safeDetail = flatDetail ? redactSecrets(flatDetail) : "";
     const now = Date.now();
 
-    for (let index = entries.length - 1; index >= Math.max(0, entries.length - COALESCE_WINDOW); index -= 1) {
-        const candidate = entries[index];
-        if (candidate.category !== safeCategory || candidate.message !== safeMessage || candidate.detail !== safeDetail) continue;
-        if (now - Date.parse(candidate.lastAt || candidate.at) > COALESCE_MS) break;
-        candidate.repeat = (candidate.repeat || 1) + 1;
-        candidate.lastAt = new Date(now).toISOString();
+    const repeated = findRepeatOf(entries, { category: safeCategory, message: safeMessage, detail: safeDetail }, now);
+    if (repeated) {
+        repeated.repeat = (repeated.repeat || 1) + 1;
+        repeated.lastAt = new Date(now).toISOString();
         schedulePersist();
         emit();
         return;
-
     }
 
     sequence += 1;
@@ -417,10 +427,7 @@ export const logDebugEvent = (category, message, detail, { verbose = false } = {
         category: safeCategory,
         message: safeMessage,
         detail: safeDetail,
-        // Marked so a reader of the buffer (the server-log forwarder in
-        // src/main.jsx) can tell a detailed-mode entry, which may quote whole
-        // conversations, from one that belongs in every report.
-        ...(verbose ? { verbose: true } : {}),
+        ...(problem ? { problem: true } : {}),
     });
     usedChars += entryCost(entries[entries.length - 1]);
     trimToBudget();
@@ -552,6 +559,7 @@ const restorePersisted = () => {
                 category: String(entry.category || "app"),
                 message: String(entry.message || ""),
                 detail: String(entry.detail || ""),
+                ...(entry.problem === true ? { problem: true } : {}),
             }));
         usedChars = entries.reduce((total, entry) => total + entryCost(entry), 0);
         // The restored buffer can exceed today's ceilings — it was written while
@@ -746,7 +754,7 @@ const PAGE_STARTED_AT = new Date().toISOString();
 // survives reloads and restarts, so a launch that failed between two good ones —
 // written only to the Desktop log, because the page never loaded — falls inside
 // it. Passed to the server so it only sends what can be used.
-export const getLoggingFileSpanStart = () => entries[0]?.at || PAGE_STARTED_AT;
+const getLoggingFileSpanStart = () => entries[0]?.at || PAGE_STARTED_AT;
 
 // Held to the same limits as a page entry in the current mode, and redacted with
 // the full page redactor — including this device's stored keys, which the server
@@ -771,14 +779,7 @@ const fromDesktopEntry = (entry) => {
 const foldRepeats = (list) => {
     const folded = [];
     for (const entry of list) {
-        const now = Date.parse(entry.at);
-        let match = null;
-        for (let index = folded.length - 1; index >= Math.max(0, folded.length - COALESCE_WINDOW); index -= 1) {
-            const candidate = folded[index];
-            if (candidate.category !== entry.category || candidate.message !== entry.message || candidate.detail !== entry.detail) continue;
-            if (now - Date.parse(candidate.lastAt || candidate.at) <= COALESCE_MS) match = candidate;
-            break;
-        }
+        const match = findRepeatOf(folded, entry, Date.parse(entry.at));
         if (match) {
             match.repeat = (match.repeat || 1) + 1;
             match.lastAt = entry.at;
@@ -825,7 +826,7 @@ const mergeWithDesktop = (pageEntries, desktop) => {
             merged.push(desktopEntries[next]);
             next += 1;
         }
-        merged.push({ ...entry, problem: PROBLEM_CATEGORIES.has(entry.category) });
+        merged.push({ ...entry, problem: entry.problem === true || PROBLEM_CATEGORIES.has(entry.category) });
     }
     return merged.concat(desktopEntries.slice(next));
 };
@@ -844,14 +845,30 @@ const renderEntry = (entry) => {
     return `[${time}]${date} [${entry.category}] ${entry.message}${repeat}${detail}`;
 };
 
-// The most the Logging file may hold. It is read whole by whoever diagnoses the
-// report, often a model with a 1M-token window that also has to read the code:
-// 1 MB of log is about a third of that, leaving the rest for the fix. Characters,
-// not bytes; the file is almost entirely ASCII.
-export const LOGGING_FILE_MAX_CHARS = 1024 * 1024;
-// Room kept for the note that says entries were left out, which is only known
-// once the trimming is done.
+// How big the Logging file may get. It is read whole by whoever diagnoses the
+// report, often a model with a 1M-token window that also has to read the code.
+//
+// The header and the log itself get 1 MB — about a third of that window,
+// leaving the rest for the fix. The reported problem comes on top of that and
+// is not cut: it is what the player pressed the button about, and a normal one
+// is a few kilobytes. Only if it would take the whole file past 2 MB is it cut,
+// in the middle, keeping its start and end. Characters, not bytes; the file is
+// almost entirely ASCII.
+const LOG_SECTION_MAX_CHARS = 1024 * 1024;
+const LOGGING_FILE_MAX_CHARS = 2 * 1024 * 1024;
+// Room kept for the notes that say something was left out or cut, which are only
+// known once the trimming is done.
 const FILE_NOTE_RESERVE_CHARS = 200;
+
+// A reported problem cut down to `allowed` characters: its start and its end,
+// which are where a raw model response shows what it was and where it broke.
+const cutReportedProblem = (text, allowed) => {
+    const marker = (cut) => `\n[… ${cut} characters of the reported problem cut here to keep this file within 2 MB …]\n`;
+    const room = Math.max(0, allowed - marker(text.length).length);
+    const head = Math.ceil(room * 0.6);
+    const tail = room - head;
+    return `${text.slice(0, head)}${marker(text.length - room)}${text.slice(text.length - tail)}`;
+};
 
 // The Logging file in parts: header lines, the reported problem, and the entries
 // it has room for, oldest first. One composition behind both the file and View
@@ -903,23 +920,29 @@ const composeLoggingFile = ({ incident, desktop } = {}) => {
     const logEntries = mergeWithDesktop(entries, desktop);
     const logLines = logEntries.map(renderEntry);
 
-    // The file's own ceiling, over and above the buffer's: header, reported
-    // problem and every entry together. The oldest entries go first, for the
-    // same reason as in trimToBudget. The reported problem is never cut — it is
-    // what the player pressed the button about.
-    let total = [...header, ...incidentBlock, "-- Log (oldest first) --", ...FILE_FOOTER].join("\n").length
+    // The log's own ceiling in the file, over and above the buffer's: header
+    // and every entry, not counting the reported problem. The oldest entries go
+    // first, for the same reason as in trimToBudget.
+    let logTotal = [...header, "-- Log (oldest first) --", ...FILE_FOOTER].join("\n").length
         + FILE_NOTE_RESERVE_CHARS
         + logLines.reduce((sum, line) => sum + line.length + 1, 0);
     let leftOut = 0;
-    while (leftOut < logLines.length && total > LOGGING_FILE_MAX_CHARS) {
-        total -= logLines[leftOut].length + 1;
+    while (leftOut < logLines.length && logTotal > LOG_SECTION_MAX_CHARS) {
+        logTotal -= logLines[leftOut].length + 1;
         leftOut += 1;
     }
     if (leftOut) {
-        header.push(`NOTE: ${leftOut} older ${leftOut === 1 ? "entry was" : "entries were"} left out to keep this file within 1 MB.`);
+        header.push(`NOTE: ${leftOut} older ${leftOut === 1 ? "entry was" : "entries were"} left out to keep this log within 1 MB.`);
     }
 
-    return { header, incidentBlock, entries: logEntries.slice(leftOut), lines: logLines.slice(leftOut) };
+    // Then the reported problem on top, cut only past the whole file's ceiling.
+    const incidentText = incidentBlock.join("\n");
+    const incidentRoom = LOGGING_FILE_MAX_CHARS - logTotal - FILE_NOTE_RESERVE_CHARS;
+    const reportedProblem = incidentText.length > incidentRoom
+        ? [cutReportedProblem(incidentText, incidentRoom)]
+        : incidentBlock;
+
+    return { header, incidentBlock: reportedProblem, entries: logEntries.slice(leftOut), lines: logLines.slice(leftOut) };
 };
 
 const FILE_FOOTER = ["", "-- End of log --"];

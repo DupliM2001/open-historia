@@ -5,6 +5,7 @@ import {
     installDebugLogCapture,
     logDebugEvent,
     setDebugLogContext,
+    withConsoleCaptureMuted,
 } from "./runtime/debugLog.js";
 import App from "./App.jsx";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -22,7 +23,13 @@ const registerServiceWorker = () => {
 
 const mount = () => {
     configureMapRuntime();
-    createRoot(document.getElementById("root")).render(
+    createRoot(document.getElementById("root"), {
+        // React console.errors every error a boundary catches, before the
+        // boundary's componentDidCatch runs. Still printed for a developer, but
+        // kept out of the diagnostics log: ErrorBoundary.jsx records the crash
+        // itself, and without this each one would read as two.
+        onCaughtError: (error) => withConsoleCaptureMuted(() => console.error(error)),
+    }).render(
         <App />,
     );
     // Live-translates the UI when a non-English language is set in Settings.

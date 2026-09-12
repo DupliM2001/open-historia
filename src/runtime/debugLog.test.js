@@ -732,9 +732,9 @@ test("D7 the player's home folder becomes ~ on Windows, macOS and Linux", () => 
     assert.match(report, /~\/\.config\/open-historia/);
 });
 
-test("D8 the whole file stays within 1 MB, dropping the oldest entries and saying how many", () => {
+test("D8 the log stays within 1 MB, dropping the oldest entries and saying how many; the reported problem comes on top", () => {
     reset();
-    const FILE_LIMIT = 1024 * 1024;
+    const LOG_LIMIT = 1024 * 1024;
     const report = withClock(() => {
         setDebugLogVerbose(true);
         // A full detailed buffer, then a Desktop log and a big reported problem
@@ -747,14 +747,49 @@ test("D8 the whole file stays within 1 MB, dropping the oldest entries and sayin
             incident: fallbackIncident("r".repeat(100_000)),
         });
     });
-    assert.ok(report.length <= FILE_LIMIT, `file was ${report.length} chars`);
+    const withoutProblem = report.replace("r".repeat(100_000), "");
+    assert.ok(withoutProblem.length <= LOG_LIMIT, `everything but the reported problem was ${withoutProblem.length} chars`);
+    assert.ok(report.length > LOG_LIMIT, "the reported problem is not squeezed into the log's 1 MB");
     assert.match(report, /desktop 149\b/, "the newest entry is kept");
     assert.ok(report.includes("r".repeat(100_000)), "the reported problem is kept whole");
     const kept = getDebugLogEntries().map((entry) => entry.message).filter((message) => report.includes(`] ${message}\n`));
     assert.ok(kept.length < getDebugLogEntries().length, "some page entries had to go");
     assert.equal(kept.includes(getDebugLogEntries()[0].message), false, "the oldest go first");
     assert.equal(kept.includes(getDebugLogEntries().at(-1).message), true);
-    assert.match(report, /NOTE: \d+ older entries were left out to keep this file within 1 MB/);
+    assert.match(report, /NOTE: \d+ older entries were left out to keep this log within 1 MB/);
+});
+
+test("D15 a reported problem over 1 MB is kept whole while the file stays within 2 MB", () => {
+    reset();
+    logDebugEvent("turn", "Jump started");
+    const raw = `{"events": [${"q".repeat(1_500_000)}`;
+    const report = buildDebugLogReport({ incident: fallbackIncident(raw) });
+    assert.ok(report.includes(raw), "nothing of the problem is cut");
+    assert.ok(report.length <= 2 * 1024 * 1024, `file was ${report.length} chars`);
+    assert.match(report, /Jump started/);
+});
+
+test("D16 past 2 MB the reported problem is cut in the middle, keeping its start and end, and says so", () => {
+    reset();
+    logDebugEvent("turn", "Jump started");
+    const raw = `START${"q".repeat(3_000_000)}END`;
+    const report = buildDebugLogReport({ incident: fallbackIncident(raw) });
+    assert.ok(report.length <= 2 * 1024 * 1024, `file was ${report.length} chars`);
+    assert.match(report, /Raw model response: STARTq/);
+    assert.match(report, /qEND/);
+    assert.match(report, /\[… \d+ characters of the reported problem cut here to keep this file within 2 MB …\]/);
+    assert.match(report, /Jump started/, "the log is kept");
+});
+
+test("D14 an entry logged as a problem shows under problems only, whatever its category", () => {
+    reset();
+    logDebugEvent("ai", "Task \"world-simulation\" failed: timed out", undefined, { problem: true });
+    logDebugEvent("ai", "Task \"world-simulation\" started.");
+    const shown = getLoggingFileEntries({});
+    assert.deepEqual(shown.map((entry) => [entry.message.slice(0, 30), entry.problem]), [
+        ["Task \"world-simulation\" starte", false],
+        ["Task \"world-simulation\" failed", true],
+    ]);
 });
 
 test("D9 the header says whether the Desktop log was included, unavailable or absent", () => {

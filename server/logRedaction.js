@@ -43,7 +43,9 @@ const HOME_FOLDER_PATTERNS = [
     [/(^|[^\w.~])\/(?:Users|home)\/[^/"'\n\r]+?(?=\/|["'\n\r]|$)/g, "$1~"],
 ];
 
-const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A literal string as a pattern. Exported for the page's literal pass over the
+// keys this device has stored (debugLog.js).
+export const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Every spelling a literal home folder can take in a log: as written, with its
 // backslashes doubled by JSON, and with forward slashes (file:// URLs).

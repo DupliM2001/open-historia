@@ -321,15 +321,15 @@ On desktop, the app's Electron process and its local server see things the page 
 
 Every way out goes through `buildLoggingFile({ incident })`: Settings' Copy and Save, View log, and every failure button.
 
-* **Span.** Desktop entries from the page log's oldest remaining entry (`getLoggingFileSpanStart`) until now. The page log survives reloads and restarts, so a launch that failed between two good ones — written only to the Desktop log, because the page never loaded — lands in the file. That is what makes the "could not start" dialog's "the full error is in the diagnostics log under Settings" true.
+* **Span.** Desktop entries from the page log's oldest remaining entry (else this page's start) until now. The page log survives reloads and restarts, so a launch that failed between two good ones — written only to the Desktop log, because the page never loaded — lands in the file. That is what makes the "could not start" dialog's "the full error is in the diagnostics log under Settings" true.
 * **Sources.** Only the Electron process's (`main`, shown as `[desktop app]`) and the server's (`server`) entries. Older builds also had the page copy its entries and whole AI prompts into the Desktop log; those are never read back.
 * **Each desktop entry** is trimmed to the same per-entry limit as a page entry in the current mode, folded when repeated exactly as page repeats are, and redacted with the full page redactor — including this device's stored keys, which the server and the Electron process cannot see. This is the choke point for everything that leaves the machine.
-* **Cap.** The whole file — header, reported problem and entries — is at most **1 MB** (`LOGGING_FILE_MAX_CHARS`), about a third of a 1M-token context window, leaving the rest for reading the code. Past it, the oldest entries are left out first and the header says how many. The reported problem is never cut.
+* **Size.** The header and the log get **1 MB** (`LOG_SECTION_MAX_CHARS`), about a third of a 1M-token context window, leaving the rest for reading the code; past it, the oldest entries are left out first and the header says how many. The reported problem comes **on top** and is not cut — it is what the player pressed the button about, and a normal one is a few kilobytes — unless it would take the whole file past **2 MB** (`LOGGING_FILE_MAX_CHARS`). Then it is cut in the middle, keeping its start and end (where a raw model response shows what it was and where it broke), with a line saying how much was cut.
 * **Header.** States the Desktop log's status: `included (N entries …)`, `unavailable` (the request failed or timed out — the file is still made), or `none on this platform` (web and Android, whose in-browser API answers `/api/log` with a 404).
 * **Fetching** (`fetchDesktopLog`) waits at most 2 s, so a dead server never holds the save and the save or copy still counts as the player's click.
 * **Phones and LAN browsers** are served their page by the host, so the read reaches the host's Desktop log with no extra plumbing, and their file carries the host's errors.
 
-**View log** (Settings → Diagnostics, `DiagnosticsLogViewer` in `settings.jsx`) lists `getLoggingFileEntries({ desktop })`: the same entries the file holds, newest first, each with `problem` for the problems-only filter (page `error`/`warn`/`crash` entries, desktop `error`/`warn` levels). It replaced the Cheats panel's old "Diagnostics Log" tool, which read only the Desktop log.
+**View log** (Settings → Diagnostics, `DiagnosticsLogViewer` in `settings.jsx`) lists `getLoggingFileEntries({ desktop })`: the same entries the file holds, newest first, each with `problem` for the problems-only filter (page `error`/`warn`/`crash` entries, any page entry logged with `{ problem: true }` — a failed AI task — and desktop `error`/`warn` levels). It replaced the Cheats panel's old "Diagnostics Log" tool, which read only the Desktop log.
 
 ### Two settings, both persisted
 
@@ -393,17 +393,16 @@ localStorage is a ~5 MB budget per origin, shared with the translator cache and 
 | Export | Purpose |
 |---|---|
 | `installDebugLogCapture()` | Once, at boot (`src/main.jsx`), before anything else runs. Restores the previous session (unless logging is off), wraps the console, binds the global error hooks |
-| `logDebugEvent(category, message, detail?, { verbose }?)` | The only way in. `detail` is flattened (Errors keep name + message + stack frames; objects are JSON; circular does not throw) and truncated. `verbose: true` marks an entry as detailed-mode-only |
-| `withConsoleCaptureMuted(run)` | Runs `run` with the console capture off, for a line already logged properly |
+| `logDebugEvent(category, message, detail?, { verbose, problem }?)` | The only way in. `detail` is flattened (Errors keep name + message + stack frames; objects are JSON; circular does not throw) and truncated. `verbose: true` marks an entry as detailed-mode-only; `problem: true` keeps it under View log's "problems only" whatever its category |
+| `withConsoleCaptureMuted(run)` | Runs `run` with the console capture off, for a line already logged properly — the error boundary's own console line, and React's report of every caught error (`onCaughtError` in `src/main.jsx`), so a render crash is one entry |
 | `isDebugLogEnabled()` / `setDebugLogEnabled(bool)` | The on/off switch. Turning it off clears the buffer, the stored copy, and (on the host) the Desktop log |
 | `isDebugLogVerbose()` / `setDebugLogVerbose(bool)` | Detailed mode |
 | `getDebugLogBytes()` / `getDebugLogLimitBytes()` / `getDebugLogDroppedCount()` / `formatLogSize(chars)` | Size reporting for the settings panel and the report header. `formatLogSize` renders anything under a kilobyte as `<1 KB`, never `0 KB` — beside a live entry count that reads like a broken counter |
 | `setDebugLogContext(patch)` | Merges campaign/build context for the report header. Redacted like everything else |
 | `buildLoggingFile({ incident }?)` | **The Logging file**: fetches the Desktop log and builds the report. What every button uses |
 | `fetchDesktopLog()` | `{ status: "included" \| "unavailable" \| "none", entries }` from `GET /api/log?since=<span start>`. Never throws |
-| `buildDebugLogReport({ incident, desktop }?)` | The plain-text file from what is passed in — header, reported problem, entries oldest-first, capped at 1 MB. Text, not JSON: it is going into a Discord message or a GitHub issue |
+| `buildDebugLogReport({ incident, desktop }?)` | The plain-text file from what is passed in — header, reported problem, entries oldest-first, sized as above. Text, not JSON: it is going into a Discord message or a GitHub issue |
 | `getLoggingFileEntries({ desktop })` | The file's entries, newest first, with `problem` — for View log |
-| `getLoggingFileSpanStart()` | Where the file begins: the oldest page entry, else this page's start |
 | `debugLogFilename(tag?)` | `open-historia-log-<ISO stamp>[-tag].txt` |
 | `clearDebugLog({ silent })` | Empties it. The player path leaves a "cleared" note so a gap never reads as lost entries; `silent` is for the tests |
 | `flushDebugLog()` | Persist now, skipping the debounce |
@@ -424,7 +423,7 @@ Always recorded:
 | `src/Game/GameUI/actions.jsx` | `action` | Orders queued (manual and from suggestions) and removed |
 | `src/runtime/mapSettings.js` | `setting` | Every map/AI/experimental toggle, by its UI label |
 | `src/Game/AI/providerConfig.js` | `setting` | Provider switches, reasoning toggle; syncs provider + model into the header |
-| `src/Game/AI/gameplay.js` | `ai` | **Every AI task that failed**, with its reason and the error (and whether it was aborted) |
+| `src/Game/AI/gameplay.js` | `ai` | **Every AI task that failed**, with its reason and the error (and whether it was aborted), marked as a problem |
 | `src/runtime/ErrorBoundary.jsx` | `crash` | Render crashes with the component stack, then flushes |
 | `window` / `console` | `crash`, `error`, `warn` | Uncaught errors, unhandled rejections, and everything the game already logged |
 
