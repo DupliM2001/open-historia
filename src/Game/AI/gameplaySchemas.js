@@ -3015,9 +3015,21 @@ const normalizeProjectsShape = (value) => {
   };
 };
 
+// The stat sheet's version field is the runtime's to fill ("the runtime fills
+// this when omitted", says its description) — so a missing, null or zero value
+// from the model is filled here, before the schema sees it, rather than
+// costing the sheet its attempt.
+const normalizeCountryStatSheetShape = (value) => {
+  if (!isPlainRecord(value)) return value;
+  const version = Number(value.statsSchemaVersion);
+  if (Number.isInteger(version) && version >= 1) return value;
+  return { ...value, statsSchemaVersion: 1 };
+};
+
 export const normalizeGameplayPayload = (taskKey, value) => {
   if (taskKey === "idleDiplomacy") return normalizeIdleDiplomacyShape(value);
   if (taskKey === "projects") return normalizeProjectsShape(value);
+  if (taskKey === "countryStatSheet") return normalizeCountryStatSheetShape(value);
   if (taskKey !== "jumpForward" && taskKey !== "autoJumpForward") return value;
   if (!isPlainRecord(value)) return value;
 
