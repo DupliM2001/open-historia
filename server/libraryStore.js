@@ -3395,10 +3395,10 @@ const uniqueGameName = (requested) => {
 
   if (!taken.has(name)) return name;
 
-  let candidate = `${name} (imported)`;
+  let candidate = `${name} (Imported)`;
   let attempt = 2;
   while (taken.has(candidate)) {
-    candidate = `${name} (imported ${attempt})`;
+    candidate = `${name} (Imported ${attempt})`;
     attempt += 1;
   }
   return candidate;

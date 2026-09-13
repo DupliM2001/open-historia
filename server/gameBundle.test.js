@@ -145,7 +145,7 @@ test("everything a game holds survives the round trip, and the copy is a new, in
   // Round-tripping into the SAME library is a genuine collision: the original is
   // still sitting there. Two cards reading "Test Campaign" is the case the
   // suffix exists for.
-  assert.equal(result.name, "Test Campaign (imported)");
+  assert.equal(result.name, "Test Campaign (Imported)");
   assert.equal(result.data.game.country, "Testland");
   assert.equal(result.data.game.difficulty, "hard");
   assert.equal(result.data.game.round, 10);
@@ -187,8 +187,8 @@ test("a name already in the library gains (imported); a free one does not", () =
   `);
 
   // The source game is still in the library, so even the first import collides.
-  assert.equal(result.first, "Test Campaign (imported)");
-  assert.equal(result.second, "Test Campaign (imported 2)", "and the suffix keeps counting");
+  assert.equal(result.first, "Test Campaign (Imported)");
+  assert.equal(result.second, "Test Campaign (Imported 2)", "and the suffix keeps counting");
   assert.equal(result.renamed, "Something Else", "a name nobody else holds is left alone");
 });
 

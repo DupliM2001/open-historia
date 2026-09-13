@@ -2221,10 +2221,21 @@ const LibraryTopBar = () => {
       .sort((a, b) => String(b.lastPlayedAt ?? "").localeCompare(String(a.lastPlayedAt ?? ""))),
     [games],
   );
-  const lastPlayedGames = useMemo(
-    () => [...visibleGames].sort((a, b) => String(b.lastPlayedAt ?? "").localeCompare(String(a.lastPlayedAt ?? ""))),
-    [visibleGames],
-  );
+  // Sorting on lastPlayedAt alone sends a game that has never been played to the
+  // far right, behind every campaign the player has ever opened — which is where
+  // a game imported thirty seconds ago used to land, the one place nobody thinks
+  // to look for it. A game with no play history is ordered by when it ARRIVED
+  // instead, so an import turns up beside the current game rather than off the
+  // end of the shelf. The current game stays first: this row is where the player
+  // comes back to it, and nothing new should displace it.
+  const lastPlayedGames = useMemo(() => {
+    const recency = (game) => String(game.lastPlayedAt || game.createdAt || "");
+    return [...visibleGames].sort((a, b) => {
+      if (a.id === activeGameId) return -1;
+      if (b.id === activeGameId) return 1;
+      return recency(b).localeCompare(recency(a));
+    });
+  }, [visibleGames, activeGameId]);
   const mostPlayedGames = useMemo(
     () => [...visibleGames].sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0) || (b.round ?? 0) - (a.round ?? 0)),
     [visibleGames],
