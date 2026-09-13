@@ -232,11 +232,13 @@
        Scrolling still works; only the indicator is hidden. */
     scrollbar-width:none;-ms-overflow-style:none}
   .gtrack::-webkit-scrollbar{display:none}
-  .gcard{flex:0 0 min(38rem,78vw);position:relative;
+  .gcard{flex:0 0 auto;height:min(23.75rem,48.75vw);max-width:88vw;position:relative;
     border:1px solid var(--line2);border-radius:var(--radius);overflow:hidden;
     background:var(--marble);box-shadow:var(--shadow)}
-  .gcard img{width:100%;display:block;aspect-ratio:16/10;object-fit:cover;background:var(--parch2);
+  .gcard img{height:100%;width:auto;max-width:88vw;display:block;object-fit:cover;
+    aspect-ratio:16/10;background:var(--parch2);
     -webkit-user-drag:none;user-select:none}
+  .gcard img.loaded{aspect-ratio:auto}
   .gcard .shot-tag{position:absolute;right:0.625rem;bottom:0.625rem;z-index:1;pointer-events:none;
     font-family:var(--display);font-size:.62rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
     color:var(--sepia);background:rgba(17,17,19,.78);backdrop-filter:blur(0.25rem);
@@ -815,6 +817,14 @@
     measure();
     raf = requestAnimationFrame(tick);
   }
+  Array.prototype.forEach.call(track.querySelectorAll("img"), function(img){
+  if (img.complete && img.naturalWidth){ img.classList.add("loaded"); return; }
+    img.addEventListener("load", function(){
+      img.classList.add("loaded");
+      SEG = 0; measure();
+    }, { once:true });
+  });
+  SEG = 0; measure();
 
   var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
   var bodies = Array.prototype.slice.call(document.querySelectorAll(".tab-body"));
