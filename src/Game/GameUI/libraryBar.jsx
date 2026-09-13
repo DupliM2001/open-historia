@@ -2631,23 +2631,40 @@ const LibraryTopBar = () => {
               display: "grid",
               flexShrink: 0,
               gap: isMobile ? "0.4rem" : "0.9rem",
-              gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+              // Three columns keeps the tabs optically centred on a desktop. On a
+              // phone the tabs and the action buttons together are wider than the
+              // bar, so the actions column collapses to nothing and its buttons
+              // spill left across the Community tab. Two columns, and the logo —
+              // decorative, and its wordmark is already hidden here — gives up its
+              // space.
+              gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : "minmax(0, 1fr) auto minmax(0, 1fr)",
               height: `${BAR_HEIGHT}px`,
               padding: isMobile ? "0 0.5rem" : "0 1rem",
             }}
           >
-            <div style={{ alignItems: "center", display: "flex", gap: "0.8rem", minWidth: 0 }}>
-              <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", flexShrink: 0, height: "2.65rem", justifyContent: "center", overflow: "hidden", width: "2.65rem" }}>
-                <img alt="Open Historia" src="/logo.png" style={{ height: "1.7rem", width: "1.7rem" }} />
-              </div>
-              {!isMobile && (
+            {!isMobile && (
+              <div style={{ alignItems: "center", display: "flex", gap: "0.8rem", minWidth: 0 }}>
+                <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", flexShrink: 0, height: "2.65rem", justifyContent: "center", overflow: "hidden", width: "2.65rem" }}>
+                  <img alt="Open Historia" src="/logo.png" style={{ height: "1.7rem", width: "1.7rem" }} />
+                </div>
                 <div style={{ color: "#fff", fontSize: "1.05rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
                   Open Historia
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            <div style={{ alignItems: "center", display: "flex", gap: "0.55rem", justifyContent: "center", justifySelf: "center" }}>
+            <div
+              style={{
+                alignItems: "center",
+                display: "flex",
+                gap: "0.55rem",
+                justifyContent: isMobile ? "flex-start" : "center",
+                justifySelf: isMobile ? "start" : "center",
+                minWidth: 0,
+                overflowX: "auto",
+                scrollbarWidth: "none",
+              }}
+            >
               {["games", "scenarios", "community"].map((tab) => (
                 <button
                   key={tab}
@@ -2657,7 +2674,7 @@ const LibraryTopBar = () => {
                     background: activeTab === tab ? "rgba(124,58,237,0.24)" : "rgba(255,255,255,0.05)",
                     borderColor: activeTab === tab ? "rgba(124,58,237,0.38)" : "rgba(255,255,255,0.08)",
                     minWidth: isMobile ? "0" : "6.6rem",
-                    padding: isMobile ? "0.55rem 0.7rem" : undefined,
+                    padding: isMobile ? "0.55rem 0.6rem" : undefined,
                   }}
                   type="button"
                 >
@@ -2666,19 +2683,34 @@ const LibraryTopBar = () => {
               ))}
             </div>
 
-            <div style={{ alignItems: "center", display: "flex", gap: "0.55rem", justifyContent: "flex-end" }}>
+            <div style={{ alignItems: "center", display: "flex", flexShrink: 0, gap: "0.55rem", justifyContent: "flex-end" }}>
               {activeTab !== "community" && (
-                <button onClick={() => refreshLibraryCatalog({ force: true }).catch(() => {})} style={actionButtonStyle} type="button">
+                <button
+                  onClick={() => refreshLibraryCatalog({ force: true }).catch(() => {})}
+                  style={{ ...actionButtonStyle, flexShrink: 0, padding: isMobile ? "0 0.7rem" : undefined }}
+                  title={isMobile ? "Refresh" : undefined}
+                  type="button"
+                >
                   {isMobile ? "⟳" : "Refresh"}
                 </button>
               )}
               {activeTab === "scenarios" && (
-                <button onClick={() => importScenarioInputRef.current?.click()} style={actionButtonStyle} type="button">
+                <button
+                  onClick={() => importScenarioInputRef.current?.click()}
+                  style={{ ...actionButtonStyle, flexShrink: 0, padding: isMobile ? "0 0.7rem" : undefined }}
+                  title={isMobile ? "Import a scenario" : undefined}
+                  type="button"
+                >
                   {isMobile ? "⬆" : "Import JSON"}
                 </button>
               )}
               {activeTab === "games" && (
-                <button onClick={() => importGameInputRef.current?.click()} style={actionButtonStyle} type="button">
+                <button
+                  onClick={() => importGameInputRef.current?.click()}
+                  style={{ ...actionButtonStyle, flexShrink: 0, padding: isMobile ? "0 0.7rem" : undefined }}
+                  title={isMobile ? "Import a game" : undefined}
+                  type="button"
+                >
                   {isMobile ? "⬆" : "Import game"}
                 </button>
               )}
