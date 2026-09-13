@@ -30,6 +30,16 @@ _Avoid_: Effort, item, card
 An ongoing situation no single polity controls, with unresolved stakes, such as a war, a crisis, a rivalry or unrest. Hidden from the player. A Project can cause or feed a Storyline, but the same thing is never both.
 _Avoid_: Process, thread, arc
 
+### Library
+
+**Scenario**:
+An authored starting position — the map, the polities and the opening state — that a Game is started from. Never written to during play, so one Scenario can seed many Games.
+_Avoid_: Preset, map, mod
+
+**Game**:
+One playthrough of a Scenario: everything the player has done and everything the world has become since it started. The thing a player names, continues, archives and exports.
+_Avoid_: Save, save game, campaign, session (as the term for the record)
+
 ### Events
 
 **Canonical event**:
