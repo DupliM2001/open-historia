@@ -1,4 +1,4 @@
-/*! Open Historia — export and import a Game as one zip, AGPL-3.0-or-later (see LICENSE). */
+/*! Open Historia — export and import a Game as one zip © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // One Game as a single .zip: what goes in it, and how to read one back.
 //
 // Assembled in the CLIENT, not on the server, so the web build — which has no
@@ -7,7 +7,6 @@
 // install. Used by the Games tab (Export / Import game) and by Settings →
 // Diagnostics (Attach game).
 //
-// The design and the measurements behind it: .scratch/save-export-zip/spec.md.
 import { exportGameBundle, exportScenarioBundle, readGameSnapshotsText } from "./library.js";
 import { buildSettingsReport } from "./debugLog.js";
 import { zipBundle, unzipBundle } from "./bundleZip.js";
@@ -65,7 +64,12 @@ const gameZipNeedsScenario = (scenarioRef) =>
 const scenarioFitsInZip = (scenarioRef) =>
   !(Number(scenarioRef?.scenarioBytes) > MAX_EMBEDDED_SCENARIO_BYTES);
 
-export const buildGameZipBlob = async (gameId) => {
+// `confirmCarryingScenario` is asked BEFORE the scenario is fetched, because the
+// fetch, the parse and the DEFLATE are the whole cost — a player who says no to a
+// big file should not have paid for it first. It is handed the map's name and what
+// it weighs as a bundle, both of which the game bundle already knows. Returning
+// false aborts and this resolves to null.
+export const buildGameZipBlob = async (gameId, { confirmCarryingScenario } = {}) => {
   const bundle = await exportGameBundle(gameId);
   const scenarioRef = bundle.scenarioRef ?? {};
   const files = {};
@@ -86,6 +90,13 @@ export const buildGameZipBlob = async (gameId) => {
       name: scenarioRef.scenarioName || scenarioRef.scenarioId,
     };
   } else if (gameZipNeedsScenario(scenarioRef)) {
+    if (confirmCarryingScenario) {
+      const carryOn = await confirmCarryingScenario({
+        bytes: Number(scenarioRef.scenarioBytes) || 0,
+        name: scenarioRef.scenarioName || scenarioRef.scenarioId,
+      });
+      if (!carryOn) return null;
+    }
     const scenarioBundle = await exportScenarioBundle(scenarioRef.scenarioId);
     // The same split the scenario export does: a custom basemap rides as real
     // bytes rather than a base64 data URL ~33% larger.
@@ -96,10 +107,10 @@ export const buildGameZipBlob = async (gameId) => {
       if (split.previewBytes) files[split.previewName] = split.previewBytes;
     }
     files[GAME_ZIP_SCENARIO] = JSON.stringify(scenarioBundle);
-    bundle.scenarioRef = { ...scenarioRef, embedded: true };
     carriesScenario = true;
   }
 
+  bundle.scenarioRef = { ...scenarioRef, embedded: carriesScenario };
   files[GAME_ZIP_BUNDLE] = JSON.stringify(bundle);
   if (snapshotsText && snapshotsText.trim() && snapshotsText.trim() !== "[]") {
     files[GAME_ZIP_SNAPSHOTS] = snapshotsText;

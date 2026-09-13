@@ -653,7 +653,7 @@ app.get("/api/games/:gameId", (req, res) => {
 });
 
 // Export one game as a bundle, and import one back. The zip around it is built
-// in the client (src/Game/GameUI/libraryBar.jsx) so the web build, which has no
+// in the client (src/runtime/gameZip.js) so the web build, which has no
 // server at all, gets the same file from the same code.
 app.get("/api/games/:gameId/export", (req, res) => {
   try {

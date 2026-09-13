@@ -1412,7 +1412,7 @@ const DiagnosticsPanel = () => {
         <button
         type="button"
         onClick={handleAttachGame}
-        disabled={attachState === "working"}
+        disabled={attachState.kind === "working"}
         style={{ ...diagnosticsButton, width: "100%", marginBottom: "0.5rem" }}
         title={attachGameTitle(enabled, activeGameName)}
         >

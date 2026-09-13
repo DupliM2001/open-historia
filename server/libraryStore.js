@@ -3308,7 +3308,7 @@ const updateScenarioFromBundle = (scenarioId, bundle) => {
 // it: a Game is a POINTER, not a world. Its map lives in a scenario folder this
 // bundle does not carry, so the bundle records where the map came from
 // (scenarioRef) and the caller decides whether to pack the scenario alongside it
-// — see the zip built in src/Game/GameUI/libraryBar.jsx.
+// — see the zip built in src/runtime/gameZip.js.
 //
 // Restore points are deliberately NOT in `data`. They are ~40x the rest of a
 // Game, and they travel as a zip entry of their own that the client moves as
@@ -3389,12 +3389,17 @@ const exportGameBundle = (gameId) => {
     exportedAt: new Date().toISOString(),
     game: {
       accentColor: game.accentColor,
+      // When the campaign began and when it was last written, as the sender's
+      // record had them. An import that minted its own would tell the receiver the
+      // campaign started the moment it arrived.
+      createdAt: game.createdAt,
       description: game.description,
       eyebrow: game.eyebrow,
       heroSubtitle: game.heroSubtitle,
       heroTitle: game.heroTitle,
       name: game.name,
       subtitle: game.subtitle,
+      updatedAt: game.updatedAt,
     },
     schema: GAME_BUNDLE_SCHEMA,
     // Enough for the receiving install to decide whether it can open this game,
@@ -3452,7 +3457,7 @@ const uniqueGameName = (requested) => {
 // than treating as an error. Nor does it activate: switching the current game
 // would yank a player out of a campaign mid-turn, and the card has a Play button
 // for when they are ready.
-const importGameBundle = (bundle, { setActive = false } = {}) => {
+const importGameBundle = (bundle) => {
   ensureGameStore();
 
   if (!bundle || typeof bundle !== "object") {
@@ -3473,7 +3478,10 @@ const importGameBundle = (bundle, { setActive = false } = {}) => {
   ensureDirectory(gameDir);
   ensureDirectory(path.join(gameDir, "storage"));
 
-  const createdAt = new Date().toISOString();
+  const arrivedAt = new Date().toISOString();
+  // The sender's dates where it sent them, so the card reads as the campaign it
+  // is rather than one begun on import. importedAt below is the arrival.
+  const createdAt = String(meta.createdAt ?? "").trim() || arrivedAt;
 
   writeJsonFile(getGameMetaPath(gameId), {
     accentColor: String(meta.accentColor ?? "").trim() || DEFAULT_GAME_META.accentColor,
@@ -3489,11 +3497,11 @@ const importGameBundle = (bundle, { setActive = false } = {}) => {
     // Whether the sender believed the map could still be fetched. Read when the
     // player presses Play on a game whose scenario is not here.
     importedScenarioOrigin: normalizeHubOrigin(ref.hubOrigin),
-    importedAt: createdAt,
+    importedAt: arrivedAt,
     name: uniqueGameName(meta.name),
     scenarioId,
     subtitle: String(meta.subtitle ?? "").trim() || DEFAULT_GAME_META.subtitle,
-    updatedAt: createdAt,
+    updatedAt: String(meta.updatedAt ?? "").trim() || arrivedAt,
   });
 
   for (const assetKey of GAME_BUNDLE_DATA_KEYS) {
@@ -3510,7 +3518,6 @@ const importGameBundle = (bundle, { setActive = false } = {}) => {
     (entry) => entry !== gameId,
   );
   manifest.order.unshift(gameId);
-  if (setActive) manifest.activeGameId = gameId;
   saveGameManifest(manifest);
 
   return getGameDetails(gameId);

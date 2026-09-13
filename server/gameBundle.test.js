@@ -1,3 +1,4 @@
+/*! Open Historia — game export and import tests © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // Run: node --test server/gameBundle.test.js
 //
 // Exporting one Game as a portable record and importing it back. What has to
@@ -396,4 +397,27 @@ test("the bundle reports what the map would weigh, and only when that matters", 
     ${report(`store.exportGameBundle("test-campaign").scenarioRef`)}
   `);
   assert.equal(gone.scenarioBytes, 0, "a map this install does not have cannot be weighed or carried");
+});
+
+test("the campaign's own dates travel, and arrival is recorded separately", () => {
+  // createdAt is when the campaign began. Minting a new one on import would tell
+  // the receiver it started the moment the file landed, which is the one thing
+  // they can already see. When it arrived is importedAt's job, not createdAt's.
+  const root = buildDataDir();
+  const result = runStore(root, `
+    const bundle = store.exportGameBundle("test-campaign");
+    const imported = store.importGameBundle(bundle);
+    const card = store.getGameCatalog().games.find((entry) => entry.id === imported.game.id);
+    ${report(`{
+      sentCreatedAt: bundle.game.createdAt,
+      sentUpdatedAt: bundle.game.updatedAt,
+      landedCreatedAt: card.createdAt,
+      landedImportedAt: card.importedAt,
+    }`)}
+  `);
+
+  assert.equal(result.sentCreatedAt, "2026-08-01T00:00:00.000Z", "the bundle carries the sender's createdAt");
+  assert.ok(result.sentUpdatedAt, "and its updatedAt");
+  assert.equal(result.landedCreatedAt, result.sentCreatedAt, "which the import keeps rather than minting its own");
+  assert.ok(result.landedImportedAt > result.sentCreatedAt, "arrival is recorded separately, and is later");
 });

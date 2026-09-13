@@ -524,7 +524,11 @@ const settingsLines = (settings) => {
 // settings.txt that rides inside an exported Game. Same readers and the same
 // redaction — a key is still only "set"/"not set", an endpoint still only a host
 // — so a Game that reaches a maintainer without a log still says what it was
-// played with. Read, never applied: see .scratch/save-export-zip/spec.md §7.
+// played with. It is a RECORD, never applied: importing a game changes nobody's
+// settings, because these are device-wide and a stranger's are either
+// meaningless here or actively wrong (the legacy renderer is a workaround for
+// that player's GPU). The settings that should follow a game already do — they
+// live in its game.json.
 export const buildSettingsReport = async () => {
     const lines = settingsLines(await readSettingsSnapshot());
     if (!lines.length) return "";

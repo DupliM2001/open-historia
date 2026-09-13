@@ -455,7 +455,7 @@ export const updateScenarioFromBundle = async (scenarioId, bundle) => {
 };
 
 // One Game as a portable record. The zip that carries it is assembled by the
-// caller (libraryBar.jsx) so the same code runs on desktop and on the web build.
+// caller (src/runtime/gameZip.js) so the same code runs on desktop and on the web build.
 export const exportGameBundle = async (gameId) =>
   requestJson(`${GAMES_API_ROOT}/${encodeURIComponent(gameId)}/export`);
 

@@ -1,3 +1,4 @@
+/*! Open Historia — game bundle parity and platform guards © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // Run: node --test src/runtime/gameBundleParity.test.js
 //
 // A Game exported in the browser has to import on a desktop install and back —
@@ -105,12 +106,60 @@ test("saving the log with the game is hidden where no file can be saved", () => 
   assert.ok(branch.includes("handleAttachGame"), "and it is that branch's button that runs it");
 });
 
-test("the zip is never handed to libraryBar's same-task revoke", () => {
-  // Firefox cancels a download whose object URL is revoked in the same task as
-  // the click, which libraryBar's older saveBlobToDisk does. gameZip.js has the
-  // deferred revoke; a game export must go through that one.
+test("every game zip is saved through the deferred-revoke helper", () => {
+  // Firefox cancels a download whose object URL is revoked in the same task as the
+  // click, which libraryBar's older saveBlobToDisk does. An earlier version of this
+  // test asserted only that gameZip.js CONTAINS a deferred revoke — which it did,
+  // while the Games tab went on calling the old helper, so the guard passed and the
+  // download stayed broken. Assert the call sites instead: what matters is which
+  // function the blob is handed to, not that a good one exists somewhere.
   const gameZip = readSource("runtime", "gameZip.js");
   assert.match(gameZip, /setTimeout\(\(\) => URL\.revokeObjectURL/, "gameZip.js defers the revoke");
+
+  for (const [where, ...parts] of [
+    ["libraryBar.jsx", "Game", "GameUI", "libraryBar.jsx"],
+    ["settings.jsx", "Game", "GameUI", "settings.jsx"],
+  ]) {
+    const text = readSource(...parts);
+    for (const match of text.matchAll(/(\w+)\(blob, `\$\{[^}]+\}-game\.zip`\)/g)) {
+      assert.equal(
+        match[1],
+        "saveGameZipToDisk",
+        `${where} saves a game zip with ${match[1]}(), which must be saveGameZipToDisk`,
+      );
+    }
+  }
+});
+
+test("Export is hidden where no file can be saved", () => {
+  // The Diagnostics half was gated from the start; the card's menu row was not, so
+  // Android offered an Export that cannot write a file. Both halves are checked
+  // now — a gate on one of two buttons is the shape of the bug, not the fix.
+  const bar = readSource("Game", "GameUI", "libraryBar.jsx");
+  assert.match(bar, /isNativeApp/, "libraryBar consults the native-app gate");
+  assert.match(
+    bar,
+    /isNativeApp\(\)\s*\?\s*\[\]\s*:\s*\[\[/,
+    "the Export row is dropped from the card menu on a native build",
+  );
+});
+
+test("settings.txt can never carry a key or a whole endpoint", () => {
+  // The block that rides inside an exported game is the Logging file's own, and it
+  // is redacted at the source: the key only ever as set/not set, the endpoint only
+  // by host. This pins those two, because settings.txt travels to strangers.
+  const settingsLog = readSource("runtime", "settingsLog.js");
+  assert.match(settingsLog, /field\("apiKey"\) \? "set" : "not set"/, "the key is a yes/no, never a value");
+  assert.match(settingsLog, /endpointHostForLog\(field\("endpoint"\)\)/, "an endpoint is reduced to its host");
+  assert.equal(
+    /\["']Endpoint["'], *field\(["']endpoint["']\)\]/.test(settingsLog),
+    false,
+    "no raw endpoint is ever put in the block",
+  );
+
+  const debugLog = readSource("runtime", "debugLog.js");
+  assert.match(debugLog, /export const buildSettingsReport/, "the report the zip carries is built here");
+  assert.match(debugLog, /settingsLines\(await readSettingsSnapshot\(\)\)/, "and it goes through the redacting builder");
 });
 
 test("a map too big to zip is refused before it is downloaded", () => {
@@ -125,4 +174,15 @@ test("a map too big to zip is refused before it is downloaded", () => {
   const fetchAt = gameZip.indexOf("await exportScenarioBundle(");
   assert.ok(check > 0 && fetchAt > 0, "both the check and the download are present");
   assert.ok(check < fetchAt, "the size is checked before the scenario is downloaded, not after");
+});
+
+test("both stores weigh a scenario the same way", () => {
+  // scenarioBundleBytes exists in both stores and both scale by the same base64
+  // factor. If one side changed it, the client would allow an embed the other
+  // would refuse, and the 32 MB ceiling would mean two different things.
+  const server = SERVER_STORE.match(/Math\.round\(total \* ([\d.]+)\)/);
+  assert.ok(server, "the server still scales a scenario folder by a base64 factor");
+  const web = readSource("runtime", "web", "libraryStore.js").match(/byteLength \* ([\d.]+)\)/);
+  assert.ok(web, "the web store still scales its assets by one too");
+  assert.equal(web[1], server[1], "the two factors must agree or the ceiling means two things");
 });

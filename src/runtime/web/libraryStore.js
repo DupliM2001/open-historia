@@ -1434,12 +1434,15 @@ const exportGameBundle = async (id) => {
     exportedAt: nowIso(),
     game: {
       accentColor: game.accentColor,
+      // Server twin: the sender's dates travel with the record.
+      createdAt: meta.createdAt,
       description: game.description,
       eyebrow: game.eyebrow,
       heroSubtitle: game.heroSubtitle,
       heroTitle: game.heroTitle,
       name: game.name,
       subtitle: game.subtitle,
+      updatedAt: meta.updatedAt,
     },
     schema: GAME_BUNDLE_SCHEMA,
     scenarioRef: {
@@ -1502,7 +1505,10 @@ const importGameBundle = async (bundle) => {
     record.json[key] = cloneJson(value ?? JSON_ASSET_DEFAULTS[key] ?? {});
   }
 
-  const createdAt = nowIso();
+  const arrivedAt = nowIso();
+  // Server twin: the sender's dates travel, so an imported campaign does not
+  // report itself as having begun the moment it arrived. importedAt is arrival.
+  const createdAt = trimmed(metaIn.createdAt) || arrivedAt;
   record.meta = {
     accentColor: trimmed(metaIn.accentColor) || DEFAULT_GAME_META.accentColor,
     createdAt,
@@ -1513,11 +1519,11 @@ const importGameBundle = async (bundle) => {
     id,
     importedScenarioName: trimmed(ref.scenarioName) || null,
     importedScenarioOrigin: normalizeHubOrigin(ref.hubOrigin),
-    importedAt: createdAt,
+    importedAt: arrivedAt,
     name: await uniqueGameName(metaIn.name),
     scenarioId,
     subtitle: trimmed(metaIn.subtitle) || DEFAULT_GAME_META.subtitle,
-    updatedAt: createdAt,
+    updatedAt: trimmed(metaIn.updatedAt) || arrivedAt,
   };
 
   await putGame(record);

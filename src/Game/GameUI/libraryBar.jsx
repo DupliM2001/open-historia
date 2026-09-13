@@ -45,7 +45,8 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
-import { buildGameZipBlob, formatZipSize, readGameZip } from "../../runtime/gameZip.js";
+import { buildGameZipBlob, formatZipSize, readGameZip, saveGameZipToDisk } from "../../runtime/gameZip.js";
+import { isNativeApp } from "../../runtime/web/nativeBoot.js";
 
 const UNIT_TYPE_LABELS = {
   infantry: "Infantry",
@@ -264,6 +265,11 @@ const buildGameEditorState = (details) => {
   };
 };
 
+// Scenario exports and JSON bundles only. It revokes the object URL in the same
+// task as the click, which Firefox treats as a cancelled download — a latent bug
+// in those two paths, left alone here because fixing them is not this change's
+// business. Anything NEW that saves a file should use saveGameZipToDisk in
+// runtime/gameZip.js, which defers the revoke.
 const saveBlobToDisk = (blob, fileName) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -565,7 +571,12 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
   const cardMenuItems = [
     ["Edit", () => { setCardMenuOpen(false); onEdit(game.id); }, false],
     ["Clone", () => { setCardMenuOpen(false); onClone(game); }, false],
-    [exporting ? "Exporting…" : "Export", runExport, exporting],
+    // Android's WebView cannot save a file at all — its download listener hands
+    // every URL to the system browser, where a blob: URL means nothing (see
+    // saveDebugLog.js). The Diagnostics log copes by falling back to the
+    // clipboard; a multi-megabyte zip has nothing to fall back to, so the row is
+    // not offered rather than failing in silence. Same gate as Settings.
+    ...(isNativeApp() ? [] : [[exporting ? "Exporting…" : "Export", runExport, exporting]]),
   ];
 
   return (
@@ -686,7 +697,7 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
                       borderRadius: 12,
                       display: "flex",
                       flexDirection: "column",
-                      minWidth: "8rem",
+                      minWidth: "13rem",
                       overflow: "hidden",
                       position: "absolute",
                       right: 0,
@@ -694,6 +705,12 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
                       zIndex: 2,
                     }}
                   >
+                    {/* Not boilerplate: an exported game carries every diplomatic
+                        conversation, advisor exchange and event in the campaign,
+                        and some of that is fiction a player may not want in
+                        public. Saying so is what stops the careful half deciding
+                        not to share at all — the same reasoning as the Diagnostics
+                        warning in settings.jsx. */}
                     {cardMenuItems.map(([label, run, working]) => (
                       <button
                         key={label}
@@ -727,6 +744,19 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
                         {label}
                       </button>
                     ))}
+                    {!isNativeApp() && (
+                      <div
+                        style={{
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          color: "rgba(255,255,255,0.45)",
+                          fontSize: "0.68rem",
+                          lineHeight: 1.35,
+                          padding: "0.5rem 0.8rem 0.55rem",
+                        }}
+                      >
+                        An exported game carries its conversations, advisors and events — worth a look before posting it publicly.
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1602,7 +1632,21 @@ const LibraryTopBar = () => {
     setIsBusy(true);
 
     try {
-      const { blob, carriesScenario, oversizeScenario } = await buildGameZipBlob(game.id);
+      // The one case where the file can be big: nothing else can fetch this map,
+      // so it has to travel. Asked BEFORE the map is fetched rather than after the
+      // zip is built — a player who says no should not have waited for the work
+      // first. Refusing outright is not an option either: it would leave them with
+      // a game nobody else can ever open.
+      const result = await buildGameZipBlob(game.id, {
+        confirmCarryingScenario: ({ bytes, name }) =>
+          window.confirm(
+            `“${name}” isn't a scenario the other machine can download, so the map has to travel ` +
+            `inside this file — about ${formatZipSize(bytes)} before it is compressed.\n\nExport it?`,
+          ),
+      });
+      if (!result) return; // the player backed out
+
+      const { blob, oversizeScenario } = result;
       if (oversizeScenario) {
         // Saved anyway: a game without its map still opens for anyone who has the
         // map, and is still the thing a maintainer needs. Refusing would leave the
@@ -1612,19 +1656,10 @@ const LibraryTopBar = () => {
           `so this export carries everything except the map. Send the scenario separately from the Scenarios tab.`,
         );
       }
-      // The one case where the file can be big: nothing else could fetch this
-      // map, so it had to travel. Say the size before writing anything, and let
-      // the player back out — refusing outright would leave them with a game
-      // nobody else can ever open.
-      if (
-        carriesScenario &&
-        !window.confirm(
-          `“${game.scenarioName}” isn't a scenario the other machine can download, so the map travels inside this file — ${formatZipSize(blob.size)} in all.\n\nExport it?`,
-        )
-      ) {
-        return;
-      }
-      saveBlobToDisk(blob, `${game.id}-game.zip`);
+      // The deferred-revoke saver, NOT the saveBlobToDisk defined above: that one
+      // revokes the object URL in the same task as the click, which Firefox treats
+      // as a cancelled download.
+      saveGameZipToDisk(blob, `${game.id}-game.zip`);
     } catch (nextError) {
       setEditorError(nextError.message);
     } finally {
@@ -1697,7 +1732,7 @@ const LibraryTopBar = () => {
       // (communityHub.jsx). Without it the scenario looks editor-made to every
       // later export, which would try to carry the whole map inside the next game
       // exported from it — hundreds of megabytes, built in the page.
-      bundle.hubOrigin = { postId: origin.postId, bundleUrl: origin.bundleUrl };
+      bundle.hubOrigin = { bundleUrl: origin.bundleUrl, postId: origin.postId, syncedAt: origin.syncedAt };
       const imported = await importScenarioBundle(bundle);
       await saveGame(game.id, { scenarioId: imported.scenario.id });
       await refreshLibraryCatalog({ force: true });
