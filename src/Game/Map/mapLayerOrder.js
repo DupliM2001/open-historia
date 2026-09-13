@@ -37,6 +37,9 @@ export const MAP_LAYER_ORDER = [
   "country-labels-live-managed",
   "country-labels-live-overlap",
   "country-labels",
+  // PTR-0 replacement typography proof. It intentionally sits above the old
+  // polity symbols while both systems coexist, and below cities/objects.
+  "polity-text-renderer",
 
   // Physical/world objects must never be buried by political cartography.
   "cities-shapes",

@@ -128,3 +128,14 @@ test("topology-safe region mesh remains an isolated experiment outside the beta 
   assert.match(nations, /filter=\{AUTHORED_GEOMETRY_FILTER\}/);
   assert.doesNotMatch(nations, /id="polity-surfaces-source"/);
 });
+
+test("CP4.2 live renderer uses the worker baseline threshold without a hidden half-zoom delay", () => {
+  assert.match(
+    nations,
+    /\["<=", \["coalesce", \["get", "curveMinZoom"\], 99\], currentLabelZoom\]/,
+  );
+  assert.doesNotMatch(
+    nations,
+    /\["\+", \["coalesce", \["get", "curveMinZoom"\], 99\], 0\.45\]/,
+  );
+});

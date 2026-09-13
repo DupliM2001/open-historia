@@ -230,6 +230,128 @@ const getInteriorLabelPoint = (polygonRings) => {
   return best?.point ?? [centroid.cx, centroid.cy];
 };
 
+// ---- Checkpoint 4: validated territorial placement -------------------------
+// The label solver remains intentionally lightweight and worker-owned.  We keep
+// the proven scanline spine, but its final placement must now be demonstrably
+// inside the selected owner component. Straight labels and curved labels share
+// this same territorial solution.
+const pointOnSegmentTile = (point, a, b, epsilon = 1e-5) => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const px = point[0] - a[0];
+  const py = point[1] - a[1];
+  const lengthSquared = dx * dx + dy * dy;
+  // GeoJSON rings normally repeat their first coordinate at the end. Treat that
+  // zero-length closing edge as a point, not as a segment containing everything.
+  if (lengthSquared <= epsilon * epsilon) {
+    return px * px + py * py <= epsilon * epsilon;
+  }
+  const cross = dx * py - dy * px;
+  if (Math.abs(cross) > epsilon * Math.max(1, Math.sqrt(lengthSquared))) return false;
+  const dot = px * dx + py * dy;
+  if (dot < -epsilon) return false;
+  return dot <= lengthSquared + epsilon;
+};
+
+// 1 = inside, 0 = boundary, -1 = outside.
+const pointInRingStateTile = (point, ring) => {
+  if (!Array.isArray(ring) || ring.length < 3) return -1;
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const a = ring[previous];
+    const b = ring[index];
+    if (pointOnSegmentTile(point, a, b)) return 0;
+    if ((a[1] > point[1]) === (b[1] > point[1])) continue;
+    const x = a[0] + ((point[1] - a[1]) * (b[0] - a[0])) / (b[1] - a[1]);
+    if (x > point[0]) inside = !inside;
+  }
+  return inside ? 1 : -1;
+};
+
+const pointInPolygonTile = (point, polygonRings) => {
+  if (pointInRingStateTile(point, polygonRings?.[0]) < 0) return false;
+  for (const hole of polygonRings?.slice(1) ?? []) {
+    // Hole interiors are excluded; their exact boundary is accepted to avoid
+    // numerical seam failures on authored/admin geometry.
+    if (pointInRingStateTile(point, hole) > 0) return false;
+  }
+  return true;
+};
+
+const pointInComponentTile = (point, componentPolygons) => (
+  (componentPolygons ?? []).some((polygon) => pointInPolygonTile(point, polygon))
+);
+
+const polylineInsideComponentTile = (points, componentPolygons) => {
+  if (!Array.isArray(points) || points.length < 2) return false;
+  for (let index = 1; index < points.length; index += 1) {
+    const a = points[index - 1];
+    const b = points[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const steps = clamp(Math.ceil(length / 2.5), 2, 80);
+    for (let sample = 0; sample <= steps; sample += 1) {
+      const fraction = sample / steps;
+      const point = [
+        a[0] + (b[0] - a[0]) * fraction,
+        a[1] + (b[1] - a[1]) * fraction,
+      ];
+      if (!pointInComponentTile(point, componentPolygons)) return false;
+    }
+  }
+  return true;
+};
+
+const componentInteriorPoint = (componentPolygons, preferredPoint = null) => {
+  if (preferredPoint && pointInComponentTile(preferredPoint, componentPolygons)) return preferredPoint;
+
+  let best = null;
+  for (const polygon of componentPolygons ?? []) {
+    const point = getInteriorLabelPoint(polygon);
+    if (!point || !pointInPolygonTile(point, polygon)) continue;
+    const outerArea = calculateArea(polygon?.[0] ?? []);
+    const holesArea = (polygon ?? []).slice(1).reduce((sum, ring) => sum + calculateArea(ring), 0);
+    const area = Math.max(0, outerArea - holesArea);
+    const distancePenalty = preferredPoint
+      ? Math.hypot(point[0] - preferredPoint[0], point[1] - preferredPoint[1]) * 0.04
+      : 0;
+    const score = Math.sqrt(Math.max(area, 1)) - distancePenalty;
+    if (!best || score > best.score) best = { point, score };
+  }
+  return best?.point ?? null;
+};
+
+const pathBendMetrics = (points) => {
+  if (!Array.isArray(points) || points.length < 2) {
+    return { directLength: 0, detourRatio: 1, maxDeviation: 0, bendRatio: 0 };
+  }
+  const start = points[0];
+  const end = points[points.length - 1];
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const directLength = Math.hypot(dx, dy);
+  if (!(directLength > 0)) return { directLength: 0, detourRatio: 1, maxDeviation: 0, bendRatio: 0 };
+  let maxDeviation = 0;
+  for (const point of points) {
+    const cross = Math.abs(dx * (start[1] - point[1]) - (start[0] - point[0]) * dy);
+    maxDeviation = Math.max(maxDeviation, cross / directLength);
+  }
+  const pathLength = getPolylineLength(points);
+  return {
+    directLength,
+    detourRatio: pathLength / directLength,
+    maxDeviation,
+    bendRatio: maxDeviation / directLength,
+  };
+};
+
+const meaningfulTerritorialCurve = (pathInfo, { world = false } = {}) => {
+  if (!pathInfo?.points?.length) return false;
+  const bend = pathBendMetrics(pathInfo.points);
+  const turn = getTotalTurnDegrees(pathInfo.points);
+  return turn >= (world ? 6 : 9)
+    && (bend.bendRatio >= (world ? 0.008 : 0.012) || bend.detourRatio >= (world ? 1.003 : 1.006));
+};
+
 const getPolylineLength = (points) => {
   let length = 0;
 
@@ -496,7 +618,7 @@ const buildCurvedLabelPath = (ring, { allowStraight = false, center = null, angl
     chosen[i] = chooseFollowInterval(samples[i].intervals, chosen[i + 1]?.midT ?? 0);
   }
 
-  const rawSamples = samples
+  let rawSamples = samples
     .map((sample, index) => {
       const interval = chosen[index];
       if (!interval) return null;
@@ -508,6 +630,49 @@ const buildCurvedLabelPath = (ring, { allowStraight = false, center = null, angl
       };
     })
     .filter(Boolean);
+
+  if (rawSamples.length < 4) return null;
+
+  // A narrow neck followed by a distant interval is usually a peninsula,
+  // detached lobe, or administrative sliver rather than part of the useful text
+  // corridor. Following it is what previously sent China's baseline climbing
+  // through Manchuria. Keep the best continuous high-clearance run instead.
+  const sortedWidths = rawSamples.map((sample) => sample.width).sort((a, b) => a - b);
+  const medianWidth = sortedWidths[Math.floor(sortedWidths.length / 2)] ?? 0;
+  const minimumCorridorWidth = Math.max(3, medianWidth * 0.18);
+  const runs = [];
+  let run = [];
+  const flushRun = () => {
+    if (run.length >= 4) runs.push(run);
+    run = [];
+  };
+  for (const sample of rawSamples) {
+    const previous = run[run.length - 1];
+    const continuityLimit = previous
+      ? Math.max(18, Math.min(previous.width, sample.width) * 0.72)
+      : Infinity;
+    const usable = sample.width >= minimumCorridorWidth
+      && (!previous || Math.abs(sample.t - previous.t) <= continuityLimit);
+    if (!usable) {
+      flushRun();
+      if (sample.width >= minimumCorridorWidth) run = [sample];
+      continue;
+    }
+    run.push(sample);
+  }
+  flushRun();
+
+  if (runs.length) {
+    const scoreRun = (candidate) => {
+      const span = candidate[candidate.length - 1].s - candidate[0].s;
+      const average = candidate.reduce((sum, sample) => sum + sample.width, 0) / candidate.length;
+      const containsCenter = candidate[0].s <= 0 && candidate[candidate.length - 1].s >= 0;
+      return span * Math.sqrt(Math.max(average, 1)) * (containsCenter ? 1.12 : 1);
+    };
+    rawSamples = runs.reduce((best, candidate) => (
+      !best || scoreRun(candidate) > scoreRun(best) ? candidate : best
+    ), null) ?? rawSamples;
+  }
 
   if (rawSamples.length < 4) return null;
 
@@ -581,18 +746,282 @@ const getMaxSegmentTurnDegrees = (points) => {
   return maxTurn;
 };
 
+const getPathFlowMetrics = (points) => {
+  if (!Array.isArray(points) || points.length < 3) {
+    return { totalTurnDegrees: 0, maxSegmentTurnDegrees: 0, wiggleDegrees: 0, turnReversals: 0 };
+  }
+  const signedTurns = [];
+  let totalTurnDegrees = 0;
+  let maxSegmentTurnDegrees = 0;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const a = Math.atan2(current[1] - previous[1], current[0] - previous[0]);
+    const b = Math.atan2(next[1] - current[1], next[0] - current[0]);
+    let delta = (b - a) * (180 / Math.PI);
+    while (delta > 180) delta -= 360;
+    while (delta < -180) delta += 360;
+    signedTurns.push(delta);
+    totalTurnDegrees += Math.abs(delta);
+    maxSegmentTurnDegrees = Math.max(maxSegmentTurnDegrees, Math.abs(delta));
+  }
+  let wiggleDegrees = 0;
+  let turnReversals = 0;
+  for (let index = 1; index < signedTurns.length; index += 1) {
+    wiggleDegrees += Math.abs(signedTurns[index] - signedTurns[index - 1]);
+    if (
+      Math.abs(signedTurns[index - 1]) >= 2.5
+      && Math.abs(signedTurns[index]) >= 2.5
+      && Math.sign(signedTurns[index - 1]) !== Math.sign(signedTurns[index])
+    ) turnReversals += 1;
+  }
+  return { totalTurnDegrees, maxSegmentTurnDegrees, wiggleDegrees, turnReversals };
+};
+
+const limitPolylineBend = (points, maxBendRatio, validatePath = null) => {
+  if (!Array.isArray(points) || points.length < 3) return points;
+  const bend = pathBendMetrics(points);
+  if (!(bend.bendRatio > maxBendRatio) || !(bend.directLength > 0)) return points;
+  const start = points[0];
+  const end = points[points.length - 1];
+  const targetFactor = clamp(maxBendRatio / bend.bendRatio, 0.18, 1);
+  const factors = [
+    targetFactor,
+    targetFactor + (1 - targetFactor) * 0.25,
+    targetFactor + (1 - targetFactor) * 0.50,
+    targetFactor + (1 - targetFactor) * 0.75,
+    1,
+  ];
+  for (const factor of factors) {
+    const candidate = points.map((point, index) => {
+      if (index === 0 || index === points.length - 1) return point;
+      const t = index / (points.length - 1);
+      const chord = [
+        start[0] + (end[0] - start[0]) * t,
+        start[1] + (end[1] - start[1]) * t,
+      ];
+      return [
+        chord[0] + (point[0] - chord[0]) * factor,
+        chord[1] + (point[1] - chord[1]) * factor,
+      ];
+    });
+    if (!validatePath || validatePath(candidate)) return candidate;
+  }
+  return points;
+};
+
+// CP4.3: MapLibre lays a whole word over only the centered span that its
+// glyphs actually occupy. A country-wide baseline can therefore be strongly
+// curved in its tails while the rendered name still sits on an almost straight
+// middle section. Measure and, where necessary, gently shape the text-bearing
+// support window itself rather than scoring only the complete polyline.
+const centeredPolylineWindow = (points, fraction = 0.7, sampleCount = 21) => {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const totalLength = getPolylineLength(points);
+  if (!(totalLength > 0)) return [...points];
+  const safeFraction = clamp(Number(fraction) || 0.7, 0.2, 1);
+  const startDistance = totalLength * (1 - safeFraction) * 0.5;
+  const endDistance = totalLength - startDistance;
+  const count = clamp(Math.round(sampleCount), 5, 41);
+  const result = [];
+  for (let index = 0; index < count; index += 1) {
+    const distance = startDistance + ((endDistance - startDistance) * index) / (count - 1);
+    const sample = getPointAlongPolyline(points, distance);
+    if (sample?.point) result.push(sample.point);
+  }
+  return result;
+};
+
+const cartographicSupportMetrics = (points, fraction = 0.7) => {
+  const support = centeredPolylineWindow(points, fraction);
+  const bend = pathBendMetrics(support);
+  const flow = getPathFlowMetrics(support);
+  return {
+    fraction: clamp(Number(fraction) || 0.7, 0.2, 1),
+    points: support,
+    bendRatio: Number(bend?.bendRatio ?? 0),
+    totalTurnDegrees: Number(flow?.totalTurnDegrees ?? 0),
+    maxSegmentTurnDegrees: Number(flow?.maxSegmentTurnDegrees ?? 0),
+  };
+};
+
+const calmPathForRenderer = (pathInfo, maxTurnDegrees, validatePath = null) => {
+  if (!pathInfo?.points?.length || pathInfo.points.length < 3) return pathInfo;
+  let points = pathInfo.points;
+  let flow = getPathFlowMetrics(points);
+  if (flow.maxSegmentTurnDegrees <= maxTurnDegrees) {
+    return { ...pathInfo, ...flow };
+  }
+
+  for (let pass = 0; pass < 5; pass += 1) {
+    const candidate = points.map((point, index) => {
+      if (index === 0 || index === points.length - 1) return point;
+      return [
+        points[index - 1][0] * 0.16 + point[0] * 0.68 + points[index + 1][0] * 0.16,
+        points[index - 1][1] * 0.16 + point[1] * 0.68 + points[index + 1][1] * 0.16,
+      ];
+    });
+    if (validatePath && !validatePath(candidate)) break;
+    points = candidate;
+    flow = getPathFlowMetrics(points);
+    if (flow.maxSegmentTurnDegrees <= maxTurnDegrees) break;
+  }
+
+  const length = getPolylineLength(points);
+  const directLength = Math.hypot(
+    points[points.length - 1][0] - points[0][0],
+    points[points.length - 1][1] - points[0][1],
+  );
+  return {
+    ...pathInfo,
+    points,
+    length,
+    ...flow,
+    detourRatio: directLength > 0 ? length / directLength : pathInfo.detourRatio,
+  };
+};
+
+const ensureCartographicSupportBend = (
+  pathInfo,
+  validatePath = null,
+  {
+    supportFraction = 0.7,
+    targetBendRatio = 0.018,
+    minimumSeedBendRatio = 0.006,
+    maxSegmentTurnDegrees = 44,
+    maxDetourRatio = 1.24,
+  } = {},
+) => {
+  if (!pathInfo?.points?.length || pathInfo.points.length < 3) return pathInfo;
+
+  const originalMetrics = cartographicSupportMetrics(pathInfo.points, supportFraction);
+  // Do not paint decorative curvature onto geometry that is genuinely straight.
+  // The Pax target preserves and clarifies territorial flow; it does not bend a
+  // perfect rectangle merely because curved labels are fashionable.
+  if (originalMetrics.bendRatio < minimumSeedBendRatio || originalMetrics.bendRatio >= targetBendRatio) {
+    return {
+      ...pathInfo,
+      supportFraction,
+      supportBendRatio: originalMetrics.bendRatio,
+      supportTurnDegrees: originalMetrics.totalTurnDegrees,
+    };
+  }
+
+  const points = pathInfo.points;
+  const start = points[0];
+  const end = points[points.length - 1];
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const directLength = Math.hypot(dx, dy);
+  const totalLength = getPolylineLength(points);
+  if (!(directLength > 0) || !(totalLength > 0)) return pathInfo;
+
+  const nx = -dy / directLength;
+  const ny = dx / directLength;
+  const progress = [0];
+  let travelled = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    travelled += Math.hypot(
+      points[index][0] - points[index - 1][0],
+      points[index][1] - points[index - 1][1],
+    );
+    progress.push(clamp(travelled / totalLength, 0, 1));
+  }
+
+  // A single sine arch adds only low-frequency cartographic flow. Both sides of
+  // the baseline are tried and full polygon containment remains mandatory, so
+  // the solver never invents a bow that escapes the polity merely to look nice.
+  const amplitudeRatios = [0.012, 0.025, 0.045, 0.065];
+  const candidates = [];
+  for (const amplitudeRatio of amplitudeRatios) {
+    const amplitude = directLength * amplitudeRatio;
+    for (const sign of [-1, 1]) {
+      const candidatePoints = points.map((point, index) => {
+        if (index === 0 || index === points.length - 1) return point;
+        const envelope = Math.sin(Math.PI * progress[index]);
+        return [
+          point[0] + nx * amplitude * envelope * sign,
+          point[1] + ny * amplitude * envelope * sign,
+        ];
+      });
+      if (validatePath && !validatePath(candidatePoints)) continue;
+
+      const length = getPolylineLength(candidatePoints);
+      const detourRatio = length / directLength;
+      const flow = getPathFlowMetrics(candidatePoints);
+      if (
+        flow.maxSegmentTurnDegrees > maxSegmentTurnDegrees
+        || flow.turnReversals > 4
+        || flow.wiggleDegrees > 220
+        || detourRatio > maxDetourRatio
+      ) continue;
+
+      const support = cartographicSupportMetrics(candidatePoints, supportFraction);
+      candidates.push({
+        points: candidatePoints,
+        amplitudeRatio,
+        support,
+        length,
+        detourRatio,
+        flow,
+      });
+    }
+  }
+
+  if (!candidates.length) {
+    return {
+      ...pathInfo,
+      supportFraction,
+      supportBendRatio: originalMetrics.bendRatio,
+      supportTurnDegrees: originalMetrics.totalTurnDegrees,
+    };
+  }
+
+  const meetingTarget = candidates.filter((candidate) => candidate.support.bendRatio >= targetBendRatio);
+  const pool = meetingTarget.length ? meetingTarget : candidates;
+  const best = pool.reduce((winner, candidate) => {
+    if (!winner) return candidate;
+    if (meetingTarget.length) {
+      // Once the visible glyph support bends enough, prefer the smallest calm
+      // intervention. Curvature should be perceptible, not ornamental excess.
+      if (candidate.amplitudeRatio !== winner.amplitudeRatio) {
+        return candidate.amplitudeRatio < winner.amplitudeRatio ? candidate : winner;
+      }
+      if (candidate.flow.maxSegmentTurnDegrees !== winner.flow.maxSegmentTurnDegrees) {
+        return candidate.flow.maxSegmentTurnDegrees < winner.flow.maxSegmentTurnDegrees ? candidate : winner;
+      }
+      return candidate.support.bendRatio < winner.support.bendRatio ? candidate : winner;
+    }
+    return candidate.support.bendRatio > winner.support.bendRatio ? candidate : winner;
+  }, null);
+
+  return {
+    ...pathInfo,
+    points: best.points,
+    length: best.length,
+    totalTurnDegrees: best.flow.totalTurnDegrees,
+    maxSegmentTurnDegrees: best.flow.maxSegmentTurnDegrees,
+    wiggleDegrees: best.flow.wiggleDegrees,
+    turnReversals: best.flow.turnReversals,
+    detourRatio: best.detourRatio,
+    supportFraction,
+    supportBendRatio: best.support.bendRatio,
+    supportTurnDegrees: best.support.totalTurnDegrees,
+  };
+};
+
 // MapLibre's native whole-word line renderer is much stricter than our
 // geometric spine builder. R6 could therefore classify a polity as "hybrid",
 // switch its guaranteed point label off, and then have MapLibre reject the
 // detailed line at the exact same zoom. R7 creates a deliberately small,
 // gently-bending spine and admits a handoff ONLY when that simplified path is
 // safe enough for the native renderer. Unsafe shapes stay point-mode forever.
-const buildSafeMapLibreWarpPath = (pathInfo) => {
+const buildSafeMapLibreWarpPath = (pathInfo, validatePath = null) => {
   if (!pathInfo?.points?.length || pathInfo.points.length < 4) return null;
 
-  const sampleCount = pathInfo.length >= 300 ? 7 : 5;
+  const sampleCount = pathInfo.length >= 280 ? 7 : 5;
   const points = [];
-
   for (let index = 0; index < sampleCount; index += 1) {
     const sample = getPointAlongPolyline(
       pathInfo.points,
@@ -602,211 +1031,102 @@ const buildSafeMapLibreWarpPath = (pathInfo) => {
     points.push(sample.point);
   }
 
-  // One light pass removes tiny coastal/scanline kinks while preserving the
-  // broad territorial arc users actually want to see.
+  // Only damp high-frequency movement. Broad monotonic curvature is desirable;
+  // alternating short bends are not.
   const smoothed = points.map((point, index) => {
     if (index === 0 || index === points.length - 1) return point;
     return [
-      points[index - 1][0] * 0.18 + point[0] * 0.64 + points[index + 1][0] * 0.18,
-      points[index - 1][1] * 0.18 + point[1] * 0.64 + points[index + 1][1] * 0.18,
+      points[index - 1][0] * 0.12 + point[0] * 0.76 + points[index + 1][0] * 0.12,
+      points[index - 1][1] * 0.12 + point[1] * 0.76 + points[index + 1][1] * 0.12,
     ];
   });
 
-  const length = getPolylineLength(smoothed);
+  let safePoints = !validatePath || validatePath(smoothed) ? smoothed : points;
+  if (validatePath && !validatePath(safePoints)) return null;
+  safePoints = limitPolylineBend(safePoints, 0.105, validatePath);
+
+  const length = getPolylineLength(safePoints);
   const directLength = Math.hypot(
-    smoothed[smoothed.length - 1][0] - smoothed[0][0],
-    smoothed[smoothed.length - 1][1] - smoothed[0][1],
+    safePoints[safePoints.length - 1][0] - safePoints[0][0],
+    safePoints[safePoints.length - 1][1] - safePoints[0][1],
   );
   if (directLength <= 0) return null;
 
-  const totalTurnDegrees = getTotalTurnDegrees(smoothed);
-  const maxSegmentTurnDegrees = getMaxSegmentTurnDegrees(smoothed);
+  const flow = getPathFlowMetrics(safePoints);
   const detourRatio = length / directLength;
-  const minLength = 88;
 
   if (
-    length < minLength
-    || totalTurnDegrees > 96
-    || maxSegmentTurnDegrees > 34
-    || detourRatio > 1.18
-  ) {
-    return null;
-  }
+    length < 42
+    || flow.totalTurnDegrees > 165
+    || flow.maxSegmentTurnDegrees > 46
+    || flow.wiggleDegrees > 220
+    || flow.turnReversals > 4
+    || detourRatio > 1.25
+  ) return null;
 
   return {
     ...pathInfo,
-    points: smoothed,
+    points: safePoints,
     length,
-    totalTurnDegrees,
-    maxSegmentTurnDegrees,
+    ...flow,
     detourRatio,
   };
 };
 
-// Whole-world typography wants only a hint of territorial shape, not the more
-// expressive close-zoom spine. Sample the already interior-biased path at three
-// points and pull the midpoint toward the chord so giant states get a subtle,
-// stable arc. No polity name is special-cased: scale + geometry decide.
-const buildGentleWorldWarpPath = (pathInfo) => {
+// Overview typography uses a simplified sample of the same validated territorial
+// spine. It must not invent curvature, and it must not flatten a real bend back
+// into a generic chord. No polity name is special-cased: scale + geometry decide.
+const buildGentleWorldWarpPath = (pathInfo, validatePath = null) => {
   if (!pathInfo?.points?.length || pathInfo.points.length < 3) return null;
 
+  const sampleCount = pathInfo.length >= 650 ? 7 : 5;
   const points = [];
-
-  for (const fraction of [0, 0.5, 1]) {
-    const sample = getPointAlongPolyline(pathInfo.points, pathInfo.length * fraction);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const sample = getPointAlongPolyline(
+      pathInfo.points,
+      (pathInfo.length * index) / (sampleCount - 1),
+    );
     if (!sample?.point) return null;
     points.push(sample.point);
   }
 
-  const chordMid = [
-    (points[0][0] + points[2][0]) / 2,
-    (points[0][1] + points[2][1]) / 2,
-  ];
-  points[1] = [
-    points[1][0] * 0.62 + chordMid[0] * 0.38,
-    points[1][1] * 0.62 + chordMid[1] * 0.38,
-  ];
+  const smoothed = points.map((point, index) => {
+    if (index === 0 || index === points.length - 1) return point;
+    return [
+      points[index - 1][0] * 0.03 + point[0] * 0.94 + points[index + 1][0] * 0.03,
+      points[index - 1][1] * 0.03 + point[1] * 0.94 + points[index + 1][1] * 0.03,
+    ];
+  });
+  let safePoints = !validatePath || validatePath(smoothed) ? smoothed : points;
+  if (validatePath && !validatePath(safePoints)) return null;
+  safePoints = limitPolylineBend(safePoints, 0.12, validatePath);
 
-  const length = getPolylineLength(points);
+  const length = getPolylineLength(safePoints);
   const directLength = Math.hypot(
-    points[2][0] - points[0][0],
-    points[2][1] - points[0][1],
+    safePoints[safePoints.length - 1][0] - safePoints[0][0],
+    safePoints[safePoints.length - 1][1] - safePoints[0][1],
   );
   if (directLength <= 0) return null;
 
-  const totalTurnDegrees = getTotalTurnDegrees(points);
-  const maxSegmentTurnDegrees = getMaxSegmentTurnDegrees(points);
+  const flow = getPathFlowMetrics(safePoints);
   const detourRatio = length / directLength;
-  const minLength = 150;
-
   if (
-    length < minLength
-    || totalTurnDegrees > 42
-    || maxSegmentTurnDegrees > 42
-    || detourRatio > 1.10
-  ) {
-    return null;
-  }
+    length < 120
+    || flow.totalTurnDegrees > 155
+    || flow.maxSegmentTurnDegrees > 42
+    || flow.wiggleDegrees > 200
+    || flow.turnReversals > 4
+    || detourRatio > 1.22
+  ) return null;
 
   return {
     ...pathInfo,
-    points,
+    points: safePoints,
     length,
-    totalTurnDegrees,
-    maxSegmentTurnDegrees,
+    ...flow,
     detourRatio,
   };
 };
-
-
-const buildCurvedLabelGlyphFeatures = (
-  pathInfo,
-  extent,
-  name,
-  areaScale,
-  featureId,
-  extraProperties = {},
-) => {
-  if (!pathInfo?.points?.length) return null;
-
-  const glyphs = Array.from(name.toUpperCase());
-  const totalUnits = glyphs.reduce(
-    (sum, glyph) => sum + (glyph === " " ? 0.55 : 1),
-    0,
-  );
-  if (totalUnits <= 0) return null;
-
-  const pathPadding = pathInfo.length * 0.08;
-  const usableLength = pathInfo.length - pathPadding * 2;
-  if (usableLength <= 0) return null;
-
-  const advance = usableLength / totalUnits;
-  // Curved spines need a little more breathing room than straight ones. A mild
-  // size reduction keeps edge cases such as France and Spain inside their live
-  // shapes without making broad, gently curved labels look timid.
-  const totalTurn = getTotalTurnDegrees(pathInfo.points);
-  const curvatureScale = clamp(1 - Math.max(0, totalTurn - 42) / 520, 0.84, 1);
-  const sizeScale = clamp(advance / 52, 0.6, 0.92) * curvatureScale;
-  const anchorSample = getPointAlongPolyline(pathInfo.points, pathInfo.length / 2);
-  if (!anchorSample) return null;
-
-  // Keep every glyph attached to one geographic anchor and express the curve
-  // in font-relative offsets. Separate geographic glyph anchors looked correct
-  // at their reference zoom, but zooming closer enlarged the distance between
-  // them even after text-size reached its cap, tearing CHINA into C H I N A.
-  // Em offsets scale with the glyphs and stop when the glyphs stop, preserving
-  // both the word and its live-shape curve at every camera zoom.
-  const offsetUnit = Math.max(advance, 1);
-  const [anchorLng, anchorLat] = tileToLngLat(
-    anchorSample.point[0],
-    anchorSample.point[1],
-    extent,
-  );
-  const features = [];
-
-  let cursorUnits = 0;
-  let glyphIndex = 0;
-  for (const glyph of glyphs) {
-    const unitWidth = glyph === " " ? 0.55 : 1;
-    const centerDistance = pathPadding + (cursorUnits + unitWidth / 2) * advance;
-    cursorUnits += unitWidth;
-
-    if (glyph === " ") continue;
-
-    const sample = getPointAlongPolyline(pathInfo.points, centerDistance);
-    if (!sample) continue;
-
-    // Average the tangent around each letter instead of inheriting the angle of
-    // one short spine segment. This removes sharp per-letter kinks while the
-    // label remains fully map-native and therefore camera-synchronous.
-    const tangentSpan = Math.max(advance * 0.72, pathInfo.length * 0.012);
-    const before = getPointAlongPolyline(
-      pathInfo.points,
-      Math.max(0, centerDistance - tangentSpan),
-    );
-    const after = getPointAlongPolyline(
-      pathInfo.points,
-      Math.min(pathInfo.length, centerDistance + tangentSpan),
-    );
-    let rotation = before && after
-      ? Math.atan2(
-          after.point[1] - before.point[1],
-          after.point[0] - before.point[0],
-        ) * (180 / Math.PI)
-      : sample.angle;
-    if (rotation > 90) rotation -= 180;
-    if (rotation < -90) rotation += 180;
-
-    const textOffset = [
-      Number(((sample.point[0] - anchorSample.point[0]) / offsetUnit).toFixed(3)),
-      Number(((sample.point[1] - anchorSample.point[1]) / offsetUnit).toFixed(3)),
-    ];
-
-    features.push({
-      type: "Feature",
-      id: `${featureId}-glyph-${glyphIndex}`,
-      geometry: {
-        type: "Point",
-        coordinates: [anchorLng, anchorLat],
-      },
-      properties: {
-        ...extraProperties,
-        glyph,
-        areaScale: areaScale * sizeScale,
-        rotation,
-        textOffset,
-        // All glyphs now share the label anchor, so the same globe correction
-        // applies to the entire word instead of subtly resizing its letters.
-        lat: anchorLat,
-      },
-    });
-
-    glyphIndex += 1;
-  }
-
-  return features.length ? features : null;
-};
-
 
 // --- Map vNext polity label policy + worker-owned canonical-owner geometry ---
 
@@ -825,13 +1145,11 @@ export const POLITY_LABEL_TIERS = Object.freeze([
 
 export const curveMinZoomForPolityLabelTier = (tier, band = "standard") => {
   if (!tier) return null;
-  if (band === "world") {
-    return Math.max(tier.minZoom + 0.15, 0.95);
-  }
-  if (band === "early") {
-    return Math.max(tier.minZoom + 0.75, tier.curveMinZoom - 0.55);
-  }
-  return tier.curveMinZoom;
+  // CP4.2: the territorial baseline is the normal cartographic presentation,
+  // not a late "curve upgrade". Enter shortly after the polity itself becomes
+  // eligible so the point fallback is only a renderer safety net.
+  const lead = band === "world" ? 0.05 : band === "early" ? 0.10 : 0.15;
+  return Math.max(tier.minZoom + lead, band === "world" ? 0.85 : tier.minZoom);
 };
 
 const REFERENCE_ZOOM = 4;
@@ -859,12 +1177,12 @@ const preferredLetterSpacing = (name, mode = "point") => {
   // Pax-style point labels spend territory on larger glyphs first and tracking
   // second. R3/R4 did the opposite on many states, producing delicate labels
   // with too much empty air between letters.
-  if (letters <= 5) return line ? 0.70 : 0.36;
-  if (letters <= 7) return line ? 0.55 : 0.28;
-  if (letters <= 10) return line ? 0.40 : 0.20;
-  if (letters <= 14) return line ? 0.28 : 0.14;
-  if (letters <= 20) return line ? 0.18 : 0.10;
-  return line ? 0.10 : 0.07;
+  if (letters <= 5) return line ? 0.50 : 0.36;
+  if (letters <= 7) return line ? 0.38 : 0.28;
+  if (letters <= 10) return line ? 0.28 : 0.20;
+  if (letters <= 14) return line ? 0.20 : 0.14;
+  if (letters <= 20) return line ? 0.13 : 0.10;
+  return line ? 0.08 : 0.07;
 };
 
 const maxLetterSpacing = (name, mode = "point") => {
@@ -877,12 +1195,12 @@ const maxLetterSpacing = (name, mode = "point") => {
     if (letters <= 20) return 0.15;
     return 0.10;
   }
-  if (letters <= 5) return 1.10;
-  if (letters <= 7) return 0.90;
-  if (letters <= 10) return 0.68;
-  if (letters <= 14) return 0.46;
-  if (letters <= 20) return 0.28;
-  return 0.16;
+  if (letters <= 5) return 0.78;
+  if (letters <= 7) return 0.62;
+  if (letters <= 10) return 0.46;
+  if (letters <= 14) return 0.34;
+  if (letters <= 20) return 0.22;
+  return 0.13;
 };
 
 const pointMaxLetterSpacing = (name, priorityScale) => {
@@ -920,38 +1238,55 @@ const tierForVisibilityScale = (visibilityScale) =>
 const fitLineTypography = ({ pathInfo, name, priorityScale }) => {
   const pathPixels = Math.max(1, pathInfo.length * REFERENCE_PIXELS_PER_TILE_UNIT);
   const corridorPixels = Math.max(1, pathInfo.width * REFERENCE_PIXELS_PER_TILE_UNIT);
+
+  // CP4.2: line typography fits TO the baseline. Diagnostics proved that the
+  // production USA spine rendered correctly at 18px but disappeared around
+  // 20px, even though the geometry itself was valid. Leave deliberate renderer
+  // headroom instead of asking MapLibre to solve the same near-limit fit again.
+  // CP4.3: the relevant quantity is not how curved the whole support line is,
+  // but how much of that curvature sits under the centered glyph footprint.
+  // ~50% occupancy let USA/Poland use an almost ruler-straight middle even when
+  // their full baselines bent strongly in the tails. Let the name occupy most of
+  // the validated support while retaining MapLibre headroom.
+  const supportBendRatio = Number(
+    pathInfo.supportBendRatio
+      ?? cartographicSupportMetrics(pathInfo.points, 0.7).bendRatio
+      ?? 0,
+  );
+  const bendExposureBoost = supportBendRatio < 0.022
+    ? 0.05
+    : supportBendRatio < 0.04
+      ? 0.025
+      : 0;
   const targetOccupancy = clamp(
-    0.59 + Math.log2(Math.max(priorityScale, 26000) / 52000) * 0.022,
-    0.56,
-    0.68,
+    0.69
+      + Math.log2(Math.max(priorityScale, 26000) / 52000) * 0.012
+      + bendExposureBoost,
+    0.66,
+    0.76,
   );
   const targetWidth = pathPixels * targetOccupancy;
   const preferredSpacing = preferredLetterSpacing(name, "line");
   const maxSpacing = maxLetterSpacing(name, "line");
-  const heightCap = clamp(corridorPixels * 0.52, 14, 260);
-  const absoluteCap = 260;
+  const heightCap = clamp(corridorPixels * 0.46, 10, 220);
+  const absoluteCap = 220;
 
   let fontPx = targetWidth / Math.max(0.1, estimatedTextWidthEm(name, preferredSpacing));
-  fontPx = clamp(fontPx, 9, Math.min(heightCap, absoluteCap));
+  fontPx = clamp(fontPx, 6, Math.min(heightCap, absoluteCap));
 
-  // If corridor thickness caps font size, spend the remaining width on spacing.
-  // This is the strategy-map effect missing from R1: RUSSIA/CANADA/CHINA can
-  // occupy their territory without making each individual glyph absurdly tall.
   const gaps = textGapCount(name);
   let letterSpacing = preferredSpacing;
   if (gaps > 0) {
     letterSpacing = clamp(
       (targetWidth / Math.max(fontPx, 1) - textBaseWidthEm(name)) / gaps,
-      0.05,
+      0.04,
       maxSpacing,
     );
   }
 
-  // Re-solve font size after spacing. This makes target occupancy the objective,
-  // rather than the old areaScale being merely capped by available path width.
   fontPx = clamp(
     targetWidth / Math.max(0.1, estimatedTextWidthEm(name, letterSpacing)),
-    9,
+    6,
     Math.min(heightCap, absoluteCap),
   );
 
@@ -962,6 +1297,7 @@ const fitLineTypography = ({ pathInfo, name, priorityScale }) => {
     letterSpacing: Number(letterSpacing.toFixed(3)),
     targetOccupancy: Number(targetOccupancy.toFixed(3)),
     estimatedOccupancy: Number(clamp(actualWidth / pathPixels, 0, 2).toFixed(3)),
+    supportBendRatio: Number(supportBendRatio.toFixed(4)),
   };
 };
 
@@ -1086,7 +1422,6 @@ const fitPointTypography = ({
 // measured the Canadian mainland and Alaska the contiguous United States; and a
 // covariance taken over ring vertices is owned by whichever coast has the most
 // of them, which is how China and Australia came out diagonal.
-const HORIZONTAL_ELONGATION = 1.8;
 // A detached landmass carries the owner's name when it has at least this much
 // ground (cos-scaled square degrees; three is roughly 37,000 km², Taiwan-sized)
 // and at least this share of the core landmass.
@@ -1397,9 +1732,114 @@ export const selectPolityPointFallbacks = (pointLabelData, renderedWarpOwners = 
 // display name. The complete selected component participates in the solution;
 // administrative fragmentation is never simplified by dropping polygons.
 //
-// This still uses the existing R7 scanline spine and horizontal-or-axis policy.
-// Checkpoint 4 replaces that placement solver. The important boundary here is
-// architectural: the geometry result below is a pure function of territory.
+// The geometry result below remains a pure function of territory. CP4 keeps the
+// bounded scanline spine, but validates its final interior path and replaces the
+// old hard horizontal mode with a soft cartographic preference.
+const rotationDistance = (left, right) => {
+  let delta = Math.abs(normalizeRotation(left) - normalizeRotation(right));
+  if (delta > 90) delta = 180 - delta;
+  return Math.abs(delta);
+};
+
+const buildValidatedPlacementCandidate = ({
+  angle,
+  centerTile,
+  bestOuterTile,
+  extraRings,
+  componentPolygons,
+}) => {
+  const rawPathInfo = buildCurvedLabelPath(bestOuterTile, {
+    allowStraight: true,
+    center: centerTile,
+    angleDeg: angle,
+    extraRings,
+  });
+  if (!rawPathInfo?.points?.length) return null;
+  if (!polylineInsideComponentTile(rawPathInfo.points, componentPolygons)) return null;
+
+  const bend = pathBendMetrics(rawPathInfo.points);
+  const flow = getPathFlowMetrics(rawPathInfo.points);
+  const clearanceFactor = clamp((rawPathInfo.clearance ?? rawPathInfo.width * 0.25) / Math.max(rawPathInfo.width, 1), 0.08, 0.5);
+  // Broad curvature is cheap. Only high-frequency direction changes and abrupt
+  // local turns reduce the candidate's cartographic score.
+  const flowPenalty = 1
+    + flow.wiggleDegrees / 240
+    + flow.turnReversals * 0.16
+    + Math.max(0, flow.maxSegmentTurnDegrees - 30) / 140;
+  return {
+    angle: normalizeRotation(angle),
+    rawPathInfo: {
+      ...rawPathInfo,
+      ...flow,
+      ...bend,
+    },
+    score: (
+      rawPathInfo.length
+      * Math.sqrt(Math.max(rawPathInfo.width, 1))
+      * (0.72 + clearanceFactor * 0.56)
+    ) / flowPenalty,
+  };
+};
+
+const chooseValidatedPlacementCandidate = ({
+  momentAngle,
+  elongation,
+  centerTile,
+  bestOuterTile,
+  extraRings,
+  componentPolygons,
+}) => {
+  // Compact territories often have a useful direction between their raw moment
+  // axis and horizontal (France is a representative real fixture). Test only a
+  // few deterministic directions; this remains bounded enough for worker use.
+  const temperedAngle = normalizeRotation(momentAngle * 0.48);
+  const angles = [
+    normalizeRotation(momentAngle),
+    temperedAngle,
+    0,
+  ];
+  if (Math.abs(momentAngle) >= 58) angles.push(momentAngle > 0 ? 90 : -90);
+
+  const candidates = [];
+  for (const angle of angles) {
+    if (candidates.some((candidate) => rotationDistance(candidate.angle, angle) < 1.5)) continue;
+    const candidate = buildValidatedPlacementCandidate({
+      angle,
+      centerTile,
+      bestOuterTile,
+      extraRings,
+      componentPolygons,
+    });
+    if (candidate) candidates.push(candidate);
+  }
+  if (!candidates.length) return null;
+
+  let best = candidates.reduce((winner, candidate) => {
+    const distance = rotationDistance(candidate.angle, momentAngle);
+    // Strongly directional geometry receives a modest axis preference. Compact
+    // geometry is allowed to choose the corridor that actually fits best.
+    const axisPreference = 1 + Math.max(0, elongation - 1.25) * (1 - distance / 90) * 0.055;
+    const ranked = candidate.score * axisPreference;
+    return !winner || ranked > winner.ranked ? { candidate, ranked } : winner;
+  }, null)?.candidate;
+
+  const moment = candidates.find((candidate) => rotationDistance(candidate.angle, momentAngle) < 1.5);
+  const horizontal = candidates.find((candidate) => Math.abs(candidate.angle) < 1.5);
+
+  if (moment && elongation >= 1.65 && moment.score >= best.score * 0.78) best = moment;
+
+  // Horizontal remains a tiny readability preference only for genuinely
+  // directionless shapes; it no longer flattens Germany/Belarus/Poland-class
+  // territories merely because they are not extremely elongated.
+  if (horizontal && best !== horizontal && elongation < 1.12 && horizontal.score >= best.score * 0.95) {
+    best = horizontal;
+  }
+  return best;
+};
+
+// Checkpoint 4: one validated territorial placement feeds both straight and
+// curved presentations. Compact states may remain straight/horizontal, but only
+// as a soft cartographic preference; elongated/diagonal states follow geometry.
 const buildLandmassGeometryLayout = ({
   polygons,
   extent,
@@ -1411,113 +1851,160 @@ const buildLandmassGeometryLayout = ({
     .map((polygon) => ({
       polygon,
       areaLocal: polygonAreaLocal(polygon),
-      outerTile: ringLngLatToTile(polygon?.[0], extent),
+      tilePolygon: (polygon ?? [])
+        .map((ring) => ringLngLatToTile(ring, extent))
+        .filter((ring) => ring.length >= 4),
     }))
-    .filter((piece) => piece.areaLocal > 0 && piece.outerTile.length >= 4)
+    .filter((piece) => piece.areaLocal > 0 && piece.tilePolygon[0]?.length >= 4)
     .sort((left, right) => right.areaLocal - left.areaLocal);
   if (!pieces.length) return null;
 
-  // CP3 invariant: every polygon in the selected component participates in
-  // bounds, moments, anchor fallback and spine construction. The old 64-piece /
-  // 0.5%-share cap discarded 41.7% of the real USA mainland fitting area and
-  // roughly 20% of China. Spatial simplification belongs in a future display
-  // surface representation, never in an administrative-piece quota.
   const componentPieces = pieces;
   const componentAreaLocal = componentPieces.reduce((sum, piece) => sum + piece.areaLocal, 0);
-  const bestOuterTile = componentPieces[0].outerTile;
-  const extraRings = componentPieces.slice(1).map((piece) => piece.outerTile);
-
-  const polygonTile = componentPieces
-    .flatMap((piece) => piece.polygon.map((ring) => ringLngLatToTile(ring, extent)))
-    .filter((ring) => ring.length >= 4);
+  const componentPolygons = componentPieces.map((piece) => piece.tilePolygon);
+  const bestOuterTile = componentPieces[0].tilePolygon[0];
+  const extraRings = componentPieces.slice(1).map((piece) => piece.tilePolygon[0]);
+  const allOuterPoints = componentPieces.flatMap((piece) => piece.tilePolygon[0]);
 
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  const allOuterPoints = [];
-  for (const piece of componentPieces) {
-    for (const point of piece.outerTile) {
-      allOuterPoints.push(point);
-      minX = Math.min(minX, point[0]);
-      minY = Math.min(minY, point[1]);
-      maxX = Math.max(maxX, point[0]);
-      maxY = Math.max(maxY, point[1]);
-    }
+  for (const point of allOuterPoints) {
+    minX = Math.min(minX, point[0]);
+    minY = Math.min(minY, point[1]);
+    maxX = Math.max(maxX, point[0]);
+    maxY = Math.max(maxY, point[1]);
   }
-
   const shapeWidth = Math.max(0, maxX - minX);
   const shapeHeight = Math.max(0, maxY - minY);
   const shortSide = Math.max(1, Math.min(shapeWidth, shapeHeight));
   const longSide = Math.max(shapeWidth, shapeHeight);
   const aspectRatio = longSide / shortSide;
 
-  // CP2 keeps the current orientation policy for now, but it is already fully
-  // name-independent. CP4 will replace the blunt horizontal threshold with a
-  // validated interior straight/curved placement choice.
   const moments = clusterMomentsLocal(componentPieces.map((piece) => piece.polygon[0]));
-  const preferHorizontal = !moments || moments.elongation < HORIZONTAL_ELONGATION;
-  const angleTile = preferHorizontal ? 0 : normalizeRotation(-moments.angleDeg);
-  const centerTile = moments ? lngLatToTile(moments.lng, moments.lat, extent) : null;
-  const axisMetrics = projectedAxisMetrics(allOuterPoints, angleTile);
-  const axisAspectRatio = axisMetrics.axisSpan / Math.max(1, axisMetrics.crossSpan);
+  const momentAngle = moments ? normalizeRotation(-moments.angleDeg) : 0;
+  const elongation = moments?.elongation ?? 1;
+  const centerTile = moments
+    ? lngLatToTile(moments.lng, moments.lat, extent)
+    : [(minX + maxX) / 2, (minY + maxY) / 2];
 
-  const rawPathInfo = buildCurvedLabelPath(bestOuterTile, {
-    allowStraight: true,
-    center: centerTile,
-    angleDeg: angleTile,
+  const placement = chooseValidatedPlacementCandidate({
+    momentAngle,
+    elongation,
+    centerTile,
+    bestOuterTile,
     extraRings,
+    componentPolygons,
   });
-  const safeWarpPath = buildSafeMapLibreWarpPath(rawPathInfo);
-  const worldWarpPath = buildGentleWorldWarpPath(rawPathInfo);
-  const turnDegrees = safeWarpPath?.totalTurnDegrees
-    ?? (rawPathInfo ? getTotalTurnDegrees(rawPathInfo.points) : 0);
 
-  // Geometry decides whether a usable line presentation exists. Display-name
-  // width may later change font size/tracking/visibility, but cannot create or
-  // destroy this territorial spine.
-  const worldCurve = Boolean(
-    priorityScale >= 400000
-    && worldWarpPath?.points?.length === 3
-    && worldWarpPath.length >= 170
-    && worldWarpPath.width >= 48
-    && worldWarpPath.totalTurnDegrees <= 42
-    && worldWarpPath.maxSegmentTurnDegrees <= 42
+  const fallbackPoint = componentInteriorPoint(componentPolygons, centerTile);
+  const rawPathInfo = placement?.rawPathInfo ?? null;
+  let rotation = placement?.angle ?? (elongation >= 1.12 ? momentAngle : 0);
+
+  // If a very elongated state somehow selected a nearly perpendicular corridor,
+  // retain its actual territorial direction. This is a fallback, not a separate
+  // horizontal/vertical mode.
+  if (elongation >= 2.6 && rotationDistance(rotation, momentAngle) > 32) {
+    rotation = momentAngle;
+  }
+
+  const axisMetrics = projectedAxisMetrics(allOuterPoints, rotation);
+  const axisAspectRatio = axisMetrics.axisSpan / Math.max(1, axisMetrics.crossSpan);
+  const validatePath = (points) => polylineInsideComponentTile(points, componentPolygons);
+  const pathMatchesPresentationAxis = !placement || rotationDistance(rotation, placement.angle) <= 32;
+  let safeWarpPath = rawPathInfo && pathMatchesPresentationAxis
+    ? buildSafeMapLibreWarpPath(rawPathInfo, validatePath)
+    : null;
+  let worldWarpPath = rawPathInfo && pathMatchesPresentationAxis
+    ? buildGentleWorldWarpPath(rawPathInfo, validatePath)
+    : null;
+
+  // CP4.3: optimize the centered support that the glyphs actually occupy. The
+  // broad-path solver remains territory-first; this final low-frequency bow is
+  // only allowed inside the validated component and is deliberately weaker for
+  // very slender states where a near-straight axis is often the truthful shape.
+  const slenderFlowFactor = clamp(2.8 / Math.max(1, elongation), 0.55, 1);
+  const detailSupportTarget = (
+    priorityScale >= 65000 ? 0.032
+      : priorityScale >= 22000 ? 0.024
+        : 0.018
+  ) * slenderFlowFactor;
+  const worldSupportTarget = 0.050 * slenderFlowFactor;
+
+  if (safeWarpPath) {
+    safeWarpPath = calmPathForRenderer(safeWarpPath, 40, validatePath);
+    safeWarpPath = ensureCartographicSupportBend(safeWarpPath, validatePath, {
+      supportFraction: 0.7,
+      targetBendRatio: detailSupportTarget,
+      maxSegmentTurnDegrees: 40,
+      maxDetourRatio: 1.25,
+    });
+  }
+  if (worldWarpPath && priorityScale >= 350000) {
+    // The live world layer uses text-max-angle=38. Keep deterministic headroom
+    // in the geometry itself instead of asking MapLibre to make the final call.
+    worldWarpPath = calmPathForRenderer(worldWarpPath, 32, validatePath);
+    worldWarpPath = ensureCartographicSupportBend(worldWarpPath, validatePath, {
+      supportFraction: 0.7,
+      targetBendRatio: worldSupportTarget,
+      maxSegmentTurnDegrees: 32,
+      maxDetourRatio: 1.22,
+    });
+  }
+
+  // CP4.2: a territorial baseline is the normal presentation for any polity
+  // large enough to support one. Curvature is continuous — a nearly straight
+  // baseline is still a baseline. Scale decides which simplified version is
+  // used, not whether the territory is "curved enough" to qualify.
+  const worldPath = priorityScale >= 350000 ? (worldWarpPath ?? safeWarpPath) : null;
+  const worldBaseline = Boolean(
+    worldPath
+    && worldPath.length >= 110
+    && worldPath.width >= 18
   );
-  const continentalCurve = Boolean(
-    priorityScale >= 170000
-    && safeWarpPath?.points?.length >= 5
-    && safeWarpPath.length >= 120
-    && safeWarpPath.width >= 38
-    && safeWarpPath.totalTurnDegrees <= 92
-    && safeWarpPath.maxSegmentTurnDegrees <= 32
-    && aspectRatio >= 1.18
+  const detailBaseline = Boolean(
+    safeWarpPath
+    && priorityScale >= 6000
+    && safeWarpPath.length >= 42
+    && safeWarpPath.width >= 8
   );
-  const elongatedCurve = Boolean(
-    priorityScale >= 22000
-    && safeWarpPath?.points?.length >= 5
-    && safeWarpPath.length >= 104
-    && safeWarpPath.width >= 24
-    && safeWarpPath.totalTurnDegrees <= 82
-    && safeWarpPath.maxSegmentTurnDegrees <= 30
-    && axisAspectRatio >= 1.9
-  );
-  const lineEligible = worldCurve || continentalCurve || elongatedCurve;
-  const linePathInfo = worldCurve ? worldWarpPath : lineEligible ? safeWarpPath : null;
-  const curveBand = worldCurve
+  const lineEligible = worldBaseline || detailBaseline;
+  const linePathInfo = worldBaseline ? worldPath : detailBaseline ? safeWarpPath : null;
+  const curveBand = worldBaseline
     ? "world"
-    : lineEligible && elongatedCurve && !continentalCurve
+    : lineEligible && (axisAspectRatio >= 1.65 || elongation >= 1.8)
       ? "early"
       : lineEligible
         ? "standard"
         : "none";
 
-  const anchorPath = linePathInfo ?? rawPathInfo;
-  const centerSample = anchorPath?.points?.length >= 2
-    ? getPointAlongPolyline(anchorPath.points, anchorPath.length / 2)
+  const rawPathCenter = rawPathInfo?.points?.length >= 2
+    ? getPointAlongPolyline(rawPathInfo.points, rawPathInfo.length / 2)?.point
     : null;
-  const pointTile = centerSample?.point ?? getInteriorLabelPoint(polygonTile);
+  const linePathCenter = linePathInfo?.points?.length >= 2
+    ? getPointAlongPolyline(linePathInfo.points, linePathInfo.length / 2)?.point
+    : null;
+  const pointTile = linePathCenter && pointInComponentTile(linePathCenter, componentPolygons)
+    ? linePathCenter
+    : rawPathCenter && pointInComponentTile(rawPathCenter, componentPolygons)
+      ? rawPathCenter
+      : fallbackPoint;
   if (!pointTile) return null;
+
+  const lineBend = linePathInfo ? pathBendMetrics(linePathInfo.points) : null;
+  const rawBend = rawPathInfo ? pathBendMetrics(rawPathInfo.points) : null;
+  const turnDegrees = linePathInfo?.totalTurnDegrees
+    ?? rawPathInfo?.totalTurnDegrees
+    ?? 0;
+  const baselineBendRatio = lineBend?.bendRatio ?? rawBend?.bendRatio ?? 0;
+  const baselineKind = !lineEligible
+    ? "point"
+    : baselineBendRatio >= 0.055 || turnDegrees >= 24
+      ? "flowing"
+      : baselineBendRatio >= 0.012 || turnDegrees >= 6
+        ? "gentle"
+        : "near-straight";
 
   const [rawLng, lat] = tileToLngLat(pointTile[0], pointTile[1], extent);
   const anchorLng = wrapLongitude(rawLng);
@@ -1540,6 +2027,12 @@ const buildLandmassGeometryLayout = ({
     linePathInfo,
     curveBand,
     turnDegrees,
+    baselineKind,
+    rotation,
+    placementInside: true,
+    placementBendRatio: baselineBendRatio,
+    geometryElongation: elongation,
+    geometryMomentAngle: momentAngle,
     anchorLng,
     lat,
   };
@@ -1577,6 +2070,12 @@ const buildLandmassLabelRecords = ({
     linePathInfo,
     curveBand,
     turnDegrees,
+    baselineKind,
+    rotation,
+    placementInside,
+    placementBendRatio,
+    geometryElongation,
+    geometryMomentAngle,
     anchorLng,
     lat,
   } = geometryLayout;
@@ -1596,7 +2095,12 @@ const buildLandmassLabelRecords = ({
   const lineTypography = lineEligible
     ? fitLineTypography({ pathInfo: linePathInfo, name: upperName, priorityScale })
     : null;
-  const rotation = axisMetrics.angle;
+  const visibleTextSupport = lineEligible && lineTypography
+    ? cartographicSupportMetrics(
+      linePathInfo.points,
+      clamp(lineTypography.estimatedOccupancy, 0.2, 1),
+    )
+    : null;
   const curveMinZoom = lineEligible
     ? curveMinZoomForPolityLabelTier(tier, curveBand)
     : null;
@@ -1610,6 +2114,7 @@ const buildLandmassLabelRecords = ({
     minZoom: tier.minZoom,
     curveMinZoom,
     curveBand,
+    baselineKind,
     forceOverlapZoom: tier.forceOverlapZoom,
     allowOverlap: tier.allowOverlap,
     areaScale: priorityScale,
@@ -1622,12 +2127,20 @@ const buildLandmassLabelRecords = ({
     aspectRatio: Number(aspectRatio.toFixed(3)),
     axisAspectRatio: Number(axisAspectRatio.toFixed(3)),
     rotation,
+    placementInside: Boolean(placementInside),
+    placementBendRatio: Number(Number(placementBendRatio ?? 0).toFixed(4)),
+    geometryElongation: Number(Number(geometryElongation ?? 1).toFixed(3)),
+    geometryMomentAngle: Number(Number(geometryMomentAngle ?? 0).toFixed(2)),
     pathLength: linePathInfo?.length ?? rawPathInfo?.length ?? 0,
     pathWidth: linePathInfo?.width ?? rawPathInfo?.width ?? 0,
     pathTurnDegrees: Number(turnDegrees.toFixed(2)),
     warpPointCount: linePathInfo?.points?.length ?? 0,
     warpMaxSegmentTurnDegrees: Number(Number(linePathInfo?.maxSegmentTurnDegrees ?? 0).toFixed(2)),
     warpDetourRatio: Number(Number(linePathInfo?.detourRatio ?? 0).toFixed(3)),
+    pathSupportFraction: Number(Number(linePathInfo?.supportFraction ?? 0.7).toFixed(3)),
+    pathSupportBendRatio: Number(Number(linePathInfo?.supportBendRatio ?? 0).toFixed(4)),
+    visibleTextBendRatio: Number(Number(visibleTextSupport?.bendRatio ?? 0).toFixed(4)),
+    visibleTextTurnDegrees: Number(Number(visibleTextSupport?.totalTurnDegrees ?? 0).toFixed(2)),
     safeWarp: lineEligible,
     hasCurvedLabel: lineEligible,
     anchorLng,

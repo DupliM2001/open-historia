@@ -58,3 +58,9 @@ test("late political fills are deterministically moved underneath existing objec
   ]);
   assert.equal(enforceMapLayerOrder(map), false);
 });
+
+test("PTR-0 polity text renderer stays above legacy polity labels and below cities", () => {
+  assert.ok(index("polity-text-renderer") > index("country-labels"));
+  assert.ok(index("polity-text-renderer") < index("cities-shapes"));
+  assert.ok(index("polity-text-renderer") < index("cities-labels"));
+});

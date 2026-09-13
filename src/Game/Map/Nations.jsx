@@ -38,6 +38,7 @@ import { MAP_SETTING_KEYS, useMapSetting, useMapSettingValue } from "../../runti
 import { useWorldState } from "./useWorldState.js";
 import { buildProvinceOutlinePaint, PROVINCE_OUTLINE_MIN_ZOOM } from "./provinceOutlineStyle.js";
 import { V_NEXT_MARKER_SHAPE_LAYER_IDS } from "./vnext/presentationPolicy.js";
+import PolityTextLayer, { isPolityTextPtr0Enabled } from "./labels/PolityTextLayer.jsx";
 import {
   buildOwnershipPresentationDelta,
   createPoliticalCartographyScheduler,
@@ -825,14 +826,10 @@ const WorldMap = ({ isGlobe = false }) => {
     visibleDerivedOwnerFilter,
     ["==", ["get", "safeWarp"], true],
     ["!=", ["coalesce", ["get", "curveBand"], "detail"], "world"],
-    // Do not ask MapLibre to place the non-world curve at the exact theoretical
-    // threshold. Give it a small camera-space buffer, while the point label
-    // remains guaranteed through the same interval.
-    [
-      "<=",
-      ["+", ["coalesce", ["get", "curveMinZoom"], 99], 0.45],
-      currentLabelZoom,
-    ],
+    // CP4.2: the territorial baseline is the normal map typography, not a late
+    // curve upgrade. The worker already gives it a small lead over minZoom; the
+    // renderer should not add another hidden half-zoom delay.
+    ["<=", ["coalesce", ["get", "curveMinZoom"], 99], currentLabelZoom],
   ], [currentLabelZoom, visibleDerivedOwnerFilter]);
 
   // A custom map is named by the live polity layers alone; the stock
@@ -2076,6 +2073,11 @@ const WorldMap = ({ isGlobe = false }) => {
     [labelFont, labelFontOverride],
   );
 
+  // PTR-0 is an opt-in proof of the replacement polity typography engine. It
+  // deliberately coexists with the current MapLibre symbol labels so the new
+  // WebGL ribbon can be judged without changing production label ownership yet.
+  const ptr0PolityTextEnabled = useMemo(() => isPolityTextPtr0Enabled(), []);
+
   const pointLabelLayerLayout = useMemo(() => ({
     "text-field": ["get", "name"],
     "text-font": labelFontStack,
@@ -2372,6 +2374,18 @@ const WorldMap = ({ isGlobe = false }) => {
           }}
         />
       </Source>
+
+      <PolityTextLayer
+        map={map}
+        enabled={Boolean(
+          ptr0PolityTextEnabled
+          && !isGlobe
+          && !mapDisplaySettings.hideCountryLabels
+        )}
+        fontFamilies={labelFontStack}
+        textColor={labelTextColor || "rgba(250, 249, 244, 0.995)"}
+        haloColor={labelHaloColor || "rgba(4, 6, 9, 0.96)"}
+      />
 
       <Source id="country-curved-label-source" type="geojson" data={activeCurvedLabelData}>
         <Layer
