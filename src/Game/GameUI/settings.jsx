@@ -1342,7 +1342,10 @@ const DiagnosticsPanel = () => {
 
         setAttachState("working");
         try {
-            await saveDebugLogFile();
+            // With logging off there is no log to send — saving an empty one would
+            // be a file that says nothing, and the button above already says the
+            // same thing by being dimmed. Just the game, and the label says so.
+            if (enabled) await saveDebugLogFile();
             const { blob } = await buildGameZipBlob(gameId);
             saveGameZipToDisk(blob, `${gameId}-game.zip`);
             setAttachState(`saved ${formatZipSize(blob.size)}`);
@@ -1388,7 +1391,9 @@ const DiagnosticsPanel = () => {
         onClick={handleAttachGame}
         disabled={attachState === "working"}
         style={{ ...diagnosticsButton, width: "100%", marginBottom: "0.5rem" }}
-        title="Saves the log file, then the game you are playing as a .zip. Send both with the report: the log says what happened, the game is what it happened to."
+        title={enabled
+            ? "Saves the log file, then the game you are playing as a .zip. Send both with the report: the log says what happened, the game is what it happened to."
+            : "Logging is off, so there is no log to save — this saves the game you are playing as a .zip."}
         >
         {attachState === "working"
             ? "Packing the game…"
@@ -1397,8 +1402,8 @@ const DiagnosticsPanel = () => {
             : attachState === "failed"
             ? "Couldn't save the game"
             : attachState.startsWith("saved ")
-            ? `✓ Saved both (game ${attachState.slice(6)})`
-            : "💾 Save log file + game"}
+            ? (enabled ? `✓ Saved both (game ${attachState.slice(6)})` : `✓ Saved game (${attachState.slice(6)})`)
+            : enabled ? "💾 Save log file + game" : "💾 Save game"}
         </button>
         )}
 

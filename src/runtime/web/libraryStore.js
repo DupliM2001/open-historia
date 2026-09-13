@@ -1403,6 +1403,21 @@ export const handleScenarios = async ({ method, segments, body, rawBody, content
 // imports into the desktop one and back. Restore points stay OUT of the bundle
 // here too: they get their own endpoint so the caller can move them without
 // parsing them.
+// Server twin of scenarioBundleBytes: what this scenario would weigh once
+// bundled, so the caller can decide whether it can carry it before building it.
+const scenarioBundleBytes = async (scenarioId) => {
+  const record = await getScenario(scenarioId);
+  if (!record) return 0;
+  let total = 0;
+  try { total += JSON.stringify(record.json ?? {}).length; } catch { /* unserialisable */ }
+  for (const asset of Object.values(record.assets ?? {})) {
+    const bytes = asset?.bytes;
+    if (bytes && typeof bytes.byteLength === "number") total += Math.round(bytes.byteLength * 1.34);
+  }
+  if (record.cover?.bytes?.byteLength) total += Math.round(record.cover.bytes.byteLength * 1.34);
+  return total;
+};
+
 const exportGameBundle = async (id) => {
   const record = await getGame(id);
   if (!record) throw new Error(`Game not found: ${id}`);
@@ -1433,6 +1448,12 @@ const exportGameBundle = async (id) => {
       // Server twin: nothing to embed when this store lacks the map either.
       missing: Boolean(scenario?.missing),
       scenarioId: meta.scenarioId,
+      // Server twin. This store holds the scenario as an object rather than files,
+      // so measure what a bundle of it would serialise to.
+      scenarioBytes:
+        scenario?.missing || BUILT_IN_SCENARIO_IDS.has(meta.scenarioId) || scenario?.hubOrigin
+          ? 0
+          : await scenarioBundleBytes(meta.scenarioId),
       // Server twin: a map's name must not decay to an id when a game carrying no
       // map is handed on again.
       scenarioName: scenario?.missing

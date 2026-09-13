@@ -3346,6 +3346,30 @@ const OPTIONAL_GAME_BUNDLE_KEYS = new Set(["colors", "flags", "tags", "intercept
 // built-in map were moved.
 const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENARIO_ID]);
 
+// Roughly what a scenario weighs once bundled, so the CLIENT can decide whether
+// it can carry it without downloading it first — which is the whole point, since
+// downloading it is the thing that kills the tab. A bundle embeds every asset,
+// pmtiles included, as base64, so it runs well above the folder on disk: base64
+// is 4/3, and measured, a 220 MB hub map bundles to 297 MB.
+const scenarioBundleBytes = (scenarioId) => {
+  const dir = getScenarioDirectory(scenarioId);
+  if (!fs.existsSync(dir)) return 0;
+
+  let total = 0;
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else {
+        try { total += fs.statSync(full).size; } catch { /* a file that vanished mid-walk */ }
+      }
+    }
+  };
+
+  try { walk(dir); } catch { /* best effort: an unreadable scenario reports 0 */ }
+  return Math.round(total * 1.34);
+};
+
 const exportGameBundle = (gameId) => {
   ensureGameStore();
 
@@ -3386,6 +3410,11 @@ const exportGameBundle = (gameId) => {
       // exactly the position the sender is in, which is the honest answer.
       missing: Boolean(scenario?.missing),
       scenarioId: game.scenarioId,
+      // Only worth measuring when the map might actually have to travel.
+      scenarioBytes:
+      scenario?.missing || BUILT_IN_SCENARIO_IDS.has(game.scenarioId) || scenario?.hubOrigin
+      ? 0
+      : scenarioBundleBytes(game.scenarioId),
       // A missing scenario is named by its id (buildScenarioCatalogEntry), which
       // is not a name a player can go and ask someone for. If THIS game was
       // itself imported without its map, it remembers what the last sender called

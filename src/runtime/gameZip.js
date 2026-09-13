@@ -42,18 +42,28 @@ export const formatZipSize = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// How big a scenario may be and still ride inside a game. The zip is built in the
+// page: the bundle is fetched, parsed into objects, stringified again and then
+// DEFLATEd, so peak memory is several times its size. Measured on real maps — an
+// editor-made map bundles to 8.75 MB and zips without trouble; a hub map carrying
+// its own tiles bundles to 297 MB, because a bundle embeds every asset as base64,
+// and building that in a tab kills it outright. So there IS a ceiling, whatever we
+// would prefer: above this the map does not travel and the player is told to send
+// the scenario separately rather than handed a browser crash.
+const MAX_EMBEDDED_SCENARIO_BYTES = 32 * 1024 * 1024;
+
 // An exported Game carries its map only when we do NOT know where that map can
 // be fetched from. A built-in scenario is on every install; a hub scenario whose
 // origin survived (hubOrigin is dropped the moment the player edits it) can be
-// downloaded again. Anything else — made in the editor, or a hub map since
-// edited — has no other home, so it travels whatever its size, and the player is
-// told the size before anything is written.
-// `missing` is the third way out: this install does not hold the map either, so
-// there is nothing to embed and asking for it would fail the whole export. That
-// is the ordinary state of a game imported without its map, and of one whose
-// scenario was deleted — neither should become a game that cannot be exported.
+// downloaded again; `missing` means this install has no copy to embed, which is
+// the ordinary state of a game imported without its map. Anything else — made in
+// the editor, or a hub map since edited — has no other home, so it travels, if it
+// is small enough to travel at all.
 const gameZipNeedsScenario = (scenarioRef) =>
   Boolean(scenarioRef) && !scenarioRef.builtIn && !scenarioRef.hubOrigin && !scenarioRef.missing;
+
+const scenarioFitsInZip = (scenarioRef) =>
+  !(Number(scenarioRef?.scenarioBytes) > MAX_EMBEDDED_SCENARIO_BYTES);
 
 export const buildGameZipBlob = async (gameId) => {
   const bundle = await exportGameBundle(gameId);
@@ -67,7 +77,15 @@ export const buildGameZipBlob = async (gameId) => {
   const settingsText = await buildSettingsReport().catch(() => "");
 
   let carriesScenario = false;
-  if (gameZipNeedsScenario(scenarioRef)) {
+  let oversizeScenario = null;
+  if (gameZipNeedsScenario(scenarioRef) && !scenarioFitsInZip(scenarioRef)) {
+    // Deliberately before the fetch: downloading a 297 MB bundle to discover it is
+    // too big is the crash we are avoiding.
+    oversizeScenario = {
+      bytes: Number(scenarioRef.scenarioBytes) || 0,
+      name: scenarioRef.scenarioName || scenarioRef.scenarioId,
+    };
+  } else if (gameZipNeedsScenario(scenarioRef)) {
     const scenarioBundle = await exportScenarioBundle(scenarioRef.scenarioId);
     // The same split the scenario export does: a custom basemap rides as real
     // bytes rather than a base64 data URL ~33% larger.
@@ -88,7 +106,7 @@ export const buildGameZipBlob = async (gameId) => {
   }
   if (settingsText) files[GAME_ZIP_SETTINGS] = settingsText;
 
-  return { blob: await zipBundle(files), carriesScenario };
+  return { blob: await zipBundle(files), carriesScenario, oversizeScenario };
 };
 
 // Resolves to the imported game's details, or throws with something a player can

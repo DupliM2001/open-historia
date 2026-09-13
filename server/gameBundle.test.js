@@ -366,3 +366,34 @@ test("an imported game records when it arrived, so the library can place it", ()
   assert.equal(result.afterWrite, result.first, "an ordinary meta write neither drops nor moves it");
   assert.equal(result.source, null, "a game that was never imported has none");
 });
+
+test("the bundle reports what the map would weigh, and only when that matters", () => {
+  // The client has to decide whether it can carry a map BEFORE downloading it:
+  // fetching a 297 MB scenario bundle to discover it is too big is the crash this
+  // number exists to avoid. Measured on a real hub map, a 220 MB scenario folder
+  // bundles to 297 MB, because a bundle embeds every asset as base64.
+  const embeddable = runStore(buildDataDir({ scenarioId: "my-own-map" }), `
+    ${report(`store.exportGameBundle("test-campaign").scenarioRef`)}
+  `);
+  assert.equal(embeddable.hubOrigin, null);
+  assert.ok(embeddable.scenarioBytes > 0, "a map that must travel is measured");
+
+  const builtIn = runStore(buildDataDir({ scenarioId: "default" }), `
+    ${report(`store.exportGameBundle("test-campaign").scenarioRef`)}
+  `);
+  assert.equal(builtIn.scenarioBytes, 0, "the built-in map never travels, so it is not weighed");
+
+  const fromHub = runStore(
+    buildDataDir({
+      scenarioId: "shared-world",
+      hubOrigin: { postId: 42, bundleUrl: "https://example.invalid/world.zip", syncedAt: "2026-08-01T00:00:00.000Z" },
+    }),
+    `${report(`store.exportGameBundle("test-campaign").scenarioRef`)}`,
+  );
+  assert.equal(fromHub.scenarioBytes, 0, "a map that can be re-downloaded never travels either");
+
+  const gone = runStore(buildDataDir({ scenarioId: "long-gone", scenarioExists: false }), `
+    ${report(`store.exportGameBundle("test-campaign").scenarioRef`)}
+  `);
+  assert.equal(gone.scenarioBytes, 0, "a map this install does not have cannot be weighed or carried");
+});

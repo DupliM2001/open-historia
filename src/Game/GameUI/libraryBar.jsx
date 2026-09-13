@@ -540,6 +540,10 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
 const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit, onExport }) => {
   const cardImageUrl = game.coverImageUrl || DEFAULT_SCENARIO_COVER;
   const [cardMenuOpen, setCardMenuOpen] = useState(false);
+  // Which row the pointer is over. These are plain buttons on a translucent
+  // surface, so without this nothing moves under the cursor and there is no way
+  // to tell which one is about to be clicked.
+  const [hoveredMenuItem, setHoveredMenuItem] = useState(null);
 
   const cardMenuItems = [
     ["Edit", () => onEdit(game.id)],
@@ -643,7 +647,7 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit, onExpo
                       many in a scrolling shelf and a listener per card is a listener
                       per card. */}
                   <div
-                    onClick={() => setCardMenuOpen(false)}
+                    onClick={() => { setCardMenuOpen(false); setHoveredMenuItem(null); }}
                     style={{ inset: 0, position: "fixed", zIndex: 1 }}
                   />
                   <div
@@ -664,13 +668,20 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit, onExpo
                     {cardMenuItems.map(([label, run]) => (
                       <button
                         key={label}
-                        onClick={() => { setCardMenuOpen(false); run(); }}
+                        onClick={() => { setCardMenuOpen(false); setHoveredMenuItem(null); run(); }}
+                        onFocus={() => setHoveredMenuItem(label)}
+                        onBlur={() => setHoveredMenuItem(null)}
+                        onMouseEnter={() => setHoveredMenuItem(label)}
+                        onMouseLeave={() => setHoveredMenuItem(null)}
                         role="menuitem"
                         style={{
                           ...actionButtonStyle,
-                          background: "transparent",
+                          background: hoveredMenuItem === label ? "rgba(255,255,255,0.16)" : "transparent",
                           border: "none",
                           borderRadius: 0,
+                          // Keyboard focus lands here too, so the highlight follows
+                          // Tab as well as the pointer.
+                          color: hoveredMenuItem === label ? "#fff" : "rgba(248,250,252,0.82)",
                           justifyContent: "flex-start",
                           padding: "0.55rem 0.8rem",
                           textAlign: "left",
@@ -1554,7 +1565,16 @@ const LibraryTopBar = () => {
     setIsBusy(true);
 
     try {
-      const { blob, carriesScenario } = await buildGameZipBlob(game.id);
+      const { blob, carriesScenario, oversizeScenario } = await buildGameZipBlob(game.id);
+      if (oversizeScenario) {
+        // Saved anyway: a game without its map still opens for anyone who has the
+        // map, and is still the thing a maintainer needs. Refusing would leave the
+        // player with nothing.
+        setEditorError(
+          `“${oversizeScenario.name}” is ${formatZipSize(oversizeScenario.bytes)} — too large to travel inside a game file, ` +
+          `so this export carries everything except the map. Send the scenario separately from the Scenarios tab.`,
+        );
+      }
       // The one case where the file can be big: nothing else could fetch this
       // map, so it had to travel. Say the size before writing anything, and let
       // the player back out — refusing outright would leave them with a game
@@ -1634,7 +1654,13 @@ const LibraryTopBar = () => {
 
     try {
       const { downloadHubBundle } = await import("./communityHub.jsx");
-      const bundle = await downloadHubBundle(game.importedScenarioOrigin.bundleUrl);
+      const origin = game.importedScenarioOrigin;
+      const bundle = await downloadHubBundle(origin.bundleUrl);
+      // Stamp where it came from, exactly as the Community tab's own import does
+      // (communityHub.jsx). Without it the scenario looks editor-made to every
+      // later export, which would try to carry the whole map inside the next game
+      // exported from it — hundreds of megabytes, built in the page.
+      bundle.hubOrigin = { postId: origin.postId, bundleUrl: origin.bundleUrl };
       const imported = await importScenarioBundle(bundle);
       await saveGame(game.id, { scenarioId: imported.scenario.id });
       await refreshLibraryCatalog({ force: true });
@@ -2525,7 +2551,7 @@ const LibraryTopBar = () => {
                 , which isn't in your library — so there is no map to open it on.
                 {pending.importedScenarioOrigin
                   ? " It's on the community hub, so it can be fetched now."
-                  : " Look for it on the community hub, or ask whoever sent you the game for the scenario file."}
+                  : " Ask whoever sent you the game for the scenario file, then import it from the Scenarios tab."}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
                 {pending.importedScenarioOrigin && (
@@ -2538,12 +2564,18 @@ const LibraryTopBar = () => {
                     {isBusy ? "Getting the scenario…" : "Import & play"}
                   </button>
                 )}
+                {/* The hub is only worth offering when the map is actually on it.
+                    Otherwise the player has a file to import, and the Scenarios
+                    tab is where importing one happens. */}
                 <button
-                  onClick={() => { setMissingScenarioGame(null); setActiveTab("community"); }}
+                  onClick={() => {
+                    setMissingScenarioGame(null);
+                    setActiveTab(pending.importedScenarioOrigin ? "community" : "scenarios");
+                  }}
                   style={{ ...actionButtonStyle, minHeight: "2.6rem" }}
                   type="button"
                 >
-                  Browse the community hub
+                  {pending.importedScenarioOrigin ? "Browse the community hub" : "Go to scenarios"}
                 </button>
                 <button
                   onClick={() => setMissingScenarioGame(null)}

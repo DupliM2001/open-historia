@@ -112,3 +112,17 @@ test("the zip is never handed to libraryBar's same-task revoke", () => {
   const gameZip = readSource("runtime", "gameZip.js");
   assert.match(gameZip, /setTimeout\(\(\) => URL\.revokeObjectURL/, "gameZip.js defers the revoke");
 });
+
+test("a map too big to zip is refused before it is downloaded", () => {
+  // The crash this prevents: a hub map bundles to 297 MB, and fetching it to find
+  // that out is itself what kills the tab. The size check must therefore sit on
+  // scenarioBytes, which the bundle already carries, and must run BEFORE the
+  // exportScenarioBundle call.
+  const gameZip = readSource("runtime", "gameZip.js");
+  assert.match(gameZip, /MAX_EMBEDDED_SCENARIO_BYTES/, "there is a ceiling at all");
+
+  const check = gameZip.indexOf("scenarioFitsInZip(scenarioRef)");
+  const fetchAt = gameZip.indexOf("await exportScenarioBundle(");
+  assert.ok(check > 0 && fetchAt > 0, "both the check and the download are present");
+  assert.ok(check < fetchAt, "the size is checked before the scenario is downloaded, not after");
+});
