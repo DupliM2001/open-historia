@@ -41,6 +41,19 @@ export const JSON_ASSET_DEFAULTS = {
   game: {}, prompts: {}, world: {}, snapshots: [], intercepts: {},
 };
 
+// This project's name, deliberately. The scenario schema below is a frozen wire
+// format kept for the bundles players already hold — not a pattern to copy.
+export const GAME_BUNDLE_SCHEMA = "open-historia-game-bundle/1";
+export const ACCEPTED_GAME_BUNDLE_SCHEMAS = new Set([GAME_BUNDLE_SCHEMA]);
+// Everything a game holds except its restore points (their own zip entry, moved
+// as text) and its cover image.
+export const GAME_BUNDLE_DATA_KEYS = [...JSON_ASSET_KEYS, ...OPTIONAL_JSON_ASSET_KEYS, "intercepts"];
+export const OPTIONAL_GAME_BUNDLE_KEYS = new Set([...OPTIONAL_JSON_ASSET_KEYS, "intercepts"]);
+// Scenarios every install ships, so a game played on one never carries a map.
+export const CLASSIC_SCENARIO_ID = "modern-day-classic";
+export const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENARIO_ID]);
+
+
 export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
   "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
   "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
@@ -305,6 +318,11 @@ export const readGameMeta = (gameId, raw = {}) => {
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     id: gameId,
+    // Server twin: server/libraryStore.js readGameMeta. What the sender called
+    // the scenario, and where they believed it could still be fetched — read
+    // when this browser opens a game whose map it does not hold.
+    importedScenarioName: String(raw?.importedScenarioName ?? "").trim() || null,
+    importedScenarioOrigin: normalizeHubOrigin(raw?.importedScenarioOrigin),
     lastPlayedAt: String(raw?.lastPlayedAt ?? "").trim() || null,
     name,
     playCount: normalizePlayCount(raw?.playCount),

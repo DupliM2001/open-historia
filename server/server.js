@@ -14,14 +14,17 @@ import {
   deleteScenario,
   ensureGameStore,
   ensureScenarioStore,
+  exportGameBundle,
   exportScenarioBundle,
   getGameCatalog,
   getGameDetails,
   getLibraryCatalog,
   getScenarioCatalog,
   getScenarioDetails,
+  importGameBundle,
   importScenarioBundle,
   updateScenarioFromBundle,
+  readGameSnapshots,
   readRuntimeJsonAsset,
   removeGameAsset,
   removeScenarioAsset,
@@ -35,6 +38,7 @@ import {
   updateScenario,
   uploadGameAsset,
   uploadScenarioAsset,
+  writeGameSnapshots,
   writeRuntimeJsonAsset,
 } from "./libraryStore.js";
 import {
@@ -645,6 +649,46 @@ app.get("/api/games/:gameId", (req, res) => {
     res.json(getGameDetails(req.params.gameId));
   } catch (error) {
     sendError(res, 404, error);
+  }
+});
+
+// Export one game as a bundle, and import one back. The zip around it is built
+// in the client (src/Game/GameUI/libraryBar.jsx) so the web build, which has no
+// server at all, gets the same file from the same code.
+app.get("/api/games/:gameId/export", (req, res) => {
+  try {
+    res.json(exportGameBundle(req.params.gameId));
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
+app.post("/api/games/import", largeJsonParser, (req, res) => {
+  try {
+    // Never setActive: an import must not switch the game the player is in.
+    res.status(201).json(importGameBundle(req.body ?? {}));
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
+// Restore points, separately from the bundle above, because they are ~40x its
+// size and the client moves them as text it never parses. Only reachable per
+// game id — /api/runtime/json/snapshots is scoped to the ACTIVE game and an
+// export is usually of some other one.
+app.get("/api/games/:gameId/snapshots", (req, res) => {
+  try {
+    res.json(readGameSnapshots(req.params.gameId));
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
+app.put("/api/games/:gameId/snapshots", largeJsonParser, (req, res) => {
+  try {
+    res.json(writeGameSnapshots(req.params.gameId, req.body));
+  } catch (error) {
+    sendError(res, 400, error);
   }
 });
 

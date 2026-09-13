@@ -23,6 +23,8 @@ import {
   readScenarioMeta, readGameMeta, readStoredImageContentType, resolveOrderedIds, normalizeId, normalizePlayCount,
   scenarioLooksLikeRuntimeSnapshot, buildFreshGameSeedFromScenario, buildFreshWorldSeedFromScenario,
   normalizeRuntimeWorld, COUNTRY_NAME_REGISTRY, normalizeHubOrigin,
+  GAME_BUNDLE_SCHEMA, ACCEPTED_GAME_BUNDLE_SCHEMAS, GAME_BUNDLE_DATA_KEYS,
+  OPTIONAL_GAME_BUNDLE_KEYS, BUILT_IN_SCENARIO_IDS,
 } from "./models.js";
 // Imported, not mirrored: server/ownerMigration.js is pure ESM with no node
 // imports, so Vite bundles it into the web build. One implementation of the
@@ -291,6 +293,8 @@ const getGameCatalog = async (scenarioCatalog, gameMetas) => {
       pendingActions: proj.pendingActions ?? 0,
       round: proj.round ?? 1,
       scenarioAccentColor: scenario?.accentColor ?? meta.accentColor,
+      // Server twin: the first client reader of `missing` is the Play button.
+      scenarioMissing: Boolean(scenario?.missing),
       scenarioName: scenario?.name ?? meta.scenarioId,
     };
   }).filter(Boolean);
@@ -1390,6 +1394,123 @@ export const handleScenarios = async ({ method, segments, body, rawBody, content
   }
 };
 
+// --- Game bundles ----------------------------------------------------------
+// The twin of exportGameBundle/importGameBundle in server/libraryStore.js. Same
+// schema, same field names, same rules, so a Game exported from the web build
+// imports into the desktop one and back. Restore points stay OUT of the bundle
+// here too: they get their own endpoint so the caller can move them without
+// parsing them.
+const exportGameBundle = async (id) => {
+  const record = await getGame(id);
+  if (!record) throw new Error(`Game not found: ${id}`);
+
+  const game = await getGameSummary(id);
+  const meta = readGameMeta(id, record.meta ?? {});
+  const scenario = await getGameScenarioSummary(meta.scenarioId);
+  const data = {};
+
+  for (const key of GAME_BUNDLE_DATA_KEYS) data[key] = jsonAsset(record, key);
+
+  return {
+    data,
+    exportedAt: nowIso(),
+    game: {
+      accentColor: game.accentColor,
+      description: game.description,
+      eyebrow: game.eyebrow,
+      heroSubtitle: game.heroSubtitle,
+      heroTitle: game.heroTitle,
+      name: game.name,
+      subtitle: game.subtitle,
+    },
+    schema: GAME_BUNDLE_SCHEMA,
+    scenarioRef: {
+      builtIn: BUILT_IN_SCENARIO_IDS.has(meta.scenarioId),
+      hubOrigin: scenario?.hubOrigin ?? null,
+      scenarioId: meta.scenarioId,
+      scenarioName: scenario?.missing ? meta.scenarioId : scenario?.name || meta.scenarioId,
+    },
+  };
+};
+
+// Keep the sender's name; disambiguate only on an exact match. Server twin:
+// uniqueGameName in server/libraryStore.js.
+const uniqueGameName = async (requested) => {
+  const name = trimmed(requested) || "Imported Game";
+  const catalog = await getGameCatalog();
+  const taken = new Set(catalog.games.map((entry) => entry.name));
+
+  if (!taken.has(name)) return name;
+
+  let candidate = `${name} (imported)`;
+  let attempt = 2;
+  while (taken.has(candidate)) {
+    candidate = `${name} (imported ${attempt})`;
+    attempt += 1;
+  }
+  return candidate;
+};
+
+// Not createGame: that seeds from a scenario and throws on an unknown id, and an
+// imported game brings its own data and may name a scenario this browser has
+// never held. Never activates, for the same reason the server twin does not.
+const importGameBundle = async (bundle) => {
+  if (!bundle || typeof bundle !== "object") throw new Error("Game bundle must be a JSON object.");
+  if (!ACCEPTED_GAME_BUNDLE_SCHEMAS.has(bundle.schema)) throw new Error("Unsupported game bundle schema.");
+
+  const metaIn = bundle.game && typeof bundle.game === "object" ? bundle.game : {};
+  const data = bundle.data && typeof bundle.data === "object" ? bundle.data : {};
+  const ref = bundle.scenarioRef && typeof bundle.scenarioRef === "object" ? bundle.scenarioRef : {};
+  const scenarioId = trimmed(ref.scenarioId) || DEFAULT_SCENARIO_ID;
+
+  const id = await ensureUniqueId(metaIn.name || scenarioId || "game", "game");
+  const record = emptyGameRecord(id);
+  record.json = {};
+  for (const key of GAME_BUNDLE_DATA_KEYS) {
+    const value = data[key];
+    if (value === undefined && OPTIONAL_GAME_BUNDLE_KEYS.has(key)) continue;
+    record.json[key] = cloneJson(value ?? JSON_ASSET_DEFAULTS[key] ?? {});
+  }
+
+  const createdAt = nowIso();
+  record.meta = {
+    accentColor: trimmed(metaIn.accentColor) || DEFAULT_GAME_META.accentColor,
+    createdAt,
+    description: trimmed(metaIn.description) || DEFAULT_GAME_META.description,
+    eyebrow: trimmed(metaIn.eyebrow) || DEFAULT_GAME_META.eyebrow,
+    heroSubtitle: trimmed(metaIn.heroSubtitle) || DEFAULT_GAME_META.heroSubtitle,
+    heroTitle: trimmed(metaIn.heroTitle) || DEFAULT_GAME_META.heroTitle,
+    id,
+    importedScenarioName: trimmed(ref.scenarioName) || null,
+    importedScenarioOrigin: normalizeHubOrigin(ref.hubOrigin),
+    name: await uniqueGameName(metaIn.name),
+    scenarioId,
+    subtitle: trimmed(metaIn.subtitle) || DEFAULT_GAME_META.subtitle,
+    updatedAt: createdAt,
+  };
+
+  await putGame(record);
+  const manifest = await getGameManifest();
+  const order = resolveOrderedIds(manifest.order, await listGameIds(), DEFAULT_GAME_ID).filter((e) => e !== id);
+  order.unshift(id);
+  await saveGameManifest({ activeGameId: manifest.activeGameId, order });
+  return getGameDetails(id);
+};
+
+const readGameSnapshots = async (id) => {
+  const record = await getGame(id);
+  if (!record) throw new Error(`Game not found: ${id}`);
+  return jsonAsset(record, "snapshots");
+};
+
+const writeGameSnapshots = async (id, snapshots) => {
+  const record = await getGame(id);
+  if (!record) throw new Error(`Game not found: ${id}`);
+  record.json = { ...record.json, snapshots: Array.isArray(snapshots) ? snapshots : [] };
+  await putGame(record);
+  return { ok: true };
+};
+
 export const handleGames = async ({ method, segments, body, rawBody, contentType, rangeHeader }) => {
   const id = segments[0] ? decodeURIComponent(segments[0]) : null;
   try {
@@ -1399,6 +1520,7 @@ export const handleGames = async ({ method, segments, body, rawBody, contentType
       return null;
     }
     if (id === "active" && method === "PUT") return jsonResponse(await setActiveGame(body?.gameId));
+    if (id === "import" && method === "POST") return jsonResponse(await importGameBundle(body ?? {}), 201);
 
     const sub = segments[1];
     if (!sub) {
@@ -1406,6 +1528,11 @@ export const handleGames = async ({ method, segments, body, rawBody, contentType
       if (method === "PUT") return jsonResponse(await updateGame(id, body ?? {}));
       if (method === "DELETE") return jsonResponse(await deleteGame(id));
       return null;
+    }
+    if (sub === "export" && method === "GET") return jsonResponse(await exportGameBundle(id));
+    if (sub === "snapshots") {
+      if (method === "GET") return jsonResponse(await readGameSnapshots(id));
+      if (method === "PUT") return jsonResponse(await writeGameSnapshots(id, body));
     }
     if (sub === "assets" && segments[2]) {
       const key = decodeURIComponent(segments[2]);

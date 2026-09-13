@@ -15,6 +15,7 @@ import {
   downloadScenarioJsonAsset,
   ensureLibraryCatalog,
   exportScenarioBundle,
+  importGameBundle,
   importScenarioBundle,
   updateScenarioFromBundle,
   loadGameDetails,
@@ -28,6 +29,7 @@ import {
   uploadGameAsset,
   uploadScenarioAsset,
   useLibraryState,
+  writeGameSnapshotsText,
 } from "../../runtime/library.js";
 import { loadCountryNames, readJson, writeJson, JSON_URLS } from "../../runtime/assets.js";
 import { LABEL_FONT_SUGGESTIONS } from "../../runtime/mapSettings.js";
@@ -43,6 +45,7 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
+import { buildGameZipBlob, formatZipSize, readGameZip } from "../../runtime/gameZip.js";
 
 const UNIT_TYPE_LABELS = {
   infantry: "Infantry",
@@ -530,8 +533,19 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
   );
 };
 
-const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
+// Edit, Clone and Export live behind the ⋮ in the corner rather than on the
+// face of the card. Three verbs compete for width with Play, and Play is the one a
+// player came to press; the other three are occasional, and none of them is
+// destructive, which is why Archive stays out here on its own.
+const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit, onExport }) => {
   const cardImageUrl = game.coverImageUrl || DEFAULT_SCENARIO_COVER;
+  const [cardMenuOpen, setCardMenuOpen] = useState(false);
+
+  const cardMenuItems = [
+    ["Edit", () => onEdit(game.id)],
+    ["Clone", () => onClone(game)],
+    ["Export", () => onExport(game)],
+  ];
 
   return (
     <div
@@ -569,26 +583,107 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
         }}
       >
         <div>
-          <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between" }}>
-            <span
-              style={{
-                background: active ? `${game.accentColor}66` : "rgba(255,255,255,0.12)",
-                border: "1px solid rgba(255,255,255,0.15)",
-                borderRadius: "999px",
-                color: "rgba(248,250,252,0.94)",
-                display: "inline-flex",
-                fontSize: "0.69rem",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                padding: "0.35rem 0.6rem",
-                textTransform: "uppercase",
-              }}
-            >
-              {active ? "Current Game" : game.eyebrow || "Game"}
-            </span>
-            <span style={{ color: "rgba(255,255,255,0.72)", fontSize: "0.76rem" }}>
-              {game.scenarioName}
-            </span>
+          <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+            {/* The pill and the scenario name are both caption text and read as a
+                pair; the corner belongs to the menu. */}
+            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", minWidth: 0 }}>
+              <span
+                style={{
+                  background: active ? `${game.accentColor}66` : "rgba(255,255,255,0.12)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: "999px",
+                  color: "rgba(248,250,252,0.94)",
+                  display: "inline-flex",
+                  flex: "0 0 auto",
+                  fontSize: "0.69rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  padding: "0.35rem 0.6rem",
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {active ? "Current Game" : game.eyebrow || "Game"}
+              </span>
+              <span
+                style={{
+                  color: "rgba(255,255,255,0.72)",
+                  fontSize: "0.76rem",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={game.scenarioName}
+              >
+                {game.scenarioName}
+              </span>
+            </div>
+
+            <div style={{ flex: "0 0 auto", position: "relative" }}>
+              <button
+                aria-haspopup="menu"
+                aria-expanded={cardMenuOpen}
+                aria-label={`More for ${game.name}`}
+                onClick={() => setCardMenuOpen((open) => !open)}
+                style={{
+                  ...actionButtonStyle,
+                  background: cardMenuOpen ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.35)",
+                  fontSize: "1.05rem",
+                  lineHeight: 1,
+                  minWidth: "2rem",
+                  padding: "0.3rem 0.45rem",
+                }}
+                type="button"
+              >
+                ⋮
+              </button>
+              {cardMenuOpen && (
+                <>
+                  {/* Click-away, rather than a document listener: the card is one of
+                      many in a scrolling shelf and a listener per card is a listener
+                      per card. */}
+                  <div
+                    onClick={() => setCardMenuOpen(false)}
+                    style={{ inset: 0, position: "fixed", zIndex: 1 }}
+                  />
+                  <div
+                    role="menu"
+                    style={{
+                      ...surfaceStyle,
+                      borderRadius: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      minWidth: "8rem",
+                      overflow: "hidden",
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 0.35rem)",
+                      zIndex: 2,
+                    }}
+                  >
+                    {cardMenuItems.map(([label, run]) => (
+                      <button
+                        key={label}
+                        onClick={() => { setCardMenuOpen(false); run(); }}
+                        role="menuitem"
+                        style={{
+                          ...actionButtonStyle,
+                          background: "transparent",
+                          border: "none",
+                          borderRadius: 0,
+                          justifyContent: "flex-start",
+                          padding: "0.55rem 0.8rem",
+                          textAlign: "left",
+                        }}
+                        type="button"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div style={{ marginTop: "2rem" }}>
@@ -616,17 +711,11 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
                 background: active ? "rgba(255,255,255,0.16)" : `${game.accentColor}cc`,
                 borderColor: active ? "rgba(255,255,255,0.22)" : `${game.accentColor}dd`,
                 color: "#fff",
-                flex: 1,
+                flexBasis: "100%",
               }}
               type="button"
             >
               {active ? "Current" : "Play"}
-            </button>
-            <button onClick={() => onEdit(game.id)} style={{ ...actionButtonStyle, flex: 1 }} type="button">
-              Edit
-            </button>
-            <button onClick={() => onClone(game)} style={{ ...actionButtonStyle, flex: 1 }} type="button">
-              Clone
             </button>
             {/* Hide a finished or abandoned run without destroying it — the case
                 Delete cannot serve. Archiving the ACTIVE game is allowed: the
@@ -1109,6 +1198,9 @@ const LibraryTopBar = () => {
   const [isBusy, setIsBusy] = useState(false);
   const assetFileInputsRef = useRef({});
   const importScenarioInputRef = useRef(null);
+  const importGameInputRef = useRef(null);
+  // The game whose map this library does not hold, while its prompt is up.
+  const [missingScenarioGame, setMissingScenarioGame] = useState(null);
 
   useEffect(() => {
     if (!loaded) {
@@ -1439,6 +1531,15 @@ const LibraryTopBar = () => {
   };
 
   const handleGameActivate = async (gameId) => {
+    // A game whose scenario is not in this library has no map to open on — the
+    // ordinary state of a game imported from someone else. Offer to go and get
+    // it rather than dropping the player into a blank world.
+    const game = games.find((entry) => entry.id === gameId);
+    if (game?.scenarioMissing) {
+      setMissingScenarioGame(game);
+      return;
+    }
+
     setMenuOpen(false);
     try {
       await activateGame(gameId);
@@ -1447,6 +1548,107 @@ const LibraryTopBar = () => {
       setEditorError(nextError.message);
     }
   };
+
+  const handleGameExport = async (game) => {
+    setEditorError(null);
+    setIsBusy(true);
+
+    try {
+      const { blob, carriesScenario } = await buildGameZipBlob(game.id);
+      // The one case where the file can be big: nothing else could fetch this
+      // map, so it had to travel. Say the size before writing anything, and let
+      // the player back out — refusing outright would leave them with a game
+      // nobody else can ever open.
+      if (
+        carriesScenario &&
+        !window.confirm(
+          `“${game.scenarioName}” isn't a scenario the other machine can download, so the map travels inside this file — ${formatZipSize(blob.size)} in all.\n\nExport it?`,
+        )
+      ) {
+        return;
+      }
+      saveBlobToDisk(blob, `${game.id}-game.zip`);
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleImportGameFile = async (event) => {
+    const [file] = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setEditorError(null);
+    setIsBusy(true);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      // By magic bytes, not by extension, so a renamed file still imports — the
+      // same rule the scenario import uses.
+      if (!looksLikeZip(new Uint8Array(buffer))) {
+        throw new Error("That file isn't a game export. Pick the .zip you saved with Export.");
+      }
+
+      const { bundle, scenarioBundle, snapshotsText } = await readGameZip(buffer);
+
+      // The scenario first, so the game's card names its map the moment it
+      // appears. Only when this library doesn't already hold that id: importing
+      // regardless would mint a second copy of the same map — up to 53 MB —
+      // every time the same game was imported, and ensureUniqueId would rename
+      // it, so the game would point at whichever copy arrived first anyway.
+      let scenarioId = bundle.scenarioRef?.scenarioId ?? "";
+      if (scenarioBundle && !scenarios.some((entry) => entry.id === scenarioId)) {
+        const imported = await importScenarioBundle(scenarioBundle);
+        scenarioId = imported.scenario.id;
+      }
+
+      const details = await importGameBundle({
+        ...bundle,
+        scenarioRef: { ...(bundle.scenarioRef ?? {}), scenarioId },
+      });
+      // Restore points go back as the text they arrived as, so neither side ever
+      // parses ~21 MB of them.
+      if (snapshotsText) await writeGameSnapshotsText(details.game.id, snapshotsText);
+
+      await refreshLibraryCatalog({ force: true });
+      setActiveTab("games");
+      setMenuOpen(true);
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  // "Import & play" on the missing-map prompt: fetch the scenario the sender
+  // recorded, import it, point the game at it, and go straight in. Offered only
+  // when there is somewhere to fetch from — see handleGameActivate.
+  const handleMissingScenarioImport = async (game) => {
+    setEditorError(null);
+    setIsBusy(true);
+
+    try {
+      const { downloadHubBundle } = await import("./communityHub.jsx");
+      const bundle = await downloadHubBundle(game.importedScenarioOrigin.bundleUrl);
+      const imported = await importScenarioBundle(bundle);
+      await saveGame(game.id, { scenarioId: imported.scenario.id });
+      await refreshLibraryCatalog({ force: true });
+      setMissingScenarioGame(null);
+      setMenuOpen(false);
+      await activateGame(game.id);
+    } catch (nextError) {
+      setMenuOpen(true);
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
 
   // Blank scenario from the menu's + tile: create (seeded server-side from the
   // default scenario) and drop straight into its editor, above the menu.
@@ -2283,10 +2485,75 @@ const LibraryTopBar = () => {
         )}
       </Presence>
 
+      {/* Pressing Play on a game whose scenario this library does not hold. The
+          third button appears only when the sender recorded somewhere to fetch
+          the map from: a button that cannot do anything is worse than two. */}
+      <Presence open={Boolean(missingScenarioGame)} value={missingScenarioGame}>
+        {(pending) => (
+          <div
+            onClick={() => setMissingScenarioGame(null)}
+            style={{ alignItems: "center", background: "rgba(0,0,0,0.55)", display: "flex", inset: 0, justifyContent: "center", position: "fixed", zIndex: 10060 }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{ ...surfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
+            >
+              <div style={{ fontSize: "1rem", fontWeight: 800 }}>This game's scenario isn't here</div>
+              <div style={{ color: "rgba(255,255,255,0.62)", fontSize: "0.82rem", lineHeight: 1.5, margin: "0.5rem 0 1rem" }}>
+                “{pending.name}” was played on{" "}
+                <strong style={{ color: "rgba(255,255,255,0.86)" }}>
+                  {pending.importedScenarioName || pending.scenarioName}
+                </strong>
+                , which isn't in your library — so there is no map to open it on.
+                {pending.importedScenarioOrigin
+                  ? " It's on the community hub, so it can be fetched now."
+                  : " Ask whoever sent you the game for the scenario file, then import it from the Scenarios tab."}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+                {pending.importedScenarioOrigin && (
+                  <button
+                    disabled={isBusy}
+                    onClick={() => handleMissingScenarioImport(pending)}
+                    style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.3)", borderColor: "rgba(139,92,246,0.55)", minHeight: "2.6rem" }}
+                    type="button"
+                  >
+                    {isBusy ? "Getting the scenario…" : "Import & play"}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setMissingScenarioGame(null); setActiveTab("scenarios"); }}
+                  style={{ ...actionButtonStyle, minHeight: "2.6rem" }}
+                  type="button"
+                >
+                  Go to scenarios
+                </button>
+                <button
+                  onClick={() => setMissingScenarioGame(null)}
+                  style={{ ...actionButtonStyle, minHeight: "2.6rem" }}
+                  type="button"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Presence>
+
       <input
         ref={importScenarioInputRef}
         accept=".json,application/json,.zip,application/zip"
         onChange={handleImportScenarioFile}
+        style={{ display: "none" }}
+        type="file"
+      />
+
+      {/* A game export is always a .zip — the bundle alone is never a whole game,
+          because its restore points and any map ride beside it. */}
+      <input
+        ref={importGameInputRef}
+        accept=".zip,application/zip"
+        onChange={handleImportGameFile}
         style={{ display: "none" }}
         type="file"
       />
@@ -2360,6 +2627,11 @@ const LibraryTopBar = () => {
                   {isMobile ? "⬆" : "Import JSON"}
                 </button>
               )}
+              {activeTab === "games" && (
+                <button onClick={() => importGameInputRef.current?.click()} style={actionButtonStyle} type="button">
+                  {isMobile ? "⬆" : "Import game"}
+                </button>
+              )}
             </div>
           </div>
 
@@ -2411,6 +2683,7 @@ const LibraryTopBar = () => {
                         onArchive={handleGameArchive}
                         onClone={handleGameClone}
                         onEdit={openGameEditor}
+                        onExport={handleGameExport}
                       />
                     ))}
                   </MenuRow>
@@ -2424,6 +2697,7 @@ const LibraryTopBar = () => {
                         onArchive={handleGameArchive}
                         onClone={handleGameClone}
                         onEdit={openGameEditor}
+                        onExport={handleGameExport}
                       />
                     ))}
                   </MenuRow>
@@ -2438,6 +2712,7 @@ const LibraryTopBar = () => {
                           onArchive={handleGameArchive}
                           onClone={handleGameClone}
                           onEdit={openGameEditor}
+                          onExport={handleGameExport}
                         />
                       ))}
                     </MenuRow>

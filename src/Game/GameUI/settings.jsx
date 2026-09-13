@@ -55,12 +55,15 @@ import {
     getLoggingFileEntries,
     isDebugLogEnabled,
     isDebugLogVerbose,
+    logDebugEvent,
     logSettingChange,
     setDebugLogEnabled,
     setDebugLogVerbose,
     subscribeToDebugLog,
 } from "../../runtime/debugLog.js";
 import { saveDebugLogFile } from "../../runtime/saveDebugLog.js";
+import { buildGameZipBlob, formatZipSize, saveGameZipToDisk } from "../../runtime/gameZip.js";
+import { isNativeApp } from "../../runtime/web/nativeBoot.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { usePresenceLeaving } from "./presence.jsx";
 import { ESRI_BASEMAPS, isBuiltinBasemapId } from "../../runtime/assets.js";
@@ -1274,6 +1277,7 @@ const DiagnosticsPanel = () => {
     const [copyState, setCopyState] = useState("idle");
     const [cleared, setCleared] = useState(false);
     const [viewing, setViewing] = useState(false);
+    const [attachState, setAttachState] = useState("idle");
     // The count is the whole reason this section is visible when nothing is
     // wrong: "Entries: 0" after a crash means the log is not recording and the
     // player should say so, rather than pasting an empty report.
@@ -1323,6 +1327,32 @@ const DiagnosticsPanel = () => {
         setTimeout(() => setCopyState("idle"), 2500);
     };
 
+    // Two files, deliberately, and the .txt first. GitHub and Discord both preview
+    // a .txt inline, so a maintainer reads the log without downloading anything;
+    // a log zipped in beside the game would be a file nobody opens. Hidden on
+    // Android, where the WebView cannot save a file at all (saveDebugLog.js) and
+    // a 4 MB zip has no clipboard to fall back to.
+    const handleAttachGame = async () => {
+        const gameId = getLibraryState().activeGameId;
+        if (!gameId) {
+            setAttachState("no game");
+            setTimeout(() => setAttachState("idle"), 2500);
+            return;
+        }
+
+        setAttachState("working");
+        try {
+            await saveDebugLogFile();
+            const { blob } = await buildGameZipBlob(gameId);
+            saveGameZipToDisk(blob, `${gameId}-game.zip`);
+            setAttachState(`saved ${formatZipSize(blob.size)}`);
+        } catch (error) {
+            logDebugEvent("diagnostics", "Attach game failed.", { error: error?.message || String(error) });
+            setAttachState("failed");
+        }
+        setTimeout(() => setAttachState("idle"), 4000);
+    };
+
     const handleClear = () => {
         clearDebugLog();
         setCleared(true);
@@ -1348,6 +1378,29 @@ const DiagnosticsPanel = () => {
         💾 Save as file
         </button>
         </div>
+
+        {/* The save itself as a second file, for a report a maintainer has to
+            reproduce: the log fingerprints the prompts, the game is what a prompt
+            can be rebuilt from. */}
+        {!isNativeApp() && (
+        <button
+        type="button"
+        onClick={handleAttachGame}
+        disabled={attachState === "working"}
+        style={{ ...diagnosticsButton, width: "100%", marginBottom: "0.5rem" }}
+        title="Saves the logging file, then the current game as a .zip. Attach both to the report."
+        >
+        {attachState === "working"
+            ? "Packing the game…"
+            : attachState === "no game"
+            ? "No game open"
+            : attachState === "failed"
+            ? "Couldn't save the game"
+            : attachState.startsWith("saved ")
+            ? `✓ Log + game (${attachState.slice(6)})`
+            : "📎 Attach game"}
+        </button>
+        )}
 
         <button
         type="button"
