@@ -22,6 +22,7 @@ import {
   PMTILES_PROTOCOL_URLS,
   ensurePmtilesProtocol,
   getNationColors,
+  loadRegionTileIdSet,
   primeCustomRegionCatalogEntries,
   readJson,
   reportPerfOperation,
@@ -38,12 +39,20 @@ import { MAP_SETTING_KEYS, useMapSetting, useMapSettingValue } from "../../runti
 import { useWorldState } from "./useWorldState.js";
 import { buildProvinceOutlinePaint, PROVINCE_OUTLINE_MIN_ZOOM } from "./provinceOutlineStyle.js";
 import { V_NEXT_MARKER_SHAPE_LAYER_IDS } from "./vnext/presentationPolicy.js";
-import PolityTextLayer, { isPolityTextPtr0Enabled } from "./labels/PolityTextLayer.jsx";
+import PolityTextLayer, {
+  isPolityTextPtr0Enabled,
+  isPolityTextPtr1DebugEnabled,
+  isPolityTextPtr1Enabled,
+} from "./labels/PolityTextLayer.jsx";
+import { buildPolityTextPtr1Records } from "./labels/polityTextRecords.js";
 import {
   buildOwnershipPresentationDelta,
   createPoliticalCartographyScheduler,
   diffPoliticalOwnership,
 } from "./vnext/politicalCartographyLifecycle.js";
+import { REGION_DISPLAY_MESH_ENABLED } from "./vnext/regionDisplayMeshPolicy.js";
+import { deriveLegacyAuthoritativeCountryCodes } from "./vnext/legacyScenarioGeometryAuthority.js";
+import { hasExactRegionTileIdentity } from "./vnext/regionTileAuthority.js";
 
 ensurePmtilesProtocol();
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
@@ -58,6 +67,7 @@ const EMPTY_CUSTOM_REGION_META = Object.freeze({
 });
 const EMPTY_POLITY_LABEL_COLLECTIONS = Object.freeze({
   labelData: EMPTY_FEATURE_COLLECTION,
+  ptrLabelData: EMPTY_FEATURE_COLLECTION,
   pointLabelData: EMPTY_FEATURE_COLLECTION,
   curvedLabelData: EMPTY_FEATURE_COLLECTION,
   lineLabelData: EMPTY_FEATURE_COLLECTION,
@@ -359,17 +369,19 @@ const DETAIL_FILL_COLOR = [
 // show sliver gaps) and the stock vector tiles when zoomed IN (the z5 seed is
 // too coarse up close). Author-drawn geometry renders from the GeoJSON at every
 // zoom, on top — the tiles don't know those shapes.
-const CUSTOM_GEOMETRY_FILTER = ["==", ["index-of", ".", ["get", "id"]], -1];
-const GADM_GEOMETRY_FILTER = [">=", ["index-of", ".", ["get", "id"]], 0];
-// A feature whose geometry lives ONLY in the GeoJSON: author-drawn ("reg_...", no
-// dot) OR a GADM region the editor reshaped (dotted id, but `edited`). Both must
-// render from the GeoJSON at every zoom AND be kept out of the stock tiles, whose
-// geometry is the ORIGINAL shape — painting both stacks twice darkens
-// the reshaped area. A plain unedited GADM region carries no `edited`, so
-// ["==", ["get","edited"], true] is false for it and these fall back exactly to the
-// dot test — stock and author-only maps render identically to before.
-const AUTHORED_GEOMETRY_FILTER = ["any", CUSTOM_GEOMETRY_FILTER, ["==", ["get", "edited"], true]];
-const STOCK_GEOMETRY_FILTER = ["all", GADM_GEOMETRY_FILTER, ["!=", ["get", "edited"], true]];
+// Geometry provenance must be explicit. Historical stock catalogs can contain
+// dotless/numeric IDs, so punctuation is not a reliable stock-vs-authored test.
+// The editor contract marks drawn geometry with reg_* and reshaped stock geometry
+// with edited=true; newer imports may additionally carry authored/geometrySource.
+const AUTHORED_GEOMETRY_FILTER = [
+  "any",
+  ["==", ["get", "edited"], true],
+  ["==", ["get", "authored"], true],
+  ["==", ["get", "geometrySource"], "authored"],
+  ["==", ["slice", ["to-string", ["get", "id"]], 0, 4], "reg_"],
+];
+const STOCK_GEOMETRY_FILTER = ["!", AUTHORED_GEOMETRY_FILTER];
+const SCENARIO_GID0_EXPRESSION = ["upcase", ["coalesce", ["get", "gid0"], ["get", "GID_0"], ""]];
 // Physical geography should be part of the political map rather than hidden
 // beneath it. Keep the far/continental wash translucent enough for relief and
 // bathymetry to read, then progressively strengthen ownership color as the
@@ -438,6 +450,26 @@ const WorldMap = ({ isGlobe = false }) => {
   // A player's own choice from Settings > Map. Empty means "whatever the
   // scenario author set", so it changes nothing until it is filled in.
   const labelFontOverride = useMapSettingValue(MAP_SETTING_KEYS.labelFont);
+  // PTR-1.7 is the default flat-map polity-name renderer. The old MapLibre
+  // label stack remains mounted only as a last-resort fallback while PTR is
+  // waiting for canonical records, if PTR fails to mount, or when explicitly
+  // disabled via ?legacyPolityText=1 / localStorage value "0".
+  const ptr0PolityTextEnabled = useMemo(() => isPolityTextPtr0Enabled(), []);
+  const ptr1PolityTextEnabled = useMemo(() => isPolityTextPtr1Enabled(), []);
+  const ptr1PolityTextDebugEnabled = useMemo(() => isPolityTextPtr1DebugEnabled(), []);
+  const [ptrPolityTextStatus, setPtrPolityTextStatus] = useState({
+    requested: false,
+    mounted: false,
+    failed: false,
+    waitingForStyle: false,
+    recordCount: 0,
+    owners: [],
+    lastMountError: null,
+  });
+  // The region catalog becomes available before political cartography finishes.
+  // Keep that early metadata path, but remember whether the initial worker
+  // revision has actually produced the label records PTR needs for first paint.
+  const [initialCartographySettled, setInitialCartographySettled] = useState(false);
   const [pointLabelData, setPointLabelData] = useState(EMPTY_FEATURE_COLLECTION);
   const [curvedLabelData, setCurvedLabelData] = useState(EMPTY_FEATURE_COLLECTION);
   const [customRegionMeta, setCustomRegionMeta] = useState(EMPTY_CUSTOM_REGION_META);
@@ -476,10 +508,14 @@ const WorldMap = ({ isGlobe = false }) => {
   const regionsGeojsonUrl = JSON_URLS.regionsGeojson;
   const activeGeometryEpoch = String(regionsGeojsonUrl || "custom-regions");
   const displayMeshReady = Boolean(
-    customFlag
+    REGION_DISPLAY_MESH_ENABLED
+    && customFlag
     && displayRegionMesh.url
     && displayRegionMesh.geometryEpoch === activeGeometryEpoch
   );
+  // Canonical scenario geometry remains the renderer authority while the
+  // topology-repair mesh is quarantined. This preserves the PR #647 fallback
+  // contract: a presentation experiment cannot delete a visible/clickable region.
   const renderedRegionsGeojsonUrl = displayMeshReady ? displayRegionMesh.url : regionsGeojsonUrl;
 
   const clearDisplayRegionMesh = useCallback(() => {
@@ -505,12 +541,50 @@ const WorldMap = ({ isGlobe = false }) => {
   // thread holds. A repaired display mesh may later replace fill geometry only;
   // ownership, region identity and the saved scenario remain unchanged.
   const customActive = customFlag && customRegionMeta.ready;
-  const hasDrawnGeometry = customActive && customRegionMeta.hasDrawnGeometry;
   const fullyAuthoredGeometry = Boolean(customActive && customRegionMeta.fullyAuthoredGeometry);
-  // Keep the stock vector source mounted for crisp province outlines and hit
-  // testing. Once the repaired mesh is ready only its FILL layers are hidden.
-  const shouldMountStockRegions = !customFlag
-    || (customRegionMeta.ready && !customRegionMeta.fullyAuthoredGeometry);
+  const [regionTileIdentityState, setRegionTileIdentityState] = useState("unknown");
+
+  useEffect(() => {
+    if (!customFlag || !customRegionMeta.ready || fullyAuthoredGeometry) {
+      setRegionTileIdentityState(fullyAuthoredGeometry ? "incompatible" : "unknown");
+      return undefined;
+    }
+
+    let cancelled = false;
+    setRegionTileIdentityState("checking");
+    loadRegionTileIdSet()
+      .then((tileRegionIds) => {
+        if (cancelled) return;
+        setRegionTileIdentityState(
+          hasExactRegionTileIdentity(customRegionMeta.records, tileRegionIds)
+            ? "compatible"
+            : "incompatible",
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn(
+          "Could not prove close-zoom region-tile identity; keeping scenario geometry authoritative:",
+          error,
+        );
+        setRegionTileIdentityState("incompatible");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGeometryEpoch, customFlag, customRegionMeta.ready, customRegionMeta.records, fullyAuthoredGeometry]);
+
+  // Current PMTiles may be a different region catalog from the scenario's
+  // serialized geometry (legacy scenarios can carry numeric/UUID ids while the
+  // shipped archive uses a newer GADM vocabulary). A close-zoom handoff is legal
+  // only when every stock-like scenario record exists by EXACT id in the mounted
+  // region-tile archive. Punctuation, gid0 and polity identity are not evidence.
+  const regionTileHandoffSafe = Boolean(
+    customActive && regionTileIdentityState === "compatible"
+  );
+  const scenarioOwnsRegionGeometryAtAllZooms = Boolean(customActive && !regionTileHandoffSafe);
+  const shouldMountStockRegions = !customFlag || regionTileHandoffSafe;
   const ownedCountryCodes = useMemo(
     () => new Set(customRegionMeta.ownedCountryCodes ?? []),
     [customRegionMeta.ownedCountryCodes],
@@ -571,6 +645,49 @@ const WorldMap = ({ isGlobe = false }) => {
   // receives compact ready-to-render point/line collections; no polygon fitting
   // or territorial geometry work is allowed in React.
   const useLivePolityLabels = polityLabelCollections.labelData.features.length > 0;
+  const ptr1PolityTextRecords = useMemo(() => buildPolityTextPtr1Records({
+    ptrLabelData: polityLabelCollections.ptrLabelData,
+    labelData: polityLabelCollections.labelData,
+  }), [polityLabelCollections.ptrLabelData, polityLabelCollections.labelData]);
+  const ptr1PolityTextRequested = Boolean(
+    ptr1PolityTextEnabled
+    && worldKnown
+    && customFlag
+    && useLivePolityLabels
+    && !isGlobe
+    && !mapDisplaySettings.hideCountryLabels
+  );
+  const ptrBlocksInitialReadiness = Boolean(
+    ptr1PolityTextEnabled
+    && customFlag
+    && !isGlobe
+    && !mapDisplaySettings.hideCountryLabels
+  );
+  const ptr1PolityTextAuthoritative = Boolean(
+    ptr1PolityTextRequested
+    && ptrPolityTextStatus.mounted
+    && ptrPolityTextStatus.recordCount > 0
+  );
+  const ptrRenderedOwnerNames = useMemo(
+    () => ptr1PolityTextAuthoritative
+      ? (ptrPolityTextStatus.owners ?? []).filter(Boolean)
+      : [],
+    [ptr1PolityTextAuthoritative, ptrPolityTextStatus.owners],
+  );
+  const ptrRenderedOwnersLiteral = useMemo(
+    () => ["literal", ptrRenderedOwnerNames],
+    [ptrRenderedOwnerNames],
+  );
+  // The legacy MapLibre renderer is retained per-owner only. While PTR is
+  // unavailable it renders normally; once PTR owns a polity, the matching
+  // legacy label is filtered out. Any malformed/unsupported polity that PTR
+  // cannot prepare therefore keeps a genuine last-resort legacy label instead
+  // of disappearing with the rest of the old stack.
+  const legacyPtrOwnerFilter = useMemo(() => (
+    ptrRenderedOwnerNames.length
+      ? ["!", ["in", ["coalesce", ["get", "sourceOwner"], ["get", "owner"], ""], ptrRenderedOwnersLiteral]]
+      : ["all"]
+  ), [ptrRenderedOwnerNames.length, ptrRenderedOwnersLiteral]);
 
 
   // R5.4.6: renderer-confirmed polity label handoff.
@@ -583,7 +700,7 @@ const WorldMap = ({ isGlobe = false }) => {
   // time renderer scan.
   useEffect(() => {
     const mapInstance = map?.getMap ? map.getMap() : map;
-    if (!customFlag || !useLivePolityLabels || mapDisplaySettings.disableCurvedCountryLabels || !mapInstance?.on) {
+    if (ptr1PolityTextAuthoritative || !customFlag || !useLivePolityLabels || mapDisplaySettings.disableCurvedCountryLabels || !mapInstance?.on) {
       setRenderConfirmedCurveOwners((current) => (current.length ? [] : current));
       return undefined;
     }
@@ -640,7 +757,7 @@ const WorldMap = ({ isGlobe = false }) => {
       mapInstance.off("movestart", clearRenderConfirmation);
       mapInstance.off("idle", confirmRenderedCurves);
     };
-  }, [customFlag, map, mapDisplaySettings.disableCurvedCountryLabels, useLivePolityLabels]);
+  }, [customFlag, map, mapDisplaySettings.disableCurvedCountryLabels, ptr1PolityTextAuthoritative, useLivePolityLabels]);
 
   // Development-time proof instead of screenshot guesswork. One authoritative
   // record per polity is exposed for inspection and the known regression set is
@@ -781,15 +898,17 @@ const WorldMap = ({ isGlobe = false }) => {
   const livePointManagedFilter = useMemo(() => [
     "all",
     visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["<=", ["coalesce", ["get", "minZoom"], 0], currentLabelZoom],
     ["==", ["coalesce", ["get", "curveBand"], "none"], "none"],
     ["!=", ["coalesce", ["get", "allowOverlap"], false], true],
     [">", ["coalesce", ["get", "forceOverlapZoom"], 99], currentLabelZoom],
-  ], [currentLabelZoom, visibleDerivedOwnerFilter]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, visibleDerivedOwnerFilter]);
 
   const livePointOverlapFilter = useMemo(() => [
     "all",
     visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["<=", ["coalesce", ["get", "minZoom"], 0], currentLabelZoom],
     [
       "any",
@@ -811,26 +930,28 @@ const WorldMap = ({ isGlobe = false }) => {
         ],
       ],
     ],
-  ], [currentLabelZoom, renderedCurveOwnersLiteral, visibleDerivedOwnerFilter]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, renderedCurveOwnersLiteral, visibleDerivedOwnerFilter]);
 
   const liveWorldLineFilter = useMemo(() => [
     "all",
     visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["==", ["get", "safeWarp"], true],
     ["==", ["coalesce", ["get", "curveBand"], "detail"], "world"],
     ["<=", ["coalesce", ["get", "curveMinZoom"], 99], currentLabelZoom],
-  ], [currentLabelZoom, visibleDerivedOwnerFilter]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, visibleDerivedOwnerFilter]);
 
   const liveDetailLineFilter = useMemo(() => [
     "all",
     visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["==", ["get", "safeWarp"], true],
     ["!=", ["coalesce", ["get", "curveBand"], "detail"], "world"],
     // CP4.2: the territorial baseline is the normal map typography, not a late
     // curve upgrade. The worker already gives it a small lead over minZoom; the
     // renderer should not add another hidden half-zoom delay.
     ["<=", ["coalesce", ["get", "curveMinZoom"], 99], currentLabelZoom],
-  ], [currentLabelZoom, visibleDerivedOwnerFilter]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, visibleDerivedOwnerFilter]);
 
   // A custom map is named by the live polity layers alone; the stock
   // modern-country points belong to stock worlds.
@@ -850,7 +971,7 @@ const WorldMap = ({ isGlobe = false }) => {
     // Resolve the province under this click using the existing region layer
     // stack. Fully authored worlds must never fall through to leftover GADM Earth.
     const resolveRegionHit = () => {
-      const candidateLayers = (hasDrawnGeometry
+      const candidateLayers = (scenarioOwnsRegionGeometryAtAllZooms
         ? [
           "custom-regions-fill",
           "custom-regions-disputed-vnext",
@@ -1014,7 +1135,7 @@ const WorldMap = ({ isGlobe = false }) => {
       isDisputed: Boolean(props._stripes || claimants.length > 0),
       lngLat: event.lngLat,
     });
-  }, [hasDrawnGeometry, map, regionClaimants]);
+  }, [map, regionClaimants, scenarioOwnsRegionGeometryAtAllZooms]);
 
   useEffect(() => {
     if (!map) return;
@@ -1282,6 +1403,7 @@ const WorldMap = ({ isGlobe = false }) => {
     enqueuedBoundaryLabelNamesRef.current = null;
 
     if (!customFlag) {
+      setInitialCartographySettled(true);
       cartographyGeometryEpochRef.current = "";
       clearDisplayRegionMesh();
       setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
@@ -1289,6 +1411,7 @@ const WorldMap = ({ isGlobe = false }) => {
       return undefined;
     }
 
+    setInitialCartographySettled(false);
     cartographyGeometryEpochRef.current = geometryEpoch;
     if (geometryChanged) {
       clearDisplayRegionMesh();
@@ -1311,8 +1434,10 @@ const WorldMap = ({ isGlobe = false }) => {
       worker = new Worker(new URL("./vnext/polityBoundariesWorker.js", import.meta.url), { type: "module" });
     } catch (error) {
       console.warn("Political cartography worker is unavailable:", error);
+      setInitialCartographySettled(true);
       setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
       clearDerivedCartography();
+      markPolitiesReady(regionsGeojsonUrl, { failed: true });
       return undefined;
     }
     polityBoundaryWorkerRef.current = worker;
@@ -1330,6 +1455,11 @@ const WorldMap = ({ isGlobe = false }) => {
       if (boundaryWorkerRestartCountRef.current < 1) {
         boundaryWorkerRestartCountRef.current += 1;
         setBoundaryWorkerEpoch((epoch) => epoch + 1);
+      } else {
+        // Two failed worker generations must degrade to canonical fills/legacy
+        // labels rather than holding the scenario-open screen until its ceiling.
+        setInitialCartographySettled(true);
+        markPolitiesReady(regionsGeojsonUrl, { failed: true });
       }
     };
 
@@ -1407,7 +1537,6 @@ const WorldMap = ({ isGlobe = false }) => {
         const metadata = { ...EMPTY_CUSTOM_REGION_META, ...(result.metadata ?? {}), ready: true };
         setCustomRegionMeta(metadata);
         primeCustomRegionCatalogEntries(metadata.records, { url: regionsGeojsonUrl, invalidateCatalog: false });
-        markPolitiesReady(regionsGeojsonUrl);
         if (Number.isFinite(result.stats?.parseMs)) {
           globalThis.__OH_MAP_SOURCE_PERF__ = {
             ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
@@ -1430,6 +1559,7 @@ const WorldMap = ({ isGlobe = false }) => {
       const request = completion.request;
 
       if (result.error) {
+        if (request?.payload?.type === "initialize") setInitialCartographySettled(true);
         console.warn("Political cartography derivation failed:", result.error);
         logDebugEvent("warn", `[map] Political cartography revision ${request?.revision ?? "?"} failed.`, {
           error: result.error,
@@ -1453,6 +1583,7 @@ const WorldMap = ({ isGlobe = false }) => {
         });
       }
       if (!["update-claims", "update-labels"].includes(request?.payload?.type)) {
+        setInitialCartographySettled(true);
         setAcknowledgedBoundaryOwnership(request?.payload?.ownershipOverrides ?? {});
       }
 
@@ -1504,14 +1635,35 @@ const WorldMap = ({ isGlobe = false }) => {
     updateBoundarySourceFromPatch,
   ]);
 
-  // Basic political-map readiness is canonical region geometry + compact
-  // metadata, not optional derived boundaries/labels. Expensive cartography may
-  // settle later without holding the campaign loading screen hostage.
+  // Opening-screen readiness now includes the authoritative PTR first paint.
+  // Catalog metadata still publishes early for gameplay/GM consumers, but a
+  // custom flat map keeps the existing scenario loading screen up until the
+  // initial worker revision has produced polity records AND PTR has mounted.
+  // Mid-campaign ownership/name updates remain incremental and never reopen the
+  // screen. If PTR genuinely fails or there are no renderable records, the
+  // legacy MapLibre fallback is allowed through instead of deadlocking startup.
   useEffect(() => {
     if (!worldKnown) return;
     if (customFlag && !customRegionMeta.ready) return;
+    if (customFlag && !initialCartographySettled) return;
+    if (
+      ptrBlocksInitialReadiness
+      && ptr1PolityTextRecords.length > 0
+      && !ptrPolityTextStatus.mounted
+      && !ptrPolityTextStatus.failed
+    ) return;
     markPolitiesReady(regionsGeojsonUrl);
-  }, [customFlag, customRegionMeta.ready, regionsGeojsonUrl, worldKnown]);
+  }, [
+    customFlag,
+    customRegionMeta.ready,
+    initialCartographySettled,
+    ptr1PolityTextRecords.length,
+    ptrBlocksInitialReadiness,
+    ptrPolityTextStatus.failed,
+    ptrPolityTextStatus.mounted,
+    regionsGeojsonUrl,
+    worldKnown,
+  ]);
 
   useEffect(() => {
     const scheduler = polityBoundarySchedulerRef.current;
@@ -1711,7 +1863,7 @@ const WorldMap = ({ isGlobe = false }) => {
     const stops = [];
     for (const record of customRegionMeta.records ?? []) {
       const id = String(record?.id ?? "");
-      if (!id.includes(".")) continue;
+      if (!id || record?.authored === true) continue;
       const claimants = regionClaimants[id]?.length ? regionClaimants[id] : record?.claimants;
       if (!Array.isArray(claimants) || !claimants.length) continue;
       const liveOwner = regionOwnershipOverrides[id] ?? record?.owner ?? "";
@@ -1730,11 +1882,21 @@ const WorldMap = ({ isGlobe = false }) => {
 
   const ownerByRegionId = useMemo(() => {
     const lookup = new Map();
+
+    // Live exact-region ownership is canonical even when a hybrid scenario's
+    // regions.geojson omits the stock geometry for that id. PR #647-era maps
+    // preserved this by keeping the PMTiles region underneath; PCPv2 accidentally
+    // rebuilt the lookup only from worker metadata and silently dropped such ids.
+    for (const [regionId, owner] of Object.entries(regionOwnershipOverrides ?? {})) {
+      const id = String(regionId ?? "");
+      if (id) lookup.set(id, owner ?? "");
+    }
+
     if (!customActive) return lookup;
     for (const record of customRegionMeta.records ?? []) {
       const id = String(record?.id ?? "");
-      if (!id) continue;
-      lookup.set(id, regionOwnershipOverrides[id] ?? record?.owner ?? "");
+      if (!id || lookup.has(id)) continue;
+      lookup.set(id, record?.owner ?? "");
     }
     return lookup;
   }, [customActive, customRegionMeta.records, regionOwnershipOverrides]);
@@ -1748,6 +1910,53 @@ const WorldMap = ({ isGlobe = false }) => {
     () => (customActive ? customRegionMeta.editedStockIds ?? [] : []),
     [customActive, customRegionMeta.editedStockIds],
   );
+
+  // Backward compatibility for tier-2 scenarios authored before `edited:true`
+  // became a complete per-feature invariant. If a scenario explicitly reshaped
+  // any stock region in a country, its serialized GeoJSON becomes the geometry
+  // authority for that whole stock-country cohort. This prevents an unmarked
+  // sibling replacement from disappearing at the PMTiles handoff and exposing
+  // the underlying modern stock province (wrong shape/owner or "Unclaimed").
+  //
+  // This is intentionally keyed by stable stock geography (gid0), never polity
+  // names: Russian Empire / Russia / fictional owners all get identical behavior.
+  const legacyAuthoritativeCountryCodes = useMemo(
+    () => customActive
+      ? deriveLegacyAuthoritativeCountryCodes(customRegionMeta.records)
+      : [],
+    [customActive, customRegionMeta.records],
+  );
+
+  const customAuthoritativeGeometryFilter = useMemo(() => (
+    legacyAuthoritativeCountryCodes.length
+      ? [
+        "any",
+        AUTHORED_GEOMETRY_FILTER,
+        ["in", SCENARIO_GID0_EXPRESSION, ["literal", legacyAuthoritativeCountryCodes]],
+      ]
+      : AUTHORED_GEOMETRY_FILTER
+  ), [legacyAuthoritativeCountryCodes]);
+
+  const customFarStockGeometryFilter = useMemo(() => (
+    legacyAuthoritativeCountryCodes.length
+      ? [
+        "all",
+        STOCK_GEOMETRY_FILTER,
+        ["!", ["in", SCENARIO_GID0_EXPRESSION, ["literal", legacyAuthoritativeCountryCodes]]],
+      ]
+      : STOCK_GEOMETRY_FILTER
+  ), [legacyAuthoritativeCountryCodes]);
+
+  const stockRegionsVisibilityFilter = useMemo(() => {
+    const clauses = [];
+    if (editedStockIds.length) {
+      clauses.push(["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]]);
+    }
+    if (legacyAuthoritativeCountryCodes.length) {
+      clauses.push(["!", ["in", ["upcase", ["get", "GID_0"]], ["literal", legacyAuthoritativeCountryCodes]]]);
+    }
+    return clauses.length ? ["all", ...clauses] : ["all"];
+  }, [editedStockIds, legacyAuthoritativeCountryCodes]);
 
   // Only live ownership overrides touch the URL-backed authored source. Seed
   // colours remain properties of the scenario file; conquests are a tiny state
@@ -1935,6 +2144,15 @@ const WorldMap = ({ isGlobe = false }) => {
   // thousands of entries on every rendered frame. Store the resolved colour on
   // each promoted GID_1 feature instead, and only touch feature-state when the
   // canonical ownership colour actually changes.
+  const authoredRegionIds = useMemo(
+    () => new Set(
+      (customRegionMeta.records ?? [])
+        .filter((record) => record?.authored === true)
+        .map((record) => String(record?.id ?? ""))
+        .filter(Boolean),
+    ),
+    [customRegionMeta.records],
+  );
   const appliedTileFillStateRef = useRef(new Map());
   useEffect(() => {
     const mapInstance = map?.getMap ? map.getMap() : map;
@@ -1956,7 +2174,11 @@ const WorldMap = ({ isGlobe = false }) => {
       const next = new Map();
 
       for (const [regionId, owner] of ownerByRegionId) {
-        if (!regionId.includes(".") || edited.has(regionId)) continue;
+        // Unknown-to-the-seed override ids are intentionally attempted here: in
+        // a hybrid world they may be legitimate stock PMTiles regions omitted
+        // from regions.geojson. Setting feature-state for a non-existent tile id
+        // is harmless; dropping a real stock id recreates the historical hole.
+        if (authoredRegionIds.has(regionId) || edited.has(regionId)) continue;
         next.set(regionId, owner ? ownerColorCss(owner) : NEUTRAL_LAND_COLOR);
       }
 
@@ -2026,7 +2248,7 @@ const WorldMap = ({ isGlobe = false }) => {
       if (retryFrame) cancelAnimationFrame(retryFrame);
       if (workFrame) cancelAnimationFrame(workFrame);
     };
-  }, [map, ownerByRegionId, editedStockIds, ownerColorCss, shouldMountStockRegions]);
+  }, [authoredRegionIds, map, ownerByRegionId, editedStockIds, ownerColorCss, shouldMountStockRegions]);
 
   const stockRegionsFillPaint = useMemo(
     () => customActive && !displayMeshReady
@@ -2073,10 +2295,10 @@ const WorldMap = ({ isGlobe = false }) => {
     [labelFont, labelFontOverride],
   );
 
-  // PTR-0 is an opt-in proof of the replacement polity typography engine. It
-  // deliberately coexists with the current MapLibre symbol labels so the new
-  // WebGL ribbon can be judged without changing production label ownership yet.
-  const ptr0PolityTextEnabled = useMemo(() => isPolityTextPtr0Enabled(), []);
+  // PTR-1.7 consumes every canonical worker polity record regardless of the
+  // scenario's naming scheme. It becomes authoritative only after its custom
+  // layer has mounted successfully; until then the legacy MapLibre labels are
+  // allowed to act as a last-resort initialization/failure fallback.
 
   const pointLabelLayerLayout = useMemo(() => ({
     "text-field": ["get", "name"],
@@ -2220,7 +2442,7 @@ const WorldMap = ({ isGlobe = false }) => {
           minzoom={STOCK_REGION_HANDOFF_ZOOM}
           source-layer="regions"
           beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
-          filter={editedStockIds.length ? ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]] : ["all"]}
+          filter={stockRegionsVisibilityFilter}
           paint={stockRegionsFillPaint}
         />
         {/* Striped fill for disputed GADM regions on the crisp tile geometry —
@@ -2232,11 +2454,11 @@ const WorldMap = ({ isGlobe = false }) => {
             minzoom={STOCK_REGION_HANDOFF_ZOOM}
             source-layer="regions"
             beforeId={map?.getLayer?.("regions-outline") ? "regions-outline" : undefined}
-            filter={editedStockIds.length
-              ? ["all",
-                ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]],
-                ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]]]
-              : ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]]}
+            filter={[
+              "all",
+              ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]],
+              stockRegionsVisibilityFilter,
+            ]}
             paint={{
               "fill-pattern": ["match", ["get", "GID_1"], ...disputedTileStops, disputedTileStops[1]],
               "fill-opacity": customActive && worldKnown && !displayMeshReady ? DISPUTED_TILE_FILL_OPACITY : 0,
@@ -2249,7 +2471,7 @@ const WorldMap = ({ isGlobe = false }) => {
           minzoom={PROVINCE_OUTLINE_MIN_ZOOM}
           source-layer="regions"
           beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
-          filter={editedStockIds.length ? ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]] : ["all"]}
+          filter={stockRegionsVisibilityFilter}
           paint={regionsOutlinePaint}
         />
       </Source>
@@ -2274,13 +2496,13 @@ const WorldMap = ({ isGlobe = false }) => {
         <Layer
           id="custom-regions-fill-far"
           type="fill"
-          maxzoom={displayMeshReady ? undefined : STOCK_REGION_HANDOFF_ZOOM}
+          maxzoom={displayMeshReady || !regionTileHandoffSafe ? undefined : STOCK_REGION_HANDOFF_ZOOM}
           beforeId={shouldMountStockRegions
             ? "regions-fill"
             : map?.getLayer?.("polity-boundaries-shadow")
               ? "polity-boundaries-shadow"
               : undefined}
-          filter={STOCK_GEOMETRY_FILTER}
+          filter={customFarStockGeometryFilter}
           paint={{
             "fill-color": CUSTOM_FILL_COLOR,
             "fill-opacity": customFarFillOpacity,
@@ -2292,7 +2514,7 @@ const WorldMap = ({ isGlobe = false }) => {
           id="custom-regions-fill"
           type="fill"
           beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
-          filter={AUTHORED_GEOMETRY_FILTER}
+          filter={customAuthoritativeGeometryFilter}
           paint={{
             "fill-color": CUSTOM_FILL_COLOR,
             "fill-opacity": customAuthoredFillOpacity,
@@ -2378,13 +2600,21 @@ const WorldMap = ({ isGlobe = false }) => {
       <PolityTextLayer
         map={map}
         enabled={Boolean(
-          ptr0PolityTextEnabled
-          && !isGlobe
-          && !mapDisplaySettings.hideCountryLabels
+          ptr1PolityTextRequested
+          || (
+            ptr0PolityTextEnabled
+            && !ptr1PolityTextEnabled
+            && !isGlobe
+            && !mapDisplaySettings.hideCountryLabels
+          )
         )}
+        mode={ptr1PolityTextEnabled ? "ptr1" : "ptr0"}
+        records={ptr1PolityTextEnabled ? ptr1PolityTextRecords : []}
         fontFamilies={labelFontStack}
         textColor={labelTextColor || "rgba(250, 249, 244, 0.995)"}
         haloColor={labelHaloColor || "rgba(4, 6, 9, 0.96)"}
+        debugBaseline={ptr1PolityTextEnabled ? ptr1PolityTextDebugEnabled : true}
+        onStatusChange={setPtrPolityTextStatus}
       />
 
       <Source id="country-curved-label-source" type="geojson" data={activeCurvedLabelData}>

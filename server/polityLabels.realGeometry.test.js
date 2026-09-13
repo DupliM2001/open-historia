@@ -144,6 +144,28 @@ test("real-geometry harness preserves highly fragmented production polity inputs
   assert.ok(denmark?.geometry?.coordinates?.length > 1, "Denmark fixture must include detached landmasses");
 });
 
+test("PTR canonical logical records expose deterministic territorial baselines independent of legacy line eligibility", () => {
+  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  for (const owner of [
+    "Russian Federation",
+    "People's Republic of China",
+    "French Republic",
+    "Federal Republic of Germany",
+    "Republic of Belarus",
+    "Republic of Poland",
+    "Ukraine",
+  ]) {
+    const label = primaryLabelFor(collections, owner);
+    assert.ok(label, `missing canonical label for ${owner}`);
+    const baseline = label.properties.cartographicBaseline;
+    assert.ok(Array.isArray(baseline) && baseline.length >= 2, `${owner} missing canonical PTR baseline`);
+    for (const point of baseline) {
+      assert.equal(point.length, 2);
+      assert.ok(Number.isFinite(point[0]) && Number.isFinite(point[1]));
+    }
+  }
+});
+
 test("production worker-safe label engine is deterministic on representative real geometry", () => {
   const first = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
   const second = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
@@ -385,6 +407,76 @@ test("CP4.2 containment validator does not treat a duplicated closing vertex as 
 });
 
 // Remaining geometry-v2 acceptance criteria belong to CP5/CP6.
-test.todo("real geometry: one polity emits exactly one sovereign presentation across detached landmasses");
 test.todo("real geometry: equivalent owner surfaces remain stable across administrative subdivision changes");
 test.todo("real geometry: overview/detail presentations simplify one placement instead of relocating it");
+
+test("PTR-1.5 publishes a bold typography envelope independent of the conservative legacy corridor", () => {
+  const checks = [
+    "Russian Federation",
+    "People's Republic of China",
+    "United States of America",
+    "French Republic",
+    "Federal Republic of Germany",
+  ];
+  for (const owner of checks) {
+    const label = primaryLabelFor(layoutFor(owner), owner);
+    assert.ok(label, `missing ${owner}`);
+    assert.ok(label.properties.ptrAxisSpanWorld > 0, `${owner} missing PTR axis span`);
+    assert.ok(label.properties.ptrCrossSpanWorld > 0, `${owner} missing PTR cross span`);
+    assert.ok(Number.isFinite(label.properties.ptrPreferredAngle), `${owner} missing PTR angle`);
+  }
+
+  const france = primaryLabelFor(layoutFor("French Republic"), "French Republic");
+  assert.ok(
+    Math.abs(france.properties.ptrPreferredAngle) >= 30
+      && Math.abs(france.properties.ptrPreferredAngle) <= 48,
+    `France should publish a diagonal typography axis, got ${france.properties.ptrPreferredAngle}`,
+  );
+
+  const russia = primaryLabelFor(layoutFor("Russian Federation"), "Russian Federation");
+  const usa = primaryLabelFor(layoutFor("United States of America"), "United States of America");
+  const china = primaryLabelFor(layoutFor("People's Republic of China"), "People's Republic of China");
+  assert.ok(russia.properties.ptrAxisSpanWorld * 4096 > russia.properties.pathLength,
+    "Russia PTR envelope should be broader than the legacy safe corridor");
+  assert.ok(usa.properties.ptrAxisSpanWorld * 4096 > usa.properties.pathLength,
+    "USA PTR envelope should be broader than the legacy safe corridor");
+  assert.ok(china.properties.ptrAxisSpanWorld * 4096 > china.properties.pathLength,
+    "China PTR envelope should be broader than the legacy safe corridor");
+});
+
+test("PTR-1.6 publishes a bounded ownership coverage field for renderer-side placement scoring", () => {
+  for (const owner of [
+    "Russian Federation",
+    "People's Republic of China",
+    "United States of America",
+    "French Republic",
+    "Kingdom of Norway",
+  ]) {
+    const label = primaryLabelFor(layoutFor(owner), owner);
+    const grid = label?.properties?.ptrCoverageGrid;
+    assert.ok(grid, `${owner} should publish ptrCoverageGrid`);
+    assert.equal(grid.resolution, 48, `${owner} grid resolution`);
+    assert.equal(grid.rows.length, 48, `${owner} grid rows`);
+    assert.ok(grid.rows.some((row) => row.includes("1")), `${owner} grid should contain owned cells`);
+    assert.equal(grid.bounds.length, 4, `${owner} grid bounds`);
+  }
+});
+
+test("PTR-1.8 publishes multiple sovereign sites generically for significant disconnected landmasses", () => {
+  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  assert.ok(collections.ptrLabelData?.features?.length > collections.labelData.features.length,
+    "fixture should expose at least one supplemental sovereign PTR site");
+
+  const sovereignSites = collections.ptrLabelData.features.filter((feature) => (
+    ["sovereign-primary", "sovereign-secondary"].includes(feature?.properties?.labelSiteRole)
+  ));
+  assert.equal(sovereignSites.length, collections.ptrLabelData.features.length,
+    "PTR site collection must contain sovereign sites only");
+  assert.ok(sovereignSites.some((feature) => feature?.properties?.labelSiteRole === "sovereign-secondary"),
+    "fixture must exercise a disconnected secondary sovereign label site");
+  for (const site of sovereignSites) {
+    assert.ok(String(site?.properties?.sourceOwner ?? "").trim(), "PTR site must retain canonical source owner");
+    assert.ok(Number(site?.properties?.ptrAxisSpanWorld) > 0, "PTR site must publish a usable territorial axis");
+    assert.ok(Number(site?.properties?.ptrCrossSpanWorld) > 0, "PTR site must publish a usable territorial cross span");
+  }
+});

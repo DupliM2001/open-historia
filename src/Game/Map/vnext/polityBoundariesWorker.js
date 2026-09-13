@@ -12,6 +12,8 @@ import {
   aggregatePolityGeometryForOwners,
 } from "./polityGeometry.js";
 import { buildPolityLabelCollections } from "./polityLabels.js";
+import { buildRegionDisplayMeshBlob, isExplicitAuthoredGeometry } from "./regionDisplayMesh.js";
+import { REGION_DISPLAY_MESH_ENABLED } from "./regionDisplayMeshPolicy.js";
 
 const EMPTY_FC = Object.freeze({ type: "FeatureCollection", features: [] });
 
@@ -24,10 +26,41 @@ let labelGeometryByOwner = new Map();
 let labelsByOwner = new Map();
 let currentOwnershipOverrides = {};
 let currentLabelNames = {};
-// The experimental region display-mesh implementation remains in-tree for
-// isolated investigation/tests, but the beta worker must not import or schedule
-// it. Keeping it out of the live worker module graph prevents its dynamic
-// polygon-clipping dependency from forcing worker code-splitting in production.
+let displayMeshGeneration = 0;
+
+const cancelDisplayMeshBuild = () => {
+  displayMeshGeneration += 1;
+};
+
+const scheduleDisplayMeshBuild = ({ requestId, geometryEpoch, regions }) => {
+  const generation = ++displayMeshGeneration;
+  const sourceRegions = regions;
+
+  // Catalog readiness and the first boundary/label snapshot publish first. The
+  // topology-safe fill mesh is a geometry-epoch-scoped presentation enhancement
+  // and must never delay gameplay or become canonical region geometry.
+  Promise.resolve().then(async () => {
+    const result = await buildRegionDisplayMeshBlob(sourceRegions, {
+      shouldCancel: () => generation !== displayMeshGeneration,
+    });
+    if (generation !== displayMeshGeneration || result?.cancelled || !result?.blob) return;
+    self.postMessage({
+      messageType: "display-mesh-ready",
+      requestId,
+      geometryEpoch,
+      displayBlob: result.blob,
+      stats: result.stats ?? {},
+    });
+  }).catch((error) => {
+    if (generation !== displayMeshGeneration) return;
+    self.postMessage({
+      messageType: "display-mesh-error",
+      requestId,
+      geometryEpoch,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+};
 
 const toStringArray = (value) => Array.isArray(value)
   ? value.map((entry) => String(entry ?? "")).filter(Boolean)
@@ -40,14 +73,16 @@ const buildMetadata = (regions) => {
   let drawnCount = 0;
   let stockCount = 0;
 
-  for (const feature of regions?.features ?? []) {
+  const sourceFeatures = regions?.features ?? [];
+  for (let index = 0; index < sourceFeatures.length; index += 1) {
+    const feature = sourceFeatures[index];
     const props = feature?.properties ?? {};
     const id = props.id != null ? String(props.id) : props.GID_1 != null ? String(props.GID_1) : "";
     if (!id) continue;
-    const dotted = id.includes(".");
-    if (dotted) stockCount += 1;
-    else drawnCount += 1;
-    if (props.edited === true && dotted) editedStockIds.push(id);
+    const authored = isExplicitAuthoredGeometry(feature, index);
+    if (authored) drawnCount += 1;
+    else stockCount += 1;
+    if (props.edited === true) editedStockIds.push(id);
 
     const gid0 = String(props.gid0 ?? props.GID_0 ?? "").trim().toUpperCase();
     if (gid0) ownedCountryCodes.add(gid0);
@@ -60,6 +95,7 @@ const buildMetadata = (regions) => {
       owner: props.owner ? String(props.owner) : "",
       gid0,
       edited: props.edited === true,
+      authored,
       claimants: toStringArray(props.claimants),
       country: props.country ? String(props.country) : "",
       countryCode: gid0,
@@ -144,6 +180,7 @@ const buildOwnerLabels = (geometryFeature) => {
   );
   return {
     labelData: collections.labelData ?? EMPTY_FC,
+    ptrLabelData: collections.ptrLabelData ?? EMPTY_FC,
     pointLabelData: collections.pointLabelData ?? EMPTY_FC,
     lineLabelData: collections.lineLabelData ?? EMPTY_FC,
   };
@@ -191,15 +228,18 @@ const rebuildLabelsForOwners = (owners) => {
 
 const combinedLabels = () => {
   const logical = [];
+  const ptr = [];
   const points = [];
   const lines = [];
   for (const collections of labelsByOwner.values()) {
     logical.push(...(collections?.labelData?.features ?? []));
+    ptr.push(...(collections?.ptrLabelData?.features ?? []));
     points.push(...(collections?.pointLabelData?.features ?? []));
     lines.push(...(collections?.lineLabelData?.features ?? []));
   }
   return {
     labelData: { type: "FeatureCollection", features: logical },
+    ptrLabelData: { type: "FeatureCollection", features: ptr },
     pointLabelData: { type: "FeatureCollection", features: points },
     lineLabelData: { type: "FeatureCollection", features: lines },
   };
@@ -357,6 +397,7 @@ self.onmessage = async ({ data: message }) => {
   try {
     let loadStats = null;
     if (type === "initialize") {
+      cancelDisplayMeshBuild();
       if (message.regions?.features) {
         cachedRegions = message.regions;
         cachedRegionsUrl = "";
@@ -487,6 +528,13 @@ self.onmessage = async ({ data: message }) => {
       stats: { ...derived.stats, ...(loadStats ?? {}) },
     });
 
+    if (REGION_DISPLAY_MESH_ENABLED && type === "initialize" && cachedRegions?.features?.length) {
+      scheduleDisplayMeshBuild({
+        requestId,
+        geometryEpoch,
+        regions: cachedRegions,
+      });
+    }
   } catch (error) {
     self.postMessage({
       messageType: "cartography-result",

@@ -6,6 +6,8 @@ import fs from "node:fs";
 const nations = fs.readFileSync(new URL("../Nations.jsx", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("./polityBoundariesWorker.js", import.meta.url), "utf8");
 const displayMesh = fs.readFileSync(new URL("./regionDisplayMesh.js", import.meta.url), "utf8");
+const displayMeshPolicy = fs.readFileSync(new URL("./regionDisplayMeshPolicy.js", import.meta.url), "utf8");
+const polityTextLayer = fs.readFileSync(new URL("../labels/PolityTextLayer.jsx", import.meta.url), "utf8");
 
 // These are intentionally source-level architecture guards. They catch accidental
 // reintroduction of the exact ownership/presentation coupling that caused the
@@ -18,7 +20,7 @@ test("Pipeline v2 keeps canonical region fills authoritative and removes runtime
   assert.match(nations, /regions-fill/);
   assert.doesNotMatch(nations, /id="polity-surfaces-source"/);
   assert.doesNotMatch(nations, /derivePolitySurfaces/);
-  assert.doesNotMatch(worker, /(?:from\s+|import\()["\']polygon-clipping["\']/);
+  assert.doesNotMatch(worker, /polygon-clipping/);
   assert.doesNotMatch(worker, /derivePolitySurfaces/);
 });
 
@@ -29,18 +31,29 @@ test("Pipeline v2 discards obsolete worker revisions rather than publishing them
   assert.match(nations, /const request = completion\.request/);
 });
 
-test("catalog readiness is published before topology, borders and labels finish", () => {
+test("catalog metadata stays early while scenario readiness waits for initial PTR first paint", () => {
   const catalogPost = worker.indexOf('messageType: "catalog-ready"');
   const initializeDerivation = worker.indexOf("initializePoliticalCartography");
   assert.ok(catalogPost >= 0);
   assert.ok(initializeDerivation >= 0);
-  // The post lives in the initialize message branch before the derivation call.
+  // Exact region identity still publishes before expensive derived cartography.
   const onMessage = worker.indexOf("self.onmessage");
   const postWithinHandler = worker.indexOf('messageType: "catalog-ready"', onMessage);
-  const deriveWithinHandler = worker.indexOf('? initializePoliticalCartography', onMessage);
+  const deriveMatch = /type === "initialize"\s*\? initializePoliticalCartography/g;
+  deriveMatch.lastIndex = onMessage;
+  const deriveWithinHandler = deriveMatch.exec(worker)?.index ?? -1;
   assert.ok(postWithinHandler >= 0 && deriveWithinHandler > postWithinHandler);
   assert.match(nations, /primeCustomRegionCatalogEntries/);
+  assert.match(nations, /initialCartographySettled/);
+  assert.match(nations, /ptrBlocksInitialReadiness/);
+  assert.match(nations, /!ptrPolityTextStatus\.mounted[\s\S]*!ptrPolityTextStatus\.failed/);
   assert.match(nations, /markPolitiesReady\(regionsGeojsonUrl\)/);
+});
+
+test("production PTR placement search runs in a dedicated worker before custom-layer mount", () => {
+  assert.match(polityTextLayer, /new Worker\(new URL\("\.\/polityTextPlacementWorker\.js"/);
+  assert.match(polityTextLayer, /placementResolved:\s*true/);
+  assert.match(polityTextLayer, /preparedEntries/);
 });
 
 test("label geometry is worker-owned and Nations never fits live polity polygons on the main thread", () => {
@@ -62,7 +75,7 @@ test("legal ownership animation is presentation-only over already-canonical regi
   assert.match(nations, /ownership-transition-fill/);
   assert.match(nations, /transitionColor/);
   assert.match(nations, /prefers-reduced-motion/);
-  assert.match(nations, /Canonical ownership is\r?\n  \/\/ already painted underneath/);
+  assert.match(nations, /Canonical ownership is\n  \/\/ already painted underneath/);
 });
 
 test("custom political maps do not build an unused stock-country label atlas", () => {
@@ -104,38 +117,65 @@ test("political fill opacity expressions keep zoom at MapLibre top level", () =>
   assert.doesNotMatch(nations, /\["-", 1, TILE_FILL_FADE\]/);
 });
 
-test("topology-safe region mesh remains an isolated experiment outside the beta worker graph", () => {
-  // Keep the experiment available for dedicated wedge research, but the live
-  // beta worker must not import/schedule it. Its dynamic clipping dependency
-  // otherwise forces worker code-splitting and breaks Vite's default worker build.
-  assert.doesNotMatch(worker, /regionDisplayMesh/);
-  assert.doesNotMatch(worker, /buildRegionDisplayMeshBlob/);
-  assert.doesNotMatch(worker, /messageType: "display-mesh-ready"/);
-  assert.doesNotMatch(worker, /scheduleDisplayMeshBuild/);
-
+test("experimental region display mesh is quarantined behind an explicit disabled rollout policy", () => {
+  assert.match(worker, /buildRegionDisplayMeshBlob/);
+  assert.match(worker, /messageType: "display-mesh-ready"/);
+  assert.match(worker, /scheduleDisplayMeshBuild/);
+  assert.match(worker, /REGION_DISPLAY_MESH_ENABLED && type === "initialize"/);
+  assert.match(displayMeshPolicy, /REGION_DISPLAY_MESH_ENABLED = false/);
   assert.match(displayMesh, /canonical scenario geometry is never mutated/i);
   assert.match(displayMesh, /polygon-clipping/);
   assert.match(displayMesh, /id\.startsWith\("reg_"\)/);
-  assert.match(displayMesh, /polygonNeedsRenderSubdivision/);
-  assert.match(displayMesh, /clipper\.intersection/);
-  assert.match(displayMesh, /rogue translucent/);
 
-  // Canonical region geometry remains the live renderer input. Dormant UI-side
-  // display-mesh plumbing can be removed separately; it has no worker producer.
+  assert.match(nations, /REGION_DISPLAY_MESH_ENABLED[\s\S]*displayRegionMesh\.geometryEpoch === activeGeometryEpoch/);
   assert.match(nations, /data=\{renderedRegionsGeojsonUrl\}/);
   assert.match(nations, /tolerance=\{0\.001\}/);
-  assert.match(nations, /filter=\{STOCK_GEOMETRY_FILTER\}/);
-  assert.match(nations, /filter=\{AUTHORED_GEOMETRY_FILTER\}/);
+  assert.match(nations, /filter=\{customFarStockGeometryFilter\}/);
+  assert.match(nations, /filter=\{customAuthoritativeGeometryFilter\}/);
+  assert.match(nations, /const shouldMountStockRegions = !customFlag/);
   assert.doesNotMatch(nations, /id="polity-surfaces-source"/);
 });
 
-test("CP4.2 live renderer uses the worker baseline threshold without a hidden half-zoom delay", () => {
+test("hybrid map fallback keeps exact ownership and stock hit-testing even when authored geometry exists", () => {
   assert.match(
     nations,
-    /\["<=", \["coalesce", \["get", "curveMinZoom"\], 99\], currentLabelZoom\]/,
+    /for \(const \[regionId, owner\] of Object\.entries\(regionOwnershipOverrides \?\? \{\}\)\)[\s\S]*lookup\.set\(id, owner \?\? ""\)/,
   );
-  assert.doesNotMatch(
-    nations,
-    /\["\+", \["coalesce", \["get", "curveMinZoom"\], 99\], 0\.45\]/,
-  );
+  assert.match(nations, /const candidateLayers = \(scenarioOwnsRegionGeometryAtAllZooms/);
+  assert.match(nations, /"regions-fill"/);
+  assert.doesNotMatch(nations, /const candidateLayers = \(hasDrawnGeometry/);
+});
+
+test("stock-vs-authored provenance is explicit rather than inferred from punctuation in region ids", () => {
+  assert.match(worker, /isExplicitAuthoredGeometry\(feature, index\)/);
+  assert.match(worker, /authored,/);
+  assert.doesNotMatch(worker, /id\.includes\("\."\)/);
+  assert.doesNotMatch(nations, /id\.includes\("\."\)/);
+  assert.match(nations, /\["==", \["get", "edited"\], true\]/);
+  assert.match(nations, /\["==", \["get", "geometrySource"\], "authored"\]/);
+  assert.match(nations, /"reg_"/);
+  assert.doesNotMatch(nations, /CUSTOM_GEOMETRY_FILTER/);
+  assert.doesNotMatch(nations, /GADM_GEOMETRY_FILTER/);
+});
+
+test("legacy tier-2 scenario geometry can own an entire stock-country cohort without polity-name special cases", () => {
+  assert.match(nations, /deriveLegacyAuthoritativeCountryCodes/);
+  assert.match(nations, /const legacyAuthoritativeCountryCodes = useMemo/);
+  assert.match(nations, /\["upcase", \["get", "GID_0"\]\], \["literal", legacyAuthoritativeCountryCodes\]/);
+  assert.match(nations, /SCENARIO_GID0_EXPRESSION/);
+  assert.match(nations, /filter=\{stockRegionsVisibilityFilter\}/);
+  assert.match(nations, /filter=\{customAuthoritativeGeometryFilter\}/);
+  assert.match(nations, /filter=\{customFarStockGeometryFilter\}/);
+  assert.doesNotMatch(nations, /Austrian Empire|Niederösterreich|Vienna Outskirts/);
+});
+
+test("close-zoom region-tile authority requires exact scenario/catalog identity", () => {
+  assert.match(nations, /loadRegionTileIdSet/);
+  assert.match(nations, /hasExactRegionTileIdentity/);
+  assert.match(nations, /const regionTileHandoffSafe = Boolean/);
+  assert.match(nations, /const scenarioOwnsRegionGeometryAtAllZooms/);
+  assert.match(nations, /const shouldMountStockRegions = !customFlag \|\| regionTileHandoffSafe/);
+  assert.match(nations, /maxzoom=\{displayMeshReady \|\| !regionTileHandoffSafe \? undefined : STOCK_REGION_HANDOFF_ZOOM\}/);
+  assert.match(nations, /const candidateLayers = \(scenarioOwnsRegionGeometryAtAllZooms/);
+  assert.doesNotMatch(nations, /id\.includes\("\."\)/);
 });

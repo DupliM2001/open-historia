@@ -221,6 +221,8 @@ let countryNamesPromise = null;
 let countryNamesPromiseKey = "";
 let regionCatalogPromise = null;
 let regionCatalogPromiseKey = "";
+let regionTileIdSetPromise = null;
+let regionTileIdSetPromiseKey = "";
 let primedCustomRegionCatalog = null;
 let primedCustomRegionCatalogKey = "";
 
@@ -1204,6 +1206,47 @@ export const decodeVectorTile = async (data) => {
 
   const { Pbf, VectorTile } = await vectorTileModulesPromise;
   return new VectorTile(new Pbf(data));
+};
+
+// Exact id index for the region PMTiles archive currently exposed by the
+// runtime. A scenario is allowed to hand close-zoom political rendering and
+// hit-testing to that archive only when its stock-like region ids match this
+// vocabulary exactly. `loadRegionCatalog` below already treats the z0 region
+// tile as the compact catalog index, so this reuses the same authoritative
+// source rather than loading world geometry on the UI thread.
+export const loadRegionTileIdSet = async () => {
+  const cacheKey = PMTILES_ARCHIVES.regions;
+  if (regionTileIdSetPromise && regionTileIdSetPromiseKey === cacheKey) {
+    return regionTileIdSetPromise;
+  }
+
+  regionTileIdSetPromiseKey = cacheKey;
+  const promise = (async () => {
+    const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+    const tileData = await pmtiles.getZxy(0, 0, 0);
+    if (!tileData?.data) return new Set();
+
+    const tile = await decodeVectorTile(tileData.data);
+    const layer = tile.layers.regions;
+    if (!layer) return new Set();
+
+    const ids = new Set();
+    for (let index = 0; index < layer.length; index += 1) {
+      const props = layer.feature(index).properties;
+      const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
+      if (id != null && String(id)) ids.add(String(id));
+    }
+    return ids;
+  })().catch((error) => {
+    if (regionTileIdSetPromise === promise) {
+      regionTileIdSetPromise = null;
+      regionTileIdSetPromiseKey = "";
+    }
+    throw error;
+  });
+
+  regionTileIdSetPromise = promise;
+  return promise;
 };
 
 export const getNationColors = async () => {

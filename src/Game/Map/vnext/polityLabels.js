@@ -282,6 +282,40 @@ const pointInComponentTile = (point, componentPolygons) => (
   (componentPolygons ?? []).some((polygon) => pointInPolygonTile(point, polygon))
 );
 
+// PTR-1.6: publish a compact occupancy mask so the browser-side typography
+// optimizer can score the ACTUAL warped label footprint against owned territory.
+// This stays deliberately coarse/bounded: it is a placement field, not canonical
+// geometry, and avoids shipping every administrative polygon to the main thread.
+const buildPtrCoverageGrid = ({
+  componentPolygons,
+  minX,
+  minY,
+  maxX,
+  maxY,
+  extent,
+  resolution = 48,
+}) => {
+  const size = clamp(Math.floor(Number(resolution) || 48), 24, 64);
+  const width = Math.max(1e-9, maxX - minX);
+  const height = Math.max(1e-9, maxY - minY);
+  const rows = [];
+  for (let row = 0; row < size; row += 1) {
+    let values = "";
+    const y = minY + ((row + 0.5) / size) * height;
+    for (let column = 0; column < size; column += 1) {
+      const x = minX + ((column + 0.5) / size) * width;
+      values += pointInComponentTile([x, y], componentPolygons) ? "1" : "0";
+    }
+    rows.push(values);
+  }
+  return {
+    resolution: size,
+    bounds: [minX / extent, minY / extent, maxX / extent, maxY / extent]
+      .map((value) => Number(value.toFixed(8))),
+    rows,
+  };
+};
+
 const polylineInsideComponentTile = (points, componentPolygons) => {
   if (!Array.isArray(points) || points.length < 2) return false;
   for (let index = 1; index < points.length; index += 1) {
@@ -1889,6 +1923,28 @@ const buildLandmassGeometryLayout = ({
     ? lngLatToTile(moments.lng, moments.lat, extent)
     : [(minX + maxX) / 2, (minY + maxY) / 2];
 
+  // PTR owns final typography and is allowed to use the polity envelope more
+  // boldly than the legacy fully-contained MapLibre corridor. Publish a stable
+  // typography axis separately from the legacy placement path. Directional
+  // shapes keep their moment axis; near-square shapes with an extreme PCA axis
+  // are tempered toward a readable diagonal instead of collapsing horizontal.
+  let ptrPreferredAngle = momentAngle;
+  if (elongation < 1.35 && Math.abs(momentAngle) > 55) {
+    ptrPreferredAngle = Math.sign(momentAngle || 1)
+      * clamp(Math.abs(momentAngle) * 0.55, 30, 48);
+  }
+  ptrPreferredAngle = normalizeRotation(ptrPreferredAngle);
+  const ptrAxisMetrics = projectedAxisMetrics(allOuterPoints, ptrPreferredAngle);
+  const ptrCoverageGrid = buildPtrCoverageGrid({
+    componentPolygons,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    extent,
+    resolution: 48,
+  });
+
   const placement = chooseValidatedPlacementCandidate({
     momentAngle,
     elongation,
@@ -2033,6 +2089,10 @@ const buildLandmassGeometryLayout = ({
     placementBendRatio: baselineBendRatio,
     geometryElongation: elongation,
     geometryMomentAngle: momentAngle,
+    ptrPreferredAngle,
+    ptrAxisSpanWorld: ptrAxisMetrics.axisSpan / extent,
+    ptrCrossSpanWorld: ptrAxisMetrics.crossSpan / extent,
+    ptrCoverageGrid,
     anchorLng,
     lat,
   };
@@ -2050,6 +2110,7 @@ const buildLandmassLabelRecords = ({
   areaLngLat,
   labelKind = "polity",
   sourceOwner = owner,
+  labelSiteRole = labelKind === "polity" ? "sovereign-primary" : "sovereign-secondary",
 }) => {
   const upperName = name;
   const geometryLayout = buildLandmassGeometryLayout({ polygons, extent, areaLngLat });
@@ -2066,6 +2127,7 @@ const buildLandmassLabelRecords = ({
     axisMetrics,
     axisAspectRatio,
     rawPathInfo,
+    safeWarpPath,
     lineEligible,
     linePathInfo,
     curveBand,
@@ -2076,6 +2138,10 @@ const buildLandmassLabelRecords = ({
     placementBendRatio,
     geometryElongation,
     geometryMomentAngle,
+    ptrPreferredAngle,
+    ptrAxisSpanWorld,
+    ptrCrossSpanWorld,
+    ptrCoverageGrid,
     anchorLng,
     lat,
   } = geometryLayout;
@@ -2105,10 +2171,22 @@ const buildLandmassLabelRecords = ({
     ? curveMinZoomForPolityLabelTier(tier, curveBand)
     : null;
 
+  // PTR-1+ consumes one canonical geographic baseline per polity directly
+  // from the worker-owned logical record. This is intentionally independent
+  // of the legacy MapLibre line-label eligibility decision: even a polity that
+  // the old renderer would present as a point can still have a valid territorial
+  // corridor for the replacement typography engine. Prefer the validated safe
+  // path when available, then fall back to the raw validated path.
+  const rendererBaselineInfo = safeWarpPath ?? rawPathInfo ?? linePathInfo;
+  const cartographicBaseline = rendererBaselineInfo?.points?.length >= 2
+    ? rendererBaselineInfo.points.map(([x, y]) => tileToLngLat(x, y, extent))
+    : [];
+
   const common = {
     name: upperName,
     owner,
     labelKind,
+    labelSiteRole,
     sourceOwner,
     tier: tier.id,
     minZoom: tier.minZoom,
@@ -2131,6 +2209,10 @@ const buildLandmassLabelRecords = ({
     placementBendRatio: Number(Number(placementBendRatio ?? 0).toFixed(4)),
     geometryElongation: Number(Number(geometryElongation ?? 1).toFixed(3)),
     geometryMomentAngle: Number(Number(geometryMomentAngle ?? 0).toFixed(2)),
+    ptrPreferredAngle: Number(Number(ptrPreferredAngle ?? rotation ?? 0).toFixed(2)),
+    ptrAxisSpanWorld: Number(Number(ptrAxisSpanWorld ?? 0).toFixed(8)),
+    ptrCrossSpanWorld: Number(Number(ptrCrossSpanWorld ?? 0).toFixed(8)),
+    ptrCoverageGrid,
     pathLength: linePathInfo?.length ?? rawPathInfo?.length ?? 0,
     pathWidth: linePathInfo?.width ?? rawPathInfo?.width ?? 0,
     pathTurnDegrees: Number(turnDegrees.toFixed(2)),
@@ -2152,6 +2234,32 @@ const buildLandmassLabelRecords = ({
   };
 
   return {
+    // PTR consumes explicit sovereign label sites rather than inferring them
+    // from the legacy point/line presentation collections. A polity can have
+    // several meaningful disconnected sites (metropole + large overseas
+    // holdings) while still retaining one logical polity record.
+    ptr: {
+      type: "Feature",
+      id: `${featureId}-ptr`,
+      geometry: { type: "Point", coordinates: [anchorLng, lat] },
+      properties: {
+        ...common,
+        mode: "ptr",
+        fitScale: pointTypography.fitScale,
+        fontPxAtZoom4: pointTypography.fontPxAtZoom4,
+        letterSpacing: pointTypography.letterSpacing,
+        targetOccupancy: pointTypography.targetOccupancy,
+        estimatedOccupancy: pointTypography.estimatedOccupancy,
+        cartographicBaseline,
+        cartographicBaselineKind: safeWarpPath
+          ? "safe"
+          : rawPathInfo
+            ? "raw"
+            : linePathInfo
+              ? "line"
+              : "none",
+      },
+    },
     // Canonical logical record: always one point geometry per owner so camera
     // framing / diagnostics never depend on MapLibre's line renderer.
     logical: {
@@ -2170,6 +2278,14 @@ const buildLandmassLabelRecords = ({
         lineLetterSpacing: lineTypography?.letterSpacing ?? null,
         lineTargetOccupancy: lineTypography?.targetOccupancy ?? null,
         lineEstimatedOccupancy: lineTypography?.estimatedOccupancy ?? null,
+        cartographicBaseline,
+        cartographicBaselineKind: safeWarpPath
+          ? "safe"
+          : rawPathInfo
+            ? "raw"
+            : linePathInfo
+              ? "line"
+              : "none",
       },
     },
     // Guaranteed overview renderer. For line-capable polities Nations.jsx shows
@@ -2251,6 +2367,7 @@ export const buildPolityLabelCollections = (
   }
 
   const logicalFeatures = [];
+  const ptrFeatures = [];
   const pointFeatures = [];
   const lineFeatures = [];
   const entries = [...ownerRegistry.values()]
@@ -2280,6 +2397,7 @@ export const buildPolityLabelCollections = (
     });
     if (!coreRecords) continue;
     logicalFeatures.push(coreRecords.logical);
+    ptrFeatures.push(coreRecords.ptr);
     pointFeatures.push(coreRecords.point);
     if (coreRecords.line) lineFeatures.push(coreRecords.line);
 
@@ -2300,8 +2418,10 @@ export const buildPolityLabelCollections = (
         areaLngLat: polygonSetAreaLngLat(part.polygons),
         labelKind: "territory",
         sourceOwner: owner,
+        labelSiteRole: "sovereign-secondary",
       });
       if (!partRecords) continue;
+      ptrFeatures.push(partRecords.ptr);
       pointFeatures.push(partRecords.point);
       if (partRecords.line) lineFeatures.push(partRecords.line);
     }
@@ -2362,6 +2482,7 @@ export const buildPolityLabelCollections = (
           owner: `__territory_${territory.id}__`,
           sourceOwner: owner,
           labelKind: "territory",
+          labelSiteRole: "geographic-territory",
           tier: territoryTier.id,
           minZoom: territoryTier.minZoom,
           curveMinZoom: null,
@@ -2394,6 +2515,7 @@ export const buildPolityLabelCollections = (
 
   return {
     labelData: { type: "FeatureCollection", features: logicalFeatures },
+    ptrLabelData: { type: "FeatureCollection", features: ptrFeatures },
     curvedLabelData: { type: "FeatureCollection", features: [] },
     lineLabelData: { type: "FeatureCollection", features: lineFeatures },
     pointLabelData: { type: "FeatureCollection", features: pointFeatures },
