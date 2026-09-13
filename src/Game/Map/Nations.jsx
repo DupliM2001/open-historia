@@ -394,33 +394,15 @@ const PAX_POLITICAL_FILL_OPACITY = [
 ];
 const DISPUTED_STRIPE_OPACITY = 0.22;
 
-// MapLibre requires `zoom` to be the direct input of a top-level `step` or
-// `interpolate` expression. Do not multiply/nest zoom expressions together.
-// These three ramps are the flattened equivalents of the overview/detail
-// crossfade used by the political region layers.
-const STOCK_REGION_FILL_OPACITY = [
-  "interpolate", ["linear"], ["zoom"],
-  5.5, 0,
-  6.5, 0.68,
-  8.0, 0.72,
-  10.0, 0.78,
-  12.0, 0.82,
-  14.0, 0.84,
-];
-const CUSTOM_FAR_FILL_OPACITY = [
-  "interpolate", ["linear"], ["zoom"],
-  1.5, 0.46,
-  2.5, 0.50,
-  3.75, 0.56,
-  5.0, 0.62,
-  5.5, 0.64,
-  6.5, 0,
-];
-const DISPUTED_TILE_FILL_OPACITY = [
-  "interpolate", ["linear"], ["zoom"],
-  5.5, 0,
-  6.5, DISPUTED_STRIPE_OPACITY,
-];
+// Experiment F: stop drawing the stock GeoJSON fallback and the stock vector
+// tile fill at the same zoom. The previous z4->z5 alpha crossfade painted two
+// independently tiled versions of the same region geometry simultaneously; where
+// their triangulation/clipping differed, semi-transparent same-colour fills showed
+// up as bright/dark wedges. Use one canonical presentation source at a time:
+// GeoJSON below z4.5, vector tiles from z4.5 upward. Both use the same political
+// opacity policy so the handoff changes geometry source, not visual strength.
+const STOCK_REGION_HANDOFF_ZOOM = 4.5;
+const DISPUTED_TILE_FILL_OPACITY = PAX_POLITICAL_FILL_OPACITY;
 
 // GADM assigns disputed / undetermined boundary areas the codes Z01-Z09 (the
 // slivers around India — Kashmir, Aksai Chin, Arunachal Pradesh). The base map
@@ -458,6 +440,8 @@ const WorldMap = ({ isGlobe = false }) => {
   const [pointLabelData, setPointLabelData] = useState(EMPTY_FEATURE_COLLECTION);
   const [curvedLabelData, setCurvedLabelData] = useState(EMPTY_FEATURE_COLLECTION);
   const [customRegionMeta, setCustomRegionMeta] = useState(EMPTY_CUSTOM_REGION_META);
+  const [displayRegionMesh, setDisplayRegionMesh] = useState({ url: "", geometryEpoch: "" });
+  const displayRegionMeshUrlRef = useRef("");
   const [disputedRegionData, setDisputedRegionData] = useState(EMPTY_FEATURE_COLLECTION);
   const [polityLabelCollections, setPolityLabelCollections] = useState(EMPTY_POLITY_LABEL_COLLECTIONS);
   const [derivedSourceEpoch, setDerivedSourceEpoch] = useState(0);
@@ -489,11 +473,41 @@ const WorldMap = ({ isGlobe = false }) => {
   const countriesUrl = PMTILES_PROTOCOL_URLS.countries;
   const regionsUrl = PMTILES_PROTOCOL_URLS.regions;
   const regionsGeojsonUrl = JSON_URLS.regionsGeojson;
-  // The worker's compact metadata is all the geometry knowledge the UI thread
-  // holds; the authored regions file itself is never parsed here.
+  const activeGeometryEpoch = String(regionsGeojsonUrl || "custom-regions");
+  const displayMeshReady = Boolean(
+    customFlag
+    && displayRegionMesh.url
+    && displayRegionMesh.geometryEpoch === activeGeometryEpoch
+  );
+  const renderedRegionsGeojsonUrl = displayMeshReady ? displayRegionMesh.url : regionsGeojsonUrl;
+
+  const clearDisplayRegionMesh = useCallback(() => {
+    const previousUrl = displayRegionMeshUrlRef.current;
+    displayRegionMeshUrlRef.current = "";
+    if (previousUrl && typeof URL !== "undefined") {
+      try { URL.revokeObjectURL(previousUrl); } catch {}
+    }
+    setDisplayRegionMesh((current) => (
+      current.url || current.geometryEpoch ? { url: "", geometryEpoch: "" } : current
+    ));
+  }, []);
+
+  useEffect(() => () => {
+    const previousUrl = displayRegionMeshUrlRef.current;
+    displayRegionMeshUrlRef.current = "";
+    if (previousUrl && typeof URL !== "undefined") {
+      try { URL.revokeObjectURL(previousUrl); } catch {}
+    }
+  }, []);
+
+  // The worker's compact metadata is all the canonical geometry knowledge the UI
+  // thread holds. A repaired display mesh may later replace fill geometry only;
+  // ownership, region identity and the saved scenario remain unchanged.
   const customActive = customFlag && customRegionMeta.ready;
   const hasDrawnGeometry = customActive && customRegionMeta.hasDrawnGeometry;
   const fullyAuthoredGeometry = Boolean(customActive && customRegionMeta.fullyAuthoredGeometry);
+  // Keep the stock vector source mounted for crisp province outlines and hit
+  // testing. Once the repaired mesh is ready only its FILL layers are hidden.
   const shouldMountStockRegions = !customFlag
     || (customRegionMeta.ready && !customRegionMeta.fullyAuthoredGeometry);
   const ownedCountryCodes = useMemo(
@@ -1252,7 +1266,7 @@ const WorldMap = ({ isGlobe = false }) => {
   // label geometry; only a result for the newest desired political revision may
   // be published. Catalog readiness is emitted before derived cartography.
   useEffect(() => {
-    const geometryEpoch = String(regionsGeojsonUrl || "custom-regions");
+    const geometryEpoch = activeGeometryEpoch;
     const previousGeometryEpoch = cartographyGeometryEpochRef.current;
     const geometryChanged = Boolean(
       customFlag
@@ -1272,6 +1286,7 @@ const WorldMap = ({ isGlobe = false }) => {
 
     if (!customFlag) {
       cartographyGeometryEpochRef.current = "";
+      clearDisplayRegionMesh();
       setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
       clearDerivedCartography();
       return undefined;
@@ -1279,6 +1294,7 @@ const WorldMap = ({ isGlobe = false }) => {
 
     cartographyGeometryEpochRef.current = geometryEpoch;
     if (geometryChanged) {
+      clearDisplayRegionMesh();
       // A game/scenario switch can keep the same MapLibre instance alive. Old
       // derived borders/labels therefore must be removed synchronously at the
       // geometry authority boundary rather than surviving until the new worker
@@ -1348,6 +1364,45 @@ const WorldMap = ({ isGlobe = false }) => {
 
     worker.onmessage = ({ data: result }) => {
       if (worker !== polityBoundaryWorkerRef.current) return;
+
+      if (result?.messageType === "display-mesh-ready") {
+        if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
+        if (!result.displayBlob || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return;
+        const nextUrl = URL.createObjectURL(result.displayBlob);
+        const previousUrl = displayRegionMeshUrlRef.current;
+        displayRegionMeshUrlRef.current = nextUrl;
+        // MapLibre feature-state belongs to source data. Swapping the GeoJSON
+        // payload can clear it, so force canonical ownership overrides to replay
+        // against the repaired display mesh on the next React effect.
+        appliedCustomFillStateRef.current = new Map();
+        setDisplayRegionMesh({ url: nextUrl, geometryEpoch });
+        if (previousUrl) {
+          setTimeout(() => { try { URL.revokeObjectURL(previousUrl); } catch {} }, 1000);
+        }
+        if (Number.isFinite(result.stats?.elapsedMs)) {
+          reportPerfOperation("map topology-safe region display mesh", result.stats.elapsedMs, {
+            warnAt: PERF_MAP_WARN_MS,
+          });
+        }
+        globalThis.__OH_MAP_SOURCE_PERF__ = {
+          ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
+          regionDisplayMeshMs: Number(result.stats?.elapsedMs ?? 0),
+          regionDisplayMeshBytes: Number(result.stats?.bytes ?? 0),
+          regionDisplayMeshRepairedFeatures: Number(result.stats?.repairedFeatureCount ?? 0),
+          regionDisplayMeshFallbacks: Number(
+            (result.stats?.lossFallbackCount ?? 0)
+            + (result.stats?.emptyFallbackCount ?? 0)
+            + (result.stats?.errorFallbackCount ?? 0),
+          ),
+        };
+        return;
+      }
+
+      if (result?.messageType === "display-mesh-error") {
+        if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
+        console.warn("Topology-safe region display mesh failed; keeping canonical fallback geometry:", result.error);
+        return;
+      }
 
       if (result?.messageType === "catalog-ready") {
         if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
@@ -1442,7 +1497,15 @@ const WorldMap = ({ isGlobe = false }) => {
   // Metadata is emitted by this effect; do not restart the worker merely because
   // catalog-ready updated customRegionMeta.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundaryWorkerEpoch, customFlag, regionsGeojsonUrl, clearDerivedCartography, updateBoundarySourceFromPatch]);
+  }, [
+    activeGeometryEpoch,
+    boundaryWorkerEpoch,
+    clearDerivedCartography,
+    clearDisplayRegionMesh,
+    customFlag,
+    regionsGeojsonUrl,
+    updateBoundarySourceFromPatch,
+  ]);
 
   // Basic political-map readiness is canonical region geometry + compact
   // metadata, not optional derived boundaries/labels. Expensive cartography may
@@ -1771,7 +1834,7 @@ const WorldMap = ({ isGlobe = false }) => {
       if (retryFrame) cancelAnimationFrame(retryFrame);
       if (workFrame) cancelAnimationFrame(workFrame);
     };
-  }, [customFlag, map, ownerColorCss, regionOwnershipOverrides]);
+  }, [customFlag, displayRegionMesh.url, map, ownerColorCss, regionOwnershipOverrides]);
 
   // Presentation-only legal sovereignty transition. Canonical ownership is
   // already painted underneath; this temporary old-colour layer simply fades
@@ -1969,17 +2032,17 @@ const WorldMap = ({ isGlobe = false }) => {
   }, [map, ownerByRegionId, editedStockIds, ownerColorCss, shouldMountStockRegions]);
 
   const stockRegionsFillPaint = useMemo(
-    () => customActive
+    () => customActive && !displayMeshReady
       ? {
           "fill-color": DETAIL_FILL_COLOR,
-          "fill-opacity": STOCK_REGION_FILL_OPACITY,
-          "fill-antialias": true,
+          "fill-opacity": PAX_POLITICAL_FILL_OPACITY,
+          "fill-antialias": false,
           "fill-outline-color": DETAIL_FILL_COLOR,
         }
       : { "fill-opacity": 0 },
-    [customActive],
+    [customActive, displayMeshReady],
   );
-  const customFarFillOpacity = customFlag ? CUSTOM_FAR_FILL_OPACITY : 0;
+  const customFarFillOpacity = customFlag ? PAX_POLITICAL_FILL_OPACITY : 0;
   const customAuthoredFillOpacity = customFlag ? PAX_POLITICAL_FILL_OPACITY : 0;
 
   // Stock country fills/borders render ONLY once the world is known to be a
@@ -2152,7 +2215,9 @@ const WorldMap = ({ isGlobe = false }) => {
         <Layer
           id="regions-fill"
           type="fill"
+          minzoom={STOCK_REGION_HANDOFF_ZOOM}
           source-layer="regions"
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
           filter={editedStockIds.length ? ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]] : ["all"]}
           paint={stockRegionsFillPaint}
         />
@@ -2162,6 +2227,7 @@ const WorldMap = ({ isGlobe = false }) => {
           <Layer
             id="regions-disputed"
             type="fill"
+            minzoom={STOCK_REGION_HANDOFF_ZOOM}
             source-layer="regions"
             beforeId={map?.getLayer?.("regions-outline") ? "regions-outline" : undefined}
             filter={editedStockIds.length
@@ -2171,7 +2237,7 @@ const WorldMap = ({ isGlobe = false }) => {
               : ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]]}
             paint={{
               "fill-pattern": ["match", ["get", "GID_1"], ...disputedTileStops, disputedTileStops[1]],
-              "fill-opacity": customActive && worldKnown ? DISPUTED_TILE_FILL_OPACITY : 0,
+              "fill-opacity": customActive && worldKnown && !displayMeshReady ? DISPUTED_TILE_FILL_OPACITY : 0,
             }}
           />
         )}
@@ -2180,55 +2246,62 @@ const WorldMap = ({ isGlobe = false }) => {
           type="line"
           minzoom={PROVINCE_OUTLINE_MIN_ZOOM}
           source-layer="regions"
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
           filter={editedStockIds.length ? ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]] : ["all"]}
           paint={regionsOutlinePaint}
         />
       </Source>
       )}
 
-      {/* Author-DRAWN geometry only (splits/new regions) — GADM regions paint the
-          stock tiles above for crisp borders at every zoom. Empty (and inert)
-          unless world.customRegions is set. */}
-      {/* tolerance 0: GeoJSON sources simplify geometry per zoom by default,
-          and each region simplifies independently — shared borders drift
-          apart at low zoom. Full resolution keeps them connected everywhere;
-          the seed geometry is coarse enough that this stays cheap. */}
+      {/* Canonical region ids/ownership remain authoritative. The political
+          worker asynchronously derives a display-only non-overlapping mesh from
+          the same full-resolution regions so translucent fills cannot double-
+          paint microscopic stock-geometry overlaps. Until that mesh is ready,
+          keep the canonical GeoJSON/PMTiles fallback without delaying gameplay. */}
       {customFlag && (
       <Source
         id="custom-regions-source"
         type="geojson"
-        data={regionsGeojsonUrl}
+        data={renderedRegionsGeojsonUrl}
         promoteId="id"
-        tolerance={0.6}
+        tolerance={0.001}
       >
-        {/* coarse seed geometry sits underneath the tile layer as a safety net.
-            black holes are a worse fallback than slightly soft borders. */}
+        {/* Once repaired geometry is ready it owns stock FILL geometry at every
+            zoom. The stock vector source remains mounted for crisp outlines and
+            hit-testing, but its fill layers become transparent. */}
         <Layer
           id="custom-regions-fill-far"
           type="fill"
-          beforeId={shouldMountStockRegions ? "regions-fill" : undefined}
+          maxzoom={displayMeshReady ? undefined : STOCK_REGION_HANDOFF_ZOOM}
+          beforeId={shouldMountStockRegions
+            ? "regions-fill"
+            : map?.getLayer?.("polity-boundaries-shadow")
+              ? "polity-boundaries-shadow"
+              : undefined}
           filter={STOCK_GEOMETRY_FILTER}
           paint={{
             "fill-color": CUSTOM_FILL_COLOR,
             "fill-opacity": customFarFillOpacity,
-            "fill-antialias": true,
+            "fill-antialias": false,
             "fill-outline-color": CUSTOM_FILL_COLOR,
           }}
         />
         <Layer
           id="custom-regions-fill"
           type="fill"
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
           filter={AUTHORED_GEOMETRY_FILTER}
           paint={{
             "fill-color": CUSTOM_FILL_COLOR,
             "fill-opacity": customAuthoredFillOpacity,
-            "fill-antialias": true,
+            "fill-antialias": false,
             "fill-outline-color": CUSTOM_FILL_COLOR,
           }}
         />
         <Layer
           id="ownership-transition-fill"
           type="fill"
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
           paint={{
             "fill-color": [
               "coalesce",
@@ -2245,6 +2318,7 @@ const WorldMap = ({ isGlobe = false }) => {
           id="custom-regions-local-outline"
           type="line"
           minzoom={PROVINCE_OUTLINE_MIN_ZOOM}
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
           layout={{ "line-cap": "round", "line-join": "round" }}
           paint={buildProvinceOutlinePaint(customActive && worldKnown)}
         />

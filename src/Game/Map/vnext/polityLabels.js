@@ -417,7 +417,7 @@ const smoothSamples = (samples, passes = 2) => {
   return current;
 };
 
-const buildCurvedLabelPath = (ring, name, { allowStraight = false, center = null, angleDeg = null, extraRings = [] } = {}) => {
+const buildCurvedLabelPath = (ring, { allowStraight = false, center = null, angleDeg = null, extraRings = [] } = {}) => {
   if (!ring || ring.length < 3) return null;
 
   // Map vNext hands in the equal-area centre and axis (ringAreaMomentsLocal);
@@ -526,10 +526,11 @@ const buildCurvedLabelPath = (ring, name, { allowStraight = false, center = null
   const averageWidth =
     rawSamples.reduce((sum, sample) => sum + sample.width, 0) / rawSamples.length;
   const widthRatio = averageWidth / usableSpan;
-  const compactNameLength = name.replace(/\s+/g, "").length;
-  const minPathLength = allowStraight
-    ? Math.max(36, compactNameLength * 4)
-    : Math.max(80, compactNameLength * 20);
+  // Geometry fitting is deliberately text-agnostic. The same territory must
+  // produce the same candidate spine whether its display name is CHINA,
+  // PEOPLE'S REPUBLIC OF CHINA, or a localized equivalent. Typography decides
+  // how that fixed placement is used later; it never changes the geometry.
+  const minPathLength = allowStraight ? 36 : 80;
 
   if (
     directLength <= 0 ||
@@ -586,10 +587,9 @@ const getMaxSegmentTurnDegrees = (points) => {
 // detailed line at the exact same zoom. R7 creates a deliberately small,
 // gently-bending spine and admits a handoff ONLY when that simplified path is
 // safe enough for the native renderer. Unsafe shapes stay point-mode forever.
-const buildSafeMapLibreWarpPath = (pathInfo, name) => {
+const buildSafeMapLibreWarpPath = (pathInfo) => {
   if (!pathInfo?.points?.length || pathInfo.points.length < 4) return null;
 
-  const compactNameLength = Math.max(1, String(name ?? "").replace(/\s+/g, "").length);
   const sampleCount = pathInfo.length >= 300 ? 7 : 5;
   const points = [];
 
@@ -622,7 +622,7 @@ const buildSafeMapLibreWarpPath = (pathInfo, name) => {
   const totalTurnDegrees = getTotalTurnDegrees(smoothed);
   const maxSegmentTurnDegrees = getMaxSegmentTurnDegrees(smoothed);
   const detourRatio = length / directLength;
-  const minLength = Math.max(88, compactNameLength * 10.5);
+  const minLength = 88;
 
   if (
     length < minLength
@@ -647,10 +647,9 @@ const buildSafeMapLibreWarpPath = (pathInfo, name) => {
 // expressive close-zoom spine. Sample the already interior-biased path at three
 // points and pull the midpoint toward the chord so giant states get a subtle,
 // stable arc. No polity name is special-cased: scale + geometry decide.
-const buildGentleWorldWarpPath = (pathInfo, name) => {
+const buildGentleWorldWarpPath = (pathInfo) => {
   if (!pathInfo?.points?.length || pathInfo.points.length < 3) return null;
 
-  const compactNameLength = Math.max(1, String(name ?? "").replace(/\s+/g, "").length);
   const points = [];
 
   for (const fraction of [0, 0.5, 1]) {
@@ -678,7 +677,7 @@ const buildGentleWorldWarpPath = (pathInfo, name) => {
   const totalTurnDegrees = getTotalTurnDegrees(points);
   const maxSegmentTurnDegrees = getMaxSegmentTurnDegrees(points);
   const detourRatio = length / directLength;
-  const minLength = Math.max(150, compactNameLength * 15);
+  const minLength = 150;
 
   if (
     length < minLength
@@ -1088,9 +1087,6 @@ const fitPointTypography = ({
 // covariance taken over ring vertices is owned by whichever coast has the most
 // of them, which is how China and Australia came out diagonal.
 const HORIZONTAL_ELONGATION = 1.8;
-// Pieces below this share of a landmass's area do not shape its label path.
-const PATH_PIECE_MIN_SHARE = 0.005;
-const PATH_PIECE_LIMIT = 64;
 // A detached landmass carries the owner's name when it has at least this much
 // ground (cos-scaled square degrees; three is roughly 37,000 km², Taiwan-sized)
 // and at least this share of the core landmass.
@@ -1397,9 +1393,161 @@ export const selectPolityPointFallbacks = (pointLabelData, renderedWarpOwners = 
   };
 };
 
-// One landmass's label: the logical record, the guaranteed point presentation
-// and, when the shape can carry it, the curved line. `polygons` are the
-// landmass's polygons in lng/lat; `areaLngLat` sets its size class.
+// Checkpoint 2/3: solve the cartographic geometry before typography sees a
+// display name. The complete selected component participates in the solution;
+// administrative fragmentation is never simplified by dropping polygons.
+//
+// This still uses the existing R7 scanline spine and horizontal-or-axis policy.
+// Checkpoint 4 replaces that placement solver. The important boundary here is
+// architectural: the geometry result below is a pure function of territory.
+const buildLandmassGeometryLayout = ({
+  polygons,
+  extent,
+  areaLngLat,
+}) => {
+  const priorityScale = Math.sqrt(Math.max(areaLngLat, 1e-8)) * 17500;
+
+  const pieces = (Array.isArray(polygons) ? polygons : [])
+    .map((polygon) => ({
+      polygon,
+      areaLocal: polygonAreaLocal(polygon),
+      outerTile: ringLngLatToTile(polygon?.[0], extent),
+    }))
+    .filter((piece) => piece.areaLocal > 0 && piece.outerTile.length >= 4)
+    .sort((left, right) => right.areaLocal - left.areaLocal);
+  if (!pieces.length) return null;
+
+  // CP3 invariant: every polygon in the selected component participates in
+  // bounds, moments, anchor fallback and spine construction. The old 64-piece /
+  // 0.5%-share cap discarded 41.7% of the real USA mainland fitting area and
+  // roughly 20% of China. Spatial simplification belongs in a future display
+  // surface representation, never in an administrative-piece quota.
+  const componentPieces = pieces;
+  const componentAreaLocal = componentPieces.reduce((sum, piece) => sum + piece.areaLocal, 0);
+  const bestOuterTile = componentPieces[0].outerTile;
+  const extraRings = componentPieces.slice(1).map((piece) => piece.outerTile);
+
+  const polygonTile = componentPieces
+    .flatMap((piece) => piece.polygon.map((ring) => ringLngLatToTile(ring, extent)))
+    .filter((ring) => ring.length >= 4);
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const allOuterPoints = [];
+  for (const piece of componentPieces) {
+    for (const point of piece.outerTile) {
+      allOuterPoints.push(point);
+      minX = Math.min(minX, point[0]);
+      minY = Math.min(minY, point[1]);
+      maxX = Math.max(maxX, point[0]);
+      maxY = Math.max(maxY, point[1]);
+    }
+  }
+
+  const shapeWidth = Math.max(0, maxX - minX);
+  const shapeHeight = Math.max(0, maxY - minY);
+  const shortSide = Math.max(1, Math.min(shapeWidth, shapeHeight));
+  const longSide = Math.max(shapeWidth, shapeHeight);
+  const aspectRatio = longSide / shortSide;
+
+  // CP2 keeps the current orientation policy for now, but it is already fully
+  // name-independent. CP4 will replace the blunt horizontal threshold with a
+  // validated interior straight/curved placement choice.
+  const moments = clusterMomentsLocal(componentPieces.map((piece) => piece.polygon[0]));
+  const preferHorizontal = !moments || moments.elongation < HORIZONTAL_ELONGATION;
+  const angleTile = preferHorizontal ? 0 : normalizeRotation(-moments.angleDeg);
+  const centerTile = moments ? lngLatToTile(moments.lng, moments.lat, extent) : null;
+  const axisMetrics = projectedAxisMetrics(allOuterPoints, angleTile);
+  const axisAspectRatio = axisMetrics.axisSpan / Math.max(1, axisMetrics.crossSpan);
+
+  const rawPathInfo = buildCurvedLabelPath(bestOuterTile, {
+    allowStraight: true,
+    center: centerTile,
+    angleDeg: angleTile,
+    extraRings,
+  });
+  const safeWarpPath = buildSafeMapLibreWarpPath(rawPathInfo);
+  const worldWarpPath = buildGentleWorldWarpPath(rawPathInfo);
+  const turnDegrees = safeWarpPath?.totalTurnDegrees
+    ?? (rawPathInfo ? getTotalTurnDegrees(rawPathInfo.points) : 0);
+
+  // Geometry decides whether a usable line presentation exists. Display-name
+  // width may later change font size/tracking/visibility, but cannot create or
+  // destroy this territorial spine.
+  const worldCurve = Boolean(
+    priorityScale >= 400000
+    && worldWarpPath?.points?.length === 3
+    && worldWarpPath.length >= 170
+    && worldWarpPath.width >= 48
+    && worldWarpPath.totalTurnDegrees <= 42
+    && worldWarpPath.maxSegmentTurnDegrees <= 42
+  );
+  const continentalCurve = Boolean(
+    priorityScale >= 170000
+    && safeWarpPath?.points?.length >= 5
+    && safeWarpPath.length >= 120
+    && safeWarpPath.width >= 38
+    && safeWarpPath.totalTurnDegrees <= 92
+    && safeWarpPath.maxSegmentTurnDegrees <= 32
+    && aspectRatio >= 1.18
+  );
+  const elongatedCurve = Boolean(
+    priorityScale >= 22000
+    && safeWarpPath?.points?.length >= 5
+    && safeWarpPath.length >= 104
+    && safeWarpPath.width >= 24
+    && safeWarpPath.totalTurnDegrees <= 82
+    && safeWarpPath.maxSegmentTurnDegrees <= 30
+    && axisAspectRatio >= 1.9
+  );
+  const lineEligible = worldCurve || continentalCurve || elongatedCurve;
+  const linePathInfo = worldCurve ? worldWarpPath : lineEligible ? safeWarpPath : null;
+  const curveBand = worldCurve
+    ? "world"
+    : lineEligible && elongatedCurve && !continentalCurve
+      ? "early"
+      : lineEligible
+        ? "standard"
+        : "none";
+
+  const anchorPath = linePathInfo ?? rawPathInfo;
+  const centerSample = anchorPath?.points?.length >= 2
+    ? getPointAlongPolyline(anchorPath.points, anchorPath.length / 2)
+    : null;
+  const pointTile = centerSample?.point ?? getInteriorLabelPoint(polygonTile);
+  if (!pointTile) return null;
+
+  const [rawLng, lat] = tileToLngLat(pointTile[0], pointTile[1], extent);
+  const anchorLng = wrapLongitude(rawLng);
+
+  return {
+    priorityScale,
+    componentPieceCount: componentPieces.length,
+    componentAreaLocal,
+    fittedPieceCount: componentPieces.length,
+    fittedAreaShare: 1,
+    shapeWidth,
+    shapeHeight,
+    aspectRatio,
+    axisMetrics,
+    axisAspectRatio,
+    rawPathInfo,
+    safeWarpPath,
+    worldWarpPath,
+    lineEligible,
+    linePathInfo,
+    curveBand,
+    turnDegrees,
+    anchorLng,
+    lat,
+  };
+};
+
+// One landmass's label: consume one name-independent geometry solution, then
+// fit the current display name onto it. This keeps translation/formal-name
+// changes from moving the polity or changing whether a territorial spine exists.
 const buildLandmassLabelRecords = ({
   polygons,
   owner,
@@ -1411,122 +1559,31 @@ const buildLandmassLabelRecords = ({
   sourceOwner = owner,
 }) => {
   const upperName = name;
-  const priorityScale = Math.sqrt(Math.max(areaLngLat, 1e-8)) * 17500;
+  const geometryLayout = buildLandmassGeometryLayout({ polygons, extent, areaLngLat });
+  if (!geometryLayout) return null;
 
-  // The label is fitted to the whole landmass. Administrative region geometry routinely leaves
-  // a mainland in several adjacent pieces (on the modern world map Canada's
-  // largest piece is a seventh of its land), and a label fitted to the largest
-  // piece alone ended up vertical along Quebec. Pieces are measured on the
-  // ground, not in tile space, where an Arctic island out-measures a mainland.
-  const pieces = (Array.isArray(polygons) ? polygons : [])
-    .map((polygon) => ({
-      polygon,
-      areaLocal: polygonAreaLocal(polygon),
-      outerTile: ringLngLatToTile(polygon?.[0], extent),
-    }))
-    .filter((piece) => piece.areaLocal > 0 && piece.outerTile.length >= 4)
-    .sort((left, right) => right.areaLocal - left.areaLocal);
-  if (!pieces.length) return null;
-  const clusterAreaLocal = pieces.reduce((sum, piece) => sum + piece.areaLocal, 0);
-  const bestOuterTile = pieces[0].outerTile;
-  const pathPieces = pieces
-    .slice(0, PATH_PIECE_LIMIT)
-    .filter((piece, index) => index === 0 || piece.areaLocal >= clusterAreaLocal * PATH_PIECE_MIN_SHARE);
-  const extraRings = pathPieces.slice(1).map((piece) => piece.outerTile);
+  const {
+    priorityScale,
+    componentPieceCount,
+    fittedPieceCount,
+    fittedAreaShare,
+    shapeWidth,
+    shapeHeight,
+    aspectRatio,
+    axisMetrics,
+    axisAspectRatio,
+    rawPathInfo,
+    lineEligible,
+    linePathInfo,
+    curveBand,
+    turnDegrees,
+    anchorLng,
+    lat,
+  } = geometryLayout;
 
-  const polygonTile = pathPieces
-    .flatMap((piece) => piece.polygon.map((ring) => ringLngLatToTile(ring, extent)))
-    .filter((ring) => ring.length >= 4);
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  const allOuterPoints = [];
-  for (const piece of pathPieces) {
-    for (const point of piece.outerTile) {
-      allOuterPoints.push(point);
-      minX = Math.min(minX, point[0]);
-      minY = Math.min(minY, point[1]);
-      maxX = Math.max(maxX, point[0]);
-      maxY = Math.max(maxY, point[1]);
-    }
-  }
-  const shapeWidth = Math.max(0, maxX - minX);
-  const shapeHeight = Math.max(0, maxY - minY);
-  const shortSide = Math.max(1, Math.min(shapeWidth, shapeHeight));
-  const longSide = Math.max(shapeWidth, shapeHeight);
-  const aspectRatio = longSide / shortSide;
-
-  // Centre and axis from the polygon's area in an equal-area frame. A compact
-  // shape reads horizontally, as an atlas would set it; only a clearly long
-  // shape (Chile, Norway, Japan) follows its own axis. Tile y points down, so
-  // the frame's counter-clockwise angle becomes a clockwise screen rotation.
-  const moments = clusterMomentsLocal(pathPieces.map((piece) => piece.polygon[0]));
-  const preferHorizontal = !moments || moments.elongation < HORIZONTAL_ELONGATION;
-  const angleTile = preferHorizontal ? 0 : normalizeRotation(-moments.angleDeg);
-  const centerTile = moments ? lngLatToTile(moments.lng, moments.lat, extent) : null;
-  const axisMetrics = projectedAxisMetrics(allOuterPoints, angleTile);
-  const axisAspectRatio = axisMetrics.axisSpan / Math.max(1, axisMetrics.crossSpan);
-  const rawPathInfo = buildCurvedLabelPath(bestOuterTile, upperName, {
-    allowStraight: true,
-    center: centerTile,
-    angleDeg: angleTile,
-    extraRings,
-  });
-  const safeWarpPath = buildSafeMapLibreWarpPath(rawPathInfo, upperName);
-  const worldWarpPath = buildGentleWorldWarpPath(rawPathInfo, upperName);
-  const compactNameLength = Math.max(1, upperName.replace(/\s+/g, "").length);
-  const turnDegrees = safeWarpPath?.totalTurnDegrees
-    ?? (rawPathInfo ? getTotalTurnDegrees(rawPathInfo.points) : 0);
-
-  // R7 never hands a polity over to MapLibre's line renderer merely because a
-  // geometric spine exists. The path must survive a second renderer-safety
-  // pass first. If it does not, the polity remains on the point presentation
-  // at every zoom, which makes a one-click zoom incapable of deleting a name.
+  // Typography still determines screen-space visibility and glyph fit. It no
+  // longer participates in the geometry solve or line eligibility decision.
   const visibilityScale = visibilityScaleFor(priorityScale, upperName);
-  // World-scale bending is deliberately rare and gentle. Only very large
-  // labels qualify; ordinary countries keep the fitted/rotated point form
-  // until the existing regional/detail warp thresholds.
-  const worldCurve = Boolean(
-    visibilityScale >= 400000
-    && worldWarpPath?.points?.length === 3
-    && worldWarpPath.length >= Math.max(170, compactNameLength * 16)
-    && worldWarpPath.width >= Math.max(48, compactNameLength * 3.25)
-    && worldWarpPath.totalTurnDegrees <= 42
-    && worldWarpPath.maxSegmentTurnDegrees <= 42
-  );
-  const continentalCurve = Boolean(
-    visibilityScale >= 170000
-    && safeWarpPath?.points?.length >= 5
-    && safeWarpPath.length >= Math.max(120, compactNameLength * 12)
-    && safeWarpPath.width >= Math.max(38, compactNameLength * 3.0)
-    && safeWarpPath.totalTurnDegrees <= 92
-    && safeWarpPath.maxSegmentTurnDegrees <= 32
-    && aspectRatio >= 1.18
-  );
-  const elongatedCurve = Boolean(
-    visibilityScale >= 22000
-    && safeWarpPath?.points?.length >= 5
-    && safeWarpPath.length >= Math.max(104, compactNameLength * 11)
-    && safeWarpPath.width >= Math.max(24, compactNameLength * 2.25)
-    && safeWarpPath.totalTurnDegrees <= 82
-    && safeWarpPath.maxSegmentTurnDegrees <= 30
-    && axisAspectRatio >= 1.9
-  );
-  const lineEligible = worldCurve || continentalCurve || elongatedCurve;
-  const linePathInfo = worldCurve ? worldWarpPath : lineEligible ? safeWarpPath : null;
-
-  const anchorPath = linePathInfo ?? rawPathInfo;
-  // The world curve has three points; the anchor must still be its midpoint,
-  // or the overview label falls back to the interior of the largest piece and
-  // RUSSIA lands in Chukotka.
-  const centerSample = anchorPath?.points?.length >= 2
-    ? getPointAlongPolyline(anchorPath.points, anchorPath.length / 2)
-    : null;
-  const pointTile = centerSample?.point ?? getInteriorLabelPoint(polygonTile);
-  if (!pointTile) return null;
-  const [rawLng, lat] = tileToLngLat(pointTile[0], pointTile[1], extent);
-  const anchorLng = wrapLongitude(rawLng);
   const tier = tierForVisibilityScale(visibilityScale);
   const pointTypography = fitPointTypography({
     shapeWidth,
@@ -1540,17 +1597,6 @@ const buildLandmassLabelRecords = ({
     ? fitLineTypography({ pathInfo: linePathInfo, name: upperName, priorityScale })
     : null;
   const rotation = axisMetrics.angle;
-  // Strongly elongated states benefit from their territory-following form
-  // earlier than generic continental curves. This specifically prevents the
-  // point fallback from becoming a giant NORWAY/CHILE banner just before the
-  // warped label would otherwise take over.
-  const curveBand = worldCurve
-    ? "world"
-    : lineEligible && elongatedCurve && !continentalCurve
-      ? "early"
-      : lineEligible
-        ? "standard"
-        : "none";
   const curveMinZoom = lineEligible
     ? curveMinZoomForPolityLabelTier(tier, curveBand)
     : null;
@@ -1587,6 +1633,9 @@ const buildLandmassLabelRecords = ({
     anchorLng,
     anchorLat: lat,
     lat,
+    geometryPieceCount: componentPieceCount,
+    fittedPieceCount,
+    fittedAreaShare,
   };
 
   return {
@@ -1611,7 +1660,7 @@ const buildLandmassLabelRecords = ({
       },
     },
     // Guaranteed overview renderer. For line-capable polities Nations.jsx shows
-    // this only below curveMinZoom; point-only polities keep it through z7.1.
+    // this until the native line is confirmed rendered.
     point: {
       type: "Feature",
       id: `${featureId}-point`,

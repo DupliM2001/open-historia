@@ -24,6 +24,10 @@ let labelGeometryByOwner = new Map();
 let labelsByOwner = new Map();
 let currentOwnershipOverrides = {};
 let currentLabelNames = {};
+// The experimental region display-mesh implementation remains in-tree for
+// isolated investigation/tests, but the beta worker must not import or schedule
+// it. Keeping it out of the live worker module graph prevents its dynamic
+// polygon-clipping dependency from forcing worker code-splitting in production.
 
 const toStringArray = (value) => Array.isArray(value)
   ? value.map((entry) => String(entry ?? "")).filter(Boolean)
@@ -482,6 +486,7 @@ self.onmessage = async ({ data: message }) => {
       ...derived,
       stats: { ...derived.stats, ...(loadStats ?? {}) },
     });
+
   } catch (error) {
     self.postMessage({
       messageType: "cartography-result",
