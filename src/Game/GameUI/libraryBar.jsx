@@ -545,10 +545,27 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
   // to tell which one is about to be clicked.
   const [hoveredMenuItem, setHoveredMenuItem] = useState(null);
 
+  // Export is the one that takes a moment — a second or two on a phone for a game
+  // with roll-back points, longer when a map has to go in. So it keeps the menu
+  // open and says so on the row that was pressed, rather than closing and leaving
+  // the card looking like nothing happened. Edit and Clone are instant and close.
+  const [exporting, setExporting] = useState(false);
+
+  const runExport = async () => {
+    setExporting(true);
+    try {
+      await onExport(game);
+    } finally {
+      setExporting(false);
+      setCardMenuOpen(false);
+      setHoveredMenuItem(null);
+    }
+  };
+
   const cardMenuItems = [
-    ["Edit", () => onEdit(game.id)],
-    ["Clone", () => onClone(game)],
-    ["Export", () => onExport(game)],
+    ["Edit", () => { setCardMenuOpen(false); onEdit(game.id); }, false],
+    ["Clone", () => { setCardMenuOpen(false); onClone(game); }, false],
+    [exporting ? "Exporting…" : "Export", runExport, exporting],
   ];
 
   return (
@@ -655,7 +672,11 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
                       many in a scrolling shelf and a listener per card is a listener
                       per card. */}
                   <div
-                    onClick={() => { setCardMenuOpen(false); setHoveredMenuItem(null); }}
+                    onClick={() => {
+                      if (exporting) return;
+                      setCardMenuOpen(false);
+                      setHoveredMenuItem(null);
+                    }}
                     style={{ inset: 0, position: "fixed", zIndex: 1 }}
                   />
                   <div
@@ -673,10 +694,11 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
                       zIndex: 2,
                     }}
                   >
-                    {cardMenuItems.map(([label, run]) => (
+                    {cardMenuItems.map(([label, run, working]) => (
                       <button
                         key={label}
-                        onClick={() => { setCardMenuOpen(false); setHoveredMenuItem(null); run(); }}
+                        disabled={exporting}
+                        onClick={() => { setHoveredMenuItem(null); run(); }}
                         onFocus={() => setHoveredMenuItem(label)}
                         onBlur={() => setHoveredMenuItem(null)}
                         onMouseEnter={() => setHoveredMenuItem(label)}
@@ -684,13 +706,19 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
                         role="menuitem"
                         style={{
                           ...actionButtonStyle,
-                          background: hoveredMenuItem === label ? "rgba(255,255,255,0.16)" : "transparent",
+                          background:
+                            working || hoveredMenuItem === label ? "rgba(255,255,255,0.16)" : "transparent",
                           border: "none",
                           borderRadius: 0,
                           // Keyboard focus lands here too, so the highlight follows
                           // Tab as well as the pointer.
-                          color: hoveredMenuItem === label ? "#fff" : "rgba(248,250,252,0.82)",
+                          color: working || hoveredMenuItem === label ? "#fff" : "rgba(248,250,252,0.82)",
+                          cursor: working ? "progress" : undefined,
                           justifyContent: "flex-start",
+                          // The row grows by a character when it changes to
+                          // "Exporting…"; a fixed width stops the menu twitching.
+                          minWidth: "8rem",
+                          opacity: exporting && !working ? 0.45 : 1,
                           padding: "0.55rem 0.8rem",
                           textAlign: "left",
                         }}
