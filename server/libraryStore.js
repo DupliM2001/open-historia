@@ -1601,7 +1601,12 @@ const buildGameCatalog = () => {
        // The first client reader of `missing`: pressing Play on a game whose map
        // is not here has to offer to go and get it rather than open a blank world.
        scenarioMissing: Boolean(scenario?.missing),
-       scenarioName: scenario?.name ?? meta.scenarioId,
+       // A scenario that is gone is named by its id, which on a card reads as a
+       // typo rather than a map. A game imported without its map knows what the
+       // sender called it — show that instead.
+       scenarioName: scenario?.missing
+       ? meta.importedScenarioName || scenario?.name || meta.scenarioId
+       : scenario?.name ?? meta.scenarioId,
     };
   })
   .filter(Boolean);

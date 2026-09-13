@@ -295,7 +295,10 @@ const getGameCatalog = async (scenarioCatalog, gameMetas) => {
       scenarioAccentColor: scenario?.accentColor ?? meta.accentColor,
       // Server twin: the first client reader of `missing` is the Play button.
       scenarioMissing: Boolean(scenario?.missing),
-      scenarioName: scenario?.name ?? meta.scenarioId,
+      // And a missing map shows the name the sender knew, not a bare id.
+      scenarioName: scenario?.missing
+        ? meta.importedScenarioName || scenario?.name || meta.scenarioId
+        : scenario?.name ?? meta.scenarioId,
     };
   }).filter(Boolean);
 
