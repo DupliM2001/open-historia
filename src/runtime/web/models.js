@@ -323,6 +323,8 @@ export const readGameMeta = (gameId, raw = {}) => {
     // when this browser opens a game whose map it does not hold.
     importedScenarioName: String(raw?.importedScenarioName ?? "").trim() || null,
     importedScenarioOrigin: normalizeHubOrigin(raw?.importedScenarioOrigin),
+    // Server twin: when this game arrived, used by the Last Played row.
+    importedAt: String(raw?.importedAt ?? "").trim() || null,
     lastPlayedAt: String(raw?.lastPlayedAt ?? "").trim() || null,
     name,
     playCount: normalizePlayCount(raw?.playCount),

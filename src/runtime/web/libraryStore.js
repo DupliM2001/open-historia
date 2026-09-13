@@ -1492,6 +1492,7 @@ const importGameBundle = async (bundle) => {
     id,
     importedScenarioName: trimmed(ref.scenarioName) || null,
     importedScenarioOrigin: normalizeHubOrigin(ref.hubOrigin),
+    importedAt: createdAt,
     name: await uniqueGameName(metaIn.name),
     scenarioId,
     subtitle: trimmed(metaIn.subtitle) || DEFAULT_GAME_META.subtitle,

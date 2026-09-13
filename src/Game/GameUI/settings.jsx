@@ -1362,7 +1362,7 @@ const DiagnosticsPanel = () => {
     return (
         <div>
         <div style={{ marginBottom: "0.55rem", fontSize: "0.72rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.35 }}>
-        The game keeps a running log of what you did — saves opened, orders queued, turns taken, and anything that went wrong. Send it with a bug report and it says what happened, in order.
+        The game keeps a running log of what you did — saves opened, orders queued, turns taken, and anything that went wrong. Send it with a bug report and it says what happened, in order. Saving it with the game attaches the campaign it happened in, which is what lets a fix be tested against it.
         </div>
 
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", opacity: enabled ? 1 : 0.45 }}>
@@ -1375,7 +1375,7 @@ const DiagnosticsPanel = () => {
         {copyState === "copied" ? "✓ Copied!" : copyState === "failed" ? "Couldn't copy" : copyState === "copying" ? "Copying…" : "📋 Copy log"}
         </button>
         <button type="button" onClick={handleDownload} style={{ ...diagnosticsButton, flex: 1 }}>
-        💾 Save as file
+        💾 Save log file
         </button>
         </div>
 
@@ -1388,7 +1388,7 @@ const DiagnosticsPanel = () => {
         onClick={handleAttachGame}
         disabled={attachState === "working"}
         style={{ ...diagnosticsButton, width: "100%", marginBottom: "0.5rem" }}
-        title="Saves the logging file, then the current game as a .zip. Attach both to the report."
+        title="Saves the log file, then the game you are playing as a .zip. Send both with the report: the log says what happened, the game is what it happened to."
         >
         {attachState === "working"
             ? "Packing the game…"
@@ -1397,8 +1397,8 @@ const DiagnosticsPanel = () => {
             : attachState === "failed"
             ? "Couldn't save the game"
             : attachState.startsWith("saved ")
-            ? `✓ Log + game (${attachState.slice(6)})`
-            : "📎 Attach game"}
+            ? `✓ Saved both (game ${attachState.slice(6)})`
+            : "💾 Save log file + game"}
         </button>
         )}
 

@@ -337,3 +337,32 @@ test("a game whose own map is already gone still exports, and passes the name on
     "the name the last sender knew is handed on, not the id",
   );
 });
+
+test("an imported game records when it arrived, so the library can place it", () => {
+  // Last Played ranks a game by when the player last touched it, and importing
+  // counts. It cannot use createdAt: readGameMeta mints a fresh one on every read
+  // for a game that has none on disk — real saves exist in that state — so such a
+  // game would read as newer than everything, forever, and push every import past
+  // it. importedAt is written once, by the import, and never minted.
+  const root = buildDataDir();
+  const result = runStore(root, `
+    const before = new Date().toISOString();
+    const bundle = store.exportGameBundle("test-campaign");
+    const imported = store.importGameBundle(bundle);
+    const card = () => store.getGameCatalog().games.find((entry) => entry.id === imported.game.id);
+    const first = card().importedAt;
+    // Any ordinary meta write must not lose it, and must not move it either.
+    store.updateGame(imported.game.id, { archived: true });
+    ${report(`{
+      before,
+      first,
+      afterWrite: card().importedAt,
+      source: store.getGameCatalog().games.find((entry) => entry.id === "test-campaign").importedAt,
+    }`)}
+  `);
+
+  assert.ok(result.first, "an imported game is stamped with its arrival");
+  assert.ok(result.first >= result.before, "and the stamp is the moment it arrived, not the sender's clock");
+  assert.equal(result.afterWrite, result.first, "an ordinary meta write neither drops nor moves it");
+  assert.equal(result.source, null, "a game that was never imported has none");
+});

@@ -91,7 +91,7 @@ test("restore points are excluded from the bundle on both sides", () => {
 // because the thing being protected is an absence.
 const readSource = (...parts) => readFileSync(path.join(HERE, "..", ...parts), "utf-8");
 
-test("Attach game is hidden where no file can be saved", () => {
+test("saving the log with the game is hidden where no file can be saved", () => {
   const settings = readSource("Game", "GameUI", "settings.jsx");
   const open = settings.indexOf("{!isNativeApp() && (");
   assert.notEqual(open, -1, "settings.jsx still gates something on !isNativeApp()");
@@ -101,7 +101,7 @@ test("Attach game is hidden where no file can be saved", () => {
   assert.notEqual(close, -1, "the gated branch closes as expected");
   const branch = settings.slice(open, close);
 
-  assert.ok(branch.includes("Attach game"), "the Attach game button sits inside the !isNativeApp() branch");
+  assert.ok(branch.includes("Save log file + game"), "the log-plus-game button sits inside the !isNativeApp() branch");
   assert.ok(branch.includes("handleAttachGame"), "and it is that branch's button that runs it");
 });
 

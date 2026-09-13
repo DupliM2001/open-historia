@@ -796,6 +796,13 @@ const readGameMeta = (gameId) => {
     // silently drops.
     importedScenarioName: String(raw?.importedScenarioName ?? "").trim() || null,
     importedScenarioOrigin: normalizeHubOrigin(raw?.importedScenarioOrigin),
+    // When this game arrived from a .zip. The library's Last Played row treats it
+    // like a play: an import the player made a moment ago belongs next to the
+    // game they are in, not behind every campaign they have ever opened.
+    // Deliberately NOT createdAt, which readGameMeta mints fresh on every read
+    // when a game has none on disk — plenty of real saves do not — so a game
+    // missing it reads as newer than anything, forever.
+    importedAt: String(raw?.importedAt ?? "").trim() || null,
     lastPlayedAt: String(raw?.lastPlayedAt ?? "").trim() || null,
     name,
     playCount: normalizePlayCount(raw?.playCount),
@@ -3453,6 +3460,7 @@ const importGameBundle = (bundle, { setActive = false } = {}) => {
     // Whether the sender believed the map could still be fetched. Read when the
     // player presses Play on a game whose scenario is not here.
     importedScenarioOrigin: normalizeHubOrigin(ref.hubOrigin),
+    importedAt: createdAt,
     name: uniqueGameName(meta.name),
     scenarioId,
     subtitle: String(meta.subtitle ?? "").trim() || DEFAULT_GAME_META.subtitle,

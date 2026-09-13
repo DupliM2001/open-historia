@@ -2223,17 +2223,24 @@ const LibraryTopBar = () => {
   );
   // Sorting on lastPlayedAt alone sends a game that has never been played to the
   // far right, behind every campaign the player has ever opened — which is where
-  // a game imported thirty seconds ago used to land, the one place nobody thinks
-  // to look for it. A game with no play history is ordered by when it ARRIVED
-  // instead, so an import turns up beside the current game rather than off the
-  // end of the shelf. The current game stays first: this row is where the player
-  // comes back to it, and nothing new should displace it.
+  // a game imported thirty seconds ago landed, the one place nobody thinks to
+  // look for something they just added. Importing counts as touching a game, so
+  // an import ranks by when it ARRIVED and turns up beside the current game.
+  //
+  // createdAt cannot be used for this: readGameMeta mints a fresh one on every
+  // read for a game that has none on disk, and real saves do exist without one,
+  // so such a game reads as newer than everything forever. A game nobody has
+  // played or imported keeps its place in the library's own order, which is
+  // what the stable sort below leaves it in.
+  //
+  // The current game stays first: this row is how the player gets back to it,
+  // and nothing newly added should displace it.
   const lastPlayedGames = useMemo(() => {
-    const recency = (game) => String(game.lastPlayedAt || game.createdAt || "");
+    const touchedAt = (game) => String(game.lastPlayedAt || game.importedAt || "");
     return [...visibleGames].sort((a, b) => {
       if (a.id === activeGameId) return -1;
       if (b.id === activeGameId) return 1;
-      return recency(b).localeCompare(recency(a));
+      return touchedAt(b).localeCompare(touchedAt(a));
     });
   }, [visibleGames, activeGameId]);
   const mostPlayedGames = useMemo(
@@ -2518,7 +2525,7 @@ const LibraryTopBar = () => {
                 , which isn't in your library — so there is no map to open it on.
                 {pending.importedScenarioOrigin
                   ? " It's on the community hub, so it can be fetched now."
-                  : " Ask whoever sent you the game for the scenario file, then import it from the Scenarios tab."}
+                  : " Look for it on the community hub, or ask whoever sent you the game for the scenario file."}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
                 {pending.importedScenarioOrigin && (
@@ -2532,11 +2539,11 @@ const LibraryTopBar = () => {
                   </button>
                 )}
                 <button
-                  onClick={() => { setMissingScenarioGame(null); setActiveTab("scenarios"); }}
+                  onClick={() => { setMissingScenarioGame(null); setActiveTab("community"); }}
                   style={{ ...actionButtonStyle, minHeight: "2.6rem" }}
                   type="button"
                 >
-                  Go to scenarios
+                  Browse the community hub
                 </button>
                 <button
                   onClick={() => setMissingScenarioGame(null)}
