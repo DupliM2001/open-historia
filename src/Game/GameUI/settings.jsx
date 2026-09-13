@@ -1258,6 +1258,20 @@ const DiagnosticsLogViewer = () => {
 
 const viewerNoteStyle = { padding: "0.6rem", fontSize: "0.72rem", color: "rgba(255,255,255,0.45)" };
 
+// The button picks its own game — whichever is being played — so both the tooltip
+// and the result name it. A campaign name can be long; the button is one line.
+const IDLE_ATTACH = { kind: "idle" };
+const shortGameName = (name) => {
+    const text = String(name ?? "").trim();
+    return text.length > 28 ? `${text.slice(0, 27)}…` : text;
+};
+const attachGameTitle = (loggingOn, gameName) => {
+    const which = gameName ? `“${gameName}”` : "the game you are playing";
+    return loggingOn
+        ? `Saves the log file, then ${which} as a .zip. Send both with the report: the log says what happened, the game is what it happened to.`
+        : `Logging is off, so there is no log to save — this saves ${which} as a .zip.`;
+};
+
 // Settings → Advanced → Diagnostics: the log a player pastes into a bug report.
 //
 // Two ways out, because the two report routes want different things. Copy is for
@@ -1277,7 +1291,10 @@ const DiagnosticsPanel = () => {
     const [copyState, setCopyState] = useState("idle");
     const [cleared, setCleared] = useState(false);
     const [viewing, setViewing] = useState(false);
-    const [attachState, setAttachState] = useState("idle");
+    const [attachState, setAttachState] = useState(IDLE_ATTACH);
+    // Read at render rather than subscribed: this panel is remounted every time the
+    // settings menu opens, and the name only has to be right when it is on screen.
+    const activeGameName = String(getLibraryState().activeGame?.name ?? "").trim();
     // The count is the whole reason this section is visible when nothing is
     // wrong: "Entries: 0" after a crash means the log is not recording and the
     // player should say so, rather than pasting an empty report.
@@ -1333,14 +1350,20 @@ const DiagnosticsPanel = () => {
     // Android, where the WebView cannot save a file at all (saveDebugLog.js) and
     // a 4 MB zip has no clipboard to fall back to.
     const handleAttachGame = async () => {
-        const gameId = getLibraryState().activeGameId;
+        const { activeGame, activeGameId: gameId } = getLibraryState();
         if (!gameId) {
-            setAttachState("no game");
-            setTimeout(() => setAttachState("idle"), 2500);
+            setAttachState({ kind: "no game" });
+            setTimeout(() => setAttachState(IDLE_ATTACH), 2500);
             return;
         }
 
-        setAttachState("working");
+        // The name, because this button picks its own game — whichever one is being
+        // played, which is not necessarily the one the player was last looking at in
+        // the library. Saying which was saved is the difference between a file they
+        // can send with confidence and one they have to go and check.
+        const name = String(activeGame?.name ?? "").trim() || gameId;
+
+        setAttachState({ kind: "working" });
         try {
             // With logging off there is no log to send — saving an empty one would
             // be a file that says nothing, and the button above already says the
@@ -1348,12 +1371,12 @@ const DiagnosticsPanel = () => {
             if (enabled) await saveDebugLogFile();
             const { blob } = await buildGameZipBlob(gameId);
             saveGameZipToDisk(blob, `${gameId}-game.zip`);
-            setAttachState(`saved ${formatZipSize(blob.size)}`);
+            setAttachState({ kind: "saved", name, size: formatZipSize(blob.size) });
         } catch (error) {
-            logDebugEvent("diagnostics", "Attach game failed.", { error: error?.message || String(error) });
-            setAttachState("failed");
+            logDebugEvent("diagnostics", "Saving the game failed.", { error: error?.message || String(error) });
+            setAttachState({ kind: "failed" });
         }
-        setTimeout(() => setAttachState("idle"), 4000);
+        setTimeout(() => setAttachState(IDLE_ATTACH), 4000);
     };
 
     const handleClear = () => {
@@ -1391,18 +1414,16 @@ const DiagnosticsPanel = () => {
         onClick={handleAttachGame}
         disabled={attachState === "working"}
         style={{ ...diagnosticsButton, width: "100%", marginBottom: "0.5rem" }}
-        title={enabled
-            ? "Saves the log file, then the game you are playing as a .zip. Send both with the report: the log says what happened, the game is what it happened to."
-            : "Logging is off, so there is no log to save — this saves the game you are playing as a .zip."}
+        title={attachGameTitle(enabled, activeGameName)}
         >
-        {attachState === "working"
+        {attachState.kind === "working"
             ? "Packing the game…"
-            : attachState === "no game"
+            : attachState.kind === "no game"
             ? "No game open"
-            : attachState === "failed"
+            : attachState.kind === "failed"
             ? "Couldn't save the game"
-            : attachState.startsWith("saved ")
-            ? (enabled ? `✓ Saved both (game ${attachState.slice(6)})` : `✓ Saved game (${attachState.slice(6)})`)
+            : attachState.kind === "saved"
+            ? `✓ Saved ${enabled ? "log + " : ""}“${shortGameName(attachState.name)}” (${attachState.size})`
             : enabled ? "💾 Save log file + game" : "💾 Save game"}
         </button>
         )}
