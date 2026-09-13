@@ -537,7 +537,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
 // face of the card. Three verbs compete for width with Play, and Play is the one a
 // player came to press; the other three are occasional, and none of them is
 // destructive, which is why Archive stays out here on its own.
-const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit, onExport }) => {
+const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, onExport }) => {
   const cardImageUrl = game.coverImageUrl || DEFAULT_SCENARIO_COVER;
   const [cardMenuOpen, setCardMenuOpen] = useState(false);
   // Which row the pointer is over. These are plain buttons on a translucent
@@ -624,19 +624,27 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit, onExpo
             </div>
 
             <div style={{ flex: "0 0 auto", position: "relative" }}>
+              {/* Building a zip takes a moment — measured, one to two seconds on a
+                  phone for a game with its roll-back points, longer when a map has
+                  to go in — and the menu closes on the click, so without this the
+                  card looks like it did nothing and gets pressed again. */}
               <button
                 aria-haspopup="menu"
                 aria-expanded={cardMenuOpen}
-                aria-label={`More for ${game.name}`}
+                aria-label={busy ? "Working…" : `More for ${game.name}`}
+                disabled={busy}
                 onClick={() => setCardMenuOpen((open) => !open)}
                 style={{
                   ...actionButtonStyle,
                   background: cardMenuOpen ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.35)",
+                  cursor: busy ? "progress" : "pointer",
                   fontSize: "1.05rem",
                   lineHeight: 1,
                   minWidth: "2rem",
+                  opacity: busy ? 0.5 : 1,
                   padding: "0.3rem 0.45rem",
                 }}
+                title={busy ? "Working…" : undefined}
                 type="button"
               >
                 ⋮
@@ -1561,6 +1569,7 @@ const LibraryTopBar = () => {
   };
 
   const handleGameExport = async (game) => {
+    if (isBusy) return;
     setEditorError(null);
     setIsBusy(true);
 
@@ -2760,6 +2769,7 @@ const LibraryTopBar = () => {
                       <GameCard
                         key={game.id}
                         active={game.id === activeGameId}
+                        busy={isBusy}
                         game={game}
                         onActivate={handleGameActivate}
                         onArchive={handleGameArchive}
@@ -2774,6 +2784,7 @@ const LibraryTopBar = () => {
                       <GameCard
                         key={game.id}
                         active={game.id === activeGameId}
+                        busy={isBusy}
                         game={game}
                         onActivate={handleGameActivate}
                         onArchive={handleGameArchive}
@@ -2789,6 +2800,7 @@ const LibraryTopBar = () => {
                         <GameCard
                           key={game.id}
                           active={game.id === activeGameId}
+                          busy={isBusy}
                           game={game}
                           onActivate={handleGameActivate}
                           onArchive={handleGameArchive}
