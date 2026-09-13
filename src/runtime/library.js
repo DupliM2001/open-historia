@@ -454,6 +454,46 @@ export const updateScenarioFromBundle = async (scenarioId, bundle) => {
   return details;
 };
 
+// One Game as a portable record. The zip that carries it is assembled by the
+// caller (src/runtime/gameZip.js) so the same code runs on desktop and on the web build.
+export const exportGameBundle = async (gameId) =>
+  requestJson(`${GAMES_API_ROOT}/${encodeURIComponent(gameId)}/export`);
+
+export const importGameBundle = async (bundle) => {
+  const details = await requestJson(`${GAMES_API_ROOT}/import`, {
+    body: bundle,
+    method: "POST",
+  });
+  await refreshLibraryCatalog({ force: true });
+  return details;
+};
+
+// Restore points move as TEXT, never through requestJson, and that is the whole
+// point of them having their own endpoint. A full snapshots file is ~21 MB;
+// JSON.parse on it costs ~80 MB of heap, and requestJson would parse it coming
+// in and stringify it going back out — twice, for a payload this side only ever
+// moves from one place to another. Straight to and from the zip instead.
+export const readGameSnapshotsText = async (gameId) => {
+  const response = await fetch(
+    `${GAMES_API_ROOT}/${encodeURIComponent(gameId)}/snapshots`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) throw new Error(`Could not read this game's restore points (HTTP ${response.status}).`);
+  return response.text();
+};
+
+export const writeGameSnapshotsText = async (gameId, snapshotsText) => {
+  const response = await fetch(
+    `${GAMES_API_ROOT}/${encodeURIComponent(gameId)}/snapshots`,
+    {
+      body: snapshotsText,
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    },
+  );
+  if (!response.ok) throw new Error(`Could not restore this game's restore points (HTTP ${response.status}).`);
+};
+
 export const loadGameDetails = async (gameId) =>
   requestJson(`${GAMES_API_ROOT}/${encodeURIComponent(gameId)}`);
 

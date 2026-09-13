@@ -520,6 +520,24 @@ const settingsLines = (settings) => {
     return lines.map(redactSecrets);
 };
 
+// The same settings block the Logging file carries, on its own, for the
+// settings.txt that rides inside an exported Game. Same readers and the same
+// redaction — a key is still only "set"/"not set", an endpoint still only a host
+// — so a Game that reaches a maintainer without a log still says what it was
+// played with. It is a RECORD, never applied: importing a game changes nobody's
+// settings, because these are device-wide and a stranger's are either
+// meaningless here or actively wrong (the legacy renderer is a workaround for
+// that player's GPU). The settings that should follow a game already do — they
+// live in its game.json.
+export const buildSettingsReport = async () => {
+    const lines = settingsLines(await readSettingsSnapshot());
+    if (!lines.length) return "";
+    // settingsLines opens with a blank separator line, which is right inside the
+    // Logging file and wrong at the top of a file of its own.
+    while (lines.length && !lines[0].trim()) lines.shift();
+    return `${lines.join("\n")}\n`;
+};
+
 // Campaign context for the report header, set by whoever knows it: library.js
 // when the active game changes, time.jsx as the date advances. Merged rather
 // than replaced so no caller has to know the other callers' fields.

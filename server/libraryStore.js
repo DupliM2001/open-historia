@@ -787,6 +787,22 @@ const readGameMeta = (gameId) => {
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     id: gameId,
+    // What the SENDER called this game's scenario, and where they believed it
+    // could still be fetched from. Written only by importGameBundle, and read
+    // only when the player opens a game whose scenario this install lacks: the
+    // scenario is then shown by its id, which is not a name anyone can go and
+    // ask for. Normalised here because writeGameMeta round-trips through this
+    // function, and a field it does not name is a field the next meta write
+    // silently drops.
+    importedScenarioName: String(raw?.importedScenarioName ?? "").trim() || null,
+    importedScenarioOrigin: normalizeHubOrigin(raw?.importedScenarioOrigin),
+    // When this game arrived from a .zip. The library's Last Played row treats it
+    // like a play: an import the player made a moment ago belongs next to the
+    // game they are in, not behind every campaign they have ever opened.
+    // Deliberately NOT createdAt, which readGameMeta mints fresh on every read
+    // when a game has none on disk — plenty of real saves do not — so a game
+    // missing it reads as newer than anything, forever.
+    importedAt: String(raw?.importedAt ?? "").trim() || null,
     lastPlayedAt: String(raw?.lastPlayedAt ?? "").trim() || null,
     name,
     playCount: normalizePlayCount(raw?.playCount),
@@ -1589,7 +1605,15 @@ const buildGameCatalog = () => {
        ? Math.trunc(Number(gameData.round))
        : 1,
        scenarioAccentColor: scenario?.accentColor ?? meta.accentColor,
-       scenarioName: scenario?.name ?? meta.scenarioId,
+       // The first client reader of `missing`: pressing Play on a game whose map
+       // is not here has to offer to go and get it rather than open a blank world.
+       scenarioMissing: Boolean(scenario?.missing),
+       // A scenario that is gone is named by its id, which on a card reads as a
+       // typo rather than a map. A game imported without its map knows what the
+       // sender called it — show that instead.
+       scenarioName: scenario?.missing
+       ? meta.importedScenarioName || scenario?.name || meta.scenarioId
+       : scenario?.name ?? meta.scenarioId,
     };
   })
   .filter(Boolean);
@@ -3277,6 +3301,244 @@ const updateScenarioFromBundle = (scenarioId, bundle) => {
   return getScenarioDetails(scenarioId);
 };
 
+// ---------------------------------------------------------------------------
+// Game bundles: one playthrough, as a portable record.
+//
+// A sibling of the scenario bundle above, with one difference that shapes all of
+// it: a Game is a POINTER, not a world. Its map lives in a scenario folder this
+// bundle does not carry, so the bundle records where the map came from
+// (scenarioRef) and the caller decides whether to pack the scenario alongside it
+// — see the zip built in src/runtime/gameZip.js.
+//
+// Restore points are deliberately NOT in `data`. They are ~40x the rest of a
+// Game, and they travel as a zip entry of their own that the client moves as
+// TEXT: parsing a 21 MB snapshots.json costs ~80 MB of heap, nothing here needs
+// to look inside it, and the browser is where that would hurt.
+//
+// The schema string carries THIS project's name. The scenario bundle's
+// "pax-historia-scenario-bundle/2" above is a frozen wire format, kept for the
+// bundles players already hold — not a pattern to copy into a new one.
+const GAME_BUNDLE_SCHEMA = "open-historia-game-bundle/1";
+const ACCEPTED_GAME_BUNDLE_SCHEMAS = new Set([GAME_BUNDLE_SCHEMA]);
+
+// Everything a game folder holds except its restore points and its cover image.
+const GAME_BUNDLE_DATA_KEYS = [
+  "actions",
+  "advisor",
+  "chat",
+  "events",
+  "game",
+  "prompts",
+  "world",
+  "colors",
+  "flags",
+  "tags",
+  "intercepts",
+];
+
+// Keys whose file is legitimately absent on a game that never had one. Writing
+// an empty one on import is harmless but noisy, and `flags: {}` is not the same
+// statement as "this game has no flags file".
+const OPTIONAL_GAME_BUNDLE_KEYS = new Set(["colors", "flags", "tags", "intercepts"]);
+
+// Scenarios every install already has, so a game played on one never needs to
+// carry a map. CLASSIC_SCENARIO_ID is where campaigns started on the older
+// built-in map were moved.
+const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENARIO_ID]);
+
+// Roughly what a scenario weighs once bundled, so the CLIENT can decide whether
+// it can carry it without downloading it first — which is the whole point, since
+// downloading it is the thing that kills the tab. A bundle embeds every asset,
+// pmtiles included, as base64, so it runs well above the folder on disk: base64
+// is 4/3, and measured, a 220 MB hub map bundles to 297 MB.
+const scenarioBundleBytes = (scenarioId) => {
+  const dir = getScenarioDirectory(scenarioId);
+  if (!fs.existsSync(dir)) return 0;
+
+  let total = 0;
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else {
+        try { total += fs.statSync(full).size; } catch { /* a file that vanished mid-walk */ }
+      }
+    }
+  };
+
+  try { walk(dir); } catch { /* best effort: an unreadable scenario reports 0 */ }
+  return Math.round(total * 1.34);
+};
+
+const exportGameBundle = (gameId) => {
+  ensureGameStore();
+
+  const game = getGameSummary(gameId);
+  const scenario = getGameScenarioSummary(game.scenarioId);
+  const data = {};
+
+  for (const assetKey of GAME_BUNDLE_DATA_KEYS) {
+    data[assetKey] = readJsonFile(
+      getGameJsonPath(gameId, assetKey),
+      cloneJson(JSON_ASSET_DEFAULTS[assetKey] ?? {}),
+    );
+  }
+
+  return {
+    data,
+    exportedAt: new Date().toISOString(),
+    game: {
+      accentColor: game.accentColor,
+      // When the campaign began and when it was last written, as the sender's
+      // record had them. An import that minted its own would tell the receiver the
+      // campaign started the moment it arrived.
+      createdAt: game.createdAt,
+      description: game.description,
+      eyebrow: game.eyebrow,
+      heroSubtitle: game.heroSubtitle,
+      heroTitle: game.heroTitle,
+      name: game.name,
+      subtitle: game.subtitle,
+      updatedAt: game.updatedAt,
+    },
+    schema: GAME_BUNDLE_SCHEMA,
+    // Enough for the receiving install to decide whether it can open this game,
+    // and to say what is missing when it cannot. `builtIn` and `hubOrigin` are
+    // the SENDER'S answers: the sender is the only one who knows whether the map
+    // is one both installs ship, or one that can still be fetched from the hub.
+    scenarioRef: {
+      builtIn: BUILT_IN_SCENARIO_IDS.has(game.scenarioId),
+      hubOrigin: scenario?.hubOrigin ?? null,
+      // This install does not have the map either — the game was imported without
+      // it, or the scenario was deleted out from under it. There is nothing to
+      // embed, so the zip travels as a pointer and the receiver is left in
+      // exactly the position the sender is in, which is the honest answer.
+      missing: Boolean(scenario?.missing),
+      scenarioId: game.scenarioId,
+      // Only worth measuring when the map might actually have to travel.
+      scenarioBytes:
+      scenario?.missing || BUILT_IN_SCENARIO_IDS.has(game.scenarioId) || scenario?.hubOrigin
+      ? 0
+      : scenarioBundleBytes(game.scenarioId),
+      // A missing scenario is named by its id (buildScenarioCatalogEntry), which
+      // is not a name a player can go and ask someone for. If THIS game was
+      // itself imported without its map, it remembers what the last sender called
+      // it — pass that on, so the name survives being handed along a chain
+      // instead of decaying to an id at the first hop.
+      scenarioName: scenario?.missing
+      ? game.importedScenarioName || game.scenarioId
+      : scenario?.name || game.scenarioId,
+    },
+  };
+};
+
+// The sender chose the name and it is information; mangling every import to
+// guard against a collision that usually is not there costs more than it saves.
+// So: keep it, and disambiguate only on an exact match.
+const uniqueGameName = (requested) => {
+  const name = String(requested ?? "").trim() || "Imported Game";
+  const taken = new Set(getGameCatalog().games.map((entry) => entry.name));
+
+  if (!taken.has(name)) return name;
+
+  let candidate = `${name} (Imported)`;
+  let attempt = 2;
+  while (taken.has(candidate)) {
+    candidate = `${name} (Imported ${attempt})`;
+    attempt += 1;
+  }
+  return candidate;
+};
+
+// Deliberately NOT createGame: that seeds a new game's files from a scenario and
+// throws when the scenario is absent. An imported game brings its own files, and
+// may well name a scenario this install has never seen — which the library
+// already knows how to show (getGameScenarioSummary marks it `missing`) rather
+// than treating as an error. Nor does it activate: switching the current game
+// would yank a player out of a campaign mid-turn, and the card has a Play button
+// for when they are ready.
+const importGameBundle = (bundle) => {
+  ensureGameStore();
+
+  if (!bundle || typeof bundle !== "object") {
+    throw new Error("Game bundle must be a JSON object.");
+  }
+
+  if (!ACCEPTED_GAME_BUNDLE_SCHEMAS.has(bundle.schema)) {
+    throw new Error("Unsupported game bundle schema.");
+  }
+
+  const meta = bundle.game && typeof bundle.game === "object" ? bundle.game : {};
+  const data = bundle.data && typeof bundle.data === "object" ? bundle.data : {};
+  const ref = bundle.scenarioRef && typeof bundle.scenarioRef === "object" ? bundle.scenarioRef : {};
+  const scenarioId = String(ref.scenarioId ?? "").trim() || DEFAULT_SCENARIO_ID;
+
+  const gameId = ensureUniqueId(meta.name || scenarioId || "game", "game");
+  const gameDir = getGameDirectory(gameId);
+  ensureDirectory(gameDir);
+  ensureDirectory(path.join(gameDir, "storage"));
+
+  const arrivedAt = new Date().toISOString();
+  // The sender's dates where it sent them, so the card reads as the campaign it
+  // is rather than one begun on import. importedAt below is the arrival.
+  const createdAt = String(meta.createdAt ?? "").trim() || arrivedAt;
+
+  writeJsonFile(getGameMetaPath(gameId), {
+    accentColor: String(meta.accentColor ?? "").trim() || DEFAULT_GAME_META.accentColor,
+    createdAt,
+    description: String(meta.description ?? "").trim() || DEFAULT_GAME_META.description,
+    eyebrow: String(meta.eyebrow ?? "").trim() || DEFAULT_GAME_META.eyebrow,
+    heroSubtitle: String(meta.heroSubtitle ?? "").trim() || DEFAULT_GAME_META.heroSubtitle,
+    heroTitle: String(meta.heroTitle ?? "").trim() || DEFAULT_GAME_META.heroTitle,
+    // What the SENDER called the scenario. Kept because a scenario this install
+    // does not have is shown by its id, and an id is not what a player has to go
+    // and ask the sender for.
+    importedScenarioName: String(ref.scenarioName ?? "").trim() || null,
+    // Whether the sender believed the map could still be fetched. Read when the
+    // player presses Play on a game whose scenario is not here.
+    importedScenarioOrigin: normalizeHubOrigin(ref.hubOrigin),
+    importedAt: arrivedAt,
+    name: uniqueGameName(meta.name),
+    scenarioId,
+    subtitle: String(meta.subtitle ?? "").trim() || DEFAULT_GAME_META.subtitle,
+    updatedAt: String(meta.updatedAt ?? "").trim() || arrivedAt,
+  });
+
+  for (const assetKey of GAME_BUNDLE_DATA_KEYS) {
+    const value = data[assetKey];
+    if (value === undefined && OPTIONAL_GAME_BUNDLE_KEYS.has(assetKey)) continue;
+    writeJsonFile(
+      getGameJsonPath(gameId, assetKey),
+      cloneJson(value ?? JSON_ASSET_DEFAULTS[assetKey] ?? {}),
+    );
+  }
+
+  const manifest = getGameManifest();
+  manifest.order = resolveOrderedIds(manifest.order, GAMES_DIR, DEFAULT_GAME_ID).filter(
+    (entry) => entry !== gameId,
+  );
+  manifest.order.unshift(gameId);
+  saveGameManifest(manifest);
+
+  return getGameDetails(gameId);
+};
+
+// Restore points move as text on the CLIENT side, so the browser never parses
+// them. The server is not the memory-constrained end, so here they are ordinary
+// JSON: the route parses the body, this writes it.
+const readGameSnapshots = (gameId) => {
+  ensureGameStore();
+  getGameSummary(gameId);
+  return readJsonFile(getGameJsonPath(gameId, "snapshots"), []);
+};
+
+const writeGameSnapshots = (gameId, snapshots) => {
+  ensureGameStore();
+  getGameSummary(gameId);
+  writeJsonFile(getGameJsonPath(gameId, "snapshots"), Array.isArray(snapshots) ? snapshots : []);
+  return { ok: true };
+};
+
 export {
   createGame,
   createScenario,
@@ -3284,6 +3546,7 @@ export {
   deleteScenario,
   ensureGameStore,
   ensureScenarioStore,
+  exportGameBundle,
   exportScenarioBundle,
   getActiveGameSummary,
   getGameCatalog,
@@ -3292,8 +3555,10 @@ export {
   getScenarioCatalog,
   getScenarioDetails,
   getSelectedScenarioSummary,
+  importGameBundle,
   importScenarioBundle,
   updateScenarioFromBundle,
+  readGameSnapshots,
   readRuntimeJsonAsset,
   removeGameAsset,
   removeScenarioAsset,
@@ -3307,5 +3572,6 @@ export {
   updateScenario,
   uploadGameAsset,
   uploadScenarioAsset,
+  writeGameSnapshots,
   writeRuntimeJsonAsset,
 };
