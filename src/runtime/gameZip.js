@@ -48,8 +48,12 @@ export const formatZipSize = (bytes) => {
 // downloaded again. Anything else — made in the editor, or a hub map since
 // edited — has no other home, so it travels whatever its size, and the player is
 // told the size before anything is written.
+// `missing` is the third way out: this install does not hold the map either, so
+// there is nothing to embed and asking for it would fail the whole export. That
+// is the ordinary state of a game imported without its map, and of one whose
+// scenario was deleted — neither should become a game that cannot be exported.
 const gameZipNeedsScenario = (scenarioRef) =>
-  Boolean(scenarioRef) && !scenarioRef.builtIn && !scenarioRef.hubOrigin;
+  Boolean(scenarioRef) && !scenarioRef.builtIn && !scenarioRef.hubOrigin && !scenarioRef.missing;
 
 export const buildGameZipBlob = async (gameId) => {
   const bundle = await exportGameBundle(gameId);

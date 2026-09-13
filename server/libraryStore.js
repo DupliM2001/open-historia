@@ -3368,11 +3368,20 @@ const exportGameBundle = (gameId) => {
     scenarioRef: {
       builtIn: BUILT_IN_SCENARIO_IDS.has(game.scenarioId),
       hubOrigin: scenario?.hubOrigin ?? null,
+      // This install does not have the map either — the game was imported without
+      // it, or the scenario was deleted out from under it. There is nothing to
+      // embed, so the zip travels as a pointer and the receiver is left in
+      // exactly the position the sender is in, which is the honest answer.
+      missing: Boolean(scenario?.missing),
       scenarioId: game.scenarioId,
       // A missing scenario is named by its id (buildScenarioCatalogEntry), which
-      // is not a name a player can go and ask someone for. Send the id in that
-      // case and let the receiver say the same thing.
-      scenarioName: scenario?.missing ? game.scenarioId : scenario?.name || game.scenarioId,
+      // is not a name a player can go and ask someone for. If THIS game was
+      // itself imported without its map, it remembers what the last sender called
+      // it — pass that on, so the name survives being handed along a chain
+      // instead of decaying to an id at the first hop.
+      scenarioName: scenario?.missing
+      ? game.importedScenarioName || game.scenarioId
+      : scenario?.name || game.scenarioId,
     },
   };
 };

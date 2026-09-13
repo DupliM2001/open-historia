@@ -1427,8 +1427,14 @@ const exportGameBundle = async (id) => {
     scenarioRef: {
       builtIn: BUILT_IN_SCENARIO_IDS.has(meta.scenarioId),
       hubOrigin: scenario?.hubOrigin ?? null,
+      // Server twin: nothing to embed when this store lacks the map either.
+      missing: Boolean(scenario?.missing),
       scenarioId: meta.scenarioId,
-      scenarioName: scenario?.missing ? meta.scenarioId : scenario?.name || meta.scenarioId,
+      // Server twin: a map's name must not decay to an id when a game carrying no
+      // map is handed on again.
+      scenarioName: scenario?.missing
+        ? meta.importedScenarioName || meta.scenarioId
+        : scenario?.name || meta.scenarioId,
     },
   };
 };

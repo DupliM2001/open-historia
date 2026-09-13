@@ -308,3 +308,32 @@ test("no API key and no home-folder path ever reaches a bundle", () => {
     assert.equal(pattern.test(serialised), false, `a game bundle must never carry ${what}`);
   }
 });
+
+test("a game whose own map is already gone still exports, and passes the name on", () => {
+  // Found by running the app: a real save pointed at a scenario that had been
+  // deleted, and the export tried to embed a map that was not there — which
+  // fails the whole export rather than the one part that cannot work. A game in
+  // that state must still be exportable, as a pointer, and must hand on whatever
+  // name it knows so the map does not become an id at the first hop.
+  const root = buildDataDir({ scenarioId: "long-gone", scenarioExists: false });
+  const result = runStore(root, `
+    const imported = store.importGameBundle({
+      schema: "open-historia-game-bundle/1",
+      game: { name: "Passed Along" },
+      data: {},
+      scenarioRef: { scenarioId: "long-gone", scenarioName: "Someone Else's Map" },
+    });
+    const reExported = store.exportGameBundle(imported.game.id);
+    const direct = store.exportGameBundle("test-campaign");
+    ${report(`{ reExported: reExported.scenarioRef, direct: direct.scenarioRef }`)}
+  `);
+
+  assert.equal(result.direct.missing, true, "the bundle says this install has no map to embed");
+  assert.equal(result.direct.builtIn, false);
+  assert.equal(result.reExported.missing, true);
+  assert.equal(
+    result.reExported.scenarioName,
+    "Someone Else's Map",
+    "the name the last sender knew is handed on, not the id",
+  );
+});
