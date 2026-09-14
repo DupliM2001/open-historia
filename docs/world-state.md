@@ -72,6 +72,32 @@ _Avoid_: Debug report, bug report (for the file itself)
 The size and a short hash of each section of a prompt sent to the model, noted for every attempt under Detailed logging, so a prompt rebuilt from the save can be checked against the one actually sent.
 _Avoid_: Prompt dump
 
+### AI access
+
+**Fallback list**:
+The player's ordered list of models to answer AI calls, which may mix providers. Every call starts at the top and uses the first entry that is not Spent. It moves down only when an entry cannot answer, and never spreads calls across entries to get more usage.
+_Avoid_: Rotator, rotation, key rotation, model chain
+
+**Connection**:
+A saved way to reach one provider: which provider it is, a name the player gives it, its key, and its endpoint when the provider needs one. Many Fallback entries can share one Connection.
+_Avoid_: Profile, preset, account
+
+**Fallback entry**:
+One Connection and one model, at one place in the Fallback list. A task that has its own pick names a Fallback entry: it tries that entry first, then the list from the top.
+_Avoid_: Slot, route, step
+
+**Spent**:
+A Fallback list entry that has used up its allowance. It is skipped until its allowance resets or the player resets it.
+_Avoid_: Exhausted, maxed out, dead
+
+**Rate limited**:
+Refused for the moment because of too many requests in a short window. Waiting fixes it, so a Rate limited entry is not Spent.
+_Avoid_: Quota exceeded (for a short-window limit)
+
+**Unusable**:
+A Fallback entry that failed in a way waiting cannot fix, such as a rejected key or a model the provider does not know. It is skipped until the player edits it, and it shows the player what went wrong.
+_Avoid_: Broken, Spent (for this case)
+
 ---
 
 ## 1. Storage model: the runtime JSON assets
