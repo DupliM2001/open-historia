@@ -1,3 +1,4 @@
+/*! Open Historia — the Fallback list's rules: which model answers, and when one is skipped © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The Fallback list's rules, in one place (docs/world-state.md, "AI access").
 //
 // Every AI call starts at the top of the player's Fallback list and uses the
@@ -11,9 +12,8 @@
 // caller hands in the list, where entry states are kept, a clock, and one
 // function that makes one call on one entry.
 
-// Remembers entry states in memory. Settings keep the real one in
-// localStorage (providerConfig.js); this one is for tests and for callers that
-// have nowhere to keep them.
+// Remembers entry states in memory, for the tests. The game keeps the real one
+// in localStorage (providerConfig.js fallbackStateStore); both have this shape.
 export const createMemoryStateStore = (initial = {}) => {
     const states = new Map(Object.entries(initial));
     return {
@@ -127,27 +127,36 @@ export const fallbackAvailability = ({ entries, store, now = Date.now }) => {
     return { canAnswer: false, nextResetAt, nextEntry };
 };
 
-const defaultFormatTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// How a reset time is shown to the player: the clock time, in their own
+// format. Shared by every message that says when a model comes back.
+export const formatResetTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-// The error for a call that found nothing in the list able to answer. Carries
-// `fallbackExhausted` so the UI can tell it from an ordinary failure.
-const exhaustedError = (entries, store, now, formatTime, cause) => {
+// What to tell the player when nothing in the list can answer: when the first
+// Spent entry comes back, or what is wrong with the first Unusable one. The
+// runner's error says it, and so does the time-skip gate before a turn starts.
+export const describeUnavailable = ({ entries, store, now = Date.now, formatTime = formatResetTime }) => {
     const { nextResetAt, nextEntry } = fallbackAvailability({ entries, store, now });
     const unusable = entries.find((candidate) => store.get(candidate.id)?.unusable);
-    const message = nextEntry
-        ? `Every model in your Fallback list has used its allowance for now. The first back is ${nextEntry.label}, at ${formatTime(nextResetAt)}.`
-        : unusable
-            ? `No model in your Fallback list can answer. ${unusable.label}: ${store.get(unusable.id).unusable}. Fix it in Settings → AI.`
-            : "No model in your Fallback list can answer. Add one in Settings → AI.";
-    const error = new Error(message, cause ? { cause } : undefined);
-    error.fallbackExhausted = { nextResetAt, nextEntry };
+    if (nextEntry) return `Every model in your Fallback list has used its allowance for now. The first back is ${nextEntry.label}, at ${formatTime(nextResetAt)}.`;
+    if (unusable) return `No model in your Fallback list can answer. ${unusable.label}: ${store.get(unusable.id).unusable}. Fix it in Settings → AI.`;
+    return "No model in your Fallback list can answer. Add one in Settings → AI.";
+};
+
+// The error for a call that found nothing in the list able to answer. Carries
+// `fallbackUnavailable` so the UI can tell it from an ordinary failure.
+const unavailableError = (entries, store, now, formatTime, cause) => {
+    const { nextResetAt, nextEntry } = fallbackAvailability({ entries, store, now });
+    const error = new Error(describeUnavailable({ entries, store, now, formatTime }), cause ? { cause } : undefined);
+    error.fallbackUnavailable = { nextResetAt, nextEntry };
     return error;
 };
 
 // `onMark` hears every mark (the Diagnostics log wants each one). `onSwitch`
-// hears, once the call has an answer, the entries THIS call found unable to
-// answer on its way down — only those it marked itself, so two calls of one
-// turn that both hit the same Spent entry tell the player once, not twice.
+// hears the entries THIS call found unable to answer on its way down — only
+// those it marked itself, so two calls of one turn that both hit the same Spent
+// entry tell the player once, not twice. It hears them whether the call then
+// got an answer (`to` is the entry that gave it) or not (`to` is null): either
+// way the calls after it start further down, and the player should know why.
 export async function runWithFallback({
     entries,
     preferredEntryId,
@@ -158,12 +167,16 @@ export async function runWithFallback({
     attempt,
     onMark,
     onSwitch,
-    formatTime = defaultFormatTime,
+    formatTime = formatResetTime,
 }) {
     let lastError = null;
     const skipped = [];
+    const fail = (error) => {
+        if (skipped.length) onSwitch?.({ skipped, to: null });
+        return error;
+    };
     const order = orderToTry(entries, preferredEntryId, store, now());
-    if (!order.length) throw exhaustedError(entries, store, now, formatTime, null);
+    if (!order.length) throw unavailableError(entries, store, now, formatTime, null);
     for (const [index, candidate] of order.entries()) {
         if (!isAvailable(store.get(candidate.id), now())) continue;
         // Once any of a streamed reply has reached the player, a failure is
@@ -197,12 +210,12 @@ export async function runWithFallback({
                     onMark?.({ entry: candidate, failure, state: mark });
                 }
             }
-            if (!mark || answerStarted) throw error;
+            if (!mark || answerStarted) throw fail(error);
             lastError = error;
         }
     }
     // Everything is Spent or Unusable: say when the list comes back. When the
     // last hope was only busy, its own message says that better.
-    if (!fallbackAvailability({ entries, store, now }).canAnswer) throw exhaustedError(entries, store, now, formatTime, lastError);
-    throw lastError;
+    if (!fallbackAvailability({ entries, store, now }).canAnswer) throw fail(unavailableError(entries, store, now, formatTime, lastError));
+    throw fail(lastError);
 }

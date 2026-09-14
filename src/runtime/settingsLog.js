@@ -26,14 +26,13 @@ import { getStoredChatLanguage, getStoredLanguage, languageDisplayName } from ".
 import {
     AI_TASK_ROUTING,
     endpointHostForLog,
-    fallbackStateStore,
+    getEntryStatus,
     getProviderMeta,
     getRateLimitPolicy,
     getReasoningEnabled,
     getResolvedFallbackList,
     getTaskPick,
 } from "../Game/AI/providerConfig.js";
-import { entryStatus } from "../Game/AI/fallbackRunner.js";
 import { isRatingEnabled, isTelemetryEnabled } from "../Game/AI/telemetry.js";
 
 const onOff = (value) => (value ? "on" : "off");
@@ -72,7 +71,7 @@ registerSettingsSnapshot("Map", () => [
 // Every entry of the Fallback list, in order, with the state it is in: "which
 // model was it trying to use?" has as many answers as the list has entries.
 const describeStatus = (entry) => {
-    const { status, reason, until } = entryStatus(fallbackStateStore.get(entry.id), Date.now());
+    const { status, reason, until } = getEntryStatus(entry.id);
     if (status === "unusable") return `Unusable: ${reason}`;
     if (status === "spent") return `Spent until ${new Date(until).toISOString()}`;
     if (status === "busy") return `${reason} until ${new Date(until).toISOString()}`;

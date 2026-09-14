@@ -116,17 +116,18 @@ test("Fill goes model first across the ticked Connections, appends, and never du
   store.set("gemini_api_key", "AIzaFIRSTKEY1234567890");
   store.set("gemini_model", "gemini-3.7-flash");
   const [first] = config.getConnections();
-  const second = config.addConnection({ provider: "gemini", name: "Second Google", apiKey: "AIzaSECONDKEY123456789" });
+  // A free key and a paid one on the same provider: ADR 0001's ordinary case.
+  const second = config.addConnection({ provider: "gemini", name: "Paid Gemini", apiKey: "AIzaPAIDKEY1234567890" });
 
   const added = config.fillFallbackList([first.id, second], ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]);
   assert.equal(added, 5, "the first key's 3.7 Flash was already entry #1");
   assert.deepEqual(config.getResolvedFallbackList().map(({ label }) => label), [
     "gemini-3.7-flash (Gemini)",
-    "gemini-3.7-flash (Second Google)",
+    "gemini-3.7-flash (Paid Gemini)",
     "gemini-3.6-flash (Gemini)",
-    "gemini-3.6-flash (Second Google)",
+    "gemini-3.6-flash (Paid Gemini)",
     "gemini-3.5-flash-lite (Gemini)",
-    "gemini-3.5-flash-lite (Second Google)",
+    "gemini-3.5-flash-lite (Paid Gemini)",
   ]);
 
   assert.equal(config.fillFallbackList([first.id, second], ["gemini-3.7-flash", " gemini-3.6-flash ", ""]), 0, "pressing it twice adds nothing");
@@ -155,6 +156,18 @@ test("editing an Unusable entry or its Connection clears the mark, so the fix is
   config.fallbackStateStore.set(entry.id, { unusable: "model not found (404)", spentUntil: 99 });
   config.updateEntry(entry.id, { model: "gemini-3.6-flash" });
   assert.equal(config.fallbackStateStore.get(entry.id), undefined);
+});
+
+// Accepting a structured-output suggestion edits the entry. It must not bring a
+// Spent model back, or the next call wastes a request finding out again.
+test("an edit that is not a new model or Connection keeps a Spent mark", () => {
+  const [entry] = config.getFallbackList();
+  config.fallbackStateStore.set(entry.id, { spentUntil: 99_000, unusable: "key rejected (401)" });
+  config.updateEntry(entry.id, { structuredMode: "json_object" });
+  assert.deepEqual(config.fallbackStateStore.get(entry.id), { spentUntil: 99_000 }, "Unusable goes, Spent stays");
+
+  config.updateEntry(entry.id, { model: "a-different-model" });
+  assert.equal(config.fallbackStateStore.get(entry.id), undefined, "a new model has an allowance of its own");
 });
 
 test("a new model starts its entry's structured-output mode at auto; other edits leave it", () => {

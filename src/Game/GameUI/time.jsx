@@ -13,7 +13,7 @@ import {
 import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplay.js";
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
 import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
-import { fallbackAvailability } from "../AI/fallbackRunner.js";
+import { describeUnavailable, fallbackAvailability } from "../AI/fallbackRunner.js";
 import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
@@ -1741,17 +1741,19 @@ const DateWidget = ({
             return;
         }
 
-        // Nothing in the Fallback list can answer: say when the first model
-        // comes back, rather than spend the turn finding out and falling back
-        // to canned events.
-        const availability = fallbackAvailability({ entries: getResolvedFallbackList(), store: fallbackStateStore });
-        if (!availability.canAnswer && availability.nextEntry) {
-            const at = new Date(availability.nextResetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        // Nothing in the Fallback list can answer — every model Spent or
+        // Unusable: say when the first comes back, or what to fix, rather than
+        // spend the turn finding out and falling back to canned events. An
+        // empty list is left to the start-of-game prompt, as a missing key is.
+        const fallbackEntries = getResolvedFallbackList();
+        const availability = fallbackAvailability({ entries: fallbackEntries, store: fallbackStateStore });
+        if (fallbackEntries.length && !availability.canAnswer) {
+            const reason = describeUnavailable({ entries: fallbackEntries, store: fallbackStateStore });
             setPanel("skip");
-            setError(`Every model in your Fallback list has used its allowance for now. The first back is ${availability.nextEntry.label}, at ${at}. Add a backup in Settings → AI to keep playing now.`);
-            logDebugEvent("turn", "Timeline jump not started: every model in the Fallback list is Spent.", {
-                firstBack: availability.nextEntry.label,
-                at: new Date(availability.nextResetAt).toISOString(),
+            setError(availability.nextEntry ? `${reason} Add a backup in Settings → AI to keep playing now.` : reason);
+            logDebugEvent("turn", "Timeline jump not started: nothing in the Fallback list can answer.", {
+                firstBack: availability.nextEntry?.label ?? "(none — every model is Unusable)",
+                ...(availability.nextResetAt ? { at: new Date(availability.nextResetAt).toISOString() } : {}),
             });
             return;
         }

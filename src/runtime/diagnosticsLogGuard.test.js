@@ -86,6 +86,19 @@ test("every switch in the Settings panel is in the Logging file's settings snaps
     }
 });
 
+test("keys kept inside saved Connections are searched for like any other stored key", () => {
+    // Connections (Game/AI/providerConfig.js) keep every key inside one stored
+    // list, ai_connections, where the *_api_key suffix search cannot see them.
+    // debugLog.test.js R2b proves the redaction; this pins that the two names
+    // still agree, so renaming the list cannot quietly let keys into a report.
+    const providerConfig = files.find(({ file }) => file === "Game/AI/providerConfig.js").text;
+    const debugLog = files.find(({ file }) => file === "runtime/debugLog.js").text;
+    const listKey = /const CONNECTIONS_KEY = "([^"]+)"/.exec(providerConfig)?.[1];
+    assert.ok(listKey, "the Connections storage key has moved; this guard needs updating");
+    const scanned = /\/\(([^)]*)\)\$\/i\.test\(key\)\) \{\s*try \{ collectApiKeyFields/.exec(debugLog)?.[1] ?? "";
+    assert.ok(scanned.split("|").some((suffix) => suffix && listKey.endsWith(suffix)), `debugLog.js does not scan "${listKey}" for keys`);
+});
+
 test("the settings snapshot is registered at boot, not only when Settings is opened", () => {
     const main = files.find(({ file }) => file === "main.jsx").text;
     assert.match(main, /import "\.\/runtime\/settingsLog\.js";/);

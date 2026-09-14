@@ -17,7 +17,7 @@ This page documents the plumbing. For the prompt templates and how they are asse
 | `src/Game/AI/gameplaySchemas.js` | JSON Schemas, tool definitions, `getGameplayTool`, `validateGameplayPayload`. See [AI schemas](ai-schemas.md). |
 | `src/Game/AI/gameplayPrompts.js`, `promptContext.js`, `defaultPrompts.json` | Prompt pack normalization + template rendering. See [AI prompts](ai-prompts.md). |
 | `src/Game/AI/chatVisibility.js` | Which diplomatic chats a given polity is allowed to have read. Keeps a leader out of conversations it was not in. |
-| `src/Game/AI/structuredMode.js` | The structured-output ladder (`tool → json_schema → json_object → text_json`), the per-provider setting, and the observer that offers it to the player. |
+| `src/Game/AI/structuredMode.js` | The structured-output ladder (`tool → json_schema → json_object → text_json`), the per-entry setting, and the observer that offers it to the player. |
 | `src/Game/AI/promptDedupe.js` | Skipping a call-time directive the template already carries, and collapsing a large block the prompt would otherwise send twice. |
 | `src/Game/AI/usageStats.js` | Token counts and time-to-first-byte, normalized across the three providers' reporting shapes. |
 | `src/Game/AI/jsonSalvage.js` | Tolerant parsing of a model's answer: think-block stripping, the answer sentinel, fenced and balanced-brace recovery. |
@@ -76,7 +76,7 @@ Every call starts at the top of the list — or at the task's own pick — and m
 | Rate limited, setting `"next"` | `skipUntil` + the provider's RetryInfo, or 60 s | As busy. On `"wait"` the provider retries as before and nothing is marked. |
 | Anything else (context window, a bad answer, a parse failure) | nothing | — the call fails as it always did. |
 
-How many times a provider retries before giving up is shared too (`shouldRetryProviderFailure`): Spent and Unusable never, busy once, Rate limited per the setting — and when the entry is the last that can answer, busy and Rate limited keep the full retry count they had before the list existed. A streamed chat reply never falls back once any of it has reached the player. When everything is Spent the call throws an error carrying `fallbackExhausted: { nextResetAt, nextEntry }`, and a time skip checks `fallbackAvailability` first so it is not started at all. Each switch is announced once (the `ai:fallback-switch` window event, shown by `FallbackSwitchNotice`) and every mark is a Diagnostics log line.
+How many times a provider retries before giving up is shared too (`shouldRetryProviderFailure`): Spent and Unusable never, busy once, Rate limited per the setting — and when the entry is the last that can answer, busy and Rate limited keep the full retry count they had before the list existed. A streamed chat reply never falls back once any of it has reached the player. When nothing can answer — every entry Spent or Unusable — the call throws an error carrying `fallbackUnavailable: { nextResetAt, nextEntry }`, and a time skip checks `fallbackAvailability` first so it is not started at all; both say the same thing (`describeUnavailable`). Each switch is announced once (the `ai:fallback-switch` window event, shown by `FallbackSwitchNotice`), even when the call that found it then fails, and every mark is a Diagnostics log line.
 
 ### `customParams` — the request‑body escape hatch
 

@@ -1,3 +1,4 @@
+/*! Open Historia — Fallback list rule tests © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // Run: node --test src/Game/AI/fallbackRunner.test.js
 //
 // The Fallback list's rules (docs/world-state.md, "AI access"; ADR 0001):
@@ -7,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createMemoryStateStore, entryStatus, fallbackAvailability, runWithFallback } from "./fallbackRunner.js";
+import { createMemoryStateStore, describeUnavailable, entryStatus, fallbackAvailability, runWithFallback } from "./fallbackRunner.js";
 
 const entry = (id, provider = "gemini") => ({ id, provider, label: id });
 
@@ -225,15 +226,15 @@ test("when every entry is Spent, the call says which comes back first, and when"
         formatTime: (ms) => new Date(ms).toISOString(),
     }).catch((caught) => caught);
     // The OpenAI entry is back in an hour; Gemini not until midnight Pacific.
-    assert.equal(error.fallbackExhausted.nextResetAt, at + 60 * 60 * 1000);
-    assert.equal(error.fallbackExhausted.nextEntry.id, "oai");
+    assert.equal(error.fallbackUnavailable.nextResetAt, at + 60 * 60 * 1000);
+    assert.equal(error.fallbackUnavailable.nextEntry.id, "oai");
     assert.equal(error.message, "Every model in your Fallback list has used its allowance for now. The first back is oai, at 2026-07-01T13:00:00.000Z.");
 
     // The next call does not waste a request finding that out again.
     const again = scripted({});
     const second = await runWithFallback({ entries, store, now: () => at + 1000, attempt: again.attempt, formatTime: String }).catch((caught) => caught);
     assert.deepEqual(again.tried, []);
-    assert.ok(second.fallbackExhausted);
+    assert.ok(second.fallbackUnavailable);
 
     // What the time-skip gate asks before starting a turn.
     assert.deepEqual(fallbackAvailability({ entries, store, now: () => at }), {
@@ -249,7 +250,21 @@ test("when no entry can ever answer, the call says what is wrong with the first"
         attempt: scripted({ a: fail("unusable", { reason: "key rejected (401)" }), b: fail("unusable", { reason: "model not found (404)" }) }).attempt,
     }).catch((caught) => caught);
     assert.equal(error.message, "No model in your Fallback list can answer. a: key rejected (401). Fix it in Settings → AI.");
-    assert.equal(error.fallbackExhausted.nextResetAt, null);
+    assert.equal(error.fallbackUnavailable.nextResetAt, null);
+    // The time-skip gate says the same thing before a turn is started.
+    assert.equal(describeUnavailable({ entries: [entry("a"), entry("b")], store, now: () => 0 }), error.message);
+});
+
+test("a switch is still announced when the call that found it then fails", async () => {
+    const switches = [];
+    await assert.rejects(runWithFallback({
+        entries: [entry("a"), entry("b")],
+        store: createMemoryStateStore(),
+        now: () => 0,
+        attempt: scripted({ a: fail("spent"), b: fail("other") }).attempt,
+        onSwitch: ({ skipped, to }) => switches.push({ from: skipped.map(({ entry: e }) => e.id), to: to?.id ?? null }),
+    }), /other failure/);
+    assert.deepEqual(switches, [{ from: ["a"], to: null }], "later calls go to b, so the player must hear about a now");
 });
 
 test("an empty list can never answer", () => {

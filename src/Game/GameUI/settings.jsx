@@ -10,9 +10,9 @@ import {
     addEntry,
     connectionDisplayName,
     entriesUsingConnection,
-    fallbackStateStore,
     fillFallbackList,
     getConnections,
+    getEntryStatus,
     getFallbackList,
     getProviderMeta,
     getRateLimitPolicy,
@@ -32,7 +32,7 @@ import {
     updateConnection,
     updateEntry,
 } from "../AI/providerConfig.js";
-import { entryStatus } from "../AI/fallbackRunner.js";
+import { formatResetTime } from "../AI/fallbackRunner.js";
 import {
     isRatingEnabled,
     isTelemetryEnabled,
@@ -146,7 +146,7 @@ const primaryButtonStyle = {
     borderColor: "rgba(59,130,246,0.6)",
 };
 
-const profileCardStyle = {
+const listCardStyle = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -571,7 +571,7 @@ const readFallbackView = () => {
         entries: getFallbackList().map((entry) => ({
             ...entry,
             resolved: resolved.get(entry.id) ?? null,
-            status: entryStatus(fallbackStateStore.get(entry.id), at),
+            status: getEntryStatus(entry.id, at),
         })),
         rateLimitPolicy: getRateLimitPolicy(),
     };
@@ -591,8 +591,6 @@ const useFallbackView = () => {
     return view;
 };
 
-const formatClock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
 const formatAgo = (ms, at) => {
     const minutes = Math.round(Math.max(0, at - ms) / 60000);
     if (minutes < 1) return "just now";
@@ -609,7 +607,7 @@ const STATUS_COLORS = {
 };
 
 const describeRowStatus = (status, at) => {
-    if (status.status === "spent") return `Spent until ${formatClock(status.until)}`;
+    if (status.status === "spent") return `Spent until ${formatResetTime(status.until)}`;
     if (status.status === "unusable") return `Unusable: ${status.reason}`;
     if (status.status === "busy") {
         const seconds = Math.max(1, Math.ceil((status.until - at) / 1000));
@@ -807,7 +805,7 @@ const FallbackListSection = () => {
             </>
         )}
         {!single && entries.map((entry, index) => (
-            <div key={entry.id} style={{ ...profileCardStyle, flexDirection: "column", alignItems: "stretch" }}>
+            <div key={entry.id} style={{ ...listCardStyle, flexDirection: "column", alignItems: "stretch" }}>
             <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between", flexWrap: "wrap" }}>
             <div style={{ minWidth: 0, flex: 1 }}>
             <div data-no-translate style={{ fontSize: "0.82rem", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -864,11 +862,17 @@ const ConnectionsSection = () => {
     const { connections, entries } = useFallbackView();
     const [editingId, setEditingId] = useState(null);
 
+    // Names the entries that go with it, so a Connection that half the list
+    // hangs off is never removed by surprise.
     const remove = (connection) => {
-        const using = entriesUsingConnection(connection.id).length;
+        const usingIds = new Set(entriesUsingConnection(connection.id).map((entry) => entry.id));
+        // Numbered by their place in the list, as the rows above are.
+        const using = entries
+            .map((entry, index) => (usingIds.has(entry.id) ? `${index + 1}. ${entry.resolved?.label ?? entry.model}` : null))
+            .filter(Boolean);
         const name = connectionDisplayName(connection);
-        const question = using
-            ? `Remove "${name}"? ${using} entr${using === 1 ? "y" : "ies"} in your list use${using === 1 ? "s" : ""} it and will be removed too.`
+        const question = using.length
+            ? `Remove "${name}"? These entries in your list use it and will be removed too:\n\n${using.join("\n")}`
             : `Remove "${name}"?`;
         if (!window.confirm(question)) return;
         removeConnection(connection.id);
@@ -880,7 +884,7 @@ const ConnectionsSection = () => {
             const using = entries.filter((entry) => entry.connectionId === connection.id).length;
             const selfHosted = providerSetupRequirement(connection.provider) === "endpoint";
             return (
-                <div key={connection.id} style={{ ...profileCardStyle, flexDirection: "column", alignItems: "stretch" }}>
+                <div key={connection.id} style={{ ...listCardStyle, flexDirection: "column", alignItems: "stretch" }}>
                 <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: "0.82rem", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionDisplayName(connection)}</div>
@@ -921,8 +925,8 @@ const TaskPicks = () => {
     const [expanded, setExpanded] = useState(false);
     const [picks, setPicks] = useState(() => Object.fromEntries(AI_TASK_ROUTING.map(({ key }) => [key, getTaskPick(key)])));
     const groups = [...new Set(AI_TASK_ROUTING.map((entry) => entry.group))];
-    const labelled = entries.filter((entry) => entry.resolved);
-    const activeCount = Object.values(picks).filter((id) => labelled.some((entry) => entry.id === id)).length;
+    const withConnection = entries.filter((entry) => entry.resolved);
+    const activeCount = Object.values(picks).filter((id) => withConnection.some((entry) => entry.id === id)).length;
 
     const update = (key, entryId) => {
         setPicks((current) => ({ ...current, [key]: entryId }));
@@ -943,9 +947,9 @@ const TaskPicks = () => {
                 {AI_TASK_ROUTING.filter((entry) => entry.group === group).map(({ key, label, hint }) => (
                     <div key={key} style={fieldGroupStyle}>
                     <label style={labelStyle}>{label}</label>
-                    <select data-no-translate value={labelled.some((entry) => entry.id === picks[key]) ? picks[key] : ""} onChange={(event) => update(key, event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+                    <select data-no-translate value={withConnection.some((entry) => entry.id === picks[key]) ? picks[key] : ""} onChange={(event) => update(key, event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
                     <option value="" style={{ color: "black" }}>Start at the top of the list</option>
-                    {labelled.map((entry, index) => (
+                    {withConnection.map((entry, index) => (
                         <option key={entry.id} value={entry.id} style={{ color: "black" }}>{index + 1}. {entry.resolved.label}</option>
                     ))}
                     </select>

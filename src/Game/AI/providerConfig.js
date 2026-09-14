@@ -1,5 +1,6 @@
 /*! Open Historia — portions (reasoning-effort toggle persistence) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import { logDebugEvent, logSettingMessage, setDebugLogContext } from "../../runtime/debugLog.js";
+import { entryStatus } from "./fallbackRunner.js";
 
 export const DEFAULT_PROVIDER = "gemini";
 
@@ -422,10 +423,11 @@ export function getFallbackList() {
 // errors.
 export const describeEntry = (model, connectionName) => `${model || "default model"} (${connectionName})`;
 
-// Everything one call on one entry needs. Custom parameters are the entry's
-// own override when it has one, else its Connection's.
+// A Connection as the player reads it: the name they gave it, or the provider's.
 export const connectionDisplayName = (connection) => String(connection?.name ?? "").trim() || getProviderMeta(connection?.provider).label;
 
+// Everything one call on one entry needs. Custom parameters are the entry's
+// own override when it has one, else its Connection's.
 const resolveEntry = (entry, connectionsById) => {
     const connection = connectionsById.get(entry.connectionId);
     if (!connection) return null;
@@ -495,9 +497,12 @@ export function addEntry(fields) {
 }
 
 // The Fill button: every model (strongest first) on every ticked Connection,
-// model first — 3.7 on A, 3.7 on B, 3.6 on A … — so every allowance of the
-// strongest model is used before a weaker one is tried. Appended, skipping any
-// pair already in the list, so pressing it twice adds nothing.
+// model first — the strong model on A, then on B, then the next model on A … —
+// so the list falls back to a weaker model only once the strong one has nowhere
+// left to answer from. A convenience for typing a long list, nothing more: the
+// list it builds is used like any other, from the top, one entry at a time
+// (docs/adr/0001). Appended, skipping any pair already in the list, so pressing
+// it twice adds nothing.
 export function fillFallbackList(connectionIds, models) {
     const list = getFallbackList();
     const known = new Set(list.map((entry) => `${entry.connectionId}|${entry.model.trim()}`));
@@ -546,6 +551,13 @@ const notifyFallbackChange = () => {
     try { window.dispatchEvent(new CustomEvent("ai:fallback-changed")); } catch { /* no window (tests, the harness) */ }
 };
 
+// The marks about an allowance: an edit that leaves the key, the address and
+// the model as they were leaves these alone.
+const KEPT_WHILE_THE_ALLOWANCE_IS_THE_SAME = ["spentUntil", "skipUntil", "skipReason"];
+
+// What a Settings row, the Logging file and batching read about one entry.
+export const getEntryStatus = (id, at = Date.now()) => entryStatus(fallbackStateStore.get(id), at);
+
 // Clears a mark, keeping when it last answered. `keep` names the marks an edit
 // leaves alone (a new name for a Connection says nothing about its allowance).
 const clearMarks = (id, keep = []) => {
@@ -584,8 +596,8 @@ export function updateConnection(id, patch) {
     saveConnections(connections);
     // A new key or address may well have a fresh allowance, so every mark on
     // its entries goes; any other edit clears only Unusable.
-    const reaches = next.apiKey !== before.apiKey || next.endpoint !== before.endpoint || next.provider !== before.provider;
-    for (const entry of entriesUsingConnection(id)) clearMarks(entry.id, reaches ? [] : ["spentUntil", "skipUntil", "skipReason"]);
+    const newAllowance = next.apiKey !== before.apiKey || next.endpoint !== before.endpoint || next.provider !== before.provider;
+    for (const entry of entriesUsingConnection(id)) clearMarks(entry.id, newAllowance ? [] : KEPT_WHILE_THE_ALLOWANCE_IS_THE_SAME);
     for (const field of Object.keys(CONNECTION_EDIT_LOG)) {
         if (next[field] !== before[field]) {
             logSettingMessage(`connection:${id}:${field}`, `AI connection "${connectionDisplayName(next)}": ${CONNECTION_EDIT_LOG[field](next)}.`, { settle: true });
@@ -611,7 +623,11 @@ export function updateEntry(id, patch) {
     if (next.model !== before.model && patch.structuredMode === undefined) next.structuredMode = "auto";
     list[index] = next;
     saveFallbackList(list);
-    clearMarks(id);
+    // Any edit may be the fix for Unusable. Only a new model or Connection has
+    // an allowance of its own, so only that clears Spent and busy: accepting a
+    // structured-output suggestion must not bring a Spent model back.
+    const newAllowance = next.model.trim() !== before.model.trim() || next.connectionId !== before.connectionId;
+    clearMarks(id, newAllowance ? [] : KEPT_WHILE_THE_ALLOWANCE_IS_THE_SAME);
     if (next.model !== before.model || next.connectionId !== before.connectionId) {
         logSettingMessage(`entry:${id}:model`, `Fallback list: entry ${index + 1} is now ${describeEntry(next.model, connectionName(next.connectionId))}.`, { settle: true });
     }

@@ -1,6 +1,7 @@
 /*! Open Historia — portions (server relay for OpenAI-style APIs + reasoning toggle) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import {
     fallbackStateStore,
+    getEntryStatus,
     getRateLimitPolicy,
     getReasoningEnabled,
     getResolvedFallbackList,
@@ -9,7 +10,7 @@ import {
     saveRecentModel,
     updateEntry,
 } from "./providerConfig.js";
-import { entryStatus, runWithFallback } from "./fallbackRunner.js";
+import { formatResetTime, runWithFallback } from "./fallbackRunner.js";
 import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord } from "./telemetry.js";
@@ -548,7 +549,7 @@ const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503, 504, 529]);
 // included — and how often busy and Rate limited retry is the list's rule
 // (shouldRetryProviderFailure), so every provider path agrees. Gemini has its
 // own (callGemini), because its messages name its quotas.
-async function retryOrFailOpenAIStyle(response, { attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel }) {
+async function retryOrFailByStatus(response, { attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel }) {
     const payload = await readErrorPayload(response);
     const failure = classifyProviderFailure({ status: response.status, payload });
     const details = extractErrorMessage(payload, "");
@@ -689,6 +690,17 @@ function providerFailureError(message, failure, extra = {}) {
     return error;
 }
 
+// Spent and Unusable: no retry, and none of a provider's own concessions
+// (streaming off, a lower structured-output rung) can fix them either.
+const waitingCannotFix = (failure) => failure.kind === "unusable" || failure.kind === "spent";
+
+// A server the browser could not reach at all (a local model that is not
+// running, the network down) is busy for the Fallback list: worth skipping for a
+// minute, and worth trying again after. Matched on the browsers' own wording, so
+// a TypeError from a bug in this file is never mistaken for one.
+const UNREACHABLE_TEXT = /failed to fetch|fetch failed|networkerror|load failed|network request failed/i;
+const isUnreachableError = (error) => error instanceof TypeError && UNREACHABLE_TEXT.test(String(error.message));
+
 // An entry that is missing what its provider needs cannot answer until the
 // player edits it — the same as a rejected key.
 const missingSetupError = (message, reason) => providerFailureError(message, { kind: "unusable", reason });
@@ -756,7 +768,7 @@ async function resolveConfiguredModel(provider, { entrySettings, endpoint = "", 
         // with no models needs the player.
         throw providerFailureError(
             `Could not auto-detect a model for ${providerLabel}. Enter a model manually in **settings**.`,
-            error instanceof TypeError ? { kind: "busy", reason: "could not be reached" } : { kind: "unusable", reason: "no model found on the server" },
+            isUnreachableError(error) ? { kind: "busy", reason: "could not be reached" } : { kind: "unusable", reason: "no model found on the server" },
         );
     }
 }
@@ -851,63 +863,19 @@ async function callGemini(systemPrompt, history, {
 
     const customParams = parseCustomParams(settings.customParams, "Gemini");
 
-    // Advisor/chat streaming: with an onChunk callback (and no tool), use the
-    // streaming endpoint so the reply appears token-by-token. maxOutputTokens
-    // caps this reply at the requested budget — the buffered jump path below
-    // deliberately sends NO cap so long simulations are never truncated.
-    if (onChunk && !tool) {
-        const streamUrl = getGeminiStreamUrl(model, apiKey);
-        // Two passes at most: the second only ever happens when the first came
-        // back with an overloaded/unavailable error INSIDE the stream, which
-        // arrives as an HTTP 200 and so never reaches the status-code retry.
-        for (let pass = 1; ; pass += 1) {
-            const response = await fetch(streamUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    system_instruction: { parts: [{ text: systemPrompt }] },
-                    contents: history,
-                    generationConfig: {
-                        maxOutputTokens: Math.max(1, Number(maxTokens) || 8192),
-                        ...(getReasoningEnabled() ? { thinkingConfig: { thinkingBudget: 8192 } } : {}),
-                    },
-                    ...customParams,
-                }),
-                signal,
-            });
-            if (!response.ok) {
-                const payload = await readErrorPayload(response);
-                throw providerFailureError(
-                    extractErrorMessage(payload, `Gemini API request failed (${response.status})`),
-                    classifyProviderFailure({ status: response.status, payload }),
-                );
-            }
-            const streamResult = await streamTextSSE(response, geminiStreamDelta, onChunk);
-            if (streamResult.text) return streamResult.text;
-            if (pass === 1 && isBusyErrorPayload(streamResult.streamError) && canRetryBeforeDeadline(deadline, OVERLOADED_RETRY_DELAY)) {
-                console.warn(`[ai] Gemini reported "${errorPayloadText(streamResult.streamError)}" mid-stream; retrying once in ${OVERLOADED_RETRY_DELAY / 1000}s`);
-                await sleep(OVERLOADED_RETRY_DELAY, signal);
-                continue;
-            }
-            throw streamFailureError("Gemini", streamResult, {
-                retried: pass > 1,
-                fallbackMessage: "Gemini response did not contain text.",
-            });
-        }
-    }
-
-    // Sorted once for every status the retry loop below can see, so the
+    // Sorted once for every retryable status either path below can see, so the
     // Fallback list and the retry count agree (shouldRetryProviderFailure).
-    const retryOrFail = async (response, attempt) => {
+    // Chat waits less for a busy model than a turn does: a player is watching.
+    const retryOrFail = async (response, attempt, busyDelay = retryDelay) => {
         const payload = await readErrorPayload(response);
         const failure = classifyProviderFailure({ status: response.status, payload });
         const details = extractErrorMessage(payload, `Gemini returned ${response.status}.`);
         if (failure.kind === "spent") {
-            throw providerFailureError(`Gemini returned 429. Your balance or quota appears to be exhausted. ${details}`.trim(), failure);
+            throw providerFailureError(`Gemini returned 429: the allowance or balance on this key is used up. ${details}`.trim(), failure);
         }
         // Honour the provider's own RetryInfo when it sent one; it knows the
         // window better than a fixed guess does.
-        const wait = failure.kind === "rateLimited" ? (failure.waitMs ?? retryDelay) : retryDelay;
+        const wait = failure.kind === "rateLimited" ? (failure.waitMs ?? retryDelay) : busyDelay;
         if (!shouldRetryProviderFailure({ failure, attempt, retries, canFallBack, rateLimitPolicy }) || !canRetryBeforeDeadline(deadline, wait)) {
             if (failure.kind === "rateLimited") {
                 throw providerFailureError(
@@ -924,6 +892,58 @@ async function callGemini(systemPrompt, history, {
         console.warn(`[ai] Gemini ${failure.kind === "rateLimited" ? "rate limited" : "is busy"}. Retrying in ${wait / 1000}s... (attempt ${attempt}/${retries})`);
         await sleep(wait, signal);
     };
+
+    // Advisor/chat streaming: with an onChunk callback (and no tool), use the
+    // streaming endpoint so the reply appears token-by-token. maxOutputTokens
+    // caps this reply at the requested budget — the buffered jump path below
+    // deliberately sends NO cap so long simulations are never truncated.
+    if (onChunk && !tool) {
+        const streamUrl = getGeminiStreamUrl(model, apiKey);
+        // A busy or Rate limited status is retried as the Fallback list's rule
+        // says (one retry when there is somewhere to fall back to). An
+        // overloaded error INSIDE the stream arrives as an HTTP 200, never
+        // reaches that check, and gets its own single retry.
+        let retriedInStream = false;
+        for (let pass = 1; ; pass += 1) {
+            const response = await fetch(streamUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    system_instruction: { parts: [{ text: systemPrompt }] },
+                    contents: history,
+                    generationConfig: {
+                        maxOutputTokens: Math.max(1, Number(maxTokens) || 8192),
+                        ...(getReasoningEnabled() ? { thinkingConfig: { thinkingBudget: 8192 } } : {}),
+                    },
+                    ...customParams,
+                }),
+                signal,
+            });
+            if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
+                await retryOrFail(response, pass, OVERLOADED_RETRY_DELAY);
+                continue;
+            }
+            if (!response.ok) {
+                const payload = await readErrorPayload(response);
+                throw providerFailureError(
+                    extractErrorMessage(payload, `Gemini API request failed (${response.status})`),
+                    classifyProviderFailure({ status: response.status, payload }),
+                );
+            }
+            const streamResult = await streamTextSSE(response, geminiStreamDelta, onChunk);
+            if (streamResult.text) return streamResult.text;
+            if (!retriedInStream && isBusyErrorPayload(streamResult.streamError) && canRetryBeforeDeadline(deadline, OVERLOADED_RETRY_DELAY)) {
+                retriedInStream = true;
+                console.warn(`[ai] Gemini reported "${errorPayloadText(streamResult.streamError)}" mid-stream; retrying once in ${OVERLOADED_RETRY_DELAY / 1000}s`);
+                await sleep(OVERLOADED_RETRY_DELAY, signal);
+                continue;
+            }
+            throw streamFailureError("Gemini", streamResult, {
+                retried: retriedInStream,
+                fallbackMessage: "Gemini response did not contain text.",
+            });
+        }
+    }
 
     let retriedAfterOverload = false;
 
@@ -1199,7 +1219,7 @@ async function callOpenAIStyleChatCompletions({
             // A bad key, a missing model or a spent balance can arrive as a 400
             // too; none of the concessions below would fix those.
             const failure = classifyProviderFailure({ status: response.status, payload });
-            if (failure.kind === "unusable" || failure.kind === "spent") throw providerFailureError(errorMessage, failure);
+            if (waitingCannotFix(failure)) throw providerFailureError(errorMessage, failure);
 
             // Cheapest concession first. A gateway that refuses stream+tools still
             // does tools, it just stops keeping the connection warm — whereas
@@ -1244,7 +1264,7 @@ async function callOpenAIStyleChatCompletions({
         }
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            await retryOrFailOpenAIStyle(response, {
+            await retryOrFailByStatus(response, {
                 attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel,
             });
             attempt += 1;
@@ -1637,7 +1657,7 @@ async function callAnthropic(systemPrompt, history, {
         });
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            await retryOrFailOpenAIStyle(response, {
+            await retryOrFailByStatus(response, {
                 attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel: "Anthropic",
             });
             continue;
@@ -1649,7 +1669,7 @@ async function callAnthropic(systemPrompt, history, {
             // A spent balance ("credit balance is too low") and a bad key both
             // arrive as errors none of the concessions below can fix.
             const failure = classifyProviderFailure({ status: response.status, payload });
-            if (failure.kind === "unusable" || failure.kind === "spent") throw providerFailureError(message, failure);
+            if (waitingCannotFix(failure)) throw providerFailureError(message, failure);
             // The cap was removed on purpose; honor the MODEL's own ceiling. Anthropic 400s
             // "max_tokens: <sent> > <max>, ..." — learn <max>, cache it, and retry at it.
             const capMatch = /max_tokens:\s*\d+\s*>\s*(\d+)/i.exec(message);
@@ -1857,7 +1877,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
         const response = await providerFetch(`${endpoint}/messages`, { headers, payload: body, signal });
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            await retryOrFailOpenAIStyle(response, {
+            await retryOrFailByStatus(response, {
                 attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel: "The Anthropic-compatible endpoint",
             });
             continue;
@@ -1867,7 +1887,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
             const payload = await readErrorPayload(response);
             const message = extractErrorMessage(payload, `Anthropic-compatible request failed (${response.status})`);
             const failure = classifyProviderFailure({ status: response.status, payload });
-            if (failure.kind === "unusable" || failure.kind === "spent") throw providerFailureError(message, failure);
+            if (waitingCannotFix(failure)) throw providerFailureError(message, failure);
             // Honor the model's own max_tokens ceiling (the cap was removed on purpose).
             const capMatch = /max_tokens:\s*\d+\s*>\s*(\d+)/i.exec(message);
             if (response.status === 400 && capMatch && Number(capMatch[1]) > 0
@@ -2020,20 +2040,13 @@ const conversationShape = (systemPrompt, history) => ({
 
 const elapsedSeconds = (startedAt) => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 
-// A server the browser could not reach at all (a local model that is not
-// running, the network down) is busy for the Fallback list: worth skipping for a
-// minute, and worth trying again after. Matched on the browsers' own wording, so
-// a TypeError from a bug in this file is never mistaken for one.
-const UNREACHABLE_TEXT = /failed to fetch|fetch failed|networkerror|load failed|network request failed/i;
+// A call that failed without the provider saying why, because it never reached
+// the provider at all (isUnreachableError).
 const asUnreachable = (error, signal) => {
     if (error?.providerFailure || signal?.aborted || error?.name === "AbortError") return error;
-    if (error instanceof TypeError && UNREACHABLE_TEXT.test(String(error.message))) {
-        error.providerFailure = { kind: "busy", reason: "could not be reached" };
-    }
+    if (isUnreachableError(error)) error.providerFailure = { kind: "busy", reason: "could not be reached" };
     return error;
 };
-
-const formatClock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 // What happened to an entry, in the words a Settings row and a notice use.
 const describeFailure = (entry, failure) => {
@@ -2050,7 +2063,7 @@ const describeFailure = (entry, failure) => {
 function logFallbackMark(label, entry, failure, state) {
     const clears = state.unusable
         ? "until it is edited"
-        : `until ${formatClock(state.spentUntil ?? state.skipUntil)}`;
+        : `until ${formatResetTime(state.spentUntil ?? state.skipUntil)}`;
     logDebugEvent("ai", `${label}: Fallback list — ${entry.label} ${describeFailure(entry, failure)}; skipped ${clears}.`, {
         provider: entry.provider,
         kind: failure.kind,
@@ -2060,8 +2073,11 @@ function logFallbackMark(label, entry, failure, state) {
 
 // Once per switch, not once per call (the runner only reports the entries a
 // call marked itself). The game UI shows it as a short notice.
+// `to` is null when nothing below answered either: the notice then says only
+// what ran out, and the call's own error says the rest.
 function announceFallbackSwitch({ skipped, to }) {
-    const message = `${skipped.map(({ entry, failure }) => `${entry.label} ${describeFailure(entry, failure)}`).join("; ")}. Now using ${to.label}.`;
+    const lost = skipped.map(({ entry, failure }) => `${entry.label} ${describeFailure(entry, failure)}`).join("; ");
+    const message = to ? `${lost}. Now using ${to.label}.` : `${lost}.`;
     logDebugEvent("ai", `Fallback list: ${message}`);
     try {
         window.dispatchEvent(new CustomEvent("ai:fallback-switch", { detail: { message } }));
@@ -2159,7 +2175,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
             },
             onMark: ({ entry, failure, state }) => logFallbackMark(label, entry, failure, state),
             onSwitch: announceFallbackSwitch,
-            formatTime: formatClock,
+            formatTime: formatResetTime,
         });
         logDebugEvent("ai-call", `${label}: ${answeredBy.label} [${answeredBy.provider}] answered in ${elapsedSeconds(startedAt)}.`, {
             replyChars: typeof result === "string" ? result.length : String(result?.rawText ?? "").length,
@@ -2186,7 +2202,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
         // failure at all: the player pressed the button.
         const cancelled = error?.name === "AbortError";
         logDebugEvent("ai-call",
-            `${label}: ${cancelled ? "call cancelled" : "call FAILED"} after ${elapsedSeconds(startedAt)}${error?.fallbackExhausted ? " — nothing in the Fallback list can answer" : ""}.`,
+            `${label}: ${cancelled ? "call cancelled" : "call FAILED"} after ${elapsedSeconds(startedAt)}${error?.fallbackUnavailable ? " — nothing in the Fallback list can answer" : ""}.`,
             error,
             { verbose: cancelled });
         attachCallMetrics(record, { usage, firstByteMs: timer.firstByteMs });
@@ -2797,7 +2813,7 @@ export async function sendDiplomaticMessageOnceOff({ playerMessage, speakingAs, 
 const batchEntryFor = (taskKey) => {
     const entries = getResolvedFallbackList();
     const pick = taskKey ? getTaskPick(taskKey) : "";
-    const ready = (entry) => entryStatus(fallbackStateStore.get(entry.id), Date.now()).status === "ready";
+    const ready = (entry) => getEntryStatus(entry.id).status === "ready";
     return entries.find((entry) => entry.id === pick && ready(entry)) ?? entries.find(ready) ?? null;
 };
 

@@ -1,8 +1,11 @@
+/*! Open Historia — the notice that the game has moved down the Fallback list © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The short notice that the game has moved down the Fallback list: "gemini-3.7-
 // flash (Main Google) has used today's allowance. Now using gemini-3.6-flash
 // (Main Google)." Once per switch, never once per call — the AI layer
 // (main.jsx announceFallbackSwitch) only announces the calls that found an
-// entry newly unable to answer, so a turn of twenty calls says it once.
+// entry newly unable to answer, so a turn of twenty calls says it once. When
+// that call found nothing else able to answer, the notice says only what ran
+// out; the call's own error says the rest.
 //
 // The writing may change with the model, and a player who does not know why
 // will blame the game; that is the whole reason this exists.
