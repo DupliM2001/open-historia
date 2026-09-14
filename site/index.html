@@ -239,11 +239,58 @@
     font-family:var(--display);font-size:.62rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
     color:var(--sepia);background:rgba(17,17,19,.78);backdrop-filter:blur(0.25rem);
     border:1px solid var(--line2);border-radius:999px;padding:0.25rem 0.625rem}
+  /* The cards are click targets now. */
+  .gcard:focus-visible{outline:2px solid var(--gold-l);outline-offset:3px}
   .gtrack:focus-visible{outline:2px solid var(--gold-l);outline-offset:2px}
   /* Desktop drag-to-scroll: the cursor is the affordance, so it has to say the
      strip is grabbable before anyone tries. */
   .gtrack{cursor:grab}
   .gtrack.dragging{cursor:grabbing;user-select:none}
+
+  /* ---------- screenshot viewer ---------- */
+  .lb{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+    padding:clamp(1rem,4vw,3.5rem);
+    background:rgba(9,9,11,.88);backdrop-filter:blur(0.5rem);
+    opacity:0;transition:opacity .18s ease}
+  .lb.on{opacity:1}
+  /* After the display:flex, or [hidden] does nothing. */
+  .lb[hidden]{display:none}
+  .lb-figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:0.875rem;
+    max-width:100%;max-height:100%;
+    transform:scale(.99);transition:transform .18s ease}
+  .lb.on .lb-figure{transform:none}
+  .lb-figure img{display:block;max-width:100%;max-height:82vh;width:auto;height:auto;
+    border:1px solid var(--line2);border-radius:var(--radius);background:var(--parch2);
+    box-shadow:0 1.75rem 4rem -1.5rem rgba(0,0,0,.9);
+    -webkit-user-drag:none;user-select:none}
+  .lb-cap{font-family:var(--display);font-size:.68rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sepia)}
+  /* Glyph only; the shadow carries it over a pale screenshot. */
+  .lb-close,.lb-nav{position:absolute;display:grid;place-items:center;cursor:pointer;
+    font-family:var(--display);line-height:1;color:var(--ink);
+    background:none;border:0;border-radius:999px;padding:0;
+    text-shadow:0 0.0625rem 0.5rem rgba(0,0,0,.9),0 0 1.25rem rgba(0,0,0,.7);
+    transition:color .15s,opacity .15s;opacity:.8}
+  .lb-close:hover,.lb-nav:hover{color:var(--gold-l);opacity:1}
+  .lb-close:focus-visible,.lb-nav:focus-visible{outline:2px solid var(--gold-l);outline-offset:2px}
+  /* Focus lands here on open, so: no ring. */
+  .lb:focus,.lb:focus-visible{outline:none}
+  .lb-close{top:1rem;right:1rem;width:2.75rem;height:2.75rem;font-size:1.5rem;padding-bottom:.16em}
+  .lb-nav{top:50%;transform:translateY(-50%);width:3rem;height:3rem;font-size:1.9rem;padding-bottom:.14em}
+  .lb-prev{left:1rem}
+  .lb-next{right:1rem}
+  .lb-nav[hidden]{display:none}
+  @media(max-width:720px){
+    .lb-nav{width:2.5rem;height:2.5rem;font-size:1.5rem}
+    .lb-prev{left:0.5rem}
+    .lb-next{right:0.5rem}
+    .lb-close{top:0.5rem;right:0.5rem;width:2.5rem;height:2.5rem}
+    .lb-figure img{max-height:70vh}
+  }
+  @media(prefers-reduced-motion: reduce){
+    .lb,.lb-figure{transition:none}
+  }
+
   /* ---------- sections ---------- */
   section{padding:3.875rem 0}
   .eyebrow{color:var(--bronze);font-weight:600;font-size:.82rem;letter-spacing:.22em;text-transform:uppercase;text-align:center}
@@ -543,6 +590,17 @@
   </div>
 </footer>
 
+<!-- Screenshot viewer. Filled in and opened by the gallery script below. -->
+<div class="lb" id="lightbox" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="Screenshot viewer">
+  <button class="lb-close" id="lbClose" type="button" aria-label="Close screenshot">✕</button>
+  <button class="lb-nav lb-prev" id="lbPrev" type="button" aria-label="Previous screenshot">‹</button>
+  <figure class="lb-figure" id="lbFigure">
+    <img id="lbImg" src="" alt="" />
+    <figcaption class="lb-cap" id="lbCap"></figcaption>
+  </figure>
+  <button class="lb-nav lb-next" id="lbNext" type="button" aria-label="Next screenshot">›</button>
+</div>
+
 <script>
 (function(){
   var ua = navigator.userAgent || "";
@@ -686,6 +744,20 @@
   if (track){
     var setSize = track.children.length;
     var originals = Array.prototype.slice.call(track.children);
+
+    // Read before the strip is tripled, and data-shot set here so the clones
+    // carry it: a click on copy three opens the same image as copy one.
+    var shots = originals.map(function(card, i){
+      var img = card.querySelector("img");
+      var tag = card.querySelector(".shot-tag");
+      card.setAttribute("data-shot", i);
+      return {
+        src: img ? img.getAttribute("src") : "",
+        alt: img ? (img.getAttribute("alt") || "") : "",
+        tag: tag ? tag.textContent.trim() : ""
+      };
+    });
+
     for (var copy = 0; copy < 2; copy++){
       originals.forEach(function(c){
         var clone = c.cloneNode(true);
@@ -697,10 +769,17 @@
       });
     }
 
+    // Originals only: twelve tab stops for four images would be a trap.
+    originals.forEach(function(card, i){
+      card.setAttribute("tabindex", "0");
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", "View screenshot " + (i + 1) + " full size");
+    });
+
     var SPEED = 22;        // px per second
     var RESUME = 2500;     // ms of idleness before the drift picks up again
     var SEG = 0;           // width of one copy of the set, in px
-    var pos = 0, last = 0, idle = 0, held = false, dragging = false, off = false, raf = 0;
+    var pos = 0, last = 0, idle = 0, held = false, dragging = false, off = false, raf = 0, lbOpen = false;
 
     // Measured from the DOM, not scrollWidth/3: the track's padding and one
     // fewer gap put that a few px off. The first-card-to-first-clone offset is
@@ -741,7 +820,7 @@
       last = now;                                    // must not lurch on return
       // Deliberately ignores prefers-reduced-motion: slow and non-essential, and
       // touching the strip stops it. Re-add `calm.matches` here to respect it.
-      if (off || held || dragging) return;
+      if (off || held || dragging || lbOpen) return; // lbOpen: viewer is up
       pos += SPEED * dt;
       // Wrap the tracked float, never a value read back out of the DOM, so
       // rounding cannot feed back into the position.
@@ -759,10 +838,128 @@
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) pause();
     }, { passive:true });
 
+    // ---------- click a screenshot to open it full size ----------
+    // A press counts as a click only while the pointer stays put, past CLICK_SLOP px it is a drag
+    var CLICK_SLOP = 6;
+    var press = null;
+
+    var lb = document.getElementById("lightbox");
+    var lbImg = document.getElementById("lbImg");
+    var lbCap = document.getElementById("lbCap");
+    var lbFigure = document.getElementById("lbFigure");
+    var lbCloseBtn = document.getElementById("lbClose");
+    var lbPrevBtn = document.getElementById("lbPrev");
+    var lbNextBtn = document.getElementById("lbNext");
+    var lbIndex = 0, lbFade = 0, lbReturn = null, lbOverflow = "", lbPad = "";
+
+    // closest(), stopping at the track so it can't return a card outside it.
+    function cardFrom(node){
+      while (node && node !== track){
+        if (node.classList && node.classList.contains("gcard")) return node;
+        node = node.parentNode;
+      }
+      return null;
+    }
+    function shotIndex(card){
+      var i = card ? parseInt(card.getAttribute("data-shot"), 10) : NaN;
+      return isNaN(i) ? -1 : i;
+    }
+
+    function lbRender(i){
+      if (!lb || !shots.length) return;
+      lbIndex = ((i % shots.length) + shots.length) % shots.length;
+      var s = shots[lbIndex];
+      if (lbImg.getAttribute("src") !== s.src) lbImg.src = s.src;   // the strip's file: cached
+      lbImg.alt = s.alt || ("Open Historia screenshot " + (lbIndex + 1));
+      lbCap.textContent = (s.tag ? s.tag + " · " : "") + (lbIndex + 1) + " / " + shots.length;
+      var many = shots.length > 1;
+      lbPrevBtn.hidden = !many;
+      lbNextBtn.hidden = !many;
+    }
+
+    function lbOpenAt(i){
+      if (!lb || lbOpen || i < 0) return;
+      lbReturn = document.activeElement;
+      lbRender(i);
+      clearTimeout(lbFade);
+      lb.hidden = false;
+      // Two frames: it must be laid out before the class can animate.
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){ lb.classList.add("on"); });
+      });
+      lbOpen = true;        // tick() reads this every frame: the drift stops
+      clearTimeout(idle);   // and no pending timer may restart it
+      // Hold the page still; pad for the scrollbar so nothing shifts.
+      var bar = window.innerWidth - document.documentElement.clientWidth;
+      lbOverflow = document.body.style.overflow;
+      lbPad = document.body.style.paddingRight;
+      document.body.style.overflow = "hidden";
+      if (bar > 0) document.body.style.paddingRight = bar + "px";
+      document.addEventListener("keydown", lbKey, true);
+      lb.focus();
+    }
+
+    function lbClose(){
+      if (!lbOpen) return;
+      lbOpen = false;
+      lb.classList.remove("on");
+      clearTimeout(lbFade);
+      lbFade = setTimeout(function(){ lb.hidden = true; }, 220);   // after the fade
+      document.removeEventListener("keydown", lbKey, true);
+      document.body.style.overflow = lbOverflow;
+      document.body.style.paddingRight = lbPad;
+      // Resume from wherever the strip sits, after the usual idle delay.
+      last = 0;
+      pos = track.scrollLeft;
+      pause();
+      if (lbReturn && lbReturn.focus) lbReturn.focus();
+      lbReturn = null;
+    }
+
+    function lbKey(e){
+      if (!lbOpen) return;
+      var k = e.key;
+      if (k === "Escape" || k === "Esc"){ e.preventDefault(); lbClose(); }
+      else if (k === "ArrowRight"){ e.preventDefault(); lbRender(lbIndex + 1); }
+      else if (k === "ArrowLeft"){ e.preventDefault(); lbRender(lbIndex - 1); }
+      else if (k === "Tab"){
+        // Keep tab inside the dialog.
+        var stops = [lbPrevBtn, lbNextBtn, lbCloseBtn].filter(function(b){ return b && !b.hidden; });
+        if (!stops.length) return;
+        var at = stops.indexOf(document.activeElement);
+        var next = at === -1 ? (e.shiftKey ? stops.length - 1 : 0) : (e.shiftKey ? at - 1 : at + 1);
+        e.preventDefault();
+        stops[(next + stops.length) % stops.length].focus();
+      }
+    }
+
+    if (lb){
+      lbCloseBtn.addEventListener("click", lbClose);
+      lbPrevBtn.addEventListener("click", function(){ lbRender(lbIndex - 1); });
+      lbNextBtn.addEventListener("click", function(){ lbRender(lbIndex + 1); });
+      // Anywhere off the image closes it.
+      lb.addEventListener("click", function(e){
+        if (e.target === lb || e.target === lbFigure || e.target === lbCap) lbClose();
+      });
+    }
+
+    // Enter and Space do what a click does.
+    track.addEventListener("keydown", function(e){
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      var card = cardFrom(e.target);
+      if (!card) return;
+      e.preventDefault();        // Space would page the document down
+      lbOpenAt(shotIndex(card));
+    });
+
     // Drag to scroll for mice. Touch is left alone - the browser's own panning
     // has momentum and rubber banding a reimplementation would not match.
     var startX = 0, startLeft = 0;
     track.addEventListener("pointerdown", function(e){
+      // Every pointer type: a tap opens the viewer on a phone too, where the drag path below never runs.
+      var card = cardFrom(e.target);
+      press = card ? { id:e.pointerId, x:e.clientX, y:e.clientY, card:card } : null;
+
       if (e.pointerType === "touch" || e.button !== 0) return;
       dragging = true;
       startX = e.clientX;
@@ -773,6 +970,10 @@
       e.preventDefault();          // otherwise the browser starts an image drag
     });
     track.addEventListener("pointermove", function(e){
+      if (press && e.pointerId === press.id &&
+          (Math.abs(e.clientX - press.x) > CLICK_SLOP || Math.abs(e.clientY - press.y) > CLICK_SLOP)){
+        press = null;              // too far: a drag, not a click
+      }
       if (!dragging) return;
       track.scrollLeft = startLeft - (e.clientX - startX);
       wrap();
@@ -789,8 +990,18 @@
       pos = track.scrollLeft;
       pause();                     // drift picks up again after the idle delay
     }
-    track.addEventListener("pointerup", endDrag);
-    track.addEventListener("pointercancel", endDrag);
+    track.addEventListener("pointerup", function(e){
+      var card = (press && press.id === e.pointerId) ? press.card : null;
+      press = null;
+      endDrag(e);
+      if (card) lbOpenAt(shotIndex(card));
+    });
+    // A touch that became a scroll lands here, not at pointerup - which is how
+    // a swipe is told apart from a tap.
+    track.addEventListener("pointercancel", function(e){
+      press = null;
+      endDrag(e);
+    });
 
     track.addEventListener("scroll", function(){
       if (held || dragging){ wrap(); pos = track.scrollLeft; }
