@@ -27,10 +27,20 @@ import {
   GAME_BUNDLE_DATA_KEYS,
   GAME_BUNDLE_SCHEMA,
   OPTIONAL_GAME_BUNDLE_KEYS,
-} from "./web/models.js";
+} from "./web/storeConstants.js";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SERVER_STORE = readFileSync(path.join(HERE, "..", "..", "server", "libraryStore.js"), "utf-8");
+
+test("the web constants load without a web build", () => {
+  // This file imported web/models.js once, which imports the web build's
+  // generated country table. It passed on every machine that had run a web build
+  // and failed on CI's clean checkout, where the tests run before any build, so
+  // the beta installers stopped building. storeConstants.js is what a Node test
+  // can import, and only while it imports nothing itself.
+  const constants = readFileSync(path.join(HERE, "web", "storeConstants.js"), "utf-8");
+  assert.equal(/^\s*(import[\s{*"']|export\s*[*{])/m.test(constants), false, "storeConstants.js imports nothing");
+});
 
 // The server's copies are module-private, as they should be — read them out of
 // the source rather than widening its exports just for a test.
