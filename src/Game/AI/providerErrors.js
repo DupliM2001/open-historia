@@ -423,7 +423,7 @@ export const isContextWindowErrorText = (text) => {
 export const contextWindowMessage = (providerLabel, detail, requestChars = 0) => {
     const chars = Math.max(0, Math.round(Number(requestChars) || 0));
     const size = chars
-        ? ` This request was about ${Math.round(chars / 4).toLocaleString()} tokens (${chars.toLocaleString()} characters of prompt and history).`
+        ? ` This request was about ${Math.round(chars / 4).toLocaleString("en-US")} tokens (${chars.toLocaleString("en-US")} characters of prompt and history).`
         : "";
     return `${providerLabel} cannot fit this request in the model's context window: it answered "${String(detail ?? "").trim()}".${size} `
         + "A turn needs a model with a large context window (32k tokens or more): pick one in Settings → AI, or a provider that offers one.";

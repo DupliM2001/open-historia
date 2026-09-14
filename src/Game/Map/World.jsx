@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Map from "react-map-gl/maplibre";
 import { useCustomBackground } from "./useCustomBackground.js";
 import MapScene from "./MapScene.jsx";
+import { loadNatGeoDarkStyle } from "./natGeoDarkStyle.js";
 
 import { recordMapFreeze, recordMapTrace } from "../../runtime/mapPerfTrace.js";
 import {
@@ -277,14 +278,18 @@ const buildWorldStyle = (basemapId, customBg, backgroundDeclared, isGlobe, terra
       sky: { "atmosphere-blend": 0 },
     };
   }
-  // The scenario's basemap is the basemap, at every zoom. Only the two "Atlas
-  // Relief" presets are a composed look of their own (ETOPO global relief fading
-  // into World Terrain Base); every other id renders the ESRI service it names.
+  // The scenario's basemap is the basemap, at every zoom. Atlas Relief and the
+  // physically-dark Ocean variant are composed looks of their own (ETOPO global
+  // relief fading into label-free World Terrain Base); other raster ids render
+  // the ESRI service they name. National Geographic - Dark is handled by the
+  // async vector-style adapter in World() below.
   // The renderer used to swap Ocean and a scenario-default Dark Gray for that
   // relief composition too, so a map authored on Ocean or Dark Gray opened on a
   // satellite-looking globe and only showed its real basemap once the relief
   // had faded out around z5.
-  const usePaxRelief = basemapId === "atlas-relief" || basemapId === "atlas-relief-dark";
+  const usePaxRelief = basemapId === "atlas-relief"
+    || basemapId === "atlas-relief-dark"
+    || basemapId === "ocean-dark";
   const paxReliefPaints = getPaxReliefPaints(basemapId);
   const basemapPaint = usePaxRelief
     ? paxReliefPaints.terrain
@@ -410,6 +415,39 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
   const hasReportedInitialIdleRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const loadTimerRef = useRef(null);
+  const [basemapTransition, setBasemapTransition] = useState({
+    active: false,
+    progress: 0,
+    target: "",
+    waitForPtr: false,
+  });
+  const basemapTransitionRef = useRef({ active: false, progress: 0, target: "", waitForPtr: false });
+  const previousBasemapRef = useRef(null);
+  const basemapTransitionHideTimerRef = useRef(null);
+  const basemapTransitionWatchdogRef = useRef(null);
+  const updateBasemapTransition = useCallback((updater) => {
+    setBasemapTransition((previous) => {
+      const next = typeof updater === "function" ? updater(previous) : updater;
+      basemapTransitionRef.current = next;
+      return next;
+    });
+  }, []);
+  const noteBasemapTransitionProgress = useCallback((progress) => {
+    updateBasemapTransition((previous) => previous.active
+      ? { ...previous, progress: Math.max(previous.progress, Math.min(96, progress)) }
+      : previous);
+  }, [updateBasemapTransition]);
+  const finishBasemapTransition = useCallback(() => {
+    if (!basemapTransitionRef.current.active) return;
+    clearTimeout(basemapTransitionWatchdogRef.current);
+    clearTimeout(basemapTransitionHideTimerRef.current);
+    updateBasemapTransition((previous) => previous.active
+      ? { ...previous, progress: 100 }
+      : previous);
+    basemapTransitionHideTimerRef.current = setTimeout(() => {
+      updateBasemapTransition((previous) => ({ ...previous, active: false, progress: 0 }));
+    }, 180);
+  }, [updateBasemapTransition]);
   const mapMountedAtRef = useRef(0);
   // Taken in an effect rather than during render: a clock read in render is
   // impure, and this value is only ever compared against later clock reads
@@ -471,30 +509,143 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
     scenarioId: worldBasemap,
     fallbackId: DEFAULT_BASEMAP_ID,
   });
+  // Snapshot this during render, before a changed map key can unmount the old
+  // MapScene/PTR effect during commit. Reading it later inside the effect is too
+  // late: PolityTextLayer cleanup may already have deleted the old probe.
+  const ptrMountedBeforeBasemapCommit = Boolean(
+    globalThis.__OH_POLITY_TEXT_PTR__?.requested
+    && globalThis.__OH_POLITY_TEXT_PTR__?.mounted
+    && !globalThis.__OH_POLITY_TEXT_PTR__?.failed
+  );
+
+  // Basemap switches remount MapLibre and therefore briefly tear down/rebuild
+  // the political presentation tree. Keep that disruption covered by a tiny,
+  // explicit transition overlay instead of exposing a half-loaded map. Initial
+  // scenario startup is handled by the normal scenario loader, so this starts
+  // only after the first resolved basemap has been observed.
+  useEffect(() => {
+    const previous = previousBasemapRef.current;
+    if (previous == null || !hasReportedInitialIdleRef.current) {
+      previousBasemapRef.current = effectiveBasemap;
+      return undefined;
+    }
+    if (previous === effectiveBasemap) return undefined;
+
+    previousBasemapRef.current = effectiveBasemap;
+    clearTimeout(basemapTransitionHideTimerRef.current);
+    clearTimeout(basemapTransitionWatchdogRef.current);
+    updateBasemapTransition({
+      active: true,
+      progress: effectiveBasemap === "natgeo-dark" ? 12 : 24,
+      target: effectiveBasemap,
+      // A style remount destroys custom layers. If PTR was active on the map
+      // the player was looking at, keep the transition cover up until that same
+      // authoritative political-label layer exists on the NEW MapLibre style.
+      // Hidden labels / globe / legacy-label configurations do not wait for PTR.
+      waitForPtr: ptrMountedBeforeBasemapCommit,
+    });
+
+    // Never leave the player trapped if a remote basemap provider stalls. The
+    // map itself already fails soft to its configured fallback; this watchdog
+    // mirrors that policy for the transition chrome.
+    basemapTransitionWatchdogRef.current = setTimeout(() => {
+      finishBasemapTransition();
+    }, 20000);
+
+    return undefined;
+  }, [
+    effectiveBasemap,
+    finishBasemapTransition,
+    ptrMountedBeforeBasemapCommit,
+    updateBasemapTransition,
+  ]);
+
   const mapProjection = useMemo(() => ({ type: projection }), [projection]);
   const styleUsesGlobeCoords = effectiveCustomBg?.kind === "image" && isGlobe;
-  const worldStyle = useMemo(
-    () => buildWorldStyle(
+
+  // The old NatGeo preset is a baked raster, so hiding country/city/province
+  // names selectively is impossible. The screenshot variant uses Esri's public
+  // World_Basemap_v2 NatGeo vector style instead and filters/style-grades its
+  // layers locally. Keep the official source JSON cached for the session; while
+  // it arrives, render the already-label-free Atlas Relief Dark composition so
+  // the user never sees a bright or politically-labelled flash.
+  const natGeoDarkActive = effectiveBasemap === "natgeo-dark"
+    && !effectiveCustomBg
+    && !effectiveBgDeclared;
+  const [natGeoDarkStyle, setNatGeoDarkStyle] = useState(null);
+  useEffect(() => {
+    if (!natGeoDarkActive) {
+      setNatGeoDarkStyle(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setNatGeoDarkStyle(null);
+    noteBasemapTransitionProgress(24);
+    loadNatGeoDarkStyle({
+      terrainEnabled,
+      terrainTileTemplate: TERRAIN_TILE_TEMPLATE,
+    })
+      .then((style) => {
+        if (!cancelled) {
+          setNatGeoDarkStyle(style);
+          noteBasemapTransitionProgress(52);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn("National Geographic - Dark vector style unavailable; keeping dark relief fallback:", error);
+          noteBasemapTransitionProgress(84);
+          finishBasemapTransition();
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    finishBasemapTransition,
+    natGeoDarkActive,
+    noteBasemapTransitionProgress,
+    terrainEnabled,
+  ]);
+
+  const worldStyle = useMemo(() => {
+    if (natGeoDarkActive) {
+      return natGeoDarkStyle ?? buildWorldStyle(
+        "atlas-relief-dark",
+        null,
+        false,
+        false,
+        terrainEnabled,
+      );
+    }
+    return buildWorldStyle(
       effectiveBasemap,
       effectiveCustomBg,
       effectiveBgDeclared,
       styleUsesGlobeCoords,
       terrainEnabled,
-    ),
-    [
-      effectiveBasemap,
-      effectiveBgDeclared,
-      effectiveCustomBg,
-      styleUsesGlobeCoords,
-      terrainEnabled,
-    ],
-  );
-  const mapInstanceKey = buildBasemapRenderKey({
+    );
+  }, [
+    effectiveBasemap,
+    effectiveBgDeclared,
+    effectiveCustomBg,
+    natGeoDarkActive,
+    natGeoDarkStyle,
+    styleUsesGlobeCoords,
+    terrainEnabled,
+  ]);
+  const basemapRenderKey = buildBasemapRenderKey({
     projection,
     basemapId: effectiveBasemap,
     backgroundKind: effectiveBgDeclared ? effectiveCustomBg?.kind || "declared" : "builtin",
     renderer: legacyRenderer ? "legacy" : "vnext",
   });
+  // Remount once the remote vector style becomes ready. MapLibre style swaps
+  // otherwise destroy/recreate style-owned layers under a live React Source
+  // tree; a clean remount is both safer and covered by the existing map loader.
+  const mapInstanceKey = natGeoDarkActive
+    ? `${basemapRenderKey}:natgeo-dark-${natGeoDarkStyle ? "ready" : "loading"}`
+    : basemapRenderKey;
   // 3D terrain deforms the mesh using the same raster-dem source that drives
   // the "hills" hillshade layer in buildWorldStyle. It only applies against the
   // real ESRI/NOAA basemap — a custom uploaded image or vector background has
@@ -661,20 +812,66 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
     markMapIdle();
     emitMapMotion(false);
     applyFixedPixelRatio();
-    if (hasReportedInitialIdleRef.current) return;
+
+    const transition = basemapTransitionRef.current;
+    if (transition.active) {
+      // NatGeo Dark deliberately mounts a label-free dark fallback while its
+      // remote vector style is fetched. Do not dismiss the overlay on that
+      // intermediate idle; wait for the real NatGeo style remount to settle.
+      if (transition.target === "natgeo-dark" && natGeoDarkActive && !natGeoDarkStyle) {
+        noteBasemapTransitionProgress(46);
+      } else {
+        const mapInstance = mapRef?.current?.getMap?.();
+        const ptrProbe = globalThis.__OH_POLITY_TEXT_PTR__;
+        const ptrReady = !transition.waitForPtr
+          || ptrProbe?.failed === true
+          || (ptrProbe?.mounted === true && Boolean(mapInstance?.getLayer?.("polity-text-renderer")));
+        if (!ptrReady) {
+          // The basemap itself is idle, but MapScene is still rebuilding the
+          // authoritative custom polity-text layer. Do not reveal the exact
+          // unlabeled intermediate frame reported in live testing. addLayer()
+          // triggers another paint/idle when PTR finishes, so this resolves
+          // naturally without polling. The existing watchdog remains fail-soft.
+          noteBasemapTransitionProgress(94);
+        } else {
+          finishBasemapTransition();
+        }
+      }
+    }
+
+    if (hasReportedInitialIdleRef.current) {
+      setLoading(false);
+      return;
+    }
     hasReportedInitialIdleRef.current = true;
     onInitialIdle?.();
     setLoading(false);
-  }, [applyFixedPixelRatio, emitMapMotion, onInitialIdle]);
+  }, [
+    applyFixedPixelRatio,
+    emitMapMotion,
+    finishBasemapTransition,
+    natGeoDarkActive,
+    natGeoDarkStyle,
+    noteBasemapTransitionProgress,
+    onInitialIdle,
+  ]);
   const handleLoading = useCallback(() => {
     recordMapTrace("map:loading");
     setLoading(true);
+    noteBasemapTransitionProgress(68);
     clearTimeout(loadTimerRef.current);
     loadTimerRef.current = setTimeout(() => setLoading(false), 8000);
-  }, []);
+  }, [noteBasemapTransitionProgress]);
+  const handleMapLoad = useCallback(() => {
+    recordMapTrace("map:load");
+    noteBasemapTransitionProgress(84);
+  }, [noteBasemapTransitionProgress]);
 
   React.useEffect(() => () => {
     emitMapMotion(false);
+    clearTimeout(loadTimerRef.current);
+    clearTimeout(basemapTransitionHideTimerRef.current);
+    clearTimeout(basemapTransitionWatchdogRef.current);
     const perf = dragPerfRef.current;
     perf.active = false;
     if (perf.raf) cancelAnimationFrame(perf.raf);
@@ -872,6 +1069,7 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
         projection={mapProjection}
         terrain={terrain}
         mapStyle={worldStyle}
+        onLoad={handleMapLoad}
         onIdle={handleIdle}
         onLoading={handleLoading}
         onMoveStart={handleMoveStart}
@@ -895,7 +1093,57 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
           }}
         />
       )}
-      {loading && (
+      {basemapTransition.active && (
+        <div
+          aria-live="polite"
+          aria-label="Changing basemap"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(8, 11, 15, 0.24)",
+            backdropFilter: "blur(7px)",
+            WebkitBackdropFilter: "blur(7px)",
+            pointerEvents: "auto",
+            transition: "opacity 160ms ease",
+          }}
+        >
+          <div style={{
+            width: 238,
+            maxWidth: "calc(100vw - 48px)",
+            padding: "15px 17px 14px",
+            borderRadius: 12,
+            background: "rgba(14, 17, 22, 0.82)",
+            border: "1px solid rgba(255,255,255,0.10)",
+            boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
+            color: "rgba(239,242,246,0.94)",
+            textAlign: "center",
+            fontSize: 13,
+            letterSpacing: "0.01em",
+          }}>
+            <div style={{ marginBottom: 10, fontWeight: 600 }}>Changing basemap…</div>
+            <div style={{
+              height: 3,
+              width: "100%",
+              overflow: "hidden",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.10)",
+            }}>
+              <div style={{
+                height: "100%",
+                width: `${Math.max(4, basemapTransition.progress)}%`,
+                borderRadius: 999,
+                background: "rgba(226,232,240,0.86)",
+                transition: "width 180ms ease-out",
+              }} />
+            </div>
+          </div>
+        </div>
+      )}
+      {loading && !basemapTransition.active && (
         <div style={{
           position: "absolute",
           bottom: 20,

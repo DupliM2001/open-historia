@@ -4,6 +4,8 @@ import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
 import { NATIVE_GAME_MASTER_PROMPT, normalizePromptPack } from "./gameplayPrompts.js";
 import { directGeneratedUnitOps } from "./nativeUnitDirector.js";
 import { directGeneratedTerritoryOps } from "./nativeTerritoryDirector.js";
+import { expandWholeCountryTransfer, wholeCountrySourceToken } from "./territoryTransferScope.js";
+import { detectExplicitBaseTerritoryScope, scopeContainsRegion } from "./gmTerritoryScope.js";
 import { curateGeneratedEventsWithHidden } from "./nativeTimelineCurator.js";
 import {
   applyWorldStorylineUpdates,
@@ -85,9 +87,12 @@ import { renderTemplateCached, staticPrefixEndOf } from "./promptLayout.js";
 import { attachAttemptOutcome, finishAiRecord, normalizeParsedSummary } from "./telemetry.js";
 import {
   JSON_URLS,
+  getPrimedScenarioRegionCatalog,
   loadCountryNames,
   loadRegionCatalog,
   loadScenarioRegionCatalog,
+  primeCustomRegionCatalog,
+  primeCustomRegionCatalogEntries,
   readJson,
   writeJson,
 } from "../../runtime/assets.js";
@@ -123,7 +128,7 @@ import {
   writeGameData,
   writeWorldState,
 } from "../../runtime/gameState.js";
-import { dedupeGeneratedEvents } from "../../runtime/eventDedup.js";
+import { dedupeGeneratedEvents, eventCanonicalKey } from "../../runtime/eventDedup.js";
 import { allocateCanonicalTurnEventIds, remapLedgerEventIds } from "../../runtime/eventIdentity.js";
 import { sortTimelineEventsChronologically } from "../../runtime/timelineOrder.js";
 import { buildPolityIdentityIndex, resolvePolityIdentity } from "../../runtime/polityIdentity.js";
@@ -3245,7 +3250,86 @@ const IMPLICIT_WHOLE_COUNTRY_LIMIT = 3;
 const resolveRegionTransfers = async (containers, world, {
   ownershipMode = "sovereignty",
   enforceNarratedCityCoverage = false,
+  exactRegionIdsOnly = false,
+  explicitScopeText = "",
 } = {}) => {
+  // Apply-time GM revalidation must verify the EXACT previewed region ids, not
+  // pay to reopen/parse the full scenario geometry and reinterpret friendly
+  // place names a second time. The preview path has already resolved every
+  // territorial operation to canonical ids. The compact region catalog is
+  // primed by Nations/Preview and is enough to prove those ids still exist. If
+  // it is unavailable, fail closed rather than silently trusting unknown ids or
+  // reopening heavyweight geography during Apply.
+  if (exactRegionIdsOnly) {
+    // Apply is intentionally forbidden from reopening/parsing the giant authored
+    // GeoJSON. Preview already resolved every territory operation to exact ids,
+    // and Nations/Preview primes this compact catalog as soon as geometry parses.
+    // If the map asset changed, assets.js invalidates the primed catalog and Apply
+    // fails closed instead of silently trusting stale ids or blocking the UI.
+    const exactCatalog = getPrimedScenarioRegionCatalog() ?? [];
+    if (!Array.isArray(exactCatalog) || exactCatalog.length === 0) {
+      return containers.flatMap(({ impacts, path }) =>
+        normalizeArray(impacts?.regionTransfers).map((transfer, transferIndex) => ({
+          candidates: [],
+          fromCode: normalizeString(transfer?.fromCode),
+          label: normalizeString(transfer?.regionName) || normalizeString(transfer?.regionId) || "unknown region",
+          path,
+          reason: "the compact scenario region catalog is not primed; regenerate the preview after the map finishes loading",
+          transferIndex,
+          wholeCountry: Boolean(transfer?.wholeCountry),
+        }))
+      );
+    }
+
+    const exactById = new Map(
+      exactCatalog
+        .map((region) => [normalizeString(region?.id), region])
+        .filter(([id]) => Boolean(id)),
+    );
+    const unresolved = [];
+
+    for (const { impacts, path } of containers) {
+      const resolved = [];
+      for (const [transferIndex, transfer] of normalizeArray(impacts?.regionTransfers).entries()) {
+        if (transfer?.wholeCountry === true) {
+          unresolved.push({
+            candidates: [],
+            fromCode: normalizeString(transfer?.fromCode),
+            label: wholeCountrySourceToken(transfer),
+            path,
+            reason: "wholeCountry must already be expanded to exact region ids before Apply",
+            transferIndex,
+            wholeCountry: true,
+          });
+          continue;
+        }
+
+        const regionId = normalizeString(transfer?.regionId);
+        const row = exactById.get(regionId);
+        if (!regionId || !row) {
+          unresolved.push({
+            candidates: [],
+            fromCode: normalizeString(transfer?.fromCode),
+            label: normalizeString(transfer?.regionName) || regionId,
+            path,
+            reason: "previewed canonical region id no longer exists",
+            transferIndex,
+          });
+          continue;
+        }
+
+        resolved.push({
+          ...transfer,
+          regionId,
+          regionName: normalizeString(row?.name) || normalizeString(transfer?.regionName) || regionId,
+        });
+      }
+      if (impacts && Array.isArray(impacts.regionTransfers)) impacts.regionTransfers = resolved;
+    }
+
+    return unresolved;
+  }
+
   // Phase 8B.2.10: resolve against the geography that is ACTUALLY rendered for
   // this scenario. loadRegionCatalog() is intentionally broad and may contain
   // stock GADM rows alongside custom/historical scenario rows; letting those two
@@ -3255,12 +3339,23 @@ const resolveRegionTransfers = async (containers, world, {
   // The current regionsGeojson is the map truth. Use it as the primary corpus
   // whenever it exists, retaining stock catalog data only as a compatibility
   // fallback for maps that do not expose rendered region features.
-  const [mergedCatalog, renderedRegionsGeojson] = await Promise.all([
-    loadRegionCatalog().catch(() => []),
-    readJson(JSON_URLS.regionsGeojson, { defaultValue: null, force: true }).catch(() => null),
-  ]);
-
+  // Read the authored scenario geography once for Preview. When it exists it is
+  // already the authoritative resolution corpus, so do not simultaneously build
+  // the merged stock catalog (which can trigger a second large scenario read).
+  // Prime the compact id/name catalog from this unavoidable parse so Apply can
+  // strictly revalidate exact previewed ids without reopening tens of MB of GeoJSON.
+  const renderedRegionsGeojson = await readJson(JSON_URLS.regionsGeojson, {
+    defaultValue: null,
+    force: true,
+    clone: false,
+  }).catch(() => null);
   const renderedFeatures = normalizeArray(renderedRegionsGeojson?.features);
+  if (renderedFeatures.length) {
+    primeCustomRegionCatalog(renderedRegionsGeojson, {
+      url: JSON_URLS.regionsGeojson,
+      invalidateCatalog: false,
+    });
+  }
   const renderedCatalog = renderedFeatures
     .map((feature) => {
       const props = feature?.properties ?? {};
@@ -3300,7 +3395,20 @@ const resolveRegionTransfers = async (containers, world, {
     })
     .filter(Boolean);
 
+  const mergedCatalog = renderedCatalog.length > 0
+    ? []
+    : await loadRegionCatalog().catch(() => []);
   const catalog = renderedCatalog.length > 0 ? renderedCatalog : mergedCatalog;
+  if (!renderedCatalog.length && mergedCatalog.length) {
+    // Preview may legitimately resolve against the compatibility/stock catalog
+    // when no authored scenario features are available. Prime the exact corpus
+    // that Preview actually used so Apply can revalidate those approved IDs
+    // without performing a second geography load.
+    primeCustomRegionCatalogEntries(mergedCatalog, {
+      url: JSON_URLS.regionsGeojson,
+      invalidateCatalog: false,
+    });
+  }
 
   // Without a catalog we cannot tell a good id from a bad one, and dropping real
   // transfers would be worse than phantom keys — leave the payload alone.
@@ -3362,14 +3470,36 @@ const resolveRegionTransfers = async (containers, world, {
     }
   }
 
+  // Same-payload polity lifecycle changes outrank pre-existing map provenance.
+  // Example: CREATE PRK + transfer North-Korean regions in one GM transaction
+  // must mean the newly created North Korea, even if an unrelated active polity
+  // currently carries mapRefs.gadm0=["PRK"] for asset/geography provenance.
+  const generatedOwnerAliases = new Map();
+  const registerGeneratedOwnerAlias = (token, canonical) => {
+    const key = regionKey(token);
+    if (!key || !canonical) return;
+    const existing = generatedOwnerAliases.get(key);
+    generatedOwnerAliases.set(key, existing && existing !== canonical ? "" : canonical);
+  };
+  for (const { impacts } of containers) {
+    for (const change of normalizeArray(impacts?.polityChanges)) {
+      const operation = normalizeString(change?.operation).toLowerCase();
+      if (!["create", "restore", "rename", "update"].includes(operation)) continue;
+      const canonical = toCountryName(normalizeString(change?.code)) || normalizeString(change?.code);
+      if (!canonical) continue;
+      for (const token of [change?.code, change?.name, ...normalizeArray(change?.aliases)]) {
+        registerGeneratedOwnerAlias(token, canonical);
+        registerGeneratedOwnerAlias(toCountryName(normalizeString(token)), canonical);
+      }
+    }
+  }
+
   // Standardised polity names. An owner field resolves only to a name this map
   // declares: an owner token actually on the map, a polity record's key, its
   // declared display name, or one of its declared aliases (a stock CODE is
   // first turned into its stock name, which then has to be declared like any
-  // other). Nothing is inferred: "Russia" on a world whose power is the
-  // "Russian Federation" — and nothing called "Russia" — names nobody, and a
-  // world that has both has two different countries. The identity resolver's
-  // core-word and stock-country stages used to fold one onto the other here.
+  // other). Existing owners stay exact; same-payload lifecycle aliases above
+  // are the only exception so CREATE/RESTORE + transfer can be atomic.
   const ownerNameIndex = new Map(); // folded name -> the owner label as the map spells it
   const declareOwner = (rawName, canonical) => {
     const key = regionKey(rawName);
@@ -3389,8 +3519,12 @@ const resolveRegionTransfers = async (containers, world, {
   const knownOwnerLabels = [...new Set(ownerNameIndex.values())].sort((a, b) => a.localeCompare(b));
 
   const resolveOwnerName = (token) => {
-    const raw = toCountryName(normalizeString(token));
+    const rawToken = normalizeString(token);
+    const raw = toCountryName(rawToken);
     if (!raw) return "";
+    const samePayload = generatedOwnerAliases.get(regionKey(rawToken))
+      || generatedOwnerAliases.get(regionKey(raw));
+    if (samePayload) return samePayload;
     return ownerNameIndex.get(regionKey(raw)) ?? "";
   };
   const ownerIsKnown = (token) => Boolean(resolveOwnerName(token));
@@ -3420,6 +3554,36 @@ const resolveRegionTransfers = async (containers, world, {
     if (!key) return [];
     return catalog.filter((region) => ownerKeyOf(region.id) === key);
   };
+
+  const ownerNameOf = (regionId) => {
+    if (ownershipMode === "sovereignty") {
+      const sovereign = toCountryName(normalizeString(sovereigntyOwners[regionId]));
+      if (sovereign) return resolveOwnerName(sovereign);
+    }
+    const controller = toCountryName(normalizeString(controlOwners[regionId]));
+    if (controller) return resolveOwnerName(controller);
+    const region = byId.get(regionId);
+    return resolveOwnerName(region?.country || toCountryName(region?.countryCode) || "");
+  };
+
+  // GM-only exhaustive base-geography scope. "All North Korean states" means
+  // the rendered PRK footprint even when those regions are currently held by a
+  // larger alternate-history polity. It must NOT be interpreted as wholeCountry
+  // on that current owner (which could move the entire Soviet Union).
+  const explicitBaseScope = !exactRegionIdsOnly
+    ? detectExplicitBaseTerritoryScope(
+        explicitScopeText,
+        catalog.map((region) => ({
+          ...region,
+          // The rendered feature's `owner` may be the CURRENT scenario polity
+          // (e.g. Soviet Union), while countryCode remains the immutable base
+          // geography provenance (PRK). Exhaustive phrases such as "all North
+          // Korean states" must resolve against that base footprint, not the
+          // current political owner.
+          country: toCountryName(region?.countryCode) || region?.country,
+        })),
+      )
+    : null;
 
   // Phase 8B.2.9: city-grounded territory operations must follow the ACTUAL
   // rendered scenario geometry, not a historically plausible region label. A
@@ -3607,28 +3771,12 @@ const resolveRegionTransfers = async (containers, world, {
     return false;
   };
 
-  const expandWholeCountry = (transfer) => {
-    const target = resolveOwnerName(
-      normalizeString(transfer?.regionId) ||
-      normalizeString(transfer?.regionName),
-    );
-    const key = canonicalOwnerKey(target);
-    if (!key) return [];
-
-    const toKey = canonicalOwnerKey(transfer?.toCode);
-    const owned = catalog.filter((region) => {
-      const owner = ownerKeyOf(region.id);
-      return owner === key && owner !== toKey;
-    });
-
-    return owned.map((region) => ({
-      ...transfer,
-      fromCode: resolveOwnerName(transfer?.fromCode) || target,
-      regionId: region.id,
-      regionName: region.name,
-      wholeCountry: undefined,
-    }));
-  };
+  const expandWholeCountry = (transfer) => expandWholeCountryTransfer(transfer, {
+    catalog,
+    resolveOwnerName,
+    canonicalOwnerKey,
+    ownerKeyOf,
+  });
 
   // The regions a transfer can legitimately mean: the losing side's when the
   // model named one, else everything the recipient does not already hold.
@@ -3760,11 +3908,12 @@ const resolveRegionTransfers = async (containers, world, {
         continue;
       }
       if (transfer?.wholeCountry === true) {
+        const sourceToken = wholeCountrySourceToken(transfer);
         const expanded = expandWholeCountry(transfer);
         if (expanded.length) {
           console.info(
             `[ai] ${path}.regionTransfers expanded whole country ` +
-              `"${normalizeString(transfer?.regionId)}" -> ${normalizeString(transfer?.toCode)}: ` +
+              `"${sourceToken}" -> ${normalizeString(transfer?.toCode)}: ` +
               `${expanded.length} region(s).`,
           );
           for (const item of expanded) {
@@ -3773,10 +3922,58 @@ const resolveRegionTransfers = async (containers, world, {
           }
           continue;
         }
+
+        // Never degrade a failed whole-country request into one exact province.
+        // That is how a malformed payload such as wholeCountry=true +
+        // regionId="Guangzhouwan" turned "all of France" into one overseas
+        // concession. wholeCountry is all-or-nothing: either native ownership
+        // expansion succeeds from the losing polity, or the operation is rejected.
+        unresolved.push({
+          label: sourceToken,
+          fromCode: normalizeString(transfer?.fromCode),
+          path,
+          candidates: regionsOwnedBy(sourceToken),
+          reason: "wholeCountry scope could not be expanded from the losing polity",
+          transferIndex,
+          wholeCountry: true,
+        });
+        continue;
       }
 
       const regionId = deterministicResolve(transfer, event);
       if (regionId) {
+        // If the administrator explicitly requested an exhaustive rendered
+        // geographic footprint ("all North Korean states", "all French
+        // territories") and the model supplied at least one correctly grounded
+        // operation inside that footprint, native code completes the SAME
+        // structured operation across every rendered region in that base
+        // geography. This is scope completion, not semantic invention: the
+        // model still decides legal sovereignty vs de-facto control and the
+        // recipient; native code merely prevents a one-province partial apply.
+        if (explicitBaseScope && scopeContainsRegion(explicitBaseScope, regionId)) {
+          const destinationKey = regionKey(transfer?.toCode);
+          for (const scopedRegionId of explicitBaseScope.regionIds) {
+            const scopedRow = byId.get(scopedRegionId);
+            if (!scopedRow) continue;
+            const fromCode = ownerNameOf(scopedRegionId);
+            if (!fromCode || canonicalOwnerKey(fromCode) === canonicalOwnerKey(transfer?.toCode)) continue;
+            const expanded = {
+              ...transfer,
+              fromCode,
+              regionId: scopedRegionId,
+              regionName: scopedRow.name || scopedRegionId,
+              wholeCountry: undefined,
+            };
+            pushUniqueTransfer(resolved, expanded);
+            destinationByRegion.set(scopedRegionId, destinationKey);
+          }
+          console.info(
+            `[gm territory] completed explicit base-geography scope ${explicitBaseScope.countryName || explicitBaseScope.countryCode}: ` +
+              `${explicitBaseScope.regionIds.length} rendered region(s) -> ${normalizeString(transfer?.toCode)}.`,
+          );
+          continue;
+        }
+
         const row = byId.get(regionId);
         const normalized = {
           ...transfer,
@@ -4158,7 +4355,7 @@ const resolveRegionTransfers = async (containers, world, {
 // legal transfers, but they are bounded by current DE-FACTO control instead of
 // sovereignty. Proxy them through the proven resolver rather than maintain two
 // subtly different historical-geography engines.
-const resolveRegionControlOps = async (containers, world) => {
+const resolveRegionControlOps = async (containers, world, { exactRegionIdsOnly = false, explicitScopeText = "" } = {}) => {
   const proxyContainers = containers.map((container) => {
     const proxies = normalizeArray(container?.impacts?.regionControlOps).map((op, index) => {
       const realToCode = normalizeString(op?.toCode);
@@ -4185,7 +4382,9 @@ const resolveRegionControlOps = async (containers, world) => {
 
   const unresolved = await resolveRegionTransfers(proxyContainers, world, {
     ownershipMode: "control",
-    enforceNarratedCityCoverage: true,
+    enforceNarratedCityCoverage: !exactRegionIdsOnly,
+    exactRegionIdsOnly,
+    explicitScopeText,
   });
 
   for (let index = 0; index < containers.length; index += 1) {
@@ -4206,6 +4405,41 @@ const resolveRegionControlOps = async (containers, world) => {
   return unresolved;
 };
 
+// Preview resolves claim geography too. Apply must therefore verify the exact
+// approved claim ids against the same compact scenario catalog without reopening
+// authored GeoJSON, resolving friendly names again, or silently dropping a claim
+// the administrator already approved. Ordinary AI generation may still salvage an
+// unresolvable claim because claims do not move borders; this exact-id guard is GM
+// transaction integrity, not a broader turn-failure rule.
+const validateExactApprovedRegionClaims = (containers) => {
+  const claimEntries = [];
+  for (const { impacts, path } of containers) {
+    for (const [claimIndex, claim] of normalizeArray(impacts?.regionClaims).entries()) {
+      claimEntries.push({ claim, claimIndex, path });
+    }
+  }
+  if (claimEntries.length === 0) return "";
+
+  const exactCatalog = getPrimedScenarioRegionCatalog() ?? [];
+  if (!Array.isArray(exactCatalog) || exactCatalog.length === 0) {
+    return "Approved region claims cannot be revalidated because the compact scenario region catalog is not primed; regenerate the GM preview after the map finishes loading.";
+  }
+
+  const exactIds = new Set(
+    exactCatalog
+      .map((region) => normalizeString(region?.id))
+      .filter(Boolean),
+  );
+
+  for (const { claim, claimIndex, path } of claimEntries) {
+    const regionId = normalizeString(claim?.regionId);
+    if (!regionId || !exactIds.has(regionId)) {
+      return `${path}.regionClaims[${claimIndex}].regionId "${regionId || "(blank)"}" is not present in the primed scenario region catalog. Regenerate the GM preview; Apply will not reinterpret or silently drop an approved claim.`;
+    }
+  }
+  return "";
+};
+
 // One retry's worth of corrective vocabulary: the exact regions the losing side
 // currently owns, so a model that wrote "Pomerania" can resend the same answer
 // with the real names/ids ("Pomorskie (POL.11_1)") instead of losing the map
@@ -4214,6 +4448,14 @@ const buildTransferFeedback = (unresolved) => {
   const lines = [];
   for (const entry of unresolved.slice(0, 3)) {
     const target = entry.label || "(blank)";
+    if (entry?.wholeCountry) {
+      lines.push(
+        `${entry.path}.regionTransfers: wholeCountry=true could not be expanded from losing polity "${target}". ` +
+          `Set fromCode to the losing polity's FULL current name and set regionId to that same polity name; ` +
+          `do not put one province/colony in regionId for a whole-country operation.`,
+      );
+      continue;
+    }
     if (entry.unknownOwner) {
       const powers = normalizeArray(entry.knownOwners);
       const listed = powers.slice(0, 80).map((name) => `"${name}"`).join(", ");
@@ -4341,7 +4583,12 @@ const buildProjectFeedback = (operationPath, operation, knownProjects) => {
 
 // captureGuard: the reluctance check below is for turn narration; an administrative
 // GM correction may legitimately mention an annexation without moving a border.
-export const validateGeneratedWorldChanges = async (candidate, world, { strictTransfers = false, captureGuard = true } = {}) => {
+export const validateGeneratedWorldChanges = async (candidate, world, {
+  strictTransfers = false,
+  captureGuard = true,
+  resolvedRegionIdsOnly = false,
+  explicitScopeText = "",
+} = {}) => {
   const strict = strictTransfers;
   const containers = Array.isArray(candidate?.events)
     ? candidate.events.map((event, index) => ({ event, impacts: event?.impacts, path: `$.events[${index}].impacts` }))
@@ -4360,13 +4607,24 @@ export const validateGeneratedWorldChanges = async (candidate, world, { strictTr
     if (normalizeString(project?.id)) knownProjects.set(normalizeString(project.id), name);
   }
 
-  const unresolvedTransfers = await resolveRegionTransfers(containers, world, { ownershipMode: "sovereignty" });
+  const unresolvedTransfers = await resolveRegionTransfers(containers, world, {
+    ownershipMode: "sovereignty",
+    exactRegionIdsOnly: resolvedRegionIdsOnly,
+    explicitScopeText,
+  });
   if (strict && unresolvedTransfers.length > 0) {
     return buildTransferFeedback(unresolvedTransfers);
   }
-  const unresolvedControlOps = await resolveRegionControlOps(containers, world);
+  const unresolvedControlOps = await resolveRegionControlOps(containers, world, {
+    exactRegionIdsOnly: resolvedRegionIdsOnly,
+    explicitScopeText,
+  });
   if (strict && unresolvedControlOps.length > 0) {
     return buildControlFeedback(unresolvedControlOps);
+  }
+  if (resolvedRegionIdsOnly) {
+    const exactClaimError = validateExactApprovedRegionClaims(containers);
+    if (exactClaimError) return exactClaimError;
   }
   // Reluctance guard (strict attempt only): events that NARRATE a capture while
   // the whole payload ships ZERO regionTransfers are the recurring field report
@@ -9686,6 +9944,9 @@ const gameMasterCanonicalPolityKey = (token, world) => {
     requireActive: false,
     allowCoreMatch: true,
     allowStockBase: true,
+    // Administrative/state-mutation comparisons must not let map provenance
+    // redirect a polity token to some other active actor.
+    allowMapRefs: false,
   });
   return gameMasterPolityKey(normalizeString(resolution?.resolved) || toCountryName(raw) || raw);
 };
@@ -9702,6 +9963,7 @@ const validateGameMasterStatPatches = (patches, world, events) => {
       requireActive: false,
       allowCoreMatch: true,
       allowStockBase: true,
+      allowMapRefs: false,
     });
     const canonical = normalizeString(resolution?.resolved);
     if (!canonical) {
@@ -9746,6 +10008,7 @@ const normalizeGameMasterStatPatches = (patches, world) => {
       requireActive: false,
       allowCoreMatch: true,
       allowStockBase: true,
+      allowMapRefs: false,
     });
     return {
       ...entry,
@@ -10000,6 +10263,7 @@ const validateGameMasterStorylineUpdates = async (candidate, { mode, world, game
         requireActive: false,
         allowCoreMatch: true,
         allowStockBase: true,
+        allowMapRefs: false,
       });
       const resolved = normalizeString(resolution?.resolved || raw);
       const canonical = currentPolities.get(resolved.toLowerCase()) || currentPolities.get(raw.toLowerCase()) || "";
@@ -10027,7 +10291,11 @@ const resolveGameMasterLifecycleIdentity = (token, world) => {
     // lifecycle semantics in a historical save (1915 Poland was the bug here).
     requireActive: false,
     allowCoreMatch: true,
-    allowStockBase: true,
+    // Stock/base geography and mapRefs are vocabulary/provenance, not proof that
+    // a political actor already exists. GM lifecycle identity must come from the
+    // campaign's declared political registry/aliases/lineage only.
+    allowStockBase: false,
+    allowMapRefs: false,
   });
   return normalizeString(resolution?.resolved);
 };
@@ -10180,7 +10448,13 @@ const validateGameMasterBreakawaySovereignty = (candidate) => {
   return "";
 };
 
-const validateGameMasterPreviewPayload = async (candidate, { mode, world, game, request = "" }) => {
+const validateGameMasterPreviewPayload = async (candidate, {
+  mode,
+  world,
+  game,
+  request = "",
+  resolvedRegionIdsOnly = false,
+}) => {
   if (!candidate || typeof candidate !== "object") return "The GM did not return a transaction object.";
   if (!GAME_MASTER_MODE_SET.has(mode)) return `Unsupported GM mode "${mode}".`;
 
@@ -10225,7 +10499,12 @@ const validateGameMasterPreviewPayload = async (candidate, { mode, world, game, 
   // Resolve/validate map, unit, marker and chat operations now, while this is
   // still a preview. This may conservatively resolve a grounded place label to
   // an exact map region, but it never writes world state.
-  const worldChangeError = await validateGeneratedWorldChanges(candidate, world, { strictTransfers: true, captureGuard: false });
+  const worldChangeError = await validateGeneratedWorldChanges(candidate, world, {
+    strictTransfers: true,
+    captureGuard: false,
+    resolvedRegionIdsOnly,
+    explicitScopeText: resolvedRegionIdsOnly ? "" : request,
+  });
   if (worldChangeError) return worldChangeError;
 
   const statError = validateGameMasterStatPatches(candidate.countryStatPatches, world, candidate.events);
@@ -10607,6 +10886,7 @@ export const applyGameMasterPreview = async (preview) => {
       world: liveWorld,
       game: bundle.game,
       request: preview.request,
+      resolvedRegionIdsOnly: true,
     });
     if (validationError) throw new Error(`GM transaction is no longer valid: ${validationError}`);
     if (JSON.stringify(candidate) !== candidateBeforeValidation) {
@@ -10615,9 +10895,27 @@ export const applyGameMasterPreview = async (preview) => {
 
     const events = normalizeArray(transaction.events).map((event) => cloneValue(event));
     const priorEvents = normalizeEvents(bundle.events);
-    const freshEvents = dedupeGeneratedEvents(priorEvents, events);
-    if (freshEvents.length !== events.length) {
-      throw new Error("One or more authored GM events duplicate existing canonical history. Nothing was applied; regenerate or make the event wording/date explicit.");
+
+    // Ordinary turn de-duplication is intentionally prose-based because cheap models
+    // tend to restate recent timeline text. GM Apply cannot use that rule: a human-
+    // approved correction may reuse the exact same date/title/description while
+    // changing canonical effects (for example replacing an earlier buggy one-region
+    // transfer with the intended whole-country transfer). Reject only a TRUE
+    // canonical duplicate here: same visible content AND same structured effects.
+    const seenCanonicalEvents = new Set(priorEvents.map((event) => eventCanonicalKey(event)));
+    let duplicateCanonicalEvent = null;
+    for (const event of events) {
+      const key = eventCanonicalKey(event);
+      if (seenCanonicalEvents.has(key)) {
+        duplicateCanonicalEvent = event;
+        break;
+      }
+      seenCanonicalEvents.add(key);
+    }
+    if (duplicateCanonicalEvent) {
+      throw new Error(
+        `Authored GM event "${normalizeString(duplicateCanonicalEvent?.title) || "Untitled"}" exactly duplicates existing canonical history, including its structured effects. Nothing was applied; regenerate or make the event distinct.`,
+      );
     }
     const existingIds = new Set(priorEvents.map((event) => normalizeString(event?.id)).filter(Boolean));
     const duplicateId = events.find((event) => existingIds.has(normalizeString(event?.id)));
@@ -10661,42 +10959,52 @@ export const applyGameMasterPreview = async (preview) => {
       });
     }
 
-    const warMerge = applyWarUpdates({
-      world: nextWorld,
-      updates: normalizeArray(transaction.warUpdates),
-      events,
-      stopDate: bundle.game.gameDate || bundle.game.startDate || "",
-      round: bundle.game.round || 0,
-    });
-    if (warMerge.appliedIds.length !== normalizeArray(transaction.warUpdates).length) {
+    const warUpdatesForApply = normalizeArray(transaction.warUpdates);
+    const warMerge = warUpdatesForApply.length
+      ? applyWarUpdates({
+          world: nextWorld,
+          updates: warUpdatesForApply,
+          events,
+          stopDate: bundle.game.gameDate || bundle.game.startDate || "",
+          round: bundle.game.round || 0,
+        })
+      : { world: nextWorld, appliedIds: [] };
+    if (warMerge.appliedIds.length !== warUpdatesForApply.length) {
       throw new Error("A canonical war operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
     nextWorld = warMerge.world;
 
-    const diplomaticMerge = applyDiplomaticUpdates({
-      world: nextWorld,
-      relationUpdates: normalizeArray(transaction.relationUpdates),
-      agreementUpdates: normalizeArray(transaction.agreementUpdates),
-      events,
-      stopDate: bundle.game.gameDate || bundle.game.startDate || "",
-      round: bundle.game.round || 0,
-    });
-    if (diplomaticMerge.appliedRelationIds.length !== normalizeArray(transaction.relationUpdates).length) {
+    const relationUpdatesForApply = normalizeArray(transaction.relationUpdates);
+    const agreementUpdatesForApply = normalizeArray(transaction.agreementUpdates);
+    const diplomaticMerge = relationUpdatesForApply.length || agreementUpdatesForApply.length
+      ? applyDiplomaticUpdates({
+          world: nextWorld,
+          relationUpdates: relationUpdatesForApply,
+          agreementUpdates: agreementUpdatesForApply,
+          events,
+          stopDate: bundle.game.gameDate || bundle.game.startDate || "",
+          round: bundle.game.round || 0,
+        })
+      : { world: nextWorld, appliedRelationIds: [], appliedAgreementIds: [] };
+    if (diplomaticMerge.appliedRelationIds.length !== relationUpdatesForApply.length) {
       throw new Error("A canonical relation operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
-    if (diplomaticMerge.appliedAgreementIds.length !== normalizeArray(transaction.agreementUpdates).length) {
+    if (diplomaticMerge.appliedAgreementIds.length !== agreementUpdatesForApply.length) {
       throw new Error("A canonical agreement operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
     nextWorld = diplomaticMerge.world;
 
-    const storylineMerge = applyWorldStorylineUpdates({
-      world: nextWorld,
-      updates: normalizeArray(transaction.storylineUpdates),
-      events,
-      stopDate: bundle.game.gameDate || bundle.game.startDate || "",
-      round: bundle.game.round || 0,
-    });
-    if (storylineMerge.appliedIds.length !== normalizeArray(transaction.storylineUpdates).length) {
+    const storylineUpdatesForApply = normalizeArray(transaction.storylineUpdates);
+    const storylineMerge = storylineUpdatesForApply.length
+      ? applyWorldStorylineUpdates({
+          world: nextWorld,
+          updates: storylineUpdatesForApply,
+          events,
+          stopDate: bundle.game.gameDate || bundle.game.startDate || "",
+          round: bundle.game.round || 0,
+        })
+      : { world: nextWorld, appliedIds: [] };
+    if (storylineMerge.appliedIds.length !== storylineUpdatesForApply.length) {
       throw new Error("A canonical storyline operation failed during the in-memory apply. Nothing was persisted; regenerate the preview.");
     }
     nextWorld = storylineMerge.world;
@@ -10785,7 +11093,7 @@ export const applyGameMasterPreview = async (preview) => {
     const touchedChats = generatedChats.length > 0;
     const touchedColors = JSON.stringify(nextColors) !== JSON.stringify(colors);
     const writes = [writeWorldState(nextWorld)];
-    if (touchedEvents) writes.push(writeEventsState(nextEvents));
+    if (touchedEvents) writes.push(writeEventsState(nextEvents, { preserveApprovedEvents: true }));
     if (touchedChats) writes.push(writeChatsState(chatsToWrite));
     if (touchedColors) writes.push(writeJson(JSON_URLS.colors, nextColors, { pretty: true }));
 
@@ -10796,7 +11104,7 @@ export const applyGameMasterPreview = async (preview) => {
       // transaction may have touched so a single failed write does not leave half an
       // intervention in canon. Best-effort rollback errors are logged separately.
       const rollbackWrites = [writeWorldState(bundle.world)];
-      if (touchedEvents) rollbackWrites.push(writeEventsState(bundle.events));
+      if (touchedEvents) rollbackWrites.push(writeEventsState(bundle.events, { preserveApprovedEvents: true }));
       if (touchedChats) rollbackWrites.push(writeChatsState(bundle.chats));
       if (touchedColors) rollbackWrites.push(writeJson(JSON_URLS.colors, colors, { pretty: true }));
       const rollbackResults = await Promise.allSettled(rollbackWrites);

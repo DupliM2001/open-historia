@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+// Exercise the exact worker-safe label engine used by Political Cartography v2.
+// Runtime countryLabels.js still owns stock-map loading/caching, but geometry
+// regressions belong against production vNext layout rather than its legacy copy.
 import {
   POLITY_LABEL_TIERS,
   buildPolityLabelCollections,
   curveMinZoomForPolityLabelTier,
   selectPolityPointFallbacks,
-  summarizePolityLabelDiagnostics,
-} from "../src/runtime/countryLabels.js";
+} from "../src/Game/Map/vnext/polityLabels.js";
 import { derivePolitySurfaces } from "../src/Game/Map/vnext/politySurfaces.js";
 
 const surface = (owner, coordinates) => ({
@@ -19,6 +21,77 @@ const surface = (owner, coordinates) => ({
 const box = (owner, west, south, east, north) => surface(owner, [[[
   [west, south], [east, south], [east, north], [west, north], [west, south],
 ]]]);
+
+
+const gentleContinentalArc = (owner, offset = 0) => surface(owner, [[[
+  [offset + 0, 0],
+  [offset + 15, -2],
+  [offset + 30, -3],
+  [offset + 45, -1],
+  [offset + 60, 3],
+  [offset + 75, 8],
+  [offset + 85, 12],
+  [offset + 85, 28],
+  [offset + 70, 23],
+  [offset + 55, 18],
+  [offset + 40, 14],
+  [offset + 25, 12],
+  [offset + 10, 11],
+  [offset + 0, 10],
+  [offset + 0, 0],
+]]]);
+
+const summarizePolityLabelDiagnostics = (collections) => {
+  const features = Array.isArray(collections?.labelData?.features)
+    ? collections.labelData.features
+    : [
+        ...(collections?.lineLabelData?.features ?? []),
+        ...(collections?.pointLabelData?.features ?? []),
+      ];
+  const counts = new Map();
+  for (const feature of features) {
+    const owner = String(feature?.properties?.owner ?? "");
+    counts.set(owner, (counts.get(owner) ?? 0) + 1);
+  }
+  return features.map((feature) => {
+    const props = feature?.properties ?? {};
+    return {
+      owner: props.owner,
+      name: props.name,
+      labelCount: counts.get(String(props.owner ?? "")) ?? 0,
+      mode: props.mode,
+      tier: props.tier,
+      minZoom: props.minZoom,
+      curveMinZoom: props.curveMinZoom,
+      curveBand: props.curveBand,
+      baselineKind: props.baselineKind,
+      placementBendRatio: Number(Number(props.placementBendRatio ?? 0).toFixed(4)),
+      safeWarp: props.safeWarp,
+      forceOverlapZoom: props.forceOverlapZoom,
+      visibilityScale: props.visibilityScale,
+      fontPxAtZoom4: props.fontPxAtZoom4,
+      letterSpacing: props.letterSpacing,
+      targetOccupancy: props.targetOccupancy,
+      estimatedOccupancy: props.estimatedOccupancy,
+      lineFontPxAtZoom4: props.lineFontPxAtZoom4,
+      lineLetterSpacing: props.lineLetterSpacing,
+      lineEstimatedOccupancy: props.lineEstimatedOccupancy,
+      shapeWidth: Number(Number(props.shapeWidth ?? 0).toFixed(1)),
+      shapeHeight: Number(Number(props.shapeHeight ?? 0).toFixed(1)),
+      axisSpan: Number(Number(props.axisSpan ?? 0).toFixed(1)),
+      crossSpan: Number(Number(props.crossSpan ?? 0).toFixed(1)),
+      pathLength: Number(Number(props.pathLength ?? 0).toFixed(1)),
+      pathWidth: Number(Number(props.pathWidth ?? 0).toFixed(1)),
+      pathTurnDegrees: props.pathTurnDegrees,
+      warpPointCount: props.warpPointCount,
+      warpMaxSegmentTurnDegrees: props.warpMaxSegmentTurnDegrees,
+      warpDetourRatio: props.warpDetourRatio,
+      rotation: Number(Number(props.rotation ?? 0).toFixed(2)),
+      anchorLng: Number(Number(props.anchorLng ?? 0).toFixed(3)),
+      anchorLat: Number(Number(props.anchorLat ?? 0).toFixed(3)),
+    };
+  });
+};
 
 const byOwner = (result, owner) => result.labelData.features
   .find((feature) => feature.properties.owner === owner);
@@ -111,10 +184,10 @@ test("Map vNext keeps giant polity geometry stable when the viewport changes", (
   assert.ok(left.labelData.features[0].properties.letterSpacing >= 0.05);
 });
 
-test("continental polity keeps one logical label with disjoint point + line presentations", () => {
+test("curved continental polity keeps one logical label with disjoint point + line presentations", () => {
   const result = buildPolityLabelCollections({
     type: "FeatureCollection",
-    features: [box("Canada", -140, 45, -52, 70)],
+    features: [gentleContinentalArc("Canada")],
   });
 
   const label = byOwner(result, "Canada");
@@ -127,7 +200,8 @@ test("continental polity keeps one logical label with disjoint point + line pres
   assert.equal(result.lineLabelData.features[0].properties.presentation, "detail");
   assert.ok(label.properties.curveMinZoom > label.properties.minZoom);
   assert.ok(label.properties.fitScale > 0);
-  assert.ok(label.properties.estimatedOccupancy >= 0.52);
+  assert.ok(label.properties.estimatedOccupancy >= 0.40);
+  assert.ok(label.properties.lineEstimatedOccupancy >= 0.50);
 });
 
 test("compact and continental polities both stay one whole-word feature", () => {
@@ -238,16 +312,15 @@ test("regression matrix: large states stretch, Europe enters early, long Congo n
 
   for (const owner of ["Russia", "Canada", "China", "United States", "Kazakhstan"]) {
     const entry = d.get(owner);
-    assert.equal(entry.mode, "hybrid", owner);
     assert.ok(entry.minZoom <= 1.75, `${owner} minZoom=${entry.minZoom}`);
-    if (["Russia", "Canada", "China", "United States"].includes(owner)) {
-      assert.equal(entry.curveBand, "world", `${owner} should use the gentle world warp`);
-      assert.ok(entry.curveMinZoom <= 1.1, `${owner} world curveMinZoom=${entry.curveMinZoom}`);
-    } else {
-      assert.ok(entry.curveMinZoom <= 3.85, `${owner} curveMinZoom=${entry.curveMinZoom}`);
-    }
     assert.ok(entry.estimatedOccupancy >= 0.52, `${owner} overview occupancy=${entry.estimatedOccupancy}`);
-    assert.ok(entry.lineEstimatedOccupancy >= 0.50, `${owner} line occupancy=${entry.lineEstimatedOccupancy}`);
+    // CP4.2: meaningful polities receive a stable territorial baseline even when
+    // that baseline is geometrically straight. A rectangle should therefore be
+    // near-straight, not point-only and not artificially bowed.
+    assert.equal(entry.mode, "hybrid", `${owner} should expose a baseline presentation`);
+    assert.equal(entry.baselineKind, "near-straight", `${owner} rectangle should remain near-straight`);
+    assert.ok(entry.placementBendRatio <= 0.01, `${owner} rectangle bend=${entry.placementBendRatio}`);
+    assert.ok(result.lineLabelData.features.some((f) => f.properties.owner === owner));
   }
 
   for (const owner of ["Ukraine", "Poland", "Germany", "France"]) {
@@ -284,9 +357,13 @@ test("high-zoom compact-state policy keeps the UK robust and microstates geograp
   });
   const d = diagnosticsByOwner(result);
 
-  assert.equal(d.get("United Kingdom").mode, "point",
-    "compact major powers must never disappear behind a line-label handoff");
+  assert.equal(d.get("United Kingdom").mode, "hybrid",
+    "a meaningful compact polity may use a near-straight territorial baseline");
   assert.ok(d.get("United Kingdom").minZoom <= 1.75);
+  assert.ok(result.pointLabelData.features.some((f) => f.properties.owner === "United Kingdom"),
+    "renderer fallback remains available until the baseline is confirmed");
+  assert.ok(result.lineLabelData.features.some((f) => f.properties.owner === "United Kingdom"),
+    "the UK should also expose its cartographic baseline");
 
   for (const owner of ["Bosnia and Herzegovina", "Transnistria", "Luxembourg", "Liechtenstein", "San Marino"]) {
     const entry = d.get(owner);
@@ -314,6 +391,25 @@ test("continental tracking stays cohesive instead of spending the whole territor
   assert.ok(d.get("Canada").letterSpacing <= 1.55);
   assert.ok(d.get("China").letterSpacing <= 1.55);
   assert.ok(d.get("Russia").estimatedOccupancy >= 0.50);
+});
+
+test("CP4 compact diagonal geometry may beat the horizontal readability preference", () => {
+  const points = [
+    [-1.965, -5.039], [5.407, 0.124], [1.965, 5.039], [-5.407, -0.124], [-1.965, -5.039],
+  ].map(([lng, lat]) => [lng + 20, lat + 25]);
+  const result = buildPolityLabelCollections({
+    type: "FeatureCollection",
+    features: [surface("Diagonal", [[points]])],
+  });
+  const label = byOwner(result, "Diagonal");
+
+  assert.equal(label.properties.mode, "hybrid", "straight diagonal territory should expose its baseline");
+  assert.equal(label.properties.baselineKind, "near-straight", "straight diagonal baseline must not invent curvature");
+  assert.ok(label.properties.placementBendRatio <= 0.01);
+  assert.ok(label.properties.geometryElongation < 1.8, "fixture must sit below the old hard-horizontal threshold");
+  assert.ok(Math.abs(label.properties.rotation) >= 25,
+    `a clear diagonal interior axis should beat horizontal, rotation=${label.properties.rotation}`);
+  assert.equal(label.properties.placementInside, true);
 });
 
 test("R6 balanced Pax fit uses a polity's dominant axis without overfilling it", () => {
@@ -371,13 +467,14 @@ test("R6 dampens extreme long-thin point labels and restores safe warping", () =
     `long-thin Norway should be damped (${norway.targetOccupancy}) below Sweden (${sweden.targetOccupancy})`);
   assert.ok(norway.fontPxAtZoom4 < sweden.fontPxAtZoom4 * 1.45,
     `Norway should not become a giant banner: ${norway.fontPxAtZoom4}px vs ${sweden.fontPxAtZoom4}px`);
-  assert.equal(ukraine.mode, "hybrid", "a wide, smooth polity should retain native territory-following text");
-  assert.ok(ukraine.lineEstimatedOccupancy >= 0.50 && ukraine.lineEstimatedOccupancy <= 0.72);
+  assert.equal(ukraine.mode, "hybrid", "a straight wide polity should still expose its territorial baseline");
+  assert.equal(ukraine.baselineKind, "near-straight");
+  assert.ok(ukraine.placementBendRatio <= 0.01, `rectangle Ukraine bend=${ukraine.placementBendRatio}`);
 });
 
 
 
-test("R7 safe-warp handoff never creates a line for a renderer-risky corkscrew", () => {
+test("R7 cartographic baseline trims a corkscrew to a calm interior corridor", () => {
   const result = buildPolityLabelCollections({
     type: "FeatureCollection",
     features: [surface("Corkscrew", [[[
@@ -388,11 +485,15 @@ test("R7 safe-warp handoff never creates a line for a renderer-risky corkscrew",
   });
 
   const logical = byOwner(result, "Corkscrew");
-  assert.equal(logical.properties.mode, "point");
-  assert.equal(logical.properties.safeWarp, false);
-  assert.equal(logical.properties.curveBand, "none");
-  assert.equal(result.lineLabelData.features.length, 0);
-  assert.equal(result.pointLabelData.features[0].properties.presentation, "persistent");
+  assert.equal(logical.properties.mode, "hybrid");
+  assert.equal(logical.properties.safeWarp, true);
+  assert.ok(result.lineLabelData.features.length === 1);
+  assert.ok(logical.properties.warpMaxSegmentTurnDegrees <= 46,
+    `trimmed corridor max turn=${logical.properties.warpMaxSegmentTurnDegrees}`);
+  assert.ok(logical.properties.warpDetourRatio <= 1.25,
+    `trimmed corridor detour=${logical.properties.warpDetourRatio}`);
+  assert.ok(logical.properties.placementBendRatio <= 0.105,
+    `trimmed corridor bend=${logical.properties.placementBendRatio}`);
 });
 
 test("R7 simplified native warp is bounded to seven points and gentle turns", () => {
@@ -409,11 +510,8 @@ test("R7 simplified native warp is bounded to seven points and gentle turns", ()
   if (logical.properties.mode === "hybrid") {
     const line = result.lineLabelData.features[0];
     assert.equal(logical.properties.safeWarp, true);
-    if (logical.properties.curveBand === "world") {
-      assert.equal(line.geometry.coordinates.length, 3);
-    } else {
-      assert.ok(line.geometry.coordinates.length >= 5 && line.geometry.coordinates.length <= 7);
-    }
+    assert.ok(line.geometry.coordinates.length >= 5 && line.geometry.coordinates.length <= 7,
+      "validated native warp stays bounded to a small territorial spine");
     assert.ok(logical.properties.warpMaxSegmentTurnDegrees <= 32);
     assert.ok(logical.properties.warpDetourRatio <= 1.18);
   } else {
@@ -425,25 +523,27 @@ test("R7 simplified native warp is bounded to seven points and gentle turns", ()
 });
 
 
-test("R11 renderer and generator share world/early/standard curve thresholds", () => {
+test("CP4.2 renderer and generator let territorial baselines enter with their polity tier", () => {
   for (const tier of POLITY_LABEL_TIERS) {
-    assert.equal(curveMinZoomForPolityLabelTier(tier, "standard"), tier.curveMinZoom);
+    assert.equal(
+      curveMinZoomForPolityLabelTier(tier, "standard"),
+      Math.max(tier.minZoom + 0.15, tier.minZoom),
+    );
     assert.equal(
       curveMinZoomForPolityLabelTier(tier, "early"),
-      Math.max(tier.minZoom + 0.75, tier.curveMinZoom - 0.55),
+      Math.max(tier.minZoom + 0.10, tier.minZoom),
     );
     assert.equal(
       curveMinZoomForPolityLabelTier(tier, "world"),
-      Math.max(tier.minZoom + 0.15, 0.95),
+      Math.max(tier.minZoom + 0.05, 0.85),
     );
   }
 });
 
-
 test("R8 keeps the point fallback until the warped label is actually rendered", () => {
   const result = buildPolityLabelCollections({
     type: "FeatureCollection",
-    features: [box("Ukraine", 22, 44, 41, 53)],
+    features: [gentleContinentalArc("Ukraine")],
   });
   const logical = byOwner(result, "Ukraine");
   assert.equal(logical.properties.mode, "hybrid");
@@ -492,8 +592,8 @@ test("R11 world warping is scale/geometry driven and keeps the R8 point safety n
   const result = buildPolityLabelCollections({
     type: "FeatureCollection",
     features: [
-      box("Continental Alpha", 0, 0, 85, 26),
-      box("Continental Beta", 100, 5, 180, 33),
+      gentleContinentalArc("Continental Alpha", 0),
+      gentleContinentalArc("Continental Beta", 90),
     ],
   });
   const d = diagnosticsByOwner(result);
@@ -503,8 +603,8 @@ test("R11 world warping is scale/geometry driven and keeps the R8 point safety n
     assert.equal(entry.mode, "hybrid");
     assert.equal(entry.curveBand, "world");
     assert.ok(entry.curveMinZoom <= 1.1);
-    assert.equal(entry.warpPointCount, 3);
-    assert.ok(entry.warpMaxSegmentTurnDegrees <= 42);
+    assert.ok(entry.warpPointCount >= 5 && entry.warpPointCount <= 7);
+    assert.ok(entry.warpMaxSegmentTurnDegrees <= 34);
 
     const beforeRender = selectPolityPointFallbacks(result.pointLabelData, new Set());
     assert.ok(beforeRender.features.some((feature) => feature.properties.owner === owner));
