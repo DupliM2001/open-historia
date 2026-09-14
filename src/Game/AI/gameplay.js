@@ -1,21 +1,29 @@
 /*! Open Historia — portions (briefing dossiers + timeout/fallback hardening) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import { callAI, providerSupportsBatch, retrieveAIBatch, sendDiplomaticMessageOnceOff, submitAIBatch } from "./main.jsx";
-import { logAi } from "../../runtime/logClient.js";
+import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
 import { NATIVE_GAME_MASTER_PROMPT, normalizePromptPack } from "./gameplayPrompts.js";
 import { directGeneratedUnitOps } from "./nativeUnitDirector.js";
 import { directGeneratedTerritoryOps } from "./nativeTerritoryDirector.js";
 import { expandWholeCountryTransfer, wholeCountrySourceToken } from "./territoryTransferScope.js";
 import { detectExplicitBaseTerritoryScope, scopeContainsRegion } from "./gmTerritoryScope.js";
-import { curateGeneratedEvents } from "./nativeTimelineCurator.js";
+import { curateGeneratedEventsWithHidden } from "./nativeTimelineCurator.js";
 import {
   applyWorldStorylineUpdates,
+  boardProvisionalConsequenceIndexes,
   assessRecentWorldConsequenceLiveness,
   bindNewStorylineEvents,
   bindSelectedStorylineEvents,
   buildWorldInitiativeContext,
+  createMotionRepairBudget,
   decodeWorldStorylineUpdates,
-  findWorldStorylineAntiStasisIssues,
+  describeAntiStasisObjectiveRule,
+  findSkipStorylineMotionIssues,
+  mergeSkipAttentionStorylines,
+  motionRepairSkipReason,
+  motionRepairTimeRemainingMs,
   normalizeWorldStorylineEventLinks,
+  settleMotionRepairCall,
+  settleSkipStorylineUpdates,
   stripQuietDeferredStorylineUpdates,
   validateWorldEventConsequencePayload,
   validateWorldStorylinePayload,
@@ -27,7 +35,7 @@ import {
   stripWorldSweepAudit,
   validateWorldExplorationAudit,
 } from "./nativeWorldIntegrity.js";
-import { isContextDiagnosticsEnabled, logContextDiagnostics, resolveTemplateVariableDemand } from "./contextDiagnostics.js";
+import { buildPromptFingerprint, isContextDiagnosticsEnabled, logContextDiagnostics, resolveTemplateVariableDemand } from "./contextDiagnostics.js";
 import {
   SEGMENTED_JUMP_MIN_DAYS,
   buildSegmentInstruction,
@@ -37,18 +45,29 @@ import {
   planJumpSegments,
   segmentEventRange,
 } from "./jumpSegments.js";
-import { UNIT_CONTRACT_MARKER, collapseRepeatedBlock, templateAlreadySays } from "./promptDedupe.js";
-import { buildJumpProjectsDirective } from "./projectsDirective.js";
+import { UNIT_CONTRACT_MARKER, collapseRepeatedWorldContext, templateAlreadySays } from "./promptDedupe.js";
+import {
+  HIGH_PRIORITY_ASSESSMENT_MARKER,
+  HIGH_PRIORITY_ASSESSMENT_RULE,
+  buildBoardPassDirective,
+  buildJumpProjectsDirective,
+} from "./projectsDirective.js";
 import { extractJsonPayload, unwrapMimickedToolCall } from "./jsonSalvage.js";
+import { withoutPlayerParticipant } from "./chatVisibility.js";
+import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKernel.js";
 import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
+import { foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
 import {
   describeDoubtedForPrompt,
   doubtedAwaitingFreshSource,
   spyIntelDoubtOps,
   spyOperationOps,
+  boardPassCarriers,
   isProjectOpen,
+  materiallyChangedEntryIds,
   spyProvenanceOps,
+  unassessedHighPriorityEntries,
 } from "../../runtime/projects.js";
 import { activeSpies, applySpyOps, espionageBrief, intelligenceOf, isIntelligenceRated, normalizeIntelligenceRating, normalizeIntercepts, normalizeSpies, resolveEspionage } from "../../runtime/spycraft.js";
 import { buildSpyOrdersDirective } from "./spyOrdersDirective.js";
@@ -148,14 +167,16 @@ import {
   mergeCountryStatPatch,
   normalizeCountryStatSheet,
   normalizeCountryStatsTracking,
+  decodeTerritorialComponentSplit,
   expandTerritorialMacroEstimates,
 } from "../../runtime/countryStats.js";
 import { beginTurnPerfStage, endTurnPerfStage, measureTurnPerfStage, recordTurnPerfAiAttempt } from "../../runtime/turnPerf.js";
 import { difficultyDirective } from "../../runtime/difficulty.js";
 import { MAP_SETTING_KEYS, getMapSetting, isBetaUnits } from "../../runtime/mapSettings.js";
 import { AI_FIRST_BYTE_TIMEOUT_MS, AI_IDLE_TIMEOUT_MS, createIdleDeadline } from "./idleDeadline.js";
-import { logDebugEvent } from "../../runtime/debugLog.js";
-import { isProviderConfigured } from "./providerConfig.js";
+import { REPAIR_STOP_TIME_BUDGET, runBoundedRepairCall } from "./repairCall.js";
+import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
+import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
@@ -673,8 +694,9 @@ const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0 }) 
 // of deferred storylines are stripped, serious visible history must bite into a
 // canonical owner, and the records are checked against the storyline ledger as
 // the earlier segments left it. A stale selected storyline, or one whose update
-// was omitted, is repaired LOCALLY after acceptance (repairAntiStasisStorylines)
-// so one overdue process never discards a segment's other events.
+// was omitted, is repaired LOCALLY once the whole skip is in hand
+// (repairSkipStorylineMotion) so one overdue process never discards a segment's
+// other events.
 const validateSegmentStorylines = (candidate, {
   world,
   analysis,
@@ -683,6 +705,7 @@ const validateSegmentStorylines = (candidate, {
   originDate,
   targetDate,
   gameCountry,
+  board = [],
 }) => {
   normalizeWorldStorylineEventLinks(candidate, { world });
   const selectedBinding = bindSelectedStorylineEvents(candidate, {
@@ -704,11 +727,24 @@ const validateSegmentStorylines = (candidate, {
       `${deferredSalvage.strippedIds.join(", ")}. The segment's other events and records stand.`,
     );
   }
+  // The Board is a place a major event may land, but the jump cannot write to it:
+  // the board pass does, after the segments. So such an event passes on the
+  // engine's own reading that it concerns an open Board entry, and its id is
+  // recorded for applySimulationResult to prove against the board pass's ops.
+  // Only on a strict attempt — the final attempt is fail-soft for every event.
+  const playerCountry = toCountryName(normalizeString(gameCountry)) || normalizeString(gameCountry);
   const consequenceError = validateWorldEventConsequencePayload(candidate, {
     selectedStorylines: analysis?.attentionStorylines,
     strict,
+    board,
+    playerCountry,
   });
   if (consequenceError) return `[world consequence] ${consequenceError}`;
+  candidate.boardProvisionalEventIds = strict
+    ? boardProvisionalConsequenceIndexes(candidate, { board, playerCountry })
+      .map((index) => normalizeString(normalizeArray(candidate?.events)[index]?.id))
+      .filter(Boolean)
+    : [];
   const storylineError = validateWorldStorylinePayload(candidate, {
     existingStorylines: world?.storylines,
     selectedStorylines: analysis?.attentionStorylines,
@@ -777,6 +813,14 @@ const screenSegmentPayload = (payload, {
     );
   }
   payload.events = screened.events;
+  // Canonical events the screen kept off the timeline still happened: the board
+  // pass reads them. A provisional major event the screen hid needs no proving.
+  state.hiddenEvents.push(...normalizeArray(screened.hidden).map((row) => row.event));
+  const keptIds = new Set(screened.events.map((event) => normalizeString(event?.id)));
+  state.boardProvisionalEventIds.push(
+    ...normalizeArray(payload?.boardProvisionalEventIds).filter((id) => keptIds.has(id)),
+  );
+  delete payload.boardProvisionalEventIds;
   payload.warUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.warUpdates, taggedEvents, screened.events);
   payload.relationUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.relationUpdates, taggedEvents, screened.events);
   payload.agreementUpdates = filterBoundLedgerUpdatesToKeptEvents(payload?.agreementUpdates, taggedEvents, screened.events);
@@ -873,6 +917,32 @@ const withDiplomaticLedgerMigration = (bundle) => {
 // The Stats tool answers with a bounded set of demographic macro buckets; native
 // code expands them into the exact live-map component ledger before the sheet
 // is validated and persisted (see generateCountryStatSheet).
+
+// The contract block for the per-component split generateCountryStatSheet asks
+// for when a small polity's ledger has no semantic split yet (countryStats.js
+// decodeTerritorialComponentSplit). Empty when no bucket needs one.
+const buildStatsComponentSplitContract = (splitBucketsInput) => {
+  const splitBuckets = normalizeArray(splitBucketsInput)
+    .map((bucket) => ({
+      index: Math.trunc(Number(bucket?.index)),
+      ids: normalizeArray(bucket?.members).map((member) => normalizeString(member?.componentId)).filter(Boolean),
+    }))
+    .filter((bucket) => Number.isInteger(bucket.index) && bucket.ids.length > 1);
+  if (!splitBuckets.length) return "";
+  const bucketLines = splitBuckets.map((bucket) => `  - M${bucket.index}: ${bucket.ids.join(", ")}`).join("\n");
+  const [first] = splitBuckets;
+  const example = first.ids.slice(0, 2);
+  return `- PER-COMPONENT SPLIT — REQUIRED for ${splitBuckets.map((bucket) => `M${bucket.index}`).join(", ")}. These components have no stored split yet. Native code saves this split ONCE and rescales it at later reassessments, so it is the population and economy a territorial transfer carries with each component.
+- Also return territorialComponentSplitText with EXACTLY ONE row for EVERY component listed here, in this exact transport format: componentId~sharePercent~group~gdpPerCapita
+${bucketLines}
+- sharePercent is the component's share of ITS OWN macro bucket's population. The shares within one bucket sum to 100. The macro row still sets the bucket's total population.
+- Estimate where the people actually live: cities, farmland, deserts, mountains, islands. NEVER split by how many map regions a component has or by its land area.
+- For a component marked PARTIAL, the share covers ONLY its listed held regions.
+- group and gdpPerCapita are the component's OWN values: a distant island, colony, or dependency does not inherit the mainland's group or productivity. Native code rescales the components' gdpPerCapita so their population-weighted average equals the bucket's macro gdpPerCapita, keeping the ratios between them.
+- Example rows: ${example[0]}~92.5~core~38000 then ${example[1] || example[0]}~7.5~overseas/dependent~21000
+`;
+};
+
 const decodeCountryStatMacroEstimates = (value, macroPlan = []) => {
   const nativePlan = normalizeArray(macroPlan)
     .map((entry, index) => ({
@@ -1303,6 +1373,24 @@ const computeSimulatedDays = (variables) => {
   return days === null ? null : Math.max(0, days);
 };
 
+// How long a task waits before re-asking a provider that refused its first
+// attempt as busy. The provider path has already retried once after 5s by then,
+// so this is the longer pause — the same 15s the providers use between their own
+// status-code retries.
+const BUSY_PROVIDER_TASK_PAUSE_MS = 15000;
+
+const abortableWait = (ms, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) {
+    reject(signal.reason);
+    return;
+  }
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener("abort", () => {
+    clearTimeout(timer);
+    reject(signal.reason);
+  }, { once: true });
+});
+
 const runJsonTask = async (taskKey, {
   fallback,
   signal,
@@ -1512,7 +1600,7 @@ The board above carries a \"Needs a decision this jump\" list. It is worked out 
 - It is stuck: op update with status stalled and a lastUpdate NAMING the blocker - the money, the shortage, the strike, the rival, the weather. \"Progress continues\" is not an answer. A stalled project with a named cause is, and it gives the player something they can act on.
 - It reached or missed a checkpoint: op milestone.
 - It is over: op complete, cancel or fail, with a note.
-A project marked HIGH PRIORITY must not sit on that list two jumps running - the player has said it matters, so it either moves or it stalls for a stated reason. A project marked low priority may be left drifting with a one-line note, and that is a correct answer for it. Everything else is normal: move it when the story plausibly moved it, and say so plainly when it did not. Never raise a progress figure that nothing in this jump's events justifies - a board of quietly inflating percentages is worth less than an honest one full of stalls.`;
+${HIGH_PRIORITY_ASSESSMENT_RULE} A project marked low priority may be left drifting with a one-line note, and that is a correct answer for it. Everything else is normal: move it when the story plausibly moved it, and say so plainly when it did not. Never raise a progress figure that nothing in this jump's events justifies - a board of quietly inflating percentages is worth less than an honest one full of stalls.`;
   }
   // The jump's own view of the board — read-only. projectOps left the jump's
   // OUTPUT contract on purpose (generateProjectOps keeps the board, from the
@@ -1524,6 +1612,13 @@ A project marked HIGH PRIORITY must not sit on that list two jumps running - the
   if (["jumpForward", "autoJumpForward"].includes(taskKey)) {
     const projectsDirective = buildJumpProjectsDirective(variables.projectsSummary);
     if (projectsDirective) systemPrompt = `${systemPrompt}\n\n${projectsDirective}`;
+  }
+  // The board pass's rules live in its template, which every campaign keeps a
+  // frozen copy of; the HIGH PRIORITY rule changed, so it is appended here to
+  // reach games whose copy still demands movement — and skipped for one whose
+  // template already carries the new rule.
+  if (taskKey === "projects" && !templateAlreadySays(systemPrompt, HIGH_PRIORITY_ASSESSMENT_MARKER)) {
+    systemPrompt = `${systemPrompt}\n\n${buildBoardPassDirective()}`;
   }
   // The between-rounds pulse may now move the world's forces a little, so it needs
   // the same discipline the jump gets — injected here so it reaches existing games
@@ -1777,10 +1872,11 @@ BOUNDED REGIONAL METHOD — REQUIRED:
 - index MUST be the supplied macro integer. Do not return province-by-province rows. Do not add, omit, split, or merge macro buckets.
 - NON-TERRITORIAL COMPATIBILITY: if the authoritative basis explicitly says NON-TERRITORIAL and no mapped macro buckets exist, territorialMacroComponentsText may use group~geography~population~gdpPerCapita rows ONLY for a genuinely campaign-supported distributed people, organization, workforce, exile community, or other non-map economic/demographic scope. If no defensible quantitative scope exists, return exactly NONE. Never invent a fake province, population, or GDP merely to satisfy the schema.
 - Allowed group values: core | integrated | overseas/dependent.
-- Estimate each macro bucket from its representative places, spatial center, scenario canon, and any prior macro baseline. Prefer checkable regional magnitudes over a single historical whole-country headline total.
+- Estimate each macro bucket from its listed components or representative places, spatial center, scenario canon, and any prior macro baseline. Prefer checkable regional magnitudes over a single historical whole-country headline total.
+- A component marked PARTIAL is only part of that country: the polity holds just the listed regions. Estimate ONLY their population and economy — never the whole country the component is named after.
 - Do NOT force the macro-bucket sum to a remembered country/empire headline. A historical headline is usable only as a cross-check when its territorial definition exactly matches the live macro scope; otherwise the regional estimates win.
 - The SUM of macro-bucket populations becomes the national population. Native JavaScript expands each macro estimate deterministically back across ALL exact live-map components, preserving prior local proportions where a campaign ledger already exists.
-- Do not give colonies, dependencies, peripheral territories, or poorer constituent regions metropolitan productivity by default.
+${buildStatsComponentSplitContract(variables?.statsComponentSplitBuckets)}- Do not give colonies, dependencies, peripheral territories, or poorer constituent regions metropolitan productivity by default.
 - group is only an economic/display bucket. It is NOT a sovereignty, alliance, customs-union, recognition, or constitutional judgment.
 - gdpPerCapita inside each macro bucket is NOMINAL output per person expressed in constant 2026-EUR accounting terms so components and eras can be aggregated. It is NOT PPP/international-dollar purchasing power and does NOT import 2026 technology, institutions, productivity, or living standards.
 - population totals and GDP aggregates are DERIVED by native JavaScript after regional expansion.
@@ -1816,23 +1912,20 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     systemPrompt = `${systemPrompt}\n\n${buildSpyOrdersDirective(normalizeString(variables?.playerPolity) || "the player")}`;
   }
 
-  // The scenario briefing arrives twice on eight of the sixteen prompts: once
-  // from the task text's own placeholder and again inside the world summary.
-  // On a real campaign that is ~108k characters sent twice, about a third of a
-  // jump prompt. Collapsed here rather than in the templates because existing
-  // saves carry frozen copies, and two tasks reach the briefing ONLY through the
-  // world summary - removing it there would take it from them entirely.
-  systemPrompt = collapseRepeatedBlock(
-    systemPrompt,
-    variables?.worldBeforeRoundOne,
-    "(The pre-round-one briefing is reproduced in full earlier in this prompt.)",
-  );
+  // The scenario briefing and simulation rules each arrive twice on most
+  // prompts: once from the task text's own placeholder and again inside the
+  // world summary. On a real campaign the briefing alone is ~108k characters
+  // sent twice, about a third of a jump prompt. Collapsed here rather than in
+  // the templates because existing saves carry frozen copies, and some tasks
+  // reach them ONLY through the world summary - removing them there would take
+  // them from those tasks entirely.
+  systemPrompt = collapseRepeatedWorldContext(systemPrompt, variables);
 
   // Batch routing (see the parameter): a deferred task leaves here with no
   // answer and no attempt loop; its result arrives through pollPendingBatches.
   if (!sync && typeof onBatchResult === "function" && batchBackgroundTasksEnabled()) {
     const batchTool = getGameplayTool(taskKey);
-    if (batchTool && providerSupportsBatch()) {
+    if (batchTool && providerSupportsBatch(taskKey)) {
       const customId = `oh_${taskKey}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
       const submitted = await submitAIBatch({
         customId,
@@ -1929,45 +2022,70 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       // Per attempt, not per task: a retry re-sends the whole prompt and so
       // re-does the wait for a first byte.
       idle.start();
-      logAi("ai.request", `${taskKey} attempt ${outputAttempt}`, {
-        task: taskKey,
-        attempt: outputAttempt,
-        promptChars: systemPrompt.length,
-        historyMessages: Array.isArray(history) ? history.length : 0,
-        // The whole context, so "what does the AI actually know here" is
-        // answerable from the log rather than by re-deriving it.
-        systemPrompt,
-      });
+      // What the AI was actually given, as sizes and hashes rather than the
+      // prompt itself: rebuild the prompt from the save, fingerprint it, and a
+      // mismatch names the section that differed (contextDiagnostics.js). Only
+      // computed in detailed mode — hashing a jump's prompt is cheap but not
+      // free, and the entry is dropped otherwise.
+      if (isDebugLogVerbose()) {
+        logDebugEvent("ai", `Task "${taskKey}" attempt ${outputAttempt} prompt fingerprint.`, buildPromptFingerprint({
+          history,
+          promptTemplate,
+          systemPrompt,
+          userMessage,
+          variables,
+        }), { verbose: true });
+      }
       // Telemetry: the record for THIS attempt comes back through the sink, so
       // the validation outcome below lands on the call that produced it.
       const attemptSink = {};
-      const response = await callAI(systemPrompt, history, {
-        // No output-token cap. A long/action-heavy turn's JSON must not be truncated
-        // mid-response — a cut-off response won't parse, so runJsonTask fell back to
-        // canned events that carry NO regionTransfers and NO diplomacy, which is why
-        // the map never changed and no chats opened. main.jsx now lets each provider
-        // use its own model maximum when no maxTokens is passed.
-        // The moment this task gives up if nothing more arrives — null while
-        // nothing has come back yet. The providers read it to decide whether a
-        // busy-retry wait still fits inside the window.
-        deadline: idle.deadline,
-        // Every network chunk of the answer restarts that window.
-        onActivity: idle.note,
-        signal: controller.signal,
-        tool,
-        // Names this call in the ai-call transport entries, so a task's own
-        // entries and the request/response pair underneath them line up.
-        logLabel: `task "${taskKey}"`,
-        // Which model answers is the task's business (Settings → Per-task models).
-        taskKey,
-        // Where the cacheable prefix of the system prompt ends — null once the
-        // prompt was rewritten past it. Anthropic pins it with an explicit
-        // cache_control block; OpenAI and Gemini cache identical prefixes on
-        // their own, so the layout alone helps them.
-        staticPrefixEnd: staticPrefixEndOf(systemPrompt, staticPromptPrefix),
-        __debug: { taskKey, attempt: outputAttempt, maxAttempts: 2, simulatedDays: computeSimulatedDays(variables) },
-        __debugSink: attemptSink,
-      });
+      let response;
+      try {
+        response = await callAI(systemPrompt, history, {
+          // No output-token cap. A long/action-heavy turn's JSON must not be truncated
+          // mid-response — a cut-off response won't parse, so runJsonTask fell back to
+          // canned events that carry NO regionTransfers and NO diplomacy, which is why
+          // the map never changed and no chats opened. main.jsx now lets each provider
+          // use its own model maximum when no maxTokens is passed.
+          // The moment this task gives up if nothing more arrives — null while
+          // nothing has come back yet. The providers read it to decide whether a
+          // busy-retry wait still fits inside the window.
+          deadline: idle.deadline,
+          // Every network chunk of the answer restarts that window.
+          onActivity: idle.note,
+          signal: controller.signal,
+          tool,
+          // Names this call in the ai-call transport entries, so a task's own
+          // entries and the request/response pair underneath them line up.
+          logLabel: `task "${taskKey}"`,
+          // Which model answers is the task's business (Settings → Per-task models).
+          taskKey,
+          // Where the cacheable prefix of the system prompt ends — null once the
+          // prompt was rewritten past it. Anthropic pins it with an explicit
+          // cache_control block; OpenAI and Gemini cache identical prefixes on
+          // their own, so the layout alone helps them.
+          staticPrefixEnd: staticPrefixEndOf(systemPrompt, staticPromptPrefix),
+          __debug: { taskKey, attempt: outputAttempt, maxAttempts: 2, simulatedDays: computeSimulatedDays(variables) },
+          __debugSink: attemptSink,
+        });
+      } catch (error) {
+        // The provider refused inside the stream and gave no answer at all
+        // (providerErrors.js toolStreamRefusalError). There is nothing to correct,
+        // so the second attempt is a plain re-ask — after a real pause when it
+        // said it was busy, since its own quick retry has already failed — and
+        // not the canned fallback. Anything else still ends the task as before.
+        if (outputAttempt !== 1 || !error?.providerRefusal || controller.signal.aborted) throw error;
+        idle.cancel();
+        failureReason = normalizeString(error.message) || failureReason;
+        const pauseMs = error.providerRefusal.busy ? BUSY_PROVIDER_TASK_PAUSE_MS : 0;
+        logDebugEvent("ai", `Task "${taskKey}" attempt 1 got no answer: the provider refused.`, {
+          provider: error.providerRefusal.detail || "(no message)",
+          busy: error.providerRefusal.busy,
+          retryInMs: pauseMs,
+        }, { verbose: true });
+        if (pauseMs) await abortableWait(pauseMs, controller.signal);
+        continue;
+      }
       // This attempt is answered: stop counting silence against it. Validation,
       // salvage and the retry's own prompt evaluation all happen with nothing on
       // the wire, and leaving the window armed across them would have attempt
@@ -2033,6 +2151,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       let statsCoverageError = "";
       let statsCalibrationError = "";
       let statsEconomicCalibrationError = "";
+      let statsSplitError = "";
       if (taskKey === "countryStatSheet" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const macroPlan = normalizeArray(variables?.statsTerritorialMacroPlan);
         const decoded = decodeCountryStatMacroEstimates(
@@ -2042,11 +2161,41 @@ This live instruction supersedes older frozen country-stat prompts and all earli
         statsCoverageError = normalizeString(decoded?.error);
         let components = decoded?.components || [];
 
+        // The per-component split, when generateCountryStatSheet asked for one
+        // (countryStats.js decodeTerritorialComponentSplit). A bucket whose rows do
+        // not validate is sent back once with the reason; on the final attempt it
+        // keeps the native weights, is not recorded as split, and is asked again at
+        // its next assessment.
+        const splitBuckets = normalizeArray(variables?.statsComponentSplitBuckets);
+        let componentSplits = null;
+        let splitGeographies = [];
+        if (splitBuckets.length && macroPlan.length > 0 && !statsCoverageError) {
+          const { splits, rejected } = decodeTerritorialComponentSplit(parsed.territorialComponentSplitText, splitBuckets);
+          const rejectedText = rejected.map((entry) => `M${entry.index}: ${entry.reason}`).join("; ");
+          if (rejected.length && outputAttempt === 1) {
+            statsSplitError =
+              `territorialComponentSplitText must give every listed component exactly one componentId~sharePercent~group~gdpPerCapita row, and each bucket's shares must sum to 100 (${rejectedText}).`;
+          } else {
+            if (rejected.length) {
+              console.warn(
+                `[stats split] ${normalizeString(variables?.statsCalibrationTargetName) || "polity"}: per-component split rejected (${rejectedText}); `
+                  + "those bucket(s) keep the native weights this time and will be asked for a split again.",
+              );
+            }
+            componentSplits = splits;
+            splitGeographies = [...splits.values()].flat().map((entry) => entry.geography);
+          }
+        }
+
         if (!statsCoverageError && macroPlan.length > 0) {
           const expanded = expandTerritorialMacroEstimates(
             macroPlan,
             decoded?.estimates || [],
-            { previousComponents: variables?.statsPreviousTerritorialComponents },
+            {
+              previousComponents: variables?.statsPreviousTerritorialComponents,
+              componentSplits,
+              splitGeographies: variables?.statsStoredSplitComponents,
+            },
           );
           statsCoverageError = normalizeString(expanded?.error);
           if (!statsCoverageError) components = expanded.components;
@@ -2119,6 +2268,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
           economicCalibration: _economicCalibration,
           territorialMacroComponentsText: _territorialMacroComponentsText,
           territorialComponentsText: _territorialComponentsText,
+          territorialComponentSplitText: _territorialComponentSplitText,
           ...statFields
         } = parsed;
         const plannedComponentCount = normalizeArray(variables?.statsTerritorialPlan).length;
@@ -2130,6 +2280,9 @@ This live instruction supersedes older frozen country-stat prompts and all earli
           territorialScope,
           territorialComponents: components,
         });
+        // Keyed by the payload itself: the answer runJsonTask returns may be an
+        // earlier attempt's (the salvage pass), and only that answer's split counts.
+        variables?.statsComponentSplitOutcome?.set?.(parsed, splitGeographies);
 
         const finalizedComponentCount = normalizeArray(parsed?.territorialComponents).length;
         if (!statsCoverageError && plannedComponentCount > 0 && finalizedComponentCount !== plannedComponentCount) {
@@ -2140,10 +2293,10 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       let validation = parsed
         ? validateGameplayPayload(taskKey, parsed)
         : { valid: false, error: "Response did not contain parseable JSON or tool arguments." };
-      if (validation.valid && (statsCoverageError || statsCalibrationError || statsEconomicCalibrationError)) {
+      if (validation.valid && (statsCoverageError || statsCalibrationError || statsEconomicCalibrationError || statsSplitError)) {
         validation = {
           valid: false,
-          error: [statsCoverageError, statsCalibrationError, statsEconomicCalibrationError].filter(Boolean).join(" "),
+          error: [statsCoverageError, statsCalibrationError, statsEconomicCalibrationError, statsSplitError].filter(Boolean).join(" "),
         };
       }
       if (transportDecodeError) {
@@ -2235,11 +2388,11 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     failureReason = firstFailureReason
       ? `${firstFailureReason}${transportReason ? ` The retry then failed: ${transportReason}` : ""}`
       : transportReason || failureReason;
-    logAi("ai.failed", `${taskKey}: ${failureReason}`, {
-      task: taskKey,
-      aborted: controller.signal.aborted,
-      stack: actualError?.stack ? String(actualError.stack).slice(0, 4000) : undefined,
-    }, "error");
+    // Always recorded, not only in detailed mode: a task that failed is what a
+    // report is about, so it is also a problem for View log's "problems only".
+    // The error itself carries the stack — one frame normally, a real call path
+    // in detailed mode.
+    logDebugEvent("ai", `Task "${taskKey}" failed${controller.signal.aborted ? " (aborted)" : ""}: ${failureReason}`, actualError instanceof Error ? actualError : undefined, { problem: true });
   } finally {
     idle.cancel();
   }
@@ -2283,9 +2436,10 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   console.warn(`[ai] task "${taskKey}" failed (${failureReason}) — using the deterministic fallback.`);
   // Capped so one runaway response can't bloat world.json (this rides along on
   // every recent fallback's simulationHistory entry, see applySimulationResult)
-  // or flood the console. Surfaced to the player as the "Copy debugging
-  // message" button next to the fallback warning (time.jsx) — that button, not
-  // DevTools, is the primary way this reaches anyone now.
+  // or flood the console. Surfaced to the player through the "Save logging
+  // file" button next to the fallback warning (time.jsx), which attaches it to
+  // the saved log — that button, not DevTools, is the primary way this reaches
+  // anyone now.
   const RAW_RESPONSE_LIMIT = 12000;
   const capturedRawText = lastRawText.length > RAW_RESPONSE_LIMIT
     ? `${lastRawText.slice(0, RAW_RESPONSE_LIMIT)}\n…[${lastRawText.length - RAW_RESPONSE_LIMIT} more characters truncated]`
@@ -2328,19 +2482,32 @@ const CONSOLIDATION_BATCH_SIZE = 60;
 // onto the events that caused them (so the board change is recorded as part of
 // that event) and then applies them through the same event path as every other
 // impact, inside the same single write and the same rollback snapshot.
-const generateProjectOps = async (bundle, events, { signal } = {}) => {
+// `hiddenEvents` are Canonical events the timeline cleanup kept off the timeline
+// (routine, low-value, already covered). They still happened, and routine
+// progress is exactly what moves a standing Operation, so the Board reads them:
+// numbered after the visible events, and marked, so a lastUpdate written from one
+// does not point the player at a timeline card that is not there.
+const generateProjectOps = async (bundle, events, { signal, hiddenEvents = [] } = {}) => {
   const board = normalizeArray(bundle.world?.projects);
+  const hidden = normalizeArray(hiddenEvents);
   // Nothing to keep in step, and nothing an event could plausibly open against
   // an empty board that is worth a whole extra request.
-  if (board.length === 0 || events.length === 0) return { ops: [], skipped: true };
+  if (board.length === 0 || (events.length === 0 && hidden.length === 0)) return { ops: [], skipped: true };
 
   const variables = await buildTemplateVariables(bundle, {});
   // The events, numbered, because eventIndex is how an op says which one moved
   // the effort. Impacts are deliberately left out: this call decides what the
   // STORY did to the board, and the other levers are noise for that question.
-  const eventList = events
-    .map((event, index) => `[${index}] ${event.date || "undated"} — ${event.title}\n${event.description}`)
-    .join("\n\n");
+  const eventList = [
+    ...events.map((event, index) => `[${index}] ${event.date || "undated"} — ${event.title}\n${event.description}`),
+    ...hidden.map((event, index) =>
+      `[${events.length + index}] ${event.date || "undated"} — ${event.title} (kept off the timeline)\n${event.description}`),
+  ].join("\n\n");
+  const hiddenNote = hidden.length
+    ? "\n\nEvents marked (kept off the timeline) happened, but were too routine to show the player as a card. "
+      + "Move the board from them exactly like any other event, and write lastUpdate so it stands on its own "
+      + "without pointing at a timeline entry."
+    : "";
 
   // Doubted entries the player now has a clean pair of eyes on. Named explicitly
   // rather than left for the model to notice, because settling one is only honest
@@ -2364,7 +2531,7 @@ const generateProjectOps = async (bundle, events, { signal } = {}) => {
     signal,
     userMessage:
       `These events have just been simulated. Move the board to match them, and return `
-      + `{"projectOps":[]} if nothing on it genuinely moved.\n\n${eventList}${doubtBlock}`,
+      + `{"projectOps":[]} if nothing on it genuinely moved.${hiddenNote}\n\n${eventList}${doubtBlock}`,
     variables,
     // No fallback: an empty board is exactly what a failed call should leave
     // behind, and runJsonTask throwing is what lets the caller tell the player
@@ -2419,6 +2586,33 @@ export const retryPendingProjectsJump = async ({ signal } = {}) => {
     endSimulation();
   }
 };
+
+// The newest turn's record lists the events that turn produced, and time.jsx
+// renders a turn from exactly that list, so anything added to or taken out of
+// the turn after the record was built (espionage's events, an unbacked
+// provisional event) has to be reflected here too.
+const withLatestTurnEventIds = (world, rewrite) => {
+  const [turnEntry, ...olderTurns] = normalizeArray(world?.simulationHistory);
+  if (!turnEntry) return world;
+  return {
+    ...world,
+    simulationHistory: [{ ...turnEntry, eventIds: rewrite(normalizeArray(turnEntry.eventIds)) }, ...olderTurns],
+  };
+};
+
+// Whether an event stands on a consequence of its own, not only on the Board.
+// Checked on the merged turn rather than trusted from the segment check, because
+// the unit and territory directors add ops to events after it; spy orders and
+// resolved player orders count too — hiding such an event would leave what it
+// did applied with nothing on the timeline to say so.
+const OWN_CONSEQUENCE_IMPACTS = [
+  "regionTransfers", "regionClaims", "regionControlOps", "polityChanges",
+  "createdChats", "unitOps", "markerOps", "spyOps", "actionIds",
+];
+const eventCarriesOwnConsequence = (event) =>
+  OWN_CONSEQUENCE_IMPACTS.some((key) => normalizeArray(event?.impacts?.[key]).length > 0)
+  || normalizeArray(event?.storylineIds).length > 0
+  || Boolean(normalizeString(event?.warId));
 
 // Put each op onto the event that caused it, so the board move is part of that
 // event's impacts. An op with no usable eventIndex lands on the LAST event: the
@@ -2624,6 +2818,11 @@ let pendingProjectsJump = null;
 // which segment failed and can retry just that segment or discard the turn (see
 // runJumpSegments).
 let pendingJumpSegment = null;
+
+// Storyline motion repairs that failed, keyed by campaign and storyline id (see
+// recordMotionRepairOutcome). Memory only: it keeps a storyline that fails the
+// same way from costing a call every turn, and a reload simply forgets it.
+const motionRepairFailures = new Map();
 
 export const hasPendingJumpSegment = () => pendingJumpSegment !== null;
 
@@ -2876,21 +3075,20 @@ const fallbackNextSpeaker = ({ chat, excludedSpeaker }) => {
 
 export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbackTitle = "", playerName = "" } = {}) => {
   const countriesInput = Array.isArray(chatLike?.countries) ? chatLike.countries : [];
-  const countries = await resolveInvitees(countriesInput, world);
+  // A chat's countries are the OTHER side; the player is implicit
+  // (chatVisibility.js). A note naming the player among them is a note to the
+  // player, and keeping them there forks a duplicate of the thread already open.
+  const countries = withoutPlayerParticipant(await resolveInvitees(countriesInput, world), playerName);
   if (countries.length === 0) return null;
 
-  // The initiating polity speaks first — and it is never the player. When the
-  // model names no speaker (or names the player), attribute the opener to the
-  // first non-player participant.
-  const playerKey = normalizeString(playerName).toUpperCase();
-  const matchesPlayer = (country) =>
-    playerKey && (normalizeString(country.name).toUpperCase() === playerKey || normalizeString(country.code).toUpperCase() === playerKey);
+  // The initiating polity speaks first — and it is never the player, who is no
+  // longer in the list. When the model names no speaker (or names the player, or
+  // someone who is not a participant), attribute the opener to the first one.
   const speakerKey = normalizeString(chatLike?.speaker).toUpperCase();
   const initiator =
     countries.find((country) =>
-      speakerKey && !matchesPlayer(country)
+      speakerKey
       && (normalizeString(country.name).toUpperCase() === speakerKey || normalizeString(country.code).toUpperCase() === speakerKey))
-    ?? countries.find((country) => !matchesPlayer(country))
     ?? countries[0];
 
   const entry = normalizeChatEntry({
@@ -3296,20 +3494,40 @@ const resolveRegionTransfers = async (containers, world, {
     }
   }
 
+  // Standardised polity names. An owner field resolves only to a name this map
+  // declares: an owner token actually on the map, a polity record's key, its
+  // declared display name, or one of its declared aliases (a stock CODE is
+  // first turned into its stock name, which then has to be declared like any
+  // other). Existing owners stay exact; same-payload lifecycle aliases above
+  // are the only exception so CREATE/RESTORE + transfer can be atomic.
+  const ownerNameIndex = new Map(); // folded name -> the owner label as the map spells it
+  const declareOwner = (rawName, canonical) => {
+    const key = regionKey(rawName);
+    if (key && canonical && !ownerNameIndex.has(key)) ownerNameIndex.set(key, canonical);
+  };
+  for (const [token, entry] of Object.entries(worldState.polityOverrides ?? {})) {
+    declareOwner(token, token);
+    declareOwner(entry?.name, token);
+    for (const alias of normalizeArray(entry?.aliases)) declareOwner(alias, token);
+  }
+  for (const owner of Object.values(controlOwners)) declareOwner(owner, normalizeString(owner));
+  for (const owner of Object.values(sovereigntyOwners)) declareOwner(owner, normalizeString(owner));
+  for (const region of catalog) {
+    const baked = normalizeString(region?.country) || toCountryName(normalizeString(region?.countryCode));
+    declareOwner(baked, baked);
+  }
+  const knownOwnerLabels = [...new Set(ownerNameIndex.values())].sort((a, b) => a.localeCompare(b));
+
   const resolveOwnerName = (token) => {
     const rawToken = normalizeString(token);
     const raw = toCountryName(rawToken);
     if (!raw) return "";
-    const samePayload = generatedOwnerAliases.get(regionKey(rawToken)) || generatedOwnerAliases.get(regionKey(raw));
+    const samePayload = generatedOwnerAliases.get(regionKey(rawToken))
+      || generatedOwnerAliases.get(regionKey(raw));
     if (samePayload) return samePayload;
-    const resolution = resolvePolityIdentity(raw, worldState, {
-      allowUnknown: false,
-      requireActive: false,
-      allowCoreMatch: true,
-      allowStockBase: true,
-    });
-    return resolution.resolved || raw;
+    return ownerNameIndex.get(regionKey(raw)) ?? "";
   };
+  const ownerIsKnown = (token) => Boolean(resolveOwnerName(token));
 
   const canonicalOwnerKey = (token) => {
     const key = regionKey(resolveOwnerName(token));
@@ -3560,6 +3778,27 @@ const resolveRegionTransfers = async (containers, world, {
     ownerKeyOf,
   });
 
+  // The regions a transfer can legitimately mean: the losing side's when the
+  // model named one, else everything the recipient does not already hold.
+  const transferPool = (transfer) => {
+    const fromKey = canonicalOwnerKey(transfer?.fromCode);
+    if (fromKey) return regionsOwnedBy(transfer.fromCode);
+    const toKey = canonicalOwnerKey(transfer?.toCode);
+    return catalog.filter((region) => ownerKeyOf(region.id) !== toKey);
+  };
+
+  // Bounded candidates for the semantic pass when the losing side is unknown:
+  // the regions whose (affix-stripped) names start like the label, so the
+  // model is never handed the whole planet.
+  const similarRegions = (label, transfer) => {
+    const stem = stripRegionAffixes(foldRegionKey(label)).slice(0, 4);
+    if (stem.length < 4) return [];
+    return transferPool(transfer).filter((region) => {
+      const name = stripRegionAffixes(foldRegionKey(region.name)) || foldRegionKey(region.name);
+      return name.startsWith(stem);
+    });
+  };
+
   const deterministicResolve = (transfer, event) => {
     const requestedId = normalizeString(transfer?.regionId);
     if (byId.has(requestedId)) {
@@ -3595,16 +3834,15 @@ const resolveRegionTransfers = async (containers, world, {
         if (owned.length === 1) return owned[0].id;
       }
 
-      // This is intentionally the LAST deterministic fuzzy-ish rule. Substring
-      // matching inside the losing side is safe only when exactly one map region
-      // survives. Anything harder belongs to the bounded semantic geography pass.
-      if (fromKey && query.length >= 4) {
-        const contains = regionsOwnedBy(transfer.fromCode).filter((region) => {
-          const name = regionKey(region.name);
-          return name.includes(query) || query.includes(name);
-        });
-        if (contains.length === 1) return contains[0].id;
-      }
+      // The shared matcher (regionMatch.js): an appended "Oblast", a stripped
+      // "the ... region", a transliteration one edit away — each accepted only
+      // when a single region survives. Inside the losing side when the model
+      // named it; otherwise among every region the recipient does not already
+      // hold, because a transfer without fromCode used to be dropped outright
+      // even when its name was on the map. Anything harder belongs to the
+      // bounded semantic geography pass.
+      const matched = matchRegionName(candidate, transferPool(transfer), { maxFuzzy: fromKey ? 2 : 1 });
+      if (matched) return matched.region.id;
     }
 
     return "";
@@ -3628,6 +3866,23 @@ const resolveRegionTransfers = async (containers, world, {
   const semanticPending = [];
   const deterministicDestinations = new Map();
 
+  // Polities this payload itself brings into being may be named before the
+  // world knows them: a creation, restoration or rename in any event's
+  // polityChanges declares the name for every transfer in the transaction.
+  const payloadDeclared = new Set();
+  for (const { impacts } of containers) {
+    for (const change of normalizeArray(impacts?.polityChanges)) {
+      for (const rawName of [change?.code, change?.name]) {
+        const key = regionKey(rawName);
+        if (key) payloadDeclared.add(key);
+      }
+    }
+  }
+  const payloadDeclares = (token) => payloadDeclared.has(regionKey(toCountryName(normalizeString(token))));
+  // resolveRegionControlOps proxies an op with no owner at all under this
+  // sentinel; the ownership rules below judge it, not the name check.
+  const OWNERLESS_SENTINEL = "Unresolved polity";
+
   for (const [containerIndex, container] of containers.entries()) {
     const { impacts, path, event } = container;
     const transfers = normalizeArray(impacts?.regionTransfers);
@@ -3638,6 +3893,20 @@ const resolveRegionTransfers = async (containers, world, {
     deterministicDestinations.set(path, destinationByRegion);
 
     for (const [transferIndex, transfer] of transfers.entries()) {
+      const unknownOwner = [transfer?.toCode, transfer?.fromCode]
+        .map(normalizeString)
+        .find((token) => token && token !== OWNERLESS_SENTINEL && !ownerIsKnown(token) && !payloadDeclares(token));
+      if (unknownOwner) {
+        unresolved.push({
+          label: normalizeString(transfer?.regionName) || normalizeString(transfer?.regionId),
+          fromCode: normalizeString(transfer?.fromCode),
+          path,
+          candidates: [],
+          unknownOwner,
+          knownOwners: knownOwnerLabels,
+        });
+        continue;
+      }
       if (transfer?.wholeCountry === true) {
         const sourceToken = wholeCountrySourceToken(transfer);
         const expanded = expandWholeCountry(transfer);
@@ -3744,10 +4013,12 @@ const resolveRegionTransfers = async (containers, world, {
         continue;
       }
 
-      const candidates = regionsOwnedBy(transfer?.fromCode);
       const label =
         normalizeString(transfer?.regionName) ||
         normalizeString(transfer?.regionId);
+      const candidates = canonicalOwnerKey(transfer?.fromCode)
+        ? regionsOwnedBy(transfer?.fromCode)
+        : similarRegions(label, transfer);
 
       const record = {
         candidates,
@@ -4185,11 +4456,22 @@ const buildTransferFeedback = (unresolved) => {
       );
       continue;
     }
+    if (entry.unknownOwner) {
+      const powers = normalizeArray(entry.knownOwners);
+      const listed = powers.slice(0, 80).map((name) => `"${name}"`).join(", ");
+      lines.push(
+        `${entry.path}.regionTransfers: "${entry.unknownOwner}" is not a power on this map. Owner names must match a power's name ` +
+          `exactly as the map spells it — no short forms, translations or codes. Powers on the map: ${listed}` +
+          `${powers.length > 80 ? `, +${powers.length - 80} more` : ""}. Use one of these exact names in fromCode/toCode, ` +
+          "or create the polity in polityChanges in the same response.",
+      );
+      continue;
+    }
     if (entry.candidates.length > 0) {
-      const listed = entry.candidates.slice(0, 40)
+      const listed = entry.candidates.slice(0, 200)
         .map((region) => `${region.name} (${region.id})`)
         .join(", ");
-      const more = entry.candidates.length > 40 ? `, +${entry.candidates.length - 40} more` : "";
+      const more = entry.candidates.length > 200 ? `, +${entry.candidates.length - 200} more` : "";
       lines.push(
         `${entry.path}.regionTransfers: no map region matches "${target}". ` +
           `Regions currently owned by ${entry.fromCode}: ${listed}${more}.`,
@@ -4880,7 +5162,7 @@ const applySimulationResult = async ({
   // canon, and deterministic gates (hard mechanical consequences, retrieved
   // prior matches, saturation) decide what those judgments may remove. The
   // default is KEEP, and any failure of the analysis keeps everything.
-  let curatedEvents = await curateGeneratedEvents({
+  const mainCuration = await curateGeneratedEventsWithHidden({
     events: dedupedEvents,
     priorEvents,
     game: baseGame,
@@ -4889,6 +5171,11 @@ const applySimulationResult = async ({
     mode: result.mode,
     analyzeBatch: curatorAnalyzeBatch,
   });
+  let curatedEvents = mainCuration.events;
+  // Canonical events the curator (and the breadth repair's own screen and
+  // curator) kept off the timeline. They still happened; the board pass reads
+  // them alongside the segments' screened-out ones (result.hiddenEvents).
+  const timelineHiddenEvents = mainCuration.hidden.map((row) => row.event);
   // Breadth is measured by what SURVIVES curation. A month-scale jump left with
   // only a few worthwhile events, or a busy window without consequential
   // outcomes, gets one bounded second search of the exploration lanes still
@@ -4924,7 +5211,7 @@ const applySimulationResult = async ({
       game: baseGame,
       analysis: breadthRepair.analysis,
     });
-    const repairCuratedEvents = await curateGeneratedEvents({
+    const repairCuration = await curateGeneratedEventsWithHidden({
       events: repairScreened.events,
       priorEvents: [...priorEvents, ...curatedEvents],
       game: baseGame,
@@ -4933,6 +5220,11 @@ const applySimulationResult = async ({
       mode: result.mode,
       analyzeBatch: curatorAnalyzeBatch,
     });
+    const repairCuratedEvents = repairCuration.events;
+    timelineHiddenEvents.push(
+      ...normalizeArray(repairScreened.hidden).map((row) => row.event),
+      ...repairCuration.hidden.map((row) => row.event),
+    );
     const survivingRepairStorylineIds = new Set(
       repairCuratedEvents
         .flatMap((event) => normalizeArray(event?.storylineIds))
@@ -5023,8 +5315,8 @@ const applySimulationResult = async ({
           mode: normalizeString(result.mode) || "jump",
           plannedActions: plannedActionSnapshot,
           // The raw model response that failed to parse (runJsonTask), so the
-          // fallback warning's "Copy debugging message" button (time.jsx) has
-          // something to copy even after a reload — only ever non-empty on a
+          // fallback warning's "Save logging file" button (time.jsx) has
+          // something to attach even after a reload — only ever non-empty on a
           // fallback turn; a normal AI turn carries nothing here.
           rawResponse: normalizeString(result.generation?.rawResponse),
           round: nextGame.round,
@@ -5220,12 +5512,8 @@ const applySimulationResult = async ({
   // argument to applyEventImpactsToWorld, which has to run BEFORE espionage
   // resolves on its output, so its eventIds snapshot also predates the loop.
   // time.jsx renders a turn's events from exactly this list.
-  if (espionageEventIds.length && worldWithImpacts.simulationHistory?.[0]) {
-    const [turnEntry, ...olderTurns] = worldWithImpacts.simulationHistory;
-    worldWithImpacts.simulationHistory = [
-      { ...turnEntry, eventIds: [...turnEntry.eventIds, ...espionageEventIds] },
-      ...olderTurns,
-    ];
+  if (espionageEventIds.length) {
+    worldWithImpacts = withLatestTurnEventIds(worldWithImpacts, (ids) => [...ids, ...espionageEventIds]);
   }
   // Keep the board's covert operations in step with the agents they track,
   // BEFORE the board task runs, so the model is shown an entry that already
@@ -5298,6 +5586,26 @@ const applySimulationResult = async ({
   // stall the operation it belonged to, and BEFORE anything is written so its ops
   // ride in on the events that caused them.
   if (projects) {
+    // Every Canonical event the timeline left out, minus anything the log or this
+    // turn's own timeline already holds (the de-dup that visible events had).
+    const boardHiddenEvents = dedupeGeneratedEvents(
+      [...priorEvents, ...freshEvents],
+      [...normalizeArray(result.hiddenEvents), ...timelineHiddenEvents]
+        .map((entry, index) => normalizeGeneratedEvent(entry, index))
+        .filter(Boolean),
+    );
+    // The major events that passed the consequence check only on a Board entry,
+    // by their canonical ids now. The board pass must back each one — unless the
+    // event has since gained a consequence of its own (the unit and territory
+    // directors add ops after the segment check), in which case it stands on that
+    // and is not the board pass's to prove.
+    const provisionalIds = new Set(
+      normalizeArray(result.boardProvisionalEventIds)
+        .map((id) => canonicalEventIdentity.idMap.get(id) || id),
+    );
+    const provisionalIndexes = new Set(freshEvents
+      .map((event, index) => (provisionalIds.has(event.id) && !eventCarriesOwnConsequence(event) ? index : -1))
+      .filter((index) => index >= 0));
     try {
       const { ops, skipped } = await generateProjectOps(
         // The LIVE world, not projects.bundle's pre-turn copy: the bundle was
@@ -5305,30 +5613,86 @@ const applySimulationResult = async ({
         // impacts and none of the covert-operation sync just above.
         { ...projects.bundle, game: nextGame, world: worldWithImpacts },
         freshEvents,
-        { signal: projects.signal },
+        { signal: projects.signal, hiddenEvents: boardHiddenEvents },
       );
-      if (!skipped && ops.length) {
-        const attached = attachProjectOpsToEvents(freshEvents, ops);
-        // Recorded on the events above; APPLIED here, through the same event path
-        // every other impact takes (release of completion effects included), so
-        // the board the player sees after this write is the one the model moved.
-        // Only the project ops are replayed: the events' other impacts were
-        // applied when the world was first impacted, and must not run twice.
-        const boardEvents = freshEvents
-          .filter((event) => normalizeArray(event.impacts?.projectOps).length)
-          .map((event) => ({ ...event, impacts: { projectOps: event.impacts.projectOps } }));
-        if (boardEvents.length) {
-          worldWithImpacts = applyEventImpactsToWorld({
-            colors: nextColors,
-            events: boardEvents,
-            world: worldWithImpacts,
-            motion: null,
-            betaEngine: betaUnits,
-            round: nextGame.round,
-          }).world;
-        }
-        logDebugEvent("turn", `Projects board updated: ${attached} op(s).`, undefined, { verbose: true });
+      // One carrier per event, in date order across the visible and Hidden lists,
+      // so an entry a Hidden event opens exists before a later event moves it.
+      const carriers = boardPassCarriers({
+        ops: skipped ? [] : ops,
+        visibleEvents: freshEvents,
+        hiddenEvents: boardHiddenEvents,
+      });
+      // Recorded on the visible events that caused them, as always.
+      const attached = attachProjectOpsToEvents(freshEvents, carriers
+        .filter((carrier) => carrier.onTimeline)
+        .flatMap((carrier) => carrier.ops.map((op) => ({ ...op, eventIndex: carrier.eventIndex }))));
+
+      // APPLIED here, one event at a time, through the same event path every other
+      // impact takes (release of completion effects included), so the board the
+      // player sees after this write is the one the model moved. Only the project
+      // ops are replayed: the events' other impacts were applied when the world
+      // was first impacted, and must not run twice. A Hidden event's carrier is
+      // never stamped into an entry's activity, which lists timeline events only.
+      //
+      // A provisional event is judged on the Board itself, before and after its
+      // OWN ops: if nothing changed materially, its claim was never recorded, so
+      // its ops are applied unstamped and the event leaves the timeline below.
+      const unbackedIds = new Set();
+      // A provisional event the board pass left no ops of its own on is unbacked
+      // before anything is applied, so not even a fallback op stamps it.
+      for (const index of provisionalIndexes) {
+        const touched = carriers.some((carrier) => carrier.onTimeline && !carrier.fallback && carrier.eventIndex === index);
+        if (!touched && freshEvents[index]) unbackedIds.add(freshEvents[index].id);
       }
+      const movedByHidden = new Set();
+      let hiddenEventsThatMoved = 0;
+      const applyCarrier = (world, carrier, event, { stamped }) => applyEventImpactsToWorld({
+        colors: nextColors,
+        events: [{ id: event.id, date: event.date || nextGame.gameDate, title: event.title, description: "", impacts: { projectOps: carrier.ops } }],
+        world,
+        motion: null,
+        betaEngine: betaUnits,
+        round: nextGame.round,
+        boardOnlyEventIds: stamped ? [] : [event.id],
+      }).world;
+      for (const carrier of carriers) {
+        const event = carrier.onTimeline ? freshEvents[carrier.eventIndex] : boardHiddenEvents[carrier.hiddenIndex];
+        if (!event) continue;
+        const before = worldWithImpacts;
+        const stamped = carrier.onTimeline && !unbackedIds.has(event.id);
+        let after = applyCarrier(before, carrier, event, { stamped });
+        const changed = materiallyChangedEntryIds(before.projects, after.projects);
+        if (carrier.onTimeline && !carrier.fallback && provisionalIndexes.has(carrier.eventIndex) && !changed.length) {
+          unbackedIds.add(event.id);
+          after = applyCarrier(before, carrier, event, { stamped: false });
+        }
+        if (!carrier.onTimeline && changed.length) {
+          hiddenEventsThatMoved += 1;
+          changed.forEach((id) => movedByHidden.add(id));
+        }
+        worldWithImpacts = after;
+      }
+      if (attached) logDebugEvent("turn", `Projects board updated: ${attached} op(s).`, undefined, { verbose: true });
+
+      // An unbacked event made a claim nothing recorded, so it leaves the timeline.
+      // It carries no consequence of its own (checked above, after the directors
+      // ran), so only the lists that name it need it taken out.
+      if (unbackedIds.size) {
+        for (const list of [freshEvents, nextEvents]) {
+          for (let index = list.length - 1; index >= 0; index -= 1) {
+            if (unbackedIds.has(list[index]?.id)) list.splice(index, 1);
+          }
+        }
+        worldWithImpacts = withLatestTurnEventIds(worldWithImpacts, (ids) => ids.filter((id) => !unbackedIds.has(id)));
+      }
+      const unassessed = skipped ? [] : unassessedHighPriorityEntries(worldWithImpacts.projects, ops, { playerCountry: playerPolity });
+      console.info(
+        `[OH board] ${boardHiddenEvents.length} Hidden event(s) read, ${hiddenEventsThatMoved} of them moved `
+        + `${movedByHidden.size} Board entr${movedByHidden.size === 1 ? "y" : "ies"}; `
+        + `${provisionalIndexes.size} provisional major event(s), ${unbackedIds.size} unbacked and kept off the timeline; `
+        + `${unassessed.length} HIGH PRIORITY entr${unassessed.length === 1 ? "y" : "ies"} not assessed`
+        + `${unassessed.length ? ` (${unassessed.map((entry) => entry.name).join(", ")})` : ""}.`,
+      );
     } catch (error) {
       // A deliberate cancel is the player's and aborts the turn like any other.
       if (error?.name === "AbortError") throw error;
@@ -5628,10 +5992,6 @@ const stableStatsHash = (value) => {
 };
 
 
-const STATS_MACRO_MAX_BUCKETS = 12;
-const STATS_MACRO_TARGET_COMPONENTS = 30;
-const STATS_MACRO_SAMPLE_NAMES = 10;
-
 // 8B.2.18.1 performance: detailed scenario GeoJSON is immutable for the life of
 // the loaded object, so normalize its 4k+ feature records only once. WeakMap keeps
 // scenario swaps safe: a new parsed FeatureCollection gets a new cache entry and
@@ -5770,12 +6130,55 @@ const buildWorldInitiativeContextBackground = async (bundle, options = {}, signa
 };
 
 
+// ---- Bounded call for the world repairs ------------------------------------
+// Both repairs used to hand callAI a stopwatch "deadline", which callAI only
+// reads to decide whether a busy-retry still fits — nothing ever aborted on it,
+// so a stalled repair could hold a finished turn forever. runBoundedRepairCall
+// (repairCall.js) aborts on silence with runJsonTask's two windows, always on
+// (idleDeadline.js explains why repairs ignore "Limit AI generation"), and at
+// `hardLimitMs` when the caller has a time budget to keep. The abort is on a
+// local controller: the caller's `signal` stays un-aborted, so its catch sees an
+// ordinary failure, while the player's Cancel still cancels.
+const callRepairAI = async ({ systemPrompt, userMessage, taskKey, tool, signal, reasoningEnabled, hardLimitMs } = {}) => {
+  const now = () =>
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  const startedAt = now();
+  try {
+    const response = await runBoundedRepairCall(
+      ({ signal: callSignal, deadline, onActivity }) =>
+        callAI(systemPrompt, [
+          { role: "user", parts: [{ text: userMessage }] },
+        ], {
+          deadline,
+          onActivity,
+          ...(reasoningEnabled === undefined ? {} : { reasoningEnabled }),
+          signal: callSignal,
+          taskKey,
+          tool,
+        }),
+      { taskKey, signal, hardLimitMs },
+    );
+    recordTurnPerfAiAttempt({ taskKey, attempt: 1, ms: Math.max(0, now() - startedAt) });
+    return response;
+  } catch (error) {
+    recordTurnPerfAiAttempt({
+      taskKey,
+      attempt: 1,
+      ms: Math.max(0, now() - startedAt),
+      error: normalizeString(error?.message || error),
+    });
+    throw error;
+  }
+};
+
 // ---- Storyline motion repair (Continuum 07.2) -----------------------------
-// A selected storyline that the accepted segment still left objectively
-// unchanged past its anti-stasis backstop, or omitted from storylineUpdates,
-// is repaired on its own: one narrow AI call that may only return that
-// storyline's semantic movement. Unrelated events are never discarded, and a
-// failed repair just leaves the process overdue for the next turn.
+// A selected storyline that the finished skip still left objectively unchanged
+// past its anti-stasis backstop, or never updated, is repaired on its own: one
+// narrow AI call that may only return that storyline's semantic movement.
+// Unrelated events are never discarded, and a failed repair just leaves the
+// process overdue for the next turn.
 const WORLD_MOTION_REPAIR_HISTORY_LIMIT = 8;
 
 const compactStorylineRepairHistory = (bundle, storyline) => {
@@ -5807,6 +6210,11 @@ const runTargetedWorldMotionRepair = async ({
   originDate,
   targetDate,
   signal,
+  // The rest of the skip's repair time; the call is stopped when it runs out.
+  hardLimitMs,
+  // Filled in on failure, so the pass can tell a repair stopped by its time
+  // budget from one that failed (repairSkipStorylineMotion).
+  outcome = null,
 } = {}) => {
   const prior = issue?.prior;
   const attempted = issue?.update;
@@ -5855,6 +6263,16 @@ const runTargetedWorldMotionRepair = async ({
   const repairCause = issue?.kind === "missing-update"
     ? "was selected for native attention, but the accepted whole-world pass omitted its required semantic update"
     : "crossed its anti-stasis backstop after the accepted whole-world pass still left it objectively unchanged";
+  // Past the backstop, the validator below (storylineHasObjectiveEvolution)
+  // rejects a prose-only change however well argued, so the model has to be told
+  // the numbers. It used to be told a prose-only stalemate was legal, and failed
+  // the same way every segment.
+  const motionRule = issue?.requiresObjectiveDelta
+    ? `HARD RULE — this process is past its anti-stasis backstop, so a rewritten state with the same numbers is REJECTED. ` +
+      `Compared with the authoritative storyline below, you MUST ${describeAntiStasisObjectiveRule({ withEvent: false })}. ` +
+      `A stalemate is still legal, but it must show in the numbers — for example pressure rising as readiness, logistics, or domestic strain builds, ` +
+      `or momentum falling as a front freezes or restraint takes hold.\n\n`
+    : `Stalemate is legal when the state materially evolves in another dimension: readiness, logistics, command, morale, domestic politics, diplomacy, strategic objectives, preparation, restraint, or de-escalation.\n\n`;
 
   let systemPrompt =
     `You are the TARGETED ENDOGENOUS MOTION REPAIR for OpenHistoria.\n\n` +
@@ -5864,7 +6282,7 @@ const runTargetedWorldMotionRepair = async ({
     `Return exactly one semantic storyline object through the dedicated repair tool.\n\n` +
     `This storyline ${repairCause}. Decide what is true about THIS process at ${targetDate}. ` +
     `Do not merely paraphrase the old equilibrium. Numeric pressure/momentum changes must follow the returned state. ` +
-    `Stalemate is legal when the state materially evolves in another dimension: readiness, logistics, command, morale, domestic politics, diplomacy, strategic objectives, preparation, restraint, or de-escalation.\n\n` +
+    motionRule +
     `Non-player actors are allowed to miscalculate, overreach, mobilize, bluff, radicalize, back down, split internally, or accept dangerous risk when current causes support it. ` +
     `Do not optimize every actor into caution. Do not invent chaos either.\n\n` +
     `PLAYER AGENCY: ${playerPolity} is human-controlled. Do not invent a NEW major sovereign/executive decision for ${playerPolity} unless already authorized by canon.\n\n` +
@@ -5915,9 +6333,6 @@ const runTargetedWorldMotionRepair = async ({
       throw signal.reason || new DOMException("Timeline jump cancelled.", "AbortError");
     }
 
-    const timeoutMs = getMapSetting(MAP_SETTING_KEYS.limitAiGeneration) ? 120000 : 0;
-    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : null;
-
     logContextDiagnostics({
       attempt: 1,
       history: [{ role: "user", parts: [{ text: userMessage }] }],
@@ -5929,44 +6344,14 @@ const runTargetedWorldMotionRepair = async ({
       variables: { storylineId, originDate, targetDate },
     });
 
-    const aiStartedAt =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
-
-    let response;
-    try {
-      response = await callAI(systemPrompt, [
-        { role: "user", parts: [{ text: userMessage }] },
-      ], {
-        deadline,
-        reasoningEnabled: false,
-        signal,
-        taskKey: "worldMotionRepair",
-        tool: getGameplayTool("worldMotionRepair"),
-      });
-    } catch (error) {
-      const failedAt =
-        typeof performance !== "undefined" && typeof performance.now === "function"
-          ? performance.now()
-          : Date.now();
-      recordTurnPerfAiAttempt({
-        taskKey: "worldMotionRepair",
-        attempt: 1,
-        ms: Math.max(0, failedAt - aiStartedAt),
-        error: normalizeString(error?.message || error),
-      });
-      throw error;
-    }
-
-    const aiEndedAt =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
-    recordTurnPerfAiAttempt({
+    const response = await callRepairAI({
+      systemPrompt,
+      userMessage,
+      reasoningEnabled: false,
+      signal,
+      hardLimitMs,
       taskKey: "worldMotionRepair",
-      attempt: 1,
-      ms: Math.max(0, aiEndedAt - aiStartedAt),
+      tool: getGameplayTool("worldMotionRepair"),
     });
 
     const rawText =
@@ -6040,6 +6425,7 @@ const runTargetedWorldMotionRepair = async ({
         ? signal.reason
         : new DOMException("Timeline jump cancelled.", "AbortError");
     }
+    if (outcome) outcome.error = error;
     console.warn(
       `[OH World Motion Repair] ${storylineId} failed: ` +
       `${normalizeString(error?.message || error) || "unknown error"}. ` +
@@ -6049,28 +6435,56 @@ const runTargetedWorldMotionRepair = async ({
   }
 };
 
-const repairAntiStasisStorylines = async ({
-  payload,
-  bundle,
-  analysis,
-  originDate,
-  targetDate,
-  passMaxEvents,
-  signal,
-} = {}) => {
-  const issues = findWorldStorylineAntiStasisIssues(payload, {
-    existingStorylines: bundle?.world?.storylines,
-    selectedStorylines: analysis?.attentionStorylines,
-    originDate,
-    stopDate: normalizeString(payload?.stopDate) || targetDate,
-    world: bundle?.world,
-  });
-  if (!issues.length) return { repaired: 0, failed: 0, issues: [] };
+// The skip's one motion repair pass, run once its last segment is in hand (see
+// findSkipStorylineMotionIssues for how the skip is judged as a single round).
+// Its results are written into the segment payloads, so they reach the ledger
+// through the same merge as everything else.
+const repairSkipStorylineMotion = async ({ context, state, signal } = {}) => {
+  const { bundle, campaignId, originDate, targetDate } = context;
+  const payloads = normalizeArray(state?.segmentPayloads);
+  const none = { repaired: 0, failed: 0, skipped: [], issues: [] };
+  if (!payloads.length) return none;
+  // A canned fallback means the model is not answering; repair calls to the same
+  // provider would only fail again after costing their wait.
+  if (normalizeString(state?.generation?.source) === "fallback") return none;
 
-  let events = normalizeArray(payload?.events);
-  let updates = decodeWorldStorylineUpdates(payload?.storylineUpdates);
+  // ONE stop date for detecting the issues, prompting the repair and validating
+  // it: the merged one the round is applied at. (Detecting at one date and
+  // validating at another could tell the model a prose-only stalemate was fine
+  // and then reject exactly that.)
+  const merged = mergeSegmentPayloads(payloads, { targetDate });
+  const stopDate = normalizeString(merged.stopDate) || targetDate;
+  const events = normalizeArray(merged.events);
+  const baseStorylines = normalizeArray(bundle?.world?.storylines);
+  const world = state.ledgerWorld || bundle.world;
+  const issues = findSkipStorylineMotionIssues({
+    events,
+    storylineUpdates: merged.storylineUpdates,
+    existingStorylines: baseStorylines,
+    selectedStorylines: state.attentionStorylines,
+    originDate,
+    stopDate,
+    world,
+  });
+  if (!issues.length) return none;
+
+  const budget = state.motionRepairBudget;
+  const round = bundle?.game?.round || 0;
+  // The world as the skip left it, for the repair's dossiers and history.
+  const repairBundle = {
+    actions: bundle.actions,
+    chats: bundle.chats,
+    events: normalizeEvents([...normalizeArray(bundle.events), ...events]),
+    game: bundle.game,
+    world,
+  };
+  const repairedUpdates = [];
+  // Storylines whose skip updates this pass replaces (repaired) or withdraws
+  // (failed or skipped).
+  const settledIds = new Set();
   let repaired = 0;
   let failed = 0;
+  const skipped = [];
 
   console.warn(
     `[OH World Motion Repair] ${issues.length} selected storyline repair issue(s): ` +
@@ -6083,6 +6497,17 @@ const repairAntiStasisStorylines = async ({
 
   for (const issue of issues) {
     const issueId = normalizeString(issue?.id);
+
+    // Over its limits the issue is treated exactly like a failed repair: the
+    // storyline stays overdue for the main pass. Issues arrive in attention
+    // order, so the cap keeps the most urgent ones.
+    const skipReason = motionRepairSkipReason(issue, { budget, failures: motionRepairFailures, campaignId, round });
+    if (skipReason) {
+      settledIds.add(issueId);
+      skipped.push({ id: issueId, reason: skipReason });
+      continue;
+    }
+
     const existingCausalEventIndex = (() => {
       let best = -1;
       events.forEach((event, index) => {
@@ -6093,53 +6518,87 @@ const repairAntiStasisStorylines = async ({
       return best;
     })();
 
+    const repairStartedAt = Date.now();
+    const repairOutcome = {};
     const repair = await runTargetedWorldMotionRepair({
-      bundle,
+      bundle: repairBundle,
       issue,
       mainPassEvents: events,
       existingCausalEventIndex,
       originDate,
-      targetDate,
+      targetDate: stopDate,
       signal,
+      // What is left of the skip's repair time: the call is stopped when it
+      // runs out, so the budget caps the pass, not only when repairs start.
+      hardLimitMs: motionRepairTimeRemainingMs(budget),
+      outcome: repairOutcome,
     });
+    const settledAs = settleMotionRepairCall(issue, {
+      budget,
+      failures: motionRepairFailures,
+      campaignId,
+      round,
+      ms: Date.now() - repairStartedAt,
+      ok: Boolean(repair),
+      stoppedAtTimeBudget: repairOutcome.error?.repairStop === REPAIR_STOP_TIME_BUDGET,
+    });
+    settledIds.add(issueId);
 
-    // Remove the insufficient copy-forward either way. If repair fails this keeps
-    // the canonical storyline's old accounted/review dates intact, so it remains
-    // immediately overdue next turn instead of being silently pushed forward.
-    updates = updates.filter((entry) => normalizeString(entry?.id) !== normalizeString(issue.id));
+    if (settledAs === "stopped-at-time-budget") {
+      skipped.push({ id: issueId, reason: settledAs });
+      continue;
+    }
 
     if (!repair) {
       failed += 1;
       continue;
     }
 
-    if (repair.event) events = [...events, repair.event];
-
-    const repairedEventIndexes =
-      Number.isInteger(repair.existingCausalEventIndex) &&
-      repair.existingCausalEventIndex >= 0 &&
-      repair.existingCausalEventIndex < events.length
-        ? [repair.existingCausalEventIndex]
-        : [];
-
-    updates.push({
-      ...repair.update,
-      eventIndexes: repairedEventIndexes,
-    });
+    // No event index: a causal event already carries this storyline's id (that
+    // is how it was found), and the ledger links storylines to events by id.
+    repairedUpdates.push({ ...repair.update, eventIndexes: [] });
     repaired += 1;
 
     console.info(
       `[OH World Motion Repair] repaired ${issue.id}: ` +
-      `${repairedEventIndexes.length ? "semantic state bound to existing main-pass event" : "hidden objective evolution"}.`,
+      `${existingCausalEventIndex >= 0 ? "semantic state bound to existing main-pass event" : "hidden objective evolution"}.`,
     );
   }
 
-  payload.events = events;
-  // Internal transport may be object records after schema validation; the native
-  // decoder explicitly supports this form and preserves exact event-index offsets.
-  payload.storylineUpdates = updates;
+  // Withdraw the skip's copy-forwards for every settled storyline that existed
+  // before the skip, and put the repairs on the last segment — see
+  // settleSkipStorylineUpdates, which is where this is tested.
+  const settledUpdates = settleSkipStorylineUpdates(
+    payloads.map((payload) => payload?.storylineUpdates),
+    { settledIds, preSkipIds: baseStorylines.map((entry) => entry?.id), repairedUpdates },
+  );
+  payloads.forEach((payload, index) => {
+    if (payload && payload.storylineUpdates !== settledUpdates[index]) {
+      payload.storylineUpdates = settledUpdates[index];
+    }
+  });
 
-  return { repaired, failed, issues };
+  // One line a bug report can carry: what this pass spent and what it left
+  // overdue on purpose.
+  const skippedByReason = skipped.reduce((counts, entry) => {
+    counts[entry.reason] = (counts[entry.reason] || 0) + 1;
+    return counts;
+  }, {});
+  const summary = {
+    attempted: repaired + failed,
+    repaired,
+    failed,
+    skipped: skippedByReason,
+    repairMs: budget ? Math.round(budget.ms) : null,
+  };
+  console.info(
+    `[OH World Motion Repair] skip ${originDate} → ${stopDate}: attempted ${summary.attempted}, repaired ${repaired}, failed ${failed}` +
+    `${skipped.length ? `, left overdue ${skipped.map((entry) => `${entry.id} (${entry.reason})`).join(", ")}` : ""}` +
+    `${budget ? `; ${Math.round(budget.ms / 1000)}s of repair time` : ""}.`,
+  );
+  logDebugEvent("turn", "World motion repair pass.", { originDate, stopDate, ...summary });
+
+  return { repaired, failed, skipped, issues };
 };
 
 // ---- Post-curation breadth repair (Continuum 08.3.1) -----------------------
@@ -6397,8 +6856,6 @@ const runWorldBreadthRepair = async ({
 
   try {
     if (signal?.aborted) throw signal.reason || new DOMException("Timeline jump cancelled.", "AbortError");
-    const timeoutMs = getMapSetting(MAP_SETTING_KEYS.limitAiGeneration) ? 180000 : 0;
-    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : null;
 
     logContextDiagnostics({
       attempt: 1,
@@ -6417,41 +6874,12 @@ const runWorldBreadthRepair = async ({
       },
     });
 
-    const breadthAiStartedAt =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
-    let response;
-    try {
-      response = await callAI(systemPrompt, [
-        { role: "user", parts: [{ text: userMessage }] },
-      ], {
-        deadline,
-        signal,
-        taskKey: "worldBreadthRepair",
-        tool: getGameplayTool("jumpForward"),
-      });
-    } catch (error) {
-      const breadthAiFailedAt =
-        typeof performance !== "undefined" && typeof performance.now === "function"
-          ? performance.now()
-          : Date.now();
-      recordTurnPerfAiAttempt({
-        taskKey: "worldBreadthRepair",
-        attempt: 1,
-        ms: Math.max(0, breadthAiFailedAt - breadthAiStartedAt),
-        error: normalizeString(error?.message || error),
-      });
-      throw error;
-    }
-    const breadthAiEndedAt =
-      typeof performance !== "undefined" && typeof performance.now === "function"
-        ? performance.now()
-        : Date.now();
-    recordTurnPerfAiAttempt({
+    const response = await callRepairAI({
+      systemPrompt,
+      userMessage,
+      signal,
       taskKey: "worldBreadthRepair",
-      attempt: 1,
-      ms: Math.max(0, breadthAiEndedAt - breadthAiStartedAt),
+      tool: getGameplayTool("jumpForward"),
     });
 
     const rawText = typeof response === "string" ? response : normalizeString(response?.rawText);
@@ -7117,238 +7545,6 @@ const statsVerboseTerritoryDebugEnabled = () => {
   }
 };
 
-const statsSphericalVector = (lng, lat) => {
-  const lon = (Number(lng) || 0) * Math.PI / 180;
-  const phi = (Number(lat) || 0) * Math.PI / 180;
-  const cosPhi = Math.cos(phi);
-  return [cosPhi * Math.cos(lon), cosPhi * Math.sin(lon), Math.sin(phi)];
-};
-
-const statsVectorDot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const statsVectorNormalize = (value) => {
-  const length = Math.hypot(value[0], value[1], value[2]) || 1;
-  return [value[0] / length, value[1] / length, value[2] / length];
-};
-const statsVectorLngLat = (value) => {
-  const unit = statsVectorNormalize(value);
-  return {
-    lng: Math.atan2(unit[1], unit[0]) * 180 / Math.PI,
-    lat: Math.asin(Math.max(-1, Math.min(1, unit[2]))) * 180 / Math.PI,
-  };
-};
-
-const statsRegionHeuristicWeight = ({ tags = [], type = "" } = {}) => {
-  const lowered = new Set(normalizeArray(tags).map((tag) => normalizeString(tag).toLowerCase()).filter(Boolean));
-  const typeKey = normalizeString(type).toLowerCase();
-  let weight = 1;
-  if ([...lowered].some((tag) => tag.includes("capital"))) weight *= 4;
-  else if ([...lowered].some((tag) => tag.includes("metro") || tag.includes("city") || tag.includes("urban"))) weight *= 2.5;
-  if ([...lowered].some((tag) => tag.includes("desert"))) weight *= 0.5;
-  if ([...lowered].some((tag) => tag.includes("mountain") || tag.includes("hill"))) weight *= 0.8;
-  if ([...lowered].some((tag) => tag.includes("jungle"))) weight *= 0.75;
-  if (typeKey.includes("island")) weight *= 0.8;
-  return Math.max(0.1, weight);
-};
-
-const buildStatsMacroPlan = (plannedRows = []) => {
-  const rows = normalizeArray(plannedRows)
-    .map((row, index) => {
-      const geography = normalizeString(row?.geography || row?.baseGeography);
-      if (!geography) return null;
-      const hasLng = row?.lng !== null && row?.lng !== undefined && row?.lng !== "";
-      const hasLat = row?.lat !== null && row?.lat !== undefined && row?.lat !== "";
-      const lng = Number(row?.lng);
-      const lat = Number(row?.lat);
-      const hasPoint = hasLng && hasLat && Number.isFinite(lng) && Number.isFinite(lat);
-      return {
-        sourceIndex: index,
-        index: Number(row?.index) || index + 1,
-        geography,
-        lng: hasPoint ? lng : ((index * 137.508) % 360) - 180,
-        lat: hasPoint ? lat : 0,
-        weight: Math.max(0.1, Number(row?.weight) || 1),
-        vector: statsSphericalVector(hasPoint ? lng : ((index * 137.508) % 360) - 180, hasPoint ? lat : 0),
-        regionIds: normalizeArray(row?.regions).map((region) => normalizeString(region?.id)).filter(Boolean),
-        adjacencyIds: normalizeArray(row?.regions).flatMap((region) => normalizeArray(region?.adjacencies).map(normalizeString)).filter(Boolean),
-      };
-    })
-    .filter(Boolean);
-  if (!rows.length) return [];
-
-  const clusterSpatially = (subset, bucketCount) => {
-    if (!subset.length) return [];
-    const count = Math.max(1, Math.min(bucketCount, subset.length));
-    if (count === 1) {
-      const vector = subset.reduce((sum, row) => [
-        sum[0] + row.vector[0] * row.weight,
-        sum[1] + row.vector[1] * row.weight,
-        sum[2] + row.vector[2] * row.weight,
-      ], [0, 0, 0]);
-      return [{ members: subset, ...statsVectorLngLat(vector) }];
-    }
-
-    const centers = [];
-    let first = subset[0];
-    for (const row of subset) {
-      if (row.weight > first.weight || (row.weight === first.weight && row.geography.localeCompare(first.geography) < 0)) first = row;
-    }
-    centers.push(first.vector);
-    while (centers.length < count) {
-      let choice = null;
-      let choiceScore = -Infinity;
-      for (const row of subset) {
-        let nearestDistance = Infinity;
-        for (const center of centers) {
-          const distance = 1 - Math.max(-1, Math.min(1, statsVectorDot(row.vector, center)));
-          if (distance < nearestDistance) nearestDistance = distance;
-        }
-        const score = nearestDistance * Math.sqrt(row.weight);
-        if (score > choiceScore || (score === choiceScore && row.geography.localeCompare(choice?.geography || "") < 0)) {
-          choice = row;
-          choiceScore = score;
-        }
-      }
-      centers.push(choice?.vector || subset[centers.length % subset.length].vector);
-    }
-
-    let assignments = new Array(subset.length).fill(0);
-    for (let iteration = 0; iteration < 5; iteration += 1) {
-      assignments = subset.map((row) => {
-        let best = 0;
-        let bestDot = -Infinity;
-        for (let centerIndex = 0; centerIndex < centers.length; centerIndex += 1) {
-          const similarity = statsVectorDot(row.vector, centers[centerIndex]);
-          if (similarity > bestDot) {
-            bestDot = similarity;
-            best = centerIndex;
-          }
-        }
-        return best;
-      });
-      for (let centerIndex = 0; centerIndex < centers.length; centerIndex += 1) {
-        const members = subset.filter((_, rowIndex) => assignments[rowIndex] === centerIndex);
-        if (!members.length) continue;
-        const vector = members.reduce((sum, row) => [
-          sum[0] + row.vector[0] * row.weight,
-          sum[1] + row.vector[1] * row.weight,
-          sum[2] + row.vector[2] * row.weight,
-        ], [0, 0, 0]);
-        centers[centerIndex] = statsVectorNormalize(vector);
-      }
-    }
-    return centers.map((center, centerIndex) => ({
-      members: subset.filter((_, rowIndex) => assignments[rowIndex] === centerIndex),
-      ...statsVectorLngLat(center),
-    })).filter((bucket) => bucket.members.length);
-  };
-
-  // Preserve major disconnected territorial blocks before spatial clustering.
-  // This prevents a nearby colony (e.g. North Africa) from being blended into the
-  // metropole merely because a global k-means center falls across the sea.
-  const rowByRegionId = new Map();
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    for (const id of rows[rowIndex].regionIds) rowByRegionId.set(id, rowIndex);
-  }
-  const graph = rows.map(() => new Set());
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    for (const adjacentId of rows[rowIndex].adjacencyIds) {
-      const other = rowByRegionId.get(adjacentId);
-      if (other == null || other === rowIndex) continue;
-      graph[rowIndex].add(other);
-      graph[other].add(rowIndex);
-    }
-  }
-  const visited = new Set();
-  const connected = [];
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    if (visited.has(rowIndex)) continue;
-    const queue = [rowIndex];
-    visited.add(rowIndex);
-    const memberIndexes = [];
-    while (queue.length) {
-      const current = queue.shift();
-      memberIndexes.push(current);
-      for (const next of graph[current]) {
-        if (visited.has(next)) continue;
-        visited.add(next);
-        queue.push(next);
-      }
-    }
-    connected.push(memberIndexes.map((index) => rows[index]));
-  }
-
-  const majorCandidates = connected.filter((component) => component.length >= 4).sort((a, b) => b.length - a.length);
-  const originalTinyRows = connected.filter((component) => component.length < 4).flat();
-  const reserveForTiny = originalTinyRows.length || majorCandidates.length > STATS_MACRO_MAX_BUCKETS ? 1 : 0;
-  const majorLimit = Math.max(0, STATS_MACRO_MAX_BUCKETS - reserveForTiny);
-  const major = majorCandidates.slice(0, majorLimit);
-  const tinyRows = [
-    ...originalTinyRows,
-    ...majorCandidates.slice(majorLimit).flat(),
-  ];
-  const baseDesired = Math.max(1, Math.min(STATS_MACRO_MAX_BUCKETS, Math.ceil(rows.length / STATS_MACRO_TARGET_COMPONENTS)));
-  const tinyCapacity = Math.max(0, STATS_MACRO_MAX_BUCKETS - major.length);
-  const tinyMinimum = tinyRows.length ? Math.min(tinyCapacity, 3, Math.ceil(tinyRows.length / 10)) : 0;
-  const minimumForLandmasses = major.length + tinyMinimum;
-  const desired = Math.max(1, Math.min(STATS_MACRO_MAX_BUCKETS, Math.max(baseDesired, minimumForLandmasses)));
-
-  const allocations = major.map(() => 1);
-  let tinyAllocation = tinyMinimum;
-  let remaining = desired - allocations.reduce((sum, value) => sum + value, 0) - tinyAllocation;
-  while (remaining > 0) {
-    let bestType = "major";
-    let bestIndex = -1;
-    let bestPressure = tinyRows.length && tinyAllocation > 0 ? tinyRows.length / tinyAllocation : -1;
-    for (let index = 0; index < major.length; index += 1) {
-      const pressure = major[index].length / allocations[index];
-      if (pressure > bestPressure) {
-        bestPressure = pressure;
-        bestIndex = index;
-      }
-    }
-    if (bestIndex >= 0) allocations[bestIndex] += 1;
-    else if (tinyRows.length) tinyAllocation += 1;
-    else break;
-    remaining -= 1;
-  }
-
-  const buckets = [];
-  major.forEach((component, index) => buckets.push(...clusterSpatially(component, allocations[index])));
-  if (tinyRows.length && tinyAllocation > 0) {
-    buckets.push(...clusterSpatially(tinyRows, tinyAllocation));
-  } else if (tinyRows.length && buckets.length) {
-    // Pathological case with more major disconnected landmasses than the hard
-    // macro cap: retain the cap and attach overflow rows to their nearest bucket.
-    for (const row of tinyRows) {
-      let nearest = buckets[0];
-      let best = -Infinity;
-      for (const bucket of buckets) {
-        const center = statsSphericalVector(bucket.lng, bucket.lat);
-        const similarity = statsVectorDot(row.vector, center);
-        if (similarity > best) {
-          best = similarity;
-          nearest = bucket;
-        }
-      }
-      nearest.members.push(row);
-    }
-  }
-  if (!buckets.length) buckets.push(...clusterSpatially(rows, desired));
-
-  buckets.sort((a, b) => b.lat - a.lat || a.lng - b.lng || a.members[0].geography.localeCompare(b.members[0].geography));
-  return buckets.map((bucket, index) => ({ index: index + 1, ...bucket }));
-};
-
-const buildStatsMacroContext = (macroPlan = []) => normalizeArray(macroPlan).map((bucket) => {
-  const center = statsVectorLngLat(statsSphericalVector(bucket?.lng, bucket?.lat));
-  const members = normalizeArray(bucket?.members);
-  const samples = [...members]
-    .sort((a, b) => b.weight - a.weight || a.geography.localeCompare(b.geography))
-    .slice(0, STATS_MACRO_SAMPLE_NAMES)
-    .map((member) => member.geography);
-  return `[M${bucket.index}] ${members.length} live component(s); center ${Math.abs(center.lat).toFixed(1)}°${center.lat >= 0 ? "N" : "S"}, ${Math.abs(center.lng).toFixed(1)}°${center.lng >= 0 ? "E" : "W"}; representative places: ${samples.join(", ")}`;
-}).join("\n");
-
 const buildStatsPreviousMacroContext = (previous, macroPlan = []) => {
   const byGeography = new Map(normalizeArray(previous?.territorialComponents).map((component) => [normalizeString(component?.geography).toLowerCase(), component]));
   const lines = [];
@@ -8008,525 +8204,29 @@ const buildStatsPopulationCalibrationCanon = ({ bundle, statCode, normalizedWorl
 // provenance from countryCode when available; otherwise keep the exact region name
 // as its own deterministic economic bucket. Never collapse unrelated blank-country
 // regions into one fake "Unclassified" component.
+// The main-thread fallback, for when the Stats worker is unavailable. The logic is
+// the worker's own (countryStatsWorkerKernel.js), not a copy: this used to be a
+// 520-line duplicate that had to be kept in step by hand. What differs here is
+// only where the inputs come from — the catalog Nations already primed, the
+// normalized world — and the UI budget passed as `pause`, so the ~850 ms this
+// takes on a full map is spread across frames instead of freezing the page.
 const buildTargetStatsTerritorialBasis = async (bundle, code, normalizedWorld = null, { signal } = {}) => {
   const world = normalizedWorld || normalizeWorldState(bundle.world);
-  const target = canonicalStatsPolity(code, world);
-  if (!target) {
-    return {
-      context: "No target polity was resolved.",
-      plan: [],
-      macroPlan: [],
-      mode: "none",
-      referenceContext: "",
-    };
-  }
-
-  // 8B.2.14: Stats must use the SAME scenario geography that the player actually
-  // sees. loadRegionCatalog() is deliberately broad: stock GADM rows are merged
-  // with scenario/custom rows and its cache may outlive individual runtime fetches.
-  // That is useful for name resolution, but it is not authoritative enough for
-  // territorial accounting on hybrid maps. The rendered regionsGeojson is the
-  // current map partition and therefore wins whenever it exists. Stock/merged
-  // catalog data is retained only as a compatibility fallback for maps that do not
-  // expose a rendered region FeatureCollection.
-  // 8B.2.18.1 performance: the rendered scenario map is authoritative, so do
-  // not eagerly load/merge the broad stock region catalog in parallel. That fallback
-  // can be much larger than the active scenario and used to block Stats even when it
-  // was immediately discarded.
-  // R2.31 performance: never reopen / parse the giant scenario GeoJSON merely to
-  // inspect another country's Stats. Nations already projects the exact rendered
-  // scenario partition into a compact non-geometry catalog. Use that authoritative
-  // projection directly; stock merged catalog remains fallback-only.
+  // The rendered scenario partition is authoritative; the broad merged catalog
+  // is loaded only when there is none (see the kernel for why).
   const scenarioCatalog = await loadScenarioRegionCatalog({ force: false }).catch(() => []);
-
-  const renderedCatalog = [];
-  const yieldCatalogSlice = createUiBudget(5);
-  for (const region of normalizeArray(scenarioCatalog)) {
-    const id = normalizeString(region?.id);
-    const name = normalizeString(region?.name) || id;
-
-    if (id && name) {
-      const countryCode = normalizeString(region?.countryCode);
-      const mappedCountryCode = countryCode
-        ? normalizeString(toCountryName(countryCode))
-        : "";
-      const resolvedCodeGeography =
-        mappedCountryCode && mappedCountryCode.toLowerCase() !== countryCode.toLowerCase()
-          ? mappedCountryCode
-          : "";
-
-      const country = normalizeString(region?.country);
-      const baseGeography = country || resolvedCodeGeography || name || id;
-      const baseOwner = country || resolvedCodeGeography || mappedCountryCode || "";
-
-      renderedCatalog.push({
-        id,
-        name,
-        countryCode,
-        baseGeography,
-        baseOwner,
-        lng: Number.isFinite(Number(region?.lng)) ? Number(region.lng) : null,
-        lat: Number.isFinite(Number(region?.lat)) ? Number(region.lat) : null,
-        weight: statsRegionHeuristicWeight({ tags: region?.tags, type: region?.type }),
-        adjacencies: normalizeArray(region?.adjacencies).map(normalizeString).filter(Boolean),
-      });
-    }
-
-    // Previous cooperative code began only AFTER this 4,390-row projection.
-    await yieldCatalogSlice(signal);
-  }
-
-  const mergedCatalog = renderedCatalog.length
+  const fallbackCatalog = normalizeArray(scenarioCatalog).length
     ? []
     : await loadRegionCatalog({ force: false }).catch(() => []);
-
-  const fallbackCatalog = normalizeArray(mergedCatalog)
-    .map((region) => {
-      const id = normalizeString(region?.id);
-      const name = normalizeString(region?.name) || id;
-      if (!id || !name) return null;
-
-      const rawCountryCode = normalizeString(region?.countryCode);
-      const mappedCountryCode = rawCountryCode
-        ? normalizeString(toCountryName(rawCountryCode))
-        : "";
-      const resolvedCodeGeography =
-        mappedCountryCode && mappedCountryCode.toLowerCase() !== rawCountryCode.toLowerCase()
-          ? mappedCountryCode
-          : "";
-      const country = normalizeString(region?.country);
-      const baseGeography = country || resolvedCodeGeography || name || id;
-      const baseOwner = country || resolvedCodeGeography || mappedCountryCode || "";
-
-      const centroid = region?.centroid?.coordinates;
-      const lng = Number(Array.isArray(centroid) ? centroid[0] : region?.lng ?? region?.longitude);
-      const lat = Number(Array.isArray(centroid) ? centroid[1] : region?.lat ?? region?.latitude);
-      return {
-        id,
-        name,
-        countryCode: rawCountryCode,
-        baseGeography,
-        baseOwner,
-        lng: Number.isFinite(lng) ? lng : null,
-        lat: Number.isFinite(lat) ? lat : null,
-        weight: statsRegionHeuristicWeight({ tags: region?.tags, type: region?.type }),
-        adjacencies: normalizeArray(region?.adjacencies).map(normalizeString).filter(Boolean),
-      };
-    })
-    .filter(Boolean);
-
-  const catalog = renderedCatalog.length > 0 ? renderedCatalog : fallbackCatalog;
-  if (!catalog.length) {
-    return {
-      context: "No region catalog is available; use existing campaign records conservatively.",
-      plan: [],
-      macroPlan: [],
-      mode: "none",
-      referenceContext: "",
-    };
-  }
-
-  // 8B.2.18.1 performance: target membership is the hot path over every map
-  // feature. Do not invoke the full polity identity resolver 2-4 times per region.
-  // Resolve the target once, build its known identity/alias set once, and compare raw
-  // map ownership tokens against that set. Keep a tiny generic resolver cache only
-  // for the rare displaced-sovereign/donor comparisons that truly need it.
-  const targetIdentityKeys = new Set([
-    target,
+  const uiBudget = createUiBudget(5);
+  return buildTargetStatsTerritorialBasisKernel({
+    bundle: { ...bundle, world },
     code,
-    ...statsPolityAliases(world, target),
-  ].map((value) => normalizeString(value).toLowerCase()).filter(Boolean));
-  const mappedTargetCode = normalizeString(toCountryName(code));
-  if (mappedTargetCode) targetIdentityKeys.add(mappedTargetCode.toLowerCase());
-
-  const sameTarget = (value) => {
-    const raw = normalizeString(value);
-    if (!raw) return false;
-    const key = raw.toLowerCase();
-    if (targetIdentityKeys.has(key)) return true;
-    const mapped = normalizeString(toCountryName(raw)).toLowerCase();
-    return Boolean(mapped && targetIdentityKeys.has(mapped));
-  };
-
-  const canonicalCache = new Map();
-  const canonicalCached = (value) => {
-    const raw = normalizeString(value);
-    if (!raw) return "";
-    const key = raw.toLowerCase();
-    if (canonicalCache.has(key)) return canonicalCache.get(key);
-    const resolved = canonicalStatsPolity(raw, world);
-    canonicalCache.set(key, resolved);
-    return resolved;
-  };
-  const same = (a, b) =>
-    normalizeString(canonicalCached(a)).toLowerCase() ===
-    normalizeString(canonicalCached(b)).toLowerCase();
-
-  const totalByBase = new Map();
-  const legalByBase = new Map();
-  const controlledByBase = new Map();
-  const displacedSovereigns = new Set();
-
-  let occupiedByTarget = 0;
-  let targetOccupiedByOthers = 0;
-  let nativeHomelandControlled = 0;
-
-  const pushRegion = (map, baseGeography, region) => {
-    if (!map.has(baseGeography)) map.set(baseGeography, []);
-    map.get(baseGeography).push(region);
-  };
-
-  await statsYieldToMainThread(signal);
-  const yieldTerritorySlice = createUiBudget(6);
-  for (let catalogIndex = 0; catalogIndex < catalog.length; catalogIndex += 1) {
-    const region = catalog[catalogIndex];
-    const regionId = normalizeString(region?.id);
-    const baseGeography = normalizeString(region?.baseGeography) || normalizeString(region?.name) || regionId;
-    if (!regionId || !baseGeography) continue;
-
-    totalByBase.set(baseGeography, (totalByBase.get(baseGeography) || 0) + 1);
-
-    const baseOwner = normalizeString(region?.baseOwner);
-    const controller = normalizeString(
-      world.regionOwnershipOverrides?.[regionId] || baseOwner,
-    );
-    // 8B.2.14: regionSovereigntyOverrides is intentionally SPARSE. normalizeWorldState
-    // drops an explicit sovereignty entry whenever legal sovereign === current controller
-    // to avoid persisting thousands of redundant normal-ownership rows. Therefore, when
-    // no explicit sovereignty anchor exists, the CURRENT CONTROLLER is the effective legal
-    // sovereign. A genuine wartime occupation is safe because its old legal sovereign is
-    // preserved as an explicit differing sovereignty override before control flips.
-    const sovereign = normalizeString(
-      world.regionSovereigntyOverrides?.[regionId] || controller || baseOwner,
-    );
-
-    const row = {
-      id: regionId,
-      name: normalizeString(region?.name) || regionId,
-      sovereign,
-      lng: Number.isFinite(Number(region?.lng)) ? Number(region.lng) : null,
-      lat: Number.isFinite(Number(region?.lat)) ? Number(region.lat) : null,
-      weight: Math.max(0.1, Number(region?.weight) || 1),
-      adjacencies: normalizeArray(region?.adjacencies).map(normalizeString).filter(Boolean),
-    };
-
-    if (sameTarget(controller)) {
-      pushRegion(controlledByBase, baseGeography, row);
-
-      if (!sameTarget(sovereign)) {
-        occupiedByTarget += 1;
-        if (sovereign) displacedSovereigns.add(sovereign);
-
-        // Strong native evidence that the controlled land is the polity's own
-        // homeland/base geography rather than an arbitrary foreign occupation.
-        if (sameTarget(baseGeography)) nativeHomelandControlled += 1;
-      }
-    }
-
-    if (sameTarget(sovereign) && controller && !sameTarget(controller)) {
-      targetOccupiedByOthers += 1;
-    }
-
-    if (sameTarget(sovereign)) pushRegion(legalByBase, baseGeography, row);
-
-    // Time-budgeted rather than item-count-budgeted: one scenario can make 20
-    // regions cheap and another can make 20 identity checks expensive. Never hold
-    // the browser for more than roughly one half-frame before yielding.
-    await yieldTerritorySlice(signal);
-  }
-
-  const targetOverrideEntry = Object.entries(world.polityOverrides || {})
-    .find(([key, record]) => [
-      key,
-      record?.code,
-      record?.name,
-      ...normalizeArray(record?.aliases),
-    ].some((value) => value && sameTarget(value)));
-
-  const targetOverride = targetOverrideEntry?.[1] || null;
-  const targetExplicitlyActive =
-    normalizeString(targetOverride?.status).toLowerCase() === "active";
-
-  // Structured lifecycle evidence is universal and identity-safe. Merely being a
-  // CREATEd/RESTOREd polity is not by itself enough (a government-in-exile or newly
-  // created foreign invader must not absorb whatever it happens to occupy). Stronger
-  // evidence exists when the establishing event ALSO assigns territory/control to the
-  // polity. No country names, historical keywords, or scenario-specific ids.
-  let lifecycleEstablished = false;
-  let foundingTerritoryEstablished = false;
-  const yieldLifecycleSlice = createUiBudget(5);
-  for (const event of normalizeArray(bundle?.events)) {
-    const changes = normalizeArray(event?.impacts?.polityChanges);
-    const establishesTarget = changes.some((change) => {
-      const operation = normalizeString(change?.operation).toLowerCase();
-      return ["create", "restore"].includes(operation) &&
-        (sameTarget(change?.code) || sameTarget(change?.name));
-    });
-
-    if (!establishesTarget) continue;
-    lifecycleEstablished = true;
-
-    const grantsControl = normalizeArray(event?.impacts?.regionControlOps)
-      .some((operation) =>
-        ["control", "control_flip"].includes(normalizeString(operation?.op).toLowerCase()) &&
-        sameTarget(operation?.toCode));
-
-    const grantsSovereignty = normalizeArray(event?.impacts?.regionTransfers)
-      .some((transfer) => sameTarget(transfer?.toCode));
-
-    if (grantsControl || grantsSovereignty) foundingTerritoryEstablished = true;
-    await yieldLifecycleSlice(signal);
-  }
-
-  // Canonical war context is supporting evidence, especially for older saves whose
-  // lifecycle-establishing event may have been consolidated away. It is NOT enough
-  // by itself to convert a normal foreign occupation into national Stats scope.
-  let opposedToDisplacedSovereign = false;
-  for (const war of normalizeArray(world?.wars)) {
-    if (!["active", "ceasefire"].includes(normalizeString(war?.status).toLowerCase())) continue;
-
-    const sideA = normalizeArray(war?.sideA);
-    const sideB = normalizeArray(war?.sideB);
-    const targetInA = sideA.some((party) => sameTarget(party));
-    const targetInB = sideB.some((party) => sameTarget(party));
-    if (!targetInA && !targetInB) continue;
-
-    const opponents = targetInA ? sideB : sideA;
-    if (opponents.some((party) =>
-      [...displacedSovereigns].some((sovereign) => same(party, sovereign)))) {
-      opposedToDisplacedSovereign = true;
-      break;
-    }
-  }
-
-  const legalRegionCount = [...legalByBase.values()]
-    .reduce((sum, regions) => sum + regions.length, 0);
-  const controlledRegionCount = [...controlledByBase.values()]
-    .reduce((sum, regions) => sum + regions.length, 0);
-
-  // Universal de-facto-state rule.
-  //
-  // Normal states stay on LEGAL SOVEREIGNTY accounting, even while occupying
-  // foreign territory. Controller-based accounting is selected ONLY when:
-  //   1) there is no usable legal-sovereign mapped basis;
-  //   2) the polity actually controls mapped territory;
-  //   3) it is an explicitly active campaign polity; and
-  //   4) native evidence identifies those holdings as its territorial state base,
-  //      not ordinary foreign occupation.
-  const deFactoStatehoodEvidence = Boolean(
-    nativeHomelandControlled > 0 ||
-    foundingTerritoryEstablished ||
-    (lifecycleEstablished && opposedToDisplacedSovereign)
-  );
-
-  const useDeFactoStateBasis = Boolean(
-    legalRegionCount === 0 &&
-    controlledRegionCount > 0 &&
-    targetExplicitlyActive &&
-    deFactoStatehoodEvidence,
-  );
-
-  const selectedByBase = useDeFactoStateBasis ? controlledByBase : legalByBase;
-  const mode = useDeFactoStateBasis ? "de_facto_state" : "legal";
-
-  if (useDeFactoStateBasis) {
-    console.info(
-      `[stats 8B.2.18.1] ${target}: DE-FACTO STATE ADMINISTRATION selected — ` +
-        `${controlledRegionCount} controlled region(s), 0 legal-sovereign region(s), ` +
-        `rendered-geography=${renderedCatalog.length ? "yes" : "fallback"}, ` +
-        `own-base=${nativeHomelandControlled}, lifecycle=${lifecycleEstablished ? "yes" : "no"}, ` +
-        `founding-territory=${foundingTerritoryEstablished ? "yes" : "no"}, ` +
-        `war-with-displaced-sovereign=${opposedToDisplacedSovereign ? "yes" : "no"}.`,
-    );
-  } else if (legalRegionCount === 0 && controlledRegionCount > 0) {
-    console.info(
-      `[stats 8B.2.18.1] ${target}: ${controlledRegionCount} controlled region(s) excluded from national Stats; ` +
-        `de-facto state qualification failed (active=${targetExplicitlyActive ? "yes" : "no"}, ` +
-        `own-base=${nativeHomelandControlled}, lifecycle=${lifecycleEstablished ? "yes" : "no"}, ` +
-        `founding-territory=${foundingTerritoryEstablished ? "yes" : "no"}, ` +
-        `war-with-displaced-sovereign=${opposedToDisplacedSovereign ? "yes" : "no"}).`,
-    );
-  }
-
-  const rows = [...selectedByBase.entries()]
-    .map(([baseGeography, regions]) => ({
-      baseGeography,
-      regions,
-      total: totalByBase.get(baseGeography) || regions.length,
-    }))
-    .sort((a, b) =>
-      b.regions.length - a.regions.length ||
-      a.baseGeography.localeCompare(b.baseGeography));
-
-  if (!rows.length) {
-    return {
-      context: [
-        `Target: ${target}`,
-        "Accounting mode: NON-TERRITORIAL",
-        "No legally sovereign national map regions were resolved for this polity.",
-        controlledRegionCount > 0
-          ? `The polity controls ${controlledRegionCount} region(s), but native statehood safeguards did NOT classify those holdings as a de-facto national administrative basis. Ordinary occupation therefore remains excluded from national population/GDP.`
-          : "No de-facto controlled mapped regions were resolved either.",
-        "Do not silently substitute modern borders. This is an explicit NON-TERRITORIAL Stats basis: estimate a distributed/non-map population or economy only when campaign canon supports one; otherwise return no quantitative scope.",
-      ].join("\n"),
-      plan: [],
-      macroPlan: [],
-      mode: "nonterritorial",
-      referenceContext: "",
-    };
-  }
-
-  const plannedRows = rows.map((row, index) => {
-    const located = row.regions.filter((region) =>
-      region?.lng !== null && region?.lng !== undefined && region?.lng !== "" &&
-      region?.lat !== null && region?.lat !== undefined && region?.lat !== "" &&
-      Number.isFinite(Number(region.lng)) && Number.isFinite(Number(region.lat))
-    );
-    const weight = row.regions.reduce((sum, region) => sum + Math.max(0.1, Number(region?.weight) || 1), 0);
-    const vector = located.reduce((sum, region) => {
-      const localWeight = Math.max(0.1, Number(region?.weight) || 1);
-      const local = statsSphericalVector(region.lng, region.lat);
-      return [sum[0] + local[0] * localWeight, sum[1] + local[1] * localWeight, sum[2] + local[2] * localWeight];
-    }, [0, 0, 0]);
-    const point = located.length ? statsVectorLngLat(vector) : { lng: null, lat: null };
-    return {
-      index: index + 1,
-      geography: row.baseGeography,
-      regions: row.regions,
-      total: row.total,
-      lng: point.lng,
-      lat: point.lat,
-      weight,
-    };
+    scenarioCatalog,
+    fallbackCatalog,
+    pause: () => uiBudget(signal),
+    debug: statsVerboseTerritoryDebugEnabled(),
   });
-
-  const macroPlan = buildStatsMacroPlan(plannedRows);
-  const macroContext = buildStatsMacroContext(macroPlan);
-  console.info(
-    `[stats 8B.2.18.1] ${target}: ${plannedRows.length} authoritative live component(s) -> ${macroPlan.length} bounded demographic macro bucket(s) (${mode}); AI output no longer scales with province count.`,
-  );
-  if (statsVerboseTerritoryDebugEnabled()) {
-    console.debug(
-      `[stats 8B.2.18.1 debug] ${target}: full authoritative component plan`,
-      plannedRows.map((row) => ({
-        index: row.index,
-        geography: row.geography,
-        coverage: `${row.regions.length}/${row.total}`,
-        regions: row.regions.map((region) => `${region.name} [${region.id}]`),
-      })),
-    );
-    console.debug(`[stats 8B.2.18.1 debug] ${target}: macro plan`, macroPlan);
-  }
-
-  const lines = [
-    `Target: ${target}`,
-    `Accounting mode: ${useDeFactoStateBasis ? "DE-FACTO STATE ADMINISTRATION" : "LEGAL SOVEREIGNTY"}`,
-    useDeFactoStateBasis
-      ? `De-facto administered mapped regions: ${controlledRegionCount}. Legal-sovereign mapped regions: 0.`
-      : `Legally sovereign mapped regions: ${legalRegionCount}.`,
-    `Exact live-map accounting components held natively: ${plannedRows.length}.`,
-    `Bounded demographic macro buckets for this AI assessment: ${macroPlan.length}.`,
-    "The macro buckets below are native spatial groupings used only to bound demographic/economic estimation. They do NOT redefine sovereignty, province identity, or constitutional status.",
-    macroContext,
-  ];
-
-  if (useDeFactoStateBasis) {
-    lines.push(
-      "SPECIAL STATEHOOD RULE: native code selected controller-based Stats because this active polity has no usable legal-sovereign map basis but does administer territory as a state actor. Count ONLY the controlled territory represented by the macro buckets. This rule must NOT be generalized by the model to ordinary foreign occupation.",
-    );
-    lines.push(
-      `Native qualification evidence: own-base controlled regions=${nativeHomelandControlled}; lifecycle create/restore=${lifecycleEstablished ? "yes" : "no"}; founding event granted territory/control=${foundingTerritoryEstablished ? "yes" : "no"}; active/ceasefire conflict with displaced sovereign=${opposedToDisplacedSovereign ? "yes" : "no"}.`,
-    );
-  }
-
-  if (!useDeFactoStateBasis && occupiedByTarget > 0) {
-    lines.push(
-      `Temporary occupations held by ${target} but legally sovereign to others: ${occupiedByTarget} region(s) — DO NOT add these inhabitants/GDP to the national component total.`,
-    );
-  }
-
-  if (targetOccupiedByOthers > 0) {
-    lines.push(
-      `Legally sovereign ${target} regions under temporary foreign control: ${targetOccupiedByOthers} region(s) — keep them in legal population/GDP scope, but current occupation may economically depress/disrupt them if campaign evidence supports it.`,
-    );
-  }
-
-  // For a de-facto state, the displaced legal sovereign often already has a mature
-  // component ledger for the same geography. Expose exact canonical donor rows as
-  // continuity anchors. This is universal data reuse, not scenario-specific data.
-  const referenceLines = [];
-  if (useDeFactoStateBasis) {
-    for (const row of plannedRows) {
-      const sourcePolities = [...new Set(
-        row.regions
-          .map((region) => canonicalCached(region?.sovereign))
-          .filter((source) => source && !same(source, target)),
-      )];
-
-      for (const source of sourcePolities) {
-        const sourceSheet = normalizeCountryStatSheet(world?.countryStats?.[source]);
-        const sourceComponents = normalizeArray(sourceSheet?.territorialComponents);
-        const donor = sourceComponents.find((component) =>
-          normalizeString(component?.geography).toLowerCase() ===
-          normalizeString(row.geography).toLowerCase());
-
-        const donorPopulation = Number(donor?.population);
-        const donorGdpPerCapita = Number(donor?.gdpPerCapita);
-        if (
-          !donor ||
-          !Number.isFinite(donorPopulation) ||
-          donorPopulation < 0 ||
-          !Number.isFinite(donorGdpPerCapita) ||
-          donorGdpPerCapita <= 0
-        ) {
-          continue;
-        }
-
-        const full = row.regions.length >= row.total;
-        referenceLines.push(
-          `[${row.index}] ${row.geography} ← ${source}: canonical donor component population=${Math.round(donorPopulation)}, gdpPerCapita=${donorGdpPerCapita}. ${
-            full
-              ? "Current scope is FULL/NEAR-FULL for this base bucket; treat this as a strong pre-separation continuity anchor."
-              : `Current scope is PARTIAL (${row.regions.length}/${row.total}); DO NOT copy the donor's whole population. Estimate ONLY the listed controlled subregions while using donor productivity/demography as context.`
-          }`,
-        );
-      }
-    }
-  }
-
-  if (referenceLines.length) {
-    console.info(`[stats 8B.2.18.1] ${target}: ${referenceLines.length} donor/reference component anchor(s) available.`);
-    if (statsVerboseTerritoryDebugEnabled()) {
-      console.debug(`[stats 8B.2.18.1 debug] ${target}: donor/reference component anchors`, referenceLines);
-    }
-  }
-
-  const fingerprintSource = [
-    `mode=${mode}`,
-    `geographySource=${renderedCatalog.length ? "rendered" : "fallback"}`,
-    ...plannedRows.map((row) => [
-      row.geography,
-      row.total,
-      row.regions.map((region) => region.id).sort().join(","),
-    ].join("|")),
-  ].join("\n");
-
-  return {
-    context: lines.join("\n"),
-    plan: plannedRows.map((row) => ({ index: row.index, geography: row.geography })),
-    macroPlan: macroPlan.map((bucket) => ({
-      index: bucket.index,
-      lng: bucket.lng,
-      lat: bucket.lat,
-      members: bucket.members.map((member) => ({
-        geography: member.geography,
-        weight: member.weight,
-      })),
-    })),
-    fingerprint: `territory-${stableStatsHash(fingerprintSource)}`,
-    mode,
-    referenceContext: referenceLines.slice(0, 24).join("\n") + (referenceLines.length > 24 ? `\n(+${referenceLines.length - 24} more donor anchors retained natively but omitted from the bounded AI context)` : ""),
-  };
 };
 
 // A persisted sheet generated from the current native territorial planner must have
@@ -8774,7 +8474,7 @@ const waitForSimulationIdle = async ({ signal, timeoutMs = 10 * 60 * 1000 } = {}
 const firstReadingsInFlight = new Map();
 const firstReading = (kind, target, reason, work) => {
   const name = normalizeString(target);
-  if (!name || typeof window === "undefined" || !isProviderConfigured()) return Promise.resolve(null);
+  if (!name || typeof window === "undefined" || !isFallbackListConfigured()) return Promise.resolve(null);
   const key = `${activeCampaignId()}|${kind}|${name.toLowerCase()}`;
   if (firstReadingsInFlight.has(key)) return firstReadingsInFlight.get(key);
   const run = work(name)
@@ -8860,6 +8560,13 @@ export const ensureCountryAssessed = (target, options = {}) =>
 // Structured national stat sheet for the Stats tab, grounded in the same
 // campaign context as the intelligence briefing.
 export const generateCountryStatSheet = async ({ code, name, forceReassess = false, signal } = {}) => {
+  // Issue #724: wait out any running simulation before reading the world.
+  // The Stats pane calls this directly, not through ensureCountryStatSheet, so
+  // it skipped the idle wait every other out-of-turn writer takes — on a fresh
+  // game that was a second AI call beside the pregame backstory, and a baseline
+  // built from a world with no history in it yet, which then became campaign
+  // canon. Ahead of the perf timer, so waiting is not reported as preparation.
+  await waitForSimulationIdle({ signal });
   const statsStartedAt = typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
   // Stats is a read-mostly panel. Use the already-canonical runtime bundle cache
   // rather than forcing every underlying state resource back through storage on each
@@ -9195,6 +8902,41 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
 
   await statsYieldToMainThread(signal);
 
+  // The per-component split (countryStats.js decodeTerritorialComponentSplit).
+  // Only when the prompt lists each component by id (a polity small enough for
+  // the kernel's componentDetail), and only for a bucket with a component that
+  // needs one: on a fresh baseline or hard audit, every component; otherwise one
+  // that is new to the ledger, has only ever had the native weights, or now holds
+  // a different number of regions than when it was split. Everything else keeps
+  // its stored split and is rescaled deterministically.
+  const splitKey = (geography) => normalizeString(geography).toLocaleLowerCase();
+  const heldRegionCount = (member) => Math.max(0, Math.trunc(Number(member?.heldRegions) || 0));
+  const storedSplits = normalizeArray(previous?.continuity?.semanticSplitComponents);
+  const storedSplitRegions = new Map(storedSplits.map((entry) => [splitKey(entry?.geography), Number(entry?.regions)]));
+  const previousComponentKeys = new Set(
+    normalizeArray(previous?.territorialComponents)
+      .filter((component) => Number(component?.population) > 0)
+      .map((component) => splitKey(component?.geography)),
+  );
+  const liveMembers = territorialMacroPlan.flatMap((bucket) => normalizeArray(bucket?.members));
+  const needsSplit = new Set(
+    liveMembers
+      .filter((member) => populationCalibrationRequested
+        || !previousComponentKeys.has(splitKey(member?.geography))
+        || storedSplitRegions.get(splitKey(member?.geography)) !== heldRegionCount(member))
+      .map((member) => splitKey(member?.geography)),
+  );
+  const componentSplitBuckets = territorialBasis.componentDetail
+    ? territorialMacroPlan
+      .filter((bucket) => normalizeArray(bucket?.members).length > 1)
+      .filter((bucket) => normalizeArray(bucket.members).some((member) => needsSplit.has(splitKey(member?.geography))))
+      .map((bucket) => ({
+        index: bucket.index,
+        members: normalizeArray(bucket.members).map((member) => ({ componentId: member.componentId, geography: member.geography })),
+      }))
+    : [];
+  const componentSplitOutcome = new WeakMap();
+
   const statsAiStartedAt = typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
   const { payload } = await runJsonTask("countryStatSheet", {
     signal,
@@ -9211,6 +8953,9 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
       statsTerritorialContext: territorialContext,
       statsTerritorialPlan: territorialPlan,
       statsTerritorialMacroPlan: territorialMacroPlan,
+      statsComponentSplitBuckets: componentSplitBuckets,
+      statsComponentSplitOutcome: componentSplitOutcome,
+      statsStoredSplitComponents: storedSplits.map((entry) => entry?.geography),
       statsPreviousTerritorialComponents: normalizeArray(previous?.territorialComponents),
       statsTerritorialBasisMode: territorialBasisMode,
       statsTerritorialReferenceContext: territorialReferenceContext,
@@ -9230,6 +8975,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
   console.info(`[stats 8B.2.18.1 perf] ${target}: bounded Stats AI ${(Math.max(0, statsAiEndedAt - statsAiStartedAt)).toFixed(1)} ms.`);
 
   throwIfAborted(signal);
+  const freshlySplitKeys = new Set(normalizeArray(payload && componentSplitOutcome.get(payload)).map(splitKey));
   const finalized = finalizeCountryStatSheet(payload);
 
   // Fail closed if any future normalization/schema regression drops authoritative
@@ -9260,6 +9006,13 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
         elapsedYears,
         evidenceText: evidenceContext,
         territoryChanged,
+        // A component's first semantic split replaces a region-count placeholder
+        // (or a split made for a different slice of it); the jump away from that is
+        // the fix, not a discontinuity. Its bucket-mates re-split alongside it are
+        // still held to the band.
+        freshlySplitGeographies: liveMembers
+          .map((member) => member.geography)
+          .filter((geography) => freshlySplitKeys.has(splitKey(geography)) && needsSplit.has(splitKey(geography))),
       });
 
   if (guarded.restored?.length) {
@@ -9295,6 +9048,15 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
           ? { populationCalibrationVersion: previousPopulationCalibrationVersion }
           : {}),
       accountedEventIds: accountedNow,
+      // Components whose share of the ledger came from a semantic split, with the
+      // regions they held then: the ones split just now, plus earlier ones still
+      // holding the same slice. A component left on the native weights, or whose
+      // holding changed without a new split, is not listed, so it is asked again.
+      semanticSplitComponents: liveMembers
+        .filter((member) => freshlySplitKeys.has(splitKey(member?.geography))
+          || (previousComponentKeys.has(splitKey(member?.geography))
+            && storedSplitRegions.get(splitKey(member?.geography)) === heldRegionCount(member)))
+        .map((member) => ({ geography: member.geography, regions: heldRegionCount(member) })),
     };
 
     try {
@@ -9814,22 +9576,12 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
             originDate: state.segmentOrigin,
             targetDate: segmentTarget,
             gameCountry: bundle.game.country,
+            board: normalizeArray(bundle.world?.projects),
           });
         },
         variables: segmentVariables,
       });
 
-      // The accepted segment keeps its events. A selected storyline that is
-      // objectively stale, or was omitted from storylineUpdates, gets one small
-      // targeted repair call; a failed repair leaves the process overdue.
-      await repairAntiStasisStorylines({
-        payload,
-        bundle: segmentBundle,
-        analysis: worldInitiative.analysis,
-        originDate: state.segmentOrigin,
-        targetDate: segmentTarget,
-        signal,
-      });
       screenSegmentPayload(payload, {
         analysis: worldInitiative.analysis,
         priorEvents: segmentBundle.events,
@@ -9844,6 +9596,13 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       });
 
       state.segmentPayloads.push(payload);
+      // What this segment asked the model to move, for the skip's one motion
+      // repair pass. Recorded only with the committed segment, so a failed
+      // attempt's selection never lingers into its retry.
+      state.attentionStorylines = mergeSkipAttentionStorylines(
+        state.attentionStorylines,
+        worldInitiative.analysis?.attentionStorylines,
+      );
       state.ledgerWorld = advanceLedgerWorld(ledgerWorld, payload, {
         stopDate: normalizeString(payload?.stopDate) || segmentTarget,
         round: (bundle.game.round || 1) + 1,
@@ -9896,6 +9655,13 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       segmentIndex,
     });
   }
+
+  // Every segment is in hand. A selected storyline the skip left objectively
+  // stale, or never updated, gets one small targeted repair call — judged once
+  // for the whole skip, never per segment; a failed repair leaves it overdue.
+  // Outside the try on purpose: nothing here may hold the turn as a failed
+  // segment, and a repair never throws except on the player's Cancel.
+  await repairSkipStorylineMotion({ context, state, signal });
 };
 
 // Merge the segments into the one round the player asked for and write it.
@@ -9997,6 +9763,8 @@ const finishTimelineJump = async ({ context, signal, state }) => {
     storylineUpdates: merged.storylineUpdates,
     breadthRepairContext: selectBreadthRepairContext(state, context),
     generation: state.generation,
+    hiddenEvents: state.hiddenEvents,
+    boardProvisionalEventIds: state.boardProvisionalEventIds,
   };
   const applyArgs = {
     baseActions: bundle.actions,
@@ -10037,9 +9805,11 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
   if (safeDays <= 0) {
     throw new Error("Choose a time-skip amount greater than zero.");
   }
-  const dateStep = Math.max(0, Math.round(safeDays));
+  // One rule for where a skip lands, shared with the timeline's labels
+  // (runtime/jumpDates.js), so a label never promises a date the jump misses.
+  const dateStep = jumpDayStep(safeDays);
   const originDate = normalizeString(bundle.game.gameDate);
-  const targetDate = dateStep >= 1 ? (addIsoDays(originDate, dateStep) || originDate) : originDate;
+  const targetDate = jumpTargetDate(originDate, safeDays);
   if (dateStep >= 1 && parseIsoDate(originDate) && targetDate === originDate) {
     throw new Error("The requested jump exceeds the supported date range.");
   }
@@ -10104,6 +9874,15 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
     ledgerWorld: bundle.world,
     // One exploration audit per segment; the quietest is re-searched after curation.
     breadthRepairContexts: [],
+    // Canonical events the integrity screen kept off the timeline, and the major
+    // events that passed the consequence check only on a Board entry — both for
+    // the board pass (applySimulationResult).
+    hiddenEvents: [],
+    boardProvisionalEventIds: [],
+    // Every storyline any segment selected, and what the skip's one motion
+    // repair pass may spend (repairSkipStorylineMotion).
+    attentionStorylines: [],
+    motionRepairBudget: createMotionRepairBudget(),
   };
 
   await runJumpSegments({ context: jumpContext, onProgress, signal, state: jumpState });
@@ -12028,16 +11807,22 @@ const validatePregameCanonicalBootstrap = (
 // writes doubles as the done-marker, so it can never run twice.
 export const maybeGeneratePregameHistory = async () => {
   if (isSimulationBusy()) return null;
-  const bundle = await readGameStateBundle({ force: true });
-  const briefing = normalizeString(bundle.world.startingTimelineText);
-  if (!briefing) return null;
-  if (normalizeEvents(bundle.events).length > 0) return null;
-  if ((normalizeWorldState(bundle.world).simulationHistory ?? []).length > 0) return null;
-  const startDate = normalizeString(bundle.game.startDate || bundle.game.gameDate);
-  if (!startDate) return null;
-
+  // Issue #724: take the lock before the first read, not after it. It used to
+  // be taken only once the bundle had been read and checked, so for the length
+  // of that read the backstory was under way while the lock still said idle —
+  // and a Stats pane already open as a fresh game loaded started its own AI
+  // call in the gap. The "nothing to do" returns below all pass through the
+  // finally, which is what makes holding the lock across them safe.
   beginSimulation();
   try {
+    const bundle = await readGameStateBundle({ force: true });
+    const briefing = normalizeString(bundle.world.startingTimelineText);
+    if (!briefing) return null;
+    if (normalizeEvents(bundle.events).length > 0) return null;
+    if ((normalizeWorldState(bundle.world).simulationHistory ?? []).length > 0) return null;
+    const startDate = normalizeString(bundle.game.startDate || bundle.game.gameDate);
+    if (!startDate) return null;
+
     // The backstory now doubles as the round-zero bootstrap of the war and
     // diplomacy ledgers: a campaign that opens mid-war starts with that war on
     // the books, and a standing alliance is a fact from day one.

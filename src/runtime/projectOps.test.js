@@ -78,6 +78,21 @@ test("an explicitly emptied list is still an instruction, not an omission", () =
   assert.deepEqual(applyProjectOps([before], [{ op: "create", name: before.name, tags: [] }], {})[0].tags, []);
 });
 
+// The board prompt titles entries `Operation "Name"`, and a model copies the whole
+// title — label, quotes, and in a Russian game a translated label. Without an id
+// that update used to match nothing and vanish.
+test("an op naming a project by its displayed title still finds it", () => {
+  const before = applyProjectOps([], [{ op: "create", name: "Standing Watch", kind: "operation", summary: "s" }], {})[0];
+  for (const name of ['Operation "Standing Watch"', 'Операция "Standing Watch"', 'Operation «Standing Watch»']) {
+    const after = applyProjectOps([before], [{ op: "update", name, progress: 70 }], {});
+    assert.equal(after.length, 1, name);
+    assert.equal(after[0].progress, 70, name);
+  }
+  // The label may already be part of the name, in which case the prompt quotes the whole thing.
+  const labelled = applyProjectOps([], [{ op: "create", name: "Operation Kingfisher", kind: "operation", summary: "s" }], {})[0];
+  assert.equal(applyProjectOps([labelled], [{ op: "update", name: '"Operation Kingfisher"', progress: 40 }], {})[0].progress, 40);
+});
+
 test("a genuinely new project still receives its defaults", () => {
   const fresh = applyProjectOps([], [{ op: "create", name: "Fresh", summary: "s" }], {})[0];
   assert.equal(fresh.status, "active");
@@ -359,6 +374,24 @@ test("replaying the same completion does not apply the effects twice", () => {
   const { world: twice } = applyEventImpactsToWorld({ events: [event], world: once });
   assert.equal(twice.regionOwnershipOverrides["RUR.1_1"], "Someone Else", "the transfer fired a second time");
   assert.equal(twice.projects[0].onCompleteAppliedAt, stamped);
+});
+
+// A Hidden event (a Canonical event kept off the timeline) still moves the Board,
+// through this same path so a completion releases its effects exactly as a
+// visible event's would — but it is not on the timeline, so it must not be
+// stamped into the entry's activity, which lists timeline events only.
+test("a board-only event completes a project and releases its effects without stamping its activity", () => {
+  const world = worldWith(applyProjectOps([], [annexation(renameRuritania)]));
+  const hiddenCarrier = { ...eventWith([{ op: "complete", name: "Northern Question" }]), id: "hidden-1" };
+  const { world: next } = applyEventImpactsToWorld({
+    events: [hiddenCarrier],
+    world,
+    boardOnlyEventIds: ["hidden-1"],
+  });
+
+  assert.equal(next.projects[0].status, "complete");
+  assert.equal(next.polityOverrides.Ruritania.name, "Federal Republic of Ruritania", "the completion effects were lost");
+  assert.deepEqual(next.projects[0].eventIds, [], "a Hidden event is not a timeline card to link to");
 });
 
 for (const op of ["cancel", "fail"]) {

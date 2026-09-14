@@ -2249,6 +2249,11 @@ export const COUNTRY_STAT_GENERATION_SCHEMA = {
       description:
         "Bounded regional territorial estimate. With a native macro plan, return exactly one row per [M#] macro bucket as index~group~population~gdpPerCapita. Native code expands each macro row back across every exact live-map component. For an explicitly NON-TERRITORIAL basis, compatibility rows may use group~geography~population~gdpPerCapita when campaign canon supports a real distributed people/organization/economy; return the literal NONE when no defensible quantitative scope exists. group is core, integrated, or overseas/dependent; population is an integer; gdpPerCapita is a positive NOMINAL output-per-capita number in constant 2026-EUR accounting terms; never PPP/international dollars.",
     },
+    territorialComponentSplitText: {
+      type: "string",
+      description:
+        "Only when the prompt requires a PER-COMPONENT SPLIT: one row per listed component as componentId~sharePercent~group~gdpPerCapita, where sharePercent is the component's share of its own macro bucket's population (each bucket's rows sum to 100), and group/gdpPerCapita are that component's own. Omit it otherwise.",
+    },
     economy: {
       type: "object",
       properties: {
@@ -2314,6 +2319,20 @@ export const COUNTRY_STAT_SHEET_SCHEMA = {
           type: "array",
           maxItems: 64,
           items: nonEmptyTextSchema("Canonical economic event id already incorporated into this stat baseline."),
+        },
+        semanticSplitComponents: {
+          type: "array",
+          maxItems: 64,
+          description: "Components whose share of their macro bucket was set by a per-component split rather than native weights.",
+          items: {
+            type: "object",
+            properties: {
+              geography: nonEmptyTextSchema("Component geography."),
+              regions: { type: "integer", minimum: 0, description: "Map regions the component held when it was split." },
+            },
+            required: ["geography", "regions"],
+            additionalProperties: false,
+          },
         },
       },
       additionalProperties: false,
@@ -2863,6 +2882,24 @@ const normalizeMarkerOperationShape = (entry) => {
   return { ...entry, ...(op ? { op } : {}) };
 };
 
+// A spawned unit's `status` is a four-word enum, and its `posture` an eight-word
+// one, and models mix them up: a field report's DeepSeek jump spawned a carrier
+// with status "holding" — a posture — and that one word failed the whole month
+// to the canned fallback. A posture word written as a status moves across (when
+// no posture was given); any other unknown status is dropped, since the field is
+// optional and the engine assigns one anyway.
+const UNIT_STATUSES = new Set(unitSchema.properties.status.enum);
+const UNIT_POSTURES = new Set(unitSchema.properties.posture.enum);
+
+const normalizeUnitOperationShape = (entry) => {
+  if (!isPlainRecord(entry) || !isPlainRecord(entry.unit) || entry.unit.status === undefined) return entry;
+  const status = String(entry.unit.status ?? "").trim().toLowerCase();
+  if (UNIT_STATUSES.has(status)) return { ...entry, unit: { ...entry.unit, status } };
+  const { status: _status, ...unit } = entry.unit;
+  if (UNIT_POSTURES.has(status) && unit.posture === undefined) unit.posture = status;
+  return { ...entry, unit };
+};
+
 const PAYLOAD_IMPACT_ARRAYS = [
   "actionIds",
   "createdChats",
@@ -2931,12 +2968,47 @@ const normalizeEventShape = (entry) => {
     if (Array.isArray(impacts.markerOps)) {
       impacts.markerOps = impacts.markerOps.map(normalizeMarkerOperationShape);
     }
+    if (Array.isArray(impacts.unitOps)) {
+      impacts.unitOps = impacts.unitOps.map(normalizeUnitOperationShape);
+    }
     event.impacts = impacts;
   }
   return event;
 };
 
+// The between-rounds pulse. `chat` is an object or null, and some models say
+// "nobody writes" in words instead — "Quiet pulse — submitting no contact." — which
+// failed both attempts of the pulse on nothing but the spelling of silence. A
+// sentence there is never a usable note (it has no speaker and no countries), so
+// it reads as the null it means.
+const normalizeIdleDiplomacyShape = (value) => {
+  if (!isPlainRecord(value)) return value;
+  const candidate = { ...value };
+  if (typeof candidate.chat === "string") candidate.chat = null;
+  if (Array.isArray(candidate.unitOps)) candidate.unitOps = candidate.unitOps.map(normalizeUnitOperationShape);
+  return candidate;
+};
+
+// The board prompt lists every running effort as `Operation "Name" [id proj-1]`,
+// and a model reads that label as the field's name: a field report's DeepSeek
+// wrote `"id"` instead of `projectId`, which held the whole turn. The reducer has
+// always read `projectId || id` (gameState.js normalizeProjectOp); only the
+// schema refused it.
+const normalizeProjectsShape = (value) => {
+  if (!isPlainRecord(value) || !Array.isArray(value.projectOps)) return value;
+  return {
+    ...value,
+    projectOps: value.projectOps.map((entry) => {
+      if (!isPlainRecord(entry) || entry.id === undefined) return entry;
+      const { id, ...op } = entry;
+      return op.projectId === undefined ? { ...op, projectId: id } : op;
+    }),
+  };
+};
+
 export const normalizeGameplayPayload = (taskKey, value) => {
+  if (taskKey === "idleDiplomacy") return normalizeIdleDiplomacyShape(value);
+  if (taskKey === "projects") return normalizeProjectsShape(value);
   if (taskKey !== "jumpForward" && taskKey !== "autoJumpForward") return value;
   if (!isPlainRecord(value)) return value;
 

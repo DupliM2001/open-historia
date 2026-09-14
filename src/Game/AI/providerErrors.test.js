@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import {
   busyProviderMessage,
+  classifyProviderFailure,
   errorPayloadText,
   isBusyErrorPayload,
   isQuotaExhaustedPayload,
@@ -13,12 +14,75 @@ import {
   looksLikeDeliberation,
   providerErrorReplyMessage,
   retryDelayMsFromPayload,
+  shouldRetryProviderFailure,
+  toolStreamRefusalError,
+  describeHtmlErrorPage,
 } from "./providerErrors.js";
 import {
     contextWindowMessage,
     isContextWindowErrorPayload,
     isContextWindowErrorText,
 } from "./providerErrors.js";
+
+// Both pages are from the same field report's log, abridged. The first is a
+// gateway's own Next.js 404 (the base URL pointed at the website, not the API);
+// it went into the log verbatim, about 10 KB, on every failed call.
+const GATEWAY_404_PAGE = '<!DOCTYPE html><html lang="en" class="dark"><head><meta charSet="utf-8"/>'
+  + '<title>ModelRouter | Unified AI API and Model Catalog</title>'
+  + '<script type="application/ld+json">{"@context":"https://schema.org"}</script></head>'
+  + '<body><div class="min-h-screen"><a href="/"><span>ModelRouter</span></a><div class="text-center">'
+  + '<h1>404</h1><p>This page doesn&#x27;t exist.</p><a href="/models">Browse Models</a></div></div>'
+  + '<script>self.__next_f.push([1,"lots of framework state"])</script></body></html>';
+
+// The second: the endpoint typed without https://, so the request went to the
+// game's own server, which answered with Express's default error page.
+const MISSING_SCHEME_PAGE = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<title>Error</title>\n</head>\n'
+  + '<body>\n<pre>Cannot POST /inference.dahl.global/v1/chat/completions</pre>\n</body>\n</html>\n';
+
+test("a gateway's 404 page is summarised to what it says, with the fix, not pasted whole", () => {
+  const message = describeHtmlErrorPage(GATEWAY_404_PAGE, "OpenAI Compatible request failed (404)");
+  assert.match(message, /^OpenAI Compatible request failed \(404\): the endpoint answered with a web page/);
+  assert.match(message, /"ModelRouter 404 This page doesn't exist\. Browse Models"/);
+  assert.match(message, /Check the endpoint address in Settings/);
+  assert.doesNotMatch(message, /<|schema\.org|__next_f|Unified AI API/, "no markup, scripts or head in the message");
+  assert.ok(message.length < 400, `summary is ${message.length} chars`);
+});
+
+test("the page the game's own server sends back shows the bad address it was given", () => {
+  const message = describeHtmlErrorPage(MISSING_SCHEME_PAGE, "OpenAI Compatible request failed (404)");
+  assert.match(message, /"Cannot POST \/inference\.dahl\.global\/v1\/chat\/completions"/);
+});
+
+test("anything that is not an HTML page is left to the caller", () => {
+  assert.equal(describeHtmlErrorPage('{"error":{"message":"nope"}}', "x"), "");
+  assert.equal(describeHtmlErrorPage("Rate limit exceeded (10 RPM on free plan).", "x"), "");
+  assert.equal(describeHtmlErrorPage("", "x"), "");
+  assert.equal(describeHtmlErrorPage("error code: 502", "x"), "");
+});
+
+// A DeepSeek V4 Flash field report: a tool call refused mid-stream, retried once,
+// refused again — and the task was handed an empty "answer" that it then blamed
+// on the model. What the providers throw instead must say it was the provider,
+// and carry the flag the task runner reads to re-ask rather than fall back.
+test("a tool call the provider refused twice becomes a flagged busy error, not an empty answer", () => {
+  const error = toolStreamRefusalError(
+    "OpenAI Compatible",
+    { message: "An internal error occurred. Please try again later." },
+    true,
+  );
+  assert.equal(error.providerRefusal.busy, true);
+  assert.equal(error.providerRefusal.detail, "An internal error occurred. Please try again later.");
+  assert.equal(error.message, busyProviderMessage("OpenAI Compatible", "An internal error occurred. Please try again later.", true));
+  assert.match(error.message, /overloaded/);
+  // Busy after its one retry: the Fallback list moves on.
+  assert.equal(error.providerFailure.kind, "busy");
+});
+
+test("a refusal that is not about load is quoted as the provider's error, still flagged", () => {
+  const error = toolStreamRefusalError("Gemini", { message: "Invalid argument in request." }, false);
+  assert.equal(error.providerRefusal.busy, false);
+  assert.equal(error.message, providerErrorReplyMessage("Gemini", "Invalid argument in request."));
+});
 
 // The frame that started this: an OpenAI-compatible gateway answering HTTP 200
 // and then refusing inside the stream. The advisor used to report it as "no
@@ -258,4 +322,152 @@ test("the context-window message names the provider, the refusal and the request
     assert.match(message, /about 30,000 tokens \(120,000 characters/);
     assert.match(message, /32k tokens or more/);
     assert.doesNotMatch(contextWindowMessage("X", "no", 0), /tokens \(/);
+});
+
+// ---------------------------------------------------------------------------
+// Sorting a failed call for the Fallback list (docs/world-state.md, AI access)
+// ---------------------------------------------------------------------------
+
+const GEMINI_PER_DAY = {
+  error: {
+    code: 429,
+    status: "RESOURCE_EXHAUSTED",
+    message: "You exceeded your current quota, please check your plan and billing details.",
+    details: [{
+      "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+      violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }],
+    }],
+  },
+};
+
+test("a used-up daily allowance is Spent", () => {
+  assert.equal(classifyProviderFailure({ status: 429, payload: GEMINI_PER_DAY }).kind, "spent");
+});
+
+// TRANSCRIBED FROM A REAL ANSWER (gemini-3.7-flash, free tier, 2026-09-14), key
+// removed. The quota id says per DAY, but the message links to ".../rate-limits"
+// and "ai.dev/rate-limit" and says "Please retry in 47s", and a RetryInfo rides
+// along. The link text used to win: the list waited on a model that was used up
+// until midnight Pacific, and never moved to the next one.
+const GEMINI_PER_DAY_REAL = {
+  error: {
+    code: 429,
+    message: "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.7-flash\nPlease retry in 47.307372861s.",
+    status: "RESOURCE_EXHAUSTED",
+    details: [
+      { "@type": "type.googleapis.com/google.rpc.Help", links: [{ description: "Learn more about Gemini API quotas", url: "https://ai.google.dev/gemini-api/docs/rate-limits" }] },
+      {
+        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+        violations: [{
+          quotaMetric: "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+          quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+          quotaDimensions: { location: "global", model: "gemini-3.7-flash" },
+          quotaValue: "20",
+        }],
+      },
+      { "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "47s" },
+    ],
+  },
+};
+
+test("Google's real per-day answer is Spent, whatever its links and retry hint say", () => {
+  assert.equal(isQuotaExhaustedPayload(GEMINI_PER_DAY_REAL), true);
+  assert.equal(classifyProviderFailure({ status: 429, payload: GEMINI_PER_DAY_REAL }).kind, "spent");
+  // The same answer for a per-minute trip is still a rate limit: the quota id
+  // decides, in both directions.
+  const perMinute = JSON.parse(JSON.stringify(GEMINI_PER_DAY_REAL).replace("GenerateRequestsPerDayPerProjectPerModel", "GenerateRequestsPerMinutePerProjectPerModel"));
+  assert.equal(classifyProviderFailure({ status: 429, payload: perMinute }).kind, "rateLimited");
+});
+
+test("each provider's spelling of a spent allowance or balance is Spent", () => {
+  // OpenAI
+  assert.equal(classifyProviderFailure({ status: 429, payload: { error: { code: "insufficient_quota", type: "insufficient_quota", message: "You exceeded your current quota, please check your plan and billing details." } } }).kind, "spent");
+  // Anthropic, which says it with a 400
+  assert.equal(classifyProviderFailure({ status: 400, payload: { type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } } }).kind, "spent");
+  // A gateway's 402
+  assert.equal(classifyProviderFailure({ status: 402, payload: { error: { message: "Payment required" } } }).kind, "spent");
+});
+
+test("an overloaded provider is busy", () => {
+  assert.equal(classifyProviderFailure({ status: 503, payload: { error: { code: 503, status: "UNAVAILABLE", message: "The model is overloaded. Please try again later." } } }).kind, "busy");
+  // Anthropic's overloaded_error has a status code of its own.
+  assert.equal(classifyProviderFailure({ status: 529, payload: { type: "error", error: { type: "overloaded_error", message: "Overloaded" } } }).kind, "busy");
+  assert.equal(classifyProviderFailure({ status: 502, payload: { rawText: "error code: 502" } }).kind, "busy");
+  // Refused inside a 200 stream: no status to go on, only the frame.
+  assert.equal(classifyProviderFailure({ payload: { message: "Service temporarily overloaded", type: "service_unavailable" } }).kind, "busy");
+});
+
+test("a rejected key or an unknown model is Unusable, with a reason the player can act on", () => {
+  assert.deepEqual(classifyProviderFailure({ status: 401, payload: { error: { message: "Incorrect API key provided: sk-abc***.", code: "invalid_api_key" } } }), {
+    kind: "unusable", reason: "key rejected (401)",
+  });
+  assert.equal(classifyProviderFailure({ status: 403, payload: { error: { code: 403, status: "PERMISSION_DENIED", message: "Permission denied." } } }).reason, "key rejected (403)");
+  // Gemini says a bad key with a 400.
+  assert.deepEqual(classifyProviderFailure({ status: 400, payload: { error: { code: 400, status: "INVALID_ARGUMENT", message: "API key not valid. Please pass a valid API key." } } }), {
+    kind: "unusable", reason: "key rejected (400)",
+  });
+  assert.deepEqual(classifyProviderFailure({ status: 404, payload: { error: { code: 404, message: "models/gemini-9-flash is not found for API version v1beta, or is not supported for generateContent." } } }), {
+    kind: "unusable", reason: "model not found (404)",
+  });
+  assert.equal(classifyProviderFailure({ status: 404, payload: { error: { message: "models/gemini-3.9-flash is not found for API version v1beta." } } }).reason, "model not found (404)");
+  assert.equal(classifyProviderFailure({ status: 404, payload: { error: { message: "The model `gpt-9` does not exist or you do not have access to it.", code: "model_not_found" } } }).reason, "model not found (404)");
+  // Busy is not mistaken for a missing model just because it names the model.
+  assert.equal(classifyProviderFailure({ status: 503, payload: { error: { message: "The model gemini-3.5-flash is overloaded. Please try again later." } } }).kind, "busy");
+  // Ollama and friends say it with a 400.
+  assert.equal(classifyProviderFailure({ status: 400, payload: { error: { message: "model 'qwen9' not found, try pulling it first" } } }).reason, "model not found (400)");
+  // A 404 that is not about a model is the address being wrong.
+  assert.deepEqual(classifyProviderFailure({ status: 404, payload: { rawText: "Cannot POST /v2/chat/completions" } }), {
+    kind: "unusable", reason: "not found (404): check the endpoint address",
+  });
+});
+
+test("a failure that would happen on any model is not a reason to fall back", () => {
+  assert.equal(classifyProviderFailure({ status: 400, payload: { error: { code: "context_length_exceeded", message: "This model's maximum context length is 4096 tokens." } } }).kind, "other");
+  assert.equal(classifyProviderFailure({ status: 400, payload: { error: { message: "Invalid JSON payload received. Unknown name \"foo\"." } } }).kind, "other");
+  assert.equal(classifyProviderFailure({ status: 500, payload: { error: { message: "Internal error" } } }).kind, "other");
+  assert.equal(classifyProviderFailure({}).kind, "other");
+});
+
+test("a provider retries a failure only where the Fallback list rules say it should", () => {
+  const retry = (kind, { attempt = 1, retries = 3, canFallBack = true, rateLimitPolicy = "wait" } = {}) =>
+    shouldRetryProviderFailure({ failure: { kind }, attempt, retries, canFallBack, rateLimitPolicy });
+
+  // Waiting fixes none of these, so asking again is a wasted request.
+  for (const kind of ["spent", "unusable", "other"]) assert.equal(retry(kind), false, kind);
+
+  // Busy: one retry, then the list moves on.
+  assert.equal(retry("busy", { attempt: 1 }), true);
+  assert.equal(retry("busy", { attempt: 2 }), false);
+
+  // Rate limited: the player's choice.
+  assert.equal(retry("rateLimited", { attempt: 2, rateLimitPolicy: "wait" }), true);
+  assert.equal(retry("rateLimited", { attempt: 3, rateLimitPolicy: "wait" }), false, "out of attempts");
+  assert.equal(retry("rateLimited", { attempt: 1, rateLimitPolicy: "next" }), false);
+
+  // Nowhere to fall back to: today's full retries, because giving up early
+  // would only lose the turn sooner.
+  assert.equal(retry("busy", { attempt: 2, canFallBack: false }), true);
+  assert.equal(retry("busy", { attempt: 3, canFallBack: false }), false);
+  assert.equal(retry("rateLimited", { attempt: 1, canFallBack: false, rateLimitPolicy: "next" }), true);
+});
+
+test("a per-minute limit is Rate limited, and carries the wait the provider asked for", () => {
+  const perMinute = {
+    error: {
+      code: 429,
+      message: "You exceeded your current quota, please check your plan and billing details.",
+      details: [
+        { violations: [{ quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier" }] },
+        { "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "35s" },
+      ],
+    },
+  };
+  assert.deepEqual(classifyProviderFailure({ status: 429, payload: perMinute }), {
+    kind: "rateLimited", reason: "rate limited", waitMs: 35000,
+  });
+  assert.equal(classifyProviderFailure({ status: 429, payload: { error: { type: "rate_limit_exceeded", message: "Rate limit reached for gpt-5 in organization org-x on requests per min (RPM)" } } }).kind, "rateLimited");
+  // No RetryInfo: the wait is unknown, and the caller picks its own.
+  assert.deepEqual(classifyProviderFailure({ status: 429, payload: { error: { message: "Too many requests" } } }), {
+    kind: "rateLimited", reason: "rate limited", waitMs: null,
+  });
 });

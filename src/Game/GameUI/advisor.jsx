@@ -4,12 +4,14 @@ import { Chart, registerables } from "chart.js";
 import { sendMessage, startChat, loadHistory } from "../AI/main.jsx";
 import { requestDiplomaticChat } from "./chat.jsx";
 import { JSON_URLS, readJson, writeJson } from "../../runtime/assets.js";
-import { copyToClipboard } from "../../runtime/clipboard.js";
-import { logDebugEvent } from "../../runtime/debugLog.js";
+import { formatReportFields, logDebugEvent } from "../../runtime/debugLog.js";
+import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
+import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { chatLanguageDiffersFromUi, isRtlLanguage, resolveChatLanguage } from "../../runtime/i18n.js";
 import { applyProjectOpsToWorld, normalizeActionEntry, readActionsState, readWorldState, writeActionsState, writeWorldState } from "../../runtime/gameState.js";
 import { extractFencedJson, looksLikeProjectOps } from "./advisorBlocks.js";
 import { buildMessageDrafts, splitAtBlockquotes } from "./advisorDrafts.js";
+import { ADVISOR_SLIDE } from "./advisorSlide.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import StatsPane from "./stats.jsx";
 
@@ -134,18 +136,21 @@ const applyAdvisorActions = async (proposal) => {
     return items;
 };
 
-const CopyButton = ({ text, label = "Copy for a bug report", tone = "rgba(255,255,255,0.2)", color = "rgba(255,255,255,0.6)" }) => {
-    const [state, setState] = useState("idle");
+// Saves the diagnostics log with this failure attached at the top, or copies
+// the failure alone while logging is off (runtime/saveDebugLog.js).
+const ReportButton = ({ buildIncident, tone = "rgba(255,255,255,0.2)", color = "rgba(255,255,255,0.6)" }) => {
+    const { busy, label, loggingOn, onClick } = useFailureReportButton({ buildIncident, copyIdleLabel: "Copy for a bug report" });
     return (
         <button
         type="button"
-        onClick={async () => {
-            setState(await copyToClipboard(text) ? "copied" : "failed");
-            setTimeout(() => setState("idle"), 2000);
-        }}
-        style={{ background: "none", border: `1px solid ${tone}`, borderRadius: "6px", color, cursor: "pointer", fontSize: "0.7rem", fontWeight: 600, padding: "0.2rem 0.5rem" }}
+        disabled={busy}
+        onClick={onClick}
+        title={loggingOn
+            ? "Saves the diagnostics log as a file, with this error's details at the top. Attach the file to your bug report."
+            : "Copies this error's details. Diagnostics logging is off — turn it on in Settings → Diagnostics to save the full log instead."}
+        style={{ background: "none", border: `1px solid ${tone}`, borderRadius: "6px", color, cursor: busy ? "default" : "pointer", fontSize: "0.7rem", fontWeight: 600, padding: "0.2rem 0.5rem" }}
         >
-        {state === "copied" ? "✓ Copied" : state === "failed" ? "Copy failed — select the text below" : label}
+        {label}
         </button>
     );
 };
@@ -158,31 +163,18 @@ const RetryIcon = () => (
     </svg>
 );
 
-// The pasteable report.
+// What the transport learned about a failure, as report fields — shown under
+// "Show details" and attached to the saved log.
 //
 // Contains no API key and no endpoint host. It DOES contain model output — the
 // tail of the reasoning and a few raw stream frames — because that is the part
 // that actually explains a failure, and it can quote the campaign. The UI says
-// so next to the button rather than letting someone paste it somewhere public
-// on the assumption that it is inert.
-const formatErrorReport = (message, diagnostics) => {
-    const lines = ["Open Historia — advisor error", "", `Message: ${message}`];
-    if (diagnostics && typeof diagnostics === "object") {
-        lines.push("");
-        for (const [key, value] of Object.entries(diagnostics)) {
-            if (value === "" || value === null || value === undefined) continue;
-            if (Array.isArray(value)) {
-                if (value.length === 0) continue;
-                lines.push(`${key}:`);
-                for (const entry of value) lines.push(`  ${String(entry)}`);
-                continue;
-            }
-            const text = String(value);
-            lines.push(text.includes("\n") ? `${key}:\n${text}` : `${key}: ${text}`);
-        }
-    }
-    return lines.join("\n");
-};
+// so next to the details rather than letting someone post them somewhere public
+// on the assumption that they are inert.
+const errorReportFields = (message, diagnostics) => [
+    ["Message", message],
+    ...(diagnostics && typeof diagnostics === "object" ? Object.entries(diagnostics) : []),
+];
 
 // Shown under an advisor error. The message says what went wrong in plain
 // English; this is the part that says WHY, in enough detail to act on.
@@ -194,7 +186,7 @@ const formatErrorReport = (message, diagnostics) => {
 // ask again without retyping, not more advice.
 const AdvisorErrorDetails = ({ message, diagnostics, onRetry, retrying }) => {
     const [open, setOpen] = useState(false);
-    const report = formatErrorReport(message, diagnostics);
+    const fields = errorReportFields(message, diagnostics);
     const hasDetail = Boolean(diagnostics && Object.keys(diagnostics).length > 0);
 
     return (
@@ -206,7 +198,11 @@ const AdvisorErrorDetails = ({ message, diagnostics, onRetry, retrying }) => {
             <RetryIcon /> {retrying ? "Retrying…" : "Retry"}
             </button>
         )}
-        <CopyButton text={report} tone="rgba(239,68,68,0.45)" color="rgba(254,202,202,0.95)" />
+        <ReportButton
+        buildIncident={() => ({ kind: "advisor-error", title: "Advisor reply failed", fields })}
+        tone="rgba(239,68,68,0.45)"
+        color="rgba(254,202,202,0.95)"
+        />
         {hasDetail && (
             <button type="button" onClick={() => setOpen((value) => !value)} style={{ background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "6px", color: "rgba(255,255,255,0.6)", cursor: "pointer", fontSize: "0.7rem", fontWeight: 600, padding: "0.2rem 0.5rem" }}>
             {open ? "Hide details" : "Show details"}
@@ -219,7 +215,7 @@ const AdvisorErrorDetails = ({ message, diagnostics, onRetry, retrying }) => {
             No API key or endpoint is included. The model&apos;s own output is, so this may quote your campaign.
             </p>
             <pre data-no-translate style={{ margin: "0.35rem 0 0", padding: "0.5rem", background: "rgba(0,0,0,0.35)", borderRadius: "6px", color: "rgba(255,255,255,0.6)", fontSize: "0.64rem", lineHeight: 1.45, maxHeight: "12rem", overflow: "auto", userSelect: "text", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {report}
+            {formatReportFields(fields).join("\n")}
             </pre>
             </>
         )}
@@ -373,8 +369,12 @@ const AdvisorProjectsProblem = ({ kind, detail, excerpt, onRetry }) => {
             </button>
         )}
         {excerpt && (
-            <CopyButton
-            text={formatErrorReport("projects block could not be applied", { detail, excerpt })}
+            <ReportButton
+            buildIncident={() => ({
+                kind: "advisor-board",
+                title: "Advisor's projects block could not be applied",
+                fields: [["Problem", kind], ["Detail", detail], ["What broke", excerpt]],
+            })}
             tone="rgba(245,158,11,0.5)"
             color="rgba(253,230,138,0.95)"
             />
@@ -807,7 +807,7 @@ const AdvisorMessageList = React.memo(({ messages, isLoading, chatDiffers, chatD
     </div>
 ));
 
-const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onOpenActions, onOpenProjects, requestedPrompt, onConsumeRequest }) => {
+const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResizeEnd, onOpenActions, onOpenProjects, requestedPrompt, onConsumeRequest }) => {
     const [messages, setMessages]   = useState([]);
     const [input, setInput]         = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -837,11 +837,12 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onOpenA
     const inputRef = useRef(null);
     const [isResizing, setIsResizing] = useState(false);
     const [handleHover, setHandleHover] = useState(false);
+    const isMobile = useIsMobile();
 
     // Drag the drawer's left edge to resize it. The panel is docked right, so the
     // new width is simply (viewport width − pointer x); the parent (main.jsx) clamps
-    // and persists it. Pointer capture keeps the drag alive if the cursor leaves the
-    // 10px handle. Works for mouse, touch and pen.
+    // it, and persists it when told the drag is over. Pointer capture keeps the drag
+    // alive if the cursor leaves the 10px handle. Works for mouse, touch and pen.
     const handleResizeStart = React.useCallback((e) => {
         if (typeof onResize !== "function") return;
         e.preventDefault();
@@ -851,6 +852,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onOpenA
         const onMove = (ev) => onResize(window.innerWidth - ev.clientX);
         const onUp = () => {
             setIsResizing(false);
+            onResizeEnd?.();
             target.removeEventListener("pointermove", onMove);
             target.removeEventListener("pointerup", onUp);
             target.removeEventListener("pointercancel", onUp);
@@ -858,7 +860,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onOpenA
         target.addEventListener("pointermove", onMove);
         target.addEventListener("pointerup", onUp);
         target.addEventListener("pointercancel", onUp);
-    }, [onResize]);
+    }, [onResize, onResizeEnd]);
     // A reply already in the chat language must skip the UI translator, which
     // would render it back into the interface language.
     const chatDiffers = chatLanguageDiffersFromUi();
@@ -1053,7 +1055,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onOpenA
                 const last = prev[prev.length - 1];
                 const base = last && last.role === "advisor" && last.streaming ? prev.slice(0, -1) : prev.slice();
                 // Keep whatever the transport managed to learn about the failure,
-                // so the Copy button still works after a reload.
+                // so the report button still has it after a reload.
                 const updated = [...base, {
                     role: "error",
                     text: err.message,
@@ -1172,18 +1174,25 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onOpenA
             // Slide via transform: the old right: calc(-min(...) - 1rem) was
             // INVALID CSS (a min() can't be negated like that), so the closed
             // position was silently dropped and the drawer never slid away.
-            transform: isAdvisorOpen ? "translateX(0)" : "translateX(calc(100% + 2rem))",
+            // Closed, it sits exactly its own width off-screen: the HUD beside it
+            // slides that same distance (main.jsx), so they move as one. The
+            // shadow, which would show past the edge, fades out with it instead.
+            transform: isAdvisorOpen ? "translateX(0)" : "translateX(100%)",
             // Full height now the in-game top bar is gone — it used to stop 64px
             // (the old BAR_HEIGHT) short of the top to clear it. Anchored bottom: 0
             // above, so height: 100vh reaches the top edge.
-            width: typeof width === "number" ? `${width}px` : ADVISOR_PANEL_WIDTH, height: "100vh",
+            width: width || ADVISOR_PANEL_WIDTH, height: "100vh",
             backgroundColor: "rgba(24, 24, 27, 0.95)", backdropFilter: "blur(8px)",
-            // Above every HUD button/panel (toolbar 9999, forces 10000,
-            // library panels 10031) so nothing covers the open drawer on
-            // phones; below the editor (10050) and server-down (10060) overlays.
-            zIndex: 10040, borderLeft: "1px solid rgba(255,255,255,0.1)",
-            boxShadow: "-4px 0 24px rgba(0,0,0,0.4)",
-            transition: "transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
+            // Phones: above every HUD button/panel (toolbar 9999, forces 10000,
+            // library panels 10031) so nothing covers the near-full-width
+            // drawer; below the editor (10050) and server-down (10060) overlays.
+            // Desktop: the drawer can be dragged wide, so it sits under every
+            // HUD button, panel and menu (9998 and up: Actions, Projects,
+            // diplomacy chat, timeline panels, settings) and over only the map
+            // and the session pill (9996).
+            zIndex: isMobile ? 10040 : 9997, borderLeft: "1px solid rgba(255,255,255,0.1)",
+            boxShadow: isAdvisorOpen ? "-4px 0 24px rgba(0,0,0,0.4)" : "none",
+            transition: `transform ${ADVISOR_SLIDE}, box-shadow ${ADVISOR_SLIDE}`,
             display: "flex", flexDirection: "column",
             color: "white", fontFamily: "sans-serif", overflow: "hidden",
         }}>

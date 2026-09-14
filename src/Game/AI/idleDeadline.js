@@ -57,6 +57,20 @@ export const AI_IDLE_TIMEOUT_MS = 300000;
 // own OH_RELAY_TIMEOUT_MS, 10 minutes by default, which reaches it first.
 export const AI_FIRST_BYTE_TIMEOUT_MS = 900000;
 
+// The world repairs (motion and breadth) use the two windows above WHATEVER
+// "Limit AI generation" says. The setting guards the turn itself: off means the
+// player would rather wait than get canned events. A repair is not the turn — it
+// is optional follow-up work, and a failed one only leaves a storyline overdue
+// for the next pass — so waiting on it forever buys nothing. They keep the same
+// windows rather than tighter ones because the reasons above apply to them too:
+// a reasoning model goes silent while it thinks, and a buffered endpoint sends
+// nothing until it is done. (Before this they passed a stopwatch "deadline" that
+// nothing ever aborted on, so one stalled repair could hold a finished turn
+// indefinitely.) A motion repair pass's total time is capped by its per-skip
+// budget in nativeWorldDirector.js, which repairCall.js enforces while a call
+// runs as well as before one starts — so the last repair stops at the budget,
+// not one of these windows past it.
+
 // `onExpire` is called at most once: `firstByteMs` after start() if nothing ever
 // arrives, or `idleMs` after the last note() if something did. Never after
 // cancel(), and never twice.

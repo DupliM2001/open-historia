@@ -11,16 +11,17 @@ This page documents the plumbing. For the prompt templates and how they are asse
 | File | Responsibility |
 |------|----------------|
 | `src/Game/AI/main.jsx` | Transport. `callAI` dispatch, per‑provider callers, `providerFetch`/relay, streaming reassembly, advisor + diplomatic chat (`sendMessage`, `sendDiplomaticMessage`). |
-| `src/Game/AI/providerConfig.js` | Provider registry, per‑provider storage keys/defaults, `getStoredProvider`, `getProviderSettings`, reasoning toggle. |
+| `src/Game/AI/providerConfig.js` | Provider registry, Connections and the Fallback list (storage, migration, Fill, per-task picks, entry states), reasoning toggle. |
+| `src/Game/AI/fallbackRunner.js` | The Fallback list's rules: order, skipping Spent/Unusable/busy entries, reset times, "nothing can answer". |
 | `src/Game/AI/gameplay.js` | `runJsonTask` task runner + every gameplay task (jumps, catalysts, actions, GM, stat sheets, consolidation, idle diplomacy), validation/salvage, and applying results to world state. |
 | `src/Game/AI/gameplaySchemas.js` | JSON Schemas, tool definitions, `getGameplayTool`, `validateGameplayPayload`. See [AI schemas](ai-schemas.md). |
 | `src/Game/AI/gameplayPrompts.js`, `promptContext.js`, `defaultPrompts.json` | Prompt pack normalization + template rendering. See [AI prompts](ai-prompts.md). |
 | `src/Game/AI/chatVisibility.js` | Which diplomatic chats a given polity is allowed to have read. Keeps a leader out of conversations it was not in. |
-| `src/Game/AI/structuredMode.js` | The structured-output ladder (`tool → json_schema → json_object → text_json`), the per-provider setting, and the observer that offers it to the player. |
+| `src/Game/AI/structuredMode.js` | The structured-output ladder (`tool → json_schema → json_object → text_json`), the per-entry setting, and the observer that offers it to the player. |
 | `src/Game/AI/promptDedupe.js` | Skipping a call-time directive the template already carries, and collapsing a large block the prompt would otherwise send twice. |
 | `src/Game/AI/usageStats.js` | Token counts and time-to-first-byte, normalized across the three providers' reporting shapes. |
 | `src/Game/AI/jsonSalvage.js` | Tolerant parsing of a model's answer: think-block stripping, the answer sentinel, fenced and balanced-brace recovery. |
-| `src/Game/AI/providerErrors.js` | Reading what a provider sent INSTEAD of an answer: busy vs rate-limited vs spent quota, streaming refusals, and deliberation-instead-of-tool-call. |
+| `src/Game/AI/providerErrors.js` | Reading what a provider sent INSTEAD of an answer: busy vs rate-limited vs spent quota vs unusable (`classifyProviderFailure`), how often to retry each (`shouldRetryProviderFailure`), streaming refusals, and deliberation-instead-of-tool-call. |
 
 Every module in the second group is **import-free and unit-tested**, deliberately: `main.jsx` and `gameplay.js` reach settings, `fetch` and the DOM and cannot be tested at all, so the judgement calls are lifted out into files that can be.
 
@@ -28,7 +29,7 @@ Every module in the second group is **import-free and unit-tested**, deliberatel
 
 ## Supported providers
 
-Defined in `PROVIDER_OPTIONS` at `src/Game/AI/providerConfig.js`. The selected provider is stored under the `api_provider` localStorage key and resolved by `getStoredProvider()` (`providerConfig.js`); `normalizeProvider` maps the legacy value `"custom"` → `"openai-compatible"` and falls back to `DEFAULT_PROVIDER` (`"gemini"`) for anything unknown.
+Defined in `PROVIDER_OPTIONS` at `src/Game/AI/providerConfig.js`. Which provider answers a call is decided by the [Fallback list](#the-fallback-list), not by a single selected provider; `normalizeProvider` maps the legacy value `"custom"` → `"openai-compatible"` and falls back to `DEFAULT_PROVIDER` (`"gemini"`) for anything unknown.
 
 | `value` | Label | Group | Caller (`main.jsx`) | Endpoint | Transport | Model discovery |
 |---------|-------|-------|---------------------|----------|-----------|-----------------|
@@ -38,7 +39,7 @@ Defined in `PROVIDER_OPTIONS` at `src/Game/AI/providerConfig.js`. The selected p
 | `openai-compatible` | OpenAI Compatible | Gateways & self‑hosted | `callOpenAICompatible` (`main.jsx`) | user `endpoint` (default `http://localhost:11434/v1`) | `providerFetch` | yes |
 | `anthropic-compatible` | Anthropic Compatible | Gateways & self‑hosted | `callAnthropicCompatible` (`main.jsx`) | user `endpoint` | `providerFetch` | no |
 
-`callAI` (`main.jsx`) is the single switch over `getStoredProvider()`; `gemini` is the `default` branch. Before dispatch it appends a language directive (`languageDirective()`, [i18n](i18n.md)) so replies come back in the player's language at the source.
+`callAI` (`main.jsx`) runs every call through the Fallback list (`runWithFallback`, `fallbackRunner.js`), and `dispatchToProvider` switches on each tried entry's provider; `gemini` is the `default` branch. Before dispatch it appends a language directive (`languageDirective()`, [i18n](i18n.md)) so replies come back in the player's language at the source.
 
 "OpenAI Compatible" is the catch‑all for Ollama, LM Studio, OpenRouter, vLLM, and other gateways speaking `/chat/completions`. "Anthropic Compatible" is a self‑hosted proxy speaking the Anthropic Messages API. Both share their native sibling's caller body but read a different settings namespace and are relay‑capable.
 
@@ -46,21 +47,36 @@ Defined in `PROVIDER_OPTIONS` at `src/Game/AI/providerConfig.js`. The selected p
 
 ## Configuration & storage keys
 
-All AI config lives in **browser `localStorage`** — never on a server. `PROVIDER_SETTINGS` (`providerConfig.js`) maps each provider's fields to their storage keys. Read via `getProviderSettings(provider)` (`providerConfig.js`), which always returns `{ provider, apiKey, endpoint, model, customParams }` (missing fields resolve to `""`).
+All AI config lives in **browser `localStorage`** — never on a server — as **Connections** and the **Fallback list** (the glossary's words: `docs/world-state.md`, "AI access"; the decision: `docs/adr/0002-connections-and-fallback-list-hold-all-ai-settings.md`).
 
-| Provider | apiKey key | model key (default) | endpoint key (default) | customParams key | structuredMode key |
-|----------|-----------|---------------------|------------------------|------------------|---|
-| `gemini` | `gemini_api_key` | `gemini_model` (`gemini-3.5-flash-lite`) | — | `gemini_custom_params` | `gemini_structured_mode` (`auto`) |
-| `openai` | `openai_api_key` | `openai_model` (`""` → discovery) | — (fixed) | `openai_custom_params` | `openai_structured_mode` (`auto`) |
-| `anthropic` | `anthropic_api_key` | `anthropic_model` (`claude-haiku-4-5`) | — (fixed) | `anthropic_custom_params` | `anthropic_structured_mode` (`auto`) |
-| `openai-compatible` | `openai_compatible_api_key` | `openai_compatible_model` (`""`) | `openai_compatible_endpoint` (`http://localhost:11434/v1`) | `openai_compatible_custom_params` | `openai_compatible_structured_mode` (`auto`) |
-| `anthropic-compatible` | `anthropic_compatible_api_key` | `anthropic_compatible_model` (`claude-haiku-4-5`) | `anthropic_compatible_endpoint` (`""`) | `anthropic_compatible_custom_params` | `anthropic_compatible_structured_mode` (`auto`) |
+| Key | Holds |
+|-----|-------|
+| `ai_connections` | JSON array of Connections: `{ id, provider, name, apiKey, endpoint, customParams, toolStrict, suggestedModel }`. |
+| `ai_fallback_list` | JSON array of Fallback entries, in order: `{ id, connectionId, model, customParamsOverride, structuredMode }`. Its presence marks the migration done. |
+| `ai_task_picks` | `{ taskKey: entryId }` — the entry a task tries first. |
+| `ai_fallback_rate_limit` | `"wait"` (default) or `"next"`: what a Rate limited entry does. |
+| `ai_fallback_states` | `{ entryId: { spentUntil?, unusable?, skipUntil?, skipReason?, lastAnsweredAt? } }` — kept apart from the list so a mark never rewrites what the player typed. |
+
+`getResolvedFallbackList()` returns the list with each entry's Connection folded in — `{ id, provider, connectionName, apiKey, endpoint, model, customParams, structuredMode, toolStrict, label }` — and that object is what each provider caller receives as `entrySettings`. An entry's `customParamsOverride`, when set, replaces its Connection's `customParams`.
 
 Notes:
-- **`structuredMode` exists on all five providers but is only READ by three** — `openai`, `openai-compatible` and `anthropic-compatible`, whose callers walk the ladder. Native Gemini and Anthropic enforce their own tool contracts, so the settings UI does not offer the control there; a stored value on those two is inert.
-- **Legacy keys**: `openai-compatible` `endpoint`/`model` fall back to the pre‑rename `custom_api_endpoint`/`custom_api_model` keys (`readStoredValue`, `providerConfig.js`).
-- **Settings‑form binding**: the settings UI reads/writes via `FORM_FIELD_MAP` (`providerConfig.js`), `loadProviderSettingsFormState()`, and `persistProviderSetting()`.
-- **Default model constants** live in `main.jsx` too: `GEMINI_DEFAULT_MODEL` (`main.jsx`), `ANTHROPIC_DEFAULT_MODEL` (`main.jsx`), used as `resolveModel` fallbacks.
+- **Migration** runs on the first read of the list, wherever that is (the harness reads it with no UI): every provider with a key or endpoint, and every profile under `ai_provider_presets`, becomes a Connection; the old active provider (`api_provider`) and its model become entry #1; the active provider's per-task models (`<provider>_model_<taskKey>`) become entries at the bottom, with picks pointing at them. The old per-provider keys (`gemini_api_key`, `openai_compatible_endpoint`, the legacy `custom_api_*`…) are left in storage and never read again.
+- **`structuredMode` lives on the entry** and is only READ by three providers — `openai`, `openai-compatible` and `anthropic-compatible`, whose callers walk the ladder. Changing an entry's model resets it to `auto` (`updateEntry`).
+- **Default model constants** live in `main.jsx`: `GEMINI_DEFAULT_MODEL`, `ANTHROPIC_DEFAULT_MODEL`, used as `resolveModel` fallbacks for an entry with a blank model. A blank model on a provider with discovery asks the server's `/models` once per entry per session and never writes the answer back.
+
+### The Fallback list
+
+Every call starts at the top of the list — or at the task's own pick — and moves down only when an entry cannot answer. It never spreads calls across entries to get more usage (`docs/adr/0001-fallback-never-rotation.md`). The rules are in `fallbackRunner.js` (import-free, tested); the provider callers only say how a call failed, via `error.providerFailure` from `classifyProviderFailure` (`providerErrors.js`):
+
+| Failure | What the entry is marked | Clears |
+|---------|--------------------------|--------|
+| Spent (daily allowance, billing, `insufficient_quota`) | `spentUntil` | Gemini: next midnight Pacific. Others: one try an hour later. Or the Reset button. |
+| Unusable (401/403, a bad key, an unknown model, no key set) | `unusable: reason` | When the entry or its Connection is edited. |
+| Busy (502/503/504/529, an overloaded frame, a server that cannot be reached) | `skipUntil` +60 s | By itself; only a hint of where to start — still tried if nothing else can answer. |
+| Rate limited, setting `"next"` | `skipUntil` + the provider's RetryInfo, or 60 s | As busy. On `"wait"` the provider retries as before and nothing is marked. |
+| Anything else (context window, a bad answer, a parse failure) | nothing | — the call fails as it always did. |
+
+How many times a provider retries before giving up is shared too (`shouldRetryProviderFailure`): Spent and Unusable never, busy once, Rate limited per the setting — and when the entry is the last that can answer, busy and Rate limited keep the full retry count they had before the list existed. A streamed chat reply never falls back once any of it has reached the player. When nothing can answer — every entry Spent or Unusable — the call throws an error carrying `fallbackUnavailable: { nextResetAt, nextEntry }`, and a time skip checks `fallbackAvailability` first so it is not started at all; both say the same thing (`describeUnavailable`). Each switch is announced once (the `ai:fallback-switch` window event, shown by `FallbackSwitchNotice`), even when the call that found it then fails, and every mark is a Diagnostics log line.
 
 ### `customParams` — the request‑body escape hatch
 
@@ -83,11 +99,11 @@ It is deliberately still **one global toggle**, not per task, and that is worth 
 
 ### Per-task model routing
 
-Ported from the abdulrahman-2005 fork. Every AI call names its task — the prompt-pack task key for `runJsonTask` calls (`jumpForward`, `timelineCurator`, `territoryDirector`…), the repair/briefing keys the direct calls pass, and `advisor` / `diplomacy` for the chats — and `resolveModel` (`main.jsx`) asks `getModelForTask(provider, taskKey)` (`providerConfig.js`) which model to run. A task override stored under `<provider>_model_<taskKey>` wins; a blank one falls through to the provider's default model and then to discovery, exactly as before. The field names are synthesized by `getSettingConfig` (`model_<taskKey>`), so `getProviderField`/`setProviderField` work on them with no per-task schema; `AI_TASK_ROUTING` lists the tasks the Settings panel shows (Settings → provider → **Per-task models**, collapsed by default). Overrides are per provider, so switching providers switches the whole set, and changing a task's model does not touch the provider's structured-output choice (only the base `model` field does).
+Ported from the abdulrahman-2005 fork. Every AI call names its task — the prompt-pack task key for `runJsonTask` calls (`jumpForward`, `timelineCurator`, `territoryDirector`…), the repair/briefing keys the direct calls pass, and `advisor` / `diplomacy` for the chats. A task with a pick (`getTaskPick(taskKey)`, `providerConfig.js`) tries that Fallback entry first, then the list from the top, so it only fails when every entry is used up; a task without one starts at the top. `AI_TASK_ROUTING` lists the tasks Settings → Advanced → **Per-task models** shows, each a choice among the list's entries.
 
-### Configuration profiles and recent models
+### Connection templates and recent models
 
-For `openai-compatible` and `anthropic-compatible`, Settings shows **Configuration profiles**: named endpoint/key/model/custom-params bundles stored as one JSON array under `ai_provider_presets` (`getSavedPresets`/`savePreset`/`updatePreset`/`deletePreset`). Three stock entries (Groq, OpenRouter, Local Ollama) are written on first read so they can be edited or deleted like any other; applying a profile that has no key keeps the key currently entered. `resolveModel` also records the model each call actually ran with (`saveRecentModel`, ten per provider under `ai_recent_models_<provider>`), and every model field — the provider's and the per-task ones — offers those as datalist suggestions (`getRecentModels`).
+Settings → AI → Connections offers three templates (`CONNECTION_TEMPLATES`: Groq, OpenRouter, Local Ollama) — the old stock profiles — so a gateway key is one click and a paste away. `resolveModel` records the model each call actually ran with (`saveRecentModel`, ten per provider under `ai_recent_models_<provider>`), and every model field offers those, plus the Connection's suggested model, as datalist suggestions (`getRecentModels`).
 
 ### Prompt caching: the static prefix
 
@@ -201,7 +217,7 @@ It steps down on **two** signals: an HTTP 400/422 refusing the mode, and — add
 
 Anthropic-compatible has the same problem (it is also an arbitrary proxy) and a two-rung version of the ladder, `tool → text_json`: the Messages API has no `response_format`. Native OpenAI, Anthropic and Gemini honour their own contracts and have no ladder.
 
-**Where a call starts** is `getProviderSettings(provider).structuredMode` — a per-provider setting, `auto` by default. `auto` starts at `tool`; anything else names a rung to begin at, skipping ones a gateway has already been shown to ignore. It is a starting point, never a lock: the ladder still steps down from wherever it starts, so a setting chosen months ago cannot strand a campaign. Changing the **model** resets it to `auto` (`setProviderField`), because the evidence behind the choice was about one model.
+**Where a call starts** is the Fallback entry's `structuredMode` — per entry, because the evidence is about one model on one endpoint, `auto` by default. `auto` starts at `tool`; anything else names a rung to begin at, skipping ones a gateway has already been shown to ignore. It is a starting point, never a lock: the ladder still steps down from wherever it starts, so a setting chosen months ago cannot strand a campaign. Changing the entry's **model** resets it to `auto` (`updateEntry`). The observer's evidence is keyed by entry id.
 
 The setting is **offered, never inferred**: `createModeObserver` records where calls land, and after two consistent sightings the UI asks whether to start there in future. Silently remembering was considered and rejected — one unrelated failure would demote every later call out of the strongest channel, invisibly.
 
@@ -329,7 +345,7 @@ See [World state](world-state.md) for the shape of what these writers touch, and
 ## Cancellation & timeouts
 
 - **Player Cancel** passes an `AbortSignal` into `simulateTimelineJump`/etc → `runJsonTask` → `callAI` → `fetch`/relay. A deliberate cancel is re‑thrown as an `AbortError` and **does not** write state or fall back to canned events (`gameplay.js`).
-- **Timeout** aborts the same controller but **does** use the deterministic fallback, because a stalled model shouldn't leave the turn with nothing. It measures **silence, not elapsed time**: the "Limit AI generation" setting (`ai_limit_generation`, **off** by default — read with `getMapSetting`) gives a task two windows: `AI_IDLE_TIMEOUT_MS` (5 minutes) with nothing arriving once an answer has started, and `AI_FIRST_BYTE_TIMEOUT_MS` (15 minutes) with no answer at all. Off disables both and generation waits as long as the model needs.
+- **Timeout** aborts the same controller but **does** use the deterministic fallback, because a stalled model shouldn't leave the turn with nothing. It measures **silence, not elapsed time**: the "Limit AI generation" setting (`ai_limit_generation`, **off** by default — read with `getMapSetting`) gives a task two windows: `AI_IDLE_TIMEOUT_MS` (5 minutes) with nothing arriving once an answer has started, and `AI_FIRST_BYTE_TIMEOUT_MS` (15 minutes) with no answer at all. Off disables both and generation waits as long as the model needs. The one exception is the two world repairs (`worldMotionRepair`, `worldBreadthRepair`): they are optional follow-up work, so `callRepairAI` always applies the same two windows to them, whatever the setting says, and a timed-out repair is an ordinary failed repair, never a fallback. The motion repair also passes what is left of its per-skip time budget (`runBoundedRepairCall`, `repairCall.js`), so a repair still running when that is spent is stopped too.
   - `createIdleDeadline` (`idleDeadline.js`) owns the timer. `start()` arms the long window when a request goes out; the first network chunk switches to the short one and every chunk after restarts it. The split is what lets a model that keeps writing run as long as it likes, while still bounding the two cases that produce no bytes for a long time and are indistinguishable from a dead request — prompt evaluation on a local model, and a buffered endpoint whose headers only arrive once the whole answer is ready.
   - A relayed call (every local model) also has the relay's own `OH_RELAY_TIMEOUT_MS` (10 minutes), which reaches it before the 15.
   - The activity signal comes from `readSSE` (`streamAssembly.js`), which calls `onActivity` per chunk; `runJsonTask` passes `idle.note` down through `callAI` to each provider caller's stream reader, and `idle.deadline` as the retry bound.
@@ -345,7 +361,8 @@ See [World state](world-state.md) for the shape of what these writers touch, and
 | `callAI(systemPrompt, history, opts)` | `main.jsx` | Provider dispatch; returns string (chat) or `{rawText,toolInput}` (structured). |
 | `sendMessage`, `sendDiplomaticMessage` | `main.jsx` | Advisor / leader chat turns. |
 | `readOpenAIStreamedResponse`, `readAnthropicStreamedResponse`, `readGeminiStreamedResponse` | `streamAssembly.js` | SSE → that provider's normal envelope, so streaming is invisible downstream. |
-| `getStoredProvider`, `getProviderSettings`, `getReasoningEnabled` | `providerConfig.js` | Read selected provider / its settings / reasoning toggle. |
+| `getResolvedFallbackList`, `getTaskPick`, `getReasoningEnabled` | `providerConfig.js` | The Fallback list with each Connection folded in / a task's pick / reasoning toggle. |
+| `runWithFallback`, `fallbackAvailability`, `entryStatus` | `fallbackRunner.js` | Run one call down the list / can anything answer now / what a Settings row shows. |
 | `runJsonTask(taskKey, opts)` | `gameplay.js` | Structured task runner (2 attempts, validate/salvage, fallback). |
 | `simulateTimelineJump`, `applyGameMasterCommand`, `generateActionSuggestions`, … | `gameplay.js` | Task entry points (see [catalog](#task-catalog)). |
 | `getGameplayTool`, `validateGameplayPayload` | `gameplaySchemas.js` | taskKey → tool, payload schema check. See [AI schemas](ai-schemas.md). |

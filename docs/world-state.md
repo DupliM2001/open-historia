@@ -6,6 +6,98 @@ Core files: `src/runtime/gameState.js` (state shape, normalizers, impact applica
 
 Related pages: [Country tags](country-tags.md) · [Map rendering & Nations layer](nations-layer.md) · [Units & combat](units.md) · [AI turn / time jump](ai-turn.md) · [Scenario library](library.md).
 
+## Glossary
+
+The words below mean one thing each. Use them in code, prompts, tickets and PRs, and avoid the listed alternatives.
+
+**Project**:
+A deliberate effort one polity runs towards a goal, such as a research programme, a construction or a sustained campaign. It can complete, fail or be abandoned.
+_Avoid_: Programme, initiative, plan (as the term for the record itself)
+
+**Operation**:
+A Project with a military or covert purpose.
+_Avoid_: Mission, op
+
+**Board**:
+The player-visible list of Projects and Operations, including foreign ones the player's services know about.
+_Avoid_: Projects & Operations panel, tracker
+
+**Board entry**:
+One Project or Operation on the Board.
+_Avoid_: Effort, item, card
+
+**Storyline**:
+An ongoing situation no single polity controls, with unresolved stakes, such as a war, a crisis, a rivalry or unrest. Hidden from the player. A Project can cause or feed a Storyline, but the same thing is never both.
+_Avoid_: Process, thread, arc
+
+### Library
+
+**Scenario**:
+An authored starting position — the map, the polities and the opening state — that a Game is started from. Never written to during play, so one Scenario can seed many Games.
+_Avoid_: Preset, map, mod
+
+**Game**:
+One playthrough of a Scenario: everything the player has done and everything the world has become since it started. The thing a player names, continues, archives and exports.
+_Avoid_: Save, save game, campaign, session (as the term for the record)
+
+### Events
+
+**Canonical event**:
+Something the simulation accepted as having happened during a jump, whether or not the player sees it on the timeline.
+_Avoid_: Accepted card
+
+**Hidden event**:
+A Canonical event kept off the timeline because it was routine, low-value or already covered. It still happened. Distinct from a rejected event, which the simulation judged untrue and which never happened.
+_Avoid_: Dropped event (for anything that still happened)
+
+### Diagnostics
+
+**Diagnostics log**:
+The one log a player sends with a bug report: what they did and what went wrong, in order. It is kept on every platform, and on desktop it also carries the Desktop log's entries.
+_Avoid_: Debug log, app log, server log
+
+**Desktop log**:
+Where the desktop app itself and its local server note their own start-up, update and server errors, because they cannot reach the Diagnostics log directly. It is not a second log: its entries appear in the Diagnostics log.
+_Avoid_: app.log (as the name of a log), server log
+
+**Detailed logging**:
+The switch that adds whole AI exchanges, conversations and world changes to the Diagnostics log. Off by default.
+_Avoid_: Verbose mode, debug mode
+
+**Logging file**:
+The single text file a player saves from the Diagnostics log to attach to a report: at most 1 MB of log, with the problem being reported on top, and never more than 2 MB in all.
+_Avoid_: Debug report, bug report (for the file itself)
+
+**Prompt fingerprint**:
+The size and a short hash of each section of a prompt sent to the model, noted for every attempt under Detailed logging, so a prompt rebuilt from the save can be checked against the one actually sent.
+_Avoid_: Prompt dump
+
+### AI access
+
+**Fallback list**:
+The player's ordered list of models to answer AI calls, which may mix providers. Every call starts at the top and uses the first entry that is not Spent. It moves down only when an entry cannot answer, and never spreads calls across entries to get more usage.
+_Avoid_: Rotator, rotation, key rotation, model chain
+
+**Connection**:
+A saved way to reach one provider: which provider it is, a name the player gives it, its key, and its endpoint when the provider needs one. Many Fallback entries can share one Connection.
+_Avoid_: Profile, preset, account
+
+**Fallback entry**:
+One Connection and one model, at one place in the Fallback list. A task that has its own pick names a Fallback entry: it tries that entry first, then the list from the top.
+_Avoid_: Slot, route, step
+
+**Spent**:
+A Fallback list entry that has used up its allowance. It is skipped until its allowance resets or the player resets it.
+_Avoid_: Exhausted, maxed out, dead
+
+**Rate limited**:
+Refused for the moment because of too many requests in a short window. Waiting fixes it, so a Rate limited entry is not Spent.
+_Avoid_: Quota exceeded (for a short-window limit)
+
+**Unusable**:
+A Fallback entry that failed in a way waiting cannot fix, such as a rejected key or a model the provider does not know. It is skipped until the player edits it, and it shows the player what went wrong.
+_Avoid_: Broken, Spent (for this case)
+
 ---
 
 ## 1. Storage model: the runtime JSON assets
@@ -71,7 +163,7 @@ Three engine-owned arrays carry the political facts the simulation used to keep 
 |---|---|---|
 | `wars` | `[{ id, title, status, sideA[], sideB[], startedDate, endedDate, lastUpdatedDate, cause, note, sourceEventIds[], createdRound, updatedRound }]` | `status` ∈ active / ceasefire / ended. **The only source of belligerency:** an event that narrates battlefield combat must carry `warId` and `combatants` naming polities from both sides of an *active* war, or the segment is rejected (on the final attempt the combat event is dropped instead). Transitions are explicit: start, join-a, join-b, leave, ceasefire, resume, end. |
 | `relations` | `[{ id, a, b, score, status, summary, lastUpdatedDate, sourceEventIds[], createdRound, updatedRound }]` | Sparse, one row per unordered pair; `score` −100..100 with `status` derived from it (friendly ≥ 55, cordial ≥ 20, neutral ≥ −10, cautious ≥ −30, strained ≥ −60, else hostile / rival). An untracked pair is *unknown*, not zero. A publicly exposed spy ring lowers the pair's score by 20. |
-| `agreements` | `[{ id, title, type, status, parties[], startedDate, endedDate, lastUpdatedDate, terms, guarantor?, beneficiary?, sourceEventIds[], createdRound, updatedRound }]` | Formal instruments: alliance, mutual_defense, guarantee, non_aggression, friendship_consultation, trade_economic, military_cooperation, military_access, neutrality, peace_settlement, other. `status` ∈ active / suspended / ended / expired. |
+| `agreements` | `[{ id, title, type, status, parties[], startedDate, endedDate, lastUpdatedDate, terms, guarantor?, beneficiary?, sourceEventIds[], createdRound, updatedRound }]` | Formal instruments: alliance, mutual_defense, guarantee, non_aggression, friendship_consultation, trade_economic, military_cooperation, military_access, neutrality, peace_settlement, other. `status` ∈ active / suspended / ended / expired. In simulation, lifecycle bookkeeping is repaired rather than fatal: a `start` for an agreement already in force becomes an update/resume or is dropped, and an update/suspend/resume/end/expire naming an id the ledger never recorded is re-aimed only at the single agreement with exactly the same resolved parties, the same named type (and a guarantee's direction) and a status the verb can act on — otherwise the row is dropped and the turn kept, since an unrecorded instrument has nothing to end (`nativeDiplomaticDirector.js`, `normalizeUnknownAgreementLifecycle`). The GM preview stays fail-closed. |
 | `storylines` | `[{ id, kind, title, participants[], status, pressure, momentum, startedDate, accountedThroughDate, lastUpdatedDate, lastVisibleEventDate, nextReviewDate, state, drivers[], constraints[], sourceEventIds[], createdRound, updatedRound }]` | Persistent world processes, the hidden state the native world director advances between turns (ai-prompts.md §7.12c). `status` ∈ active / dormant / resolved; `pressure` (unresolved stakes) and `momentum` (rate of change) 0–100; the director schedules attention from `nextReviewDate`; events carry `storylineIds[]`. ≤96, written by `applyWorldStorylineUpdates` from a jump's compact `storylineUpdates` lines, a GM transaction or the pregame bootstrap (every live Round-One war gets a `storyline-<warId>` mirror). |
 | `diplomaticLedgerVersion` | number | 0 until `migrateLegacyDiplomaticState` has seeded relations and agreements from a pre-ledger save's treaty events and chats (it runs at the start of the next jump), or the pregame bootstrap wrote the ledgers for a fresh game. |
 
@@ -127,6 +219,10 @@ Capped at **120 projects**, 8 milestones each and 12 `eventIds` each — sized a
 If a board ever genuinely needs more than this, the answer is not a bigger number: it is moving `projects` out to its own runtime asset. That is real work, because rollback snapshots and the staged event reveal both get `world.projects` for free today purely by riding inside world state.
 
 **The player cannot author a project's content.** Only two things write what a project *is*: events, via `impacts.projectOps` (§5) — which since the board moved out of the jump are produced by the dedicated `projects` task and attached back onto the events that caused them — and the advisor, via its ```` ```projects ```` block. The player owns exactly two fields, from the panel itself: `priority` (`high|normal|low` — how much attention they want it to get, which the jump and advisor directives then act on) and abandoning it, which goes through the ordinary `cancel` op so the entry stays under Closed with the progress it actually reached. Both route through `applyProjectOpsToWorld`, the same door the advisor uses, so they stamp `updatedAt`/`updatedRound` and close out dangling milestones like any other write. `eventIds` is stamped by `applyProjectOps` from the causing event, which is what builds the per-project activity feed without the model having to maintain it.
+
+**The board reads every Canonical event, not just the timeline.** The timeline cleanup (the integrity screen's routine and low-value rules, the curator's redundancy, filler and churn routes) decides what is *worth showing*, and keeps routine patrol, reconnaissance and administrative follow-up off the timeline. Those are Hidden events (see the Glossary): they still happened, and routine progress is exactly what moves a standing Operation or records a stall. So the board pass reads them too, and a Board entry can move without a timeline card. Its `lastUpdate` carries the explanation, and its activity feed stays a list of timeline events: a Hidden event is never stamped into `eventIds`. Only events judged untrue (rejected) and exact duplicates are withheld from the board. The same separation keeps a Project off the Storylines ledger: one polity's deliberate effort is a Board entry, a Storyline is a situation nobody controls, and the jump is told that one may cause the other but a thing is never both (ai-prompts.md §7.12c, §7.17).
+
+**HIGH PRIORITY buys an assessment, not motion.** Every jump, each of the player's open HIGH PRIORITY entries gets an explicit assessment, and "no material change this period, because…" is a valid one. The earlier rule that such an entry "must not sit on the list two jumps running" forbade that honest answer and so invited invented progress. An entry the board pass leaves unassessed is named in the turn log, never retried.
 
 Everything date-derived — overdue, due-soon, a slipped milestone, a programme untouched for several rounds — is **not stored**. It is computed from the game clock by `src/runtime/projects.js` (import-free, unit-tested in a bare checkout), so it cannot go stale between AI turns. That split is the point of the feature: the model owns what only it can know, the calendar owns the rest.
 

@@ -12,6 +12,7 @@ import {
   createWorldActorResolver,
 } from "./nativeWorldIntegrity.js";
 import { addGameDays, compareGameDates, gameDateDayNumber, gameDateYear } from "../../runtime/gameDates.js";
+import { boardEntriesConcernedByEvent, isProjectOpen } from "../../runtime/projects.js";
 
 // Native World Director (ported from kernely's Continuum branch).
 //
@@ -347,11 +348,32 @@ const eventLooksLikeRoutineAdministrativeCard = (event) => {
     && !HUMAN_TEXTURE_RE.test(text);
 };
 
+// A major event whose only consequence is a Board entry. The Board is not a
+// channel the jump can write — the board pass records it after the segments —
+// so such an event passes the check PROVISIONALLY: the engine's own matcher says
+// it concerns an open Board entry, and the turn must later see the board pass
+// materially change a Board entry because of it, or the event is kept off the
+// timeline. "Probably about Westbird" is never taken for "Westbird changed".
+// A crisis is not eligible: a crisis is a Storyline by definition.
+const eventRestsOnBoardConsequence = (candidate, index, board, playerCountry) => {
+  const event = normalizeArray(candidate?.events)[index];
+  if (!eventLooksStrategicallyMajor(event) || eventLooksLikeUnresolvedCrisis(event)) return false;
+  if (eventCanonicalConsequenceChannels(candidate, index).length) return false;
+  return boardEntriesConcernedByEvent(event, board, { playerCountry }).length > 0;
+};
+
+export const boardProvisionalConsequenceIndexes = (candidate, { board = [], playerCountry = "" } = {}) =>
+  normalizeArray(candidate?.events)
+    .map((_, index) => index)
+    .filter((index) => eventRestsOnBoardConsequence(candidate, index, board, playerCountry));
+
 export const validateWorldEventConsequencePayload = (
   candidate,
   {
     selectedStorylines = [],
     strict = true,
+    board = [],
+    playerCountry = "",
   } = {},
 ) => {
   if (!strict) return "";
@@ -365,8 +387,13 @@ export const validateWorldEventConsequencePayload = (
       return `Major unresolved crisis event ${index + 1} ("${normalizeString(event?.title)}") has no persistent storyline consequence. Create/update the canonical storyline for the unresolved process and link this event; do not let a multi-turn crisis vanish after one card.`;
     }
 
-    if (eventLooksStrategicallyMajor(event) && channels.length === 0) {
-      return `Strategically major event ${index + 1} ("${normalizeString(event?.title)}") has no canonical consequence at all. Keep the event only if something materially changes in an existing owner (storyline, Stats, relations, agreements, units, war, territory/control, polity metadata, markers, or a created diplomatic chat); otherwise downgrade/drop the card instead of narrating a consequence-free crisis.`;
+    if (
+      eventLooksStrategicallyMajor(event) &&
+      channels.length === 0 &&
+      !eventRestsOnBoardConsequence(candidate, index, board, playerCountry)
+    ) {
+      const boardOwner = normalizeArray(board).some(isProjectOpen) ? ", a Board entry named exactly as the Board names it" : "";
+      return `Strategically major event ${index + 1} ("${normalizeString(event?.title)}") has no canonical consequence at all. Keep the event only if something materially changes in an existing owner (storyline, Stats, relations, agreements, units, war, territory/control, polity metadata, markers${boardOwner}, or a created diplomatic chat); otherwise downgrade/drop the card instead of narrating a consequence-free crisis.`;
     }
   }
 
@@ -1292,6 +1319,18 @@ const clampNextReviewDate = ({ stopDate, pressure, momentum, status, requested, 
 const STORYLINE_RECORD_SEPARATOR = "~";
 const MAX_STORYLINE_UPDATES_PER_JUMP = 16;
 
+// A storyline state is a sentence; a kind, a title and a list of polity names
+// are not. The longest comma-separated stretch decides it: the longest official
+// polity name ("United Kingdom of Great Britain and Northern Ireland") is eight
+// words, so a list of names never reaches nine, and a stretch of six or more
+// words that ends like a sentence is prose. A list that happens to end "U.S."
+// stays a list, because none of its names is six words long.
+const looksLikeStorylineStateProse = (value) => {
+  const text = normalizeString(value);
+  const longest = Math.max(0, ...text.split(",").map((part) => part.trim().split(/\s+/).filter(Boolean).length));
+  return longest >= 9 || (longest >= 6 && /[.!?]$/.test(text));
+};
+
 const parseStorylineRecord = (line, index = 0) => {
   const text = normalizeString(line);
   if (!text) return null;
@@ -1302,11 +1341,13 @@ const parseStorylineRecord = (line, index = 0) => {
   // can be preserved rather than corrupting the record.
   const fields = [];
   let rest = text;
+  let separators = 9;
   for (let cut = 0; cut < 9; cut += 1) {
     const pos = rest.indexOf(STORYLINE_RECORD_SEPARATOR);
     if (pos < 0) {
       fields.push(rest);
       rest = "";
+      separators = cut;
       break;
     }
     fields.push(rest.slice(0, pos));
@@ -1314,6 +1355,25 @@ const parseStorylineRecord = (line, index = 0) => {
   }
   while (fields.length < 9) fields.push("");
   fields.push(rest);
+
+  // Two or more empty positional fields left out. The one-short shape (state in
+  // the event-number slot) is recovered below; a model that also drops an empty
+  // kind/title/participants field pushes the state further left — a player's
+  // turn came back as "id~active~20~75~2024-01-09~~~<state>", seven separators,
+  // which put every state into participantsCSV and cost the whole jump to
+  // "record 1 must describe the process state". The line's final field is where
+  // the model put the state; move it home when that is plainly what it is.
+  // Only kind, title and participants are recovered: a record short enough to
+  // put its state in startedDate or earlier is too broken to read positionally.
+  if (
+    separators >= 5 &&
+    separators <= 7 &&
+    !normalizeString(fields[9]) &&
+    looksLikeStorylineStateProse(fields[separators])
+  ) {
+    fields[9] = fields[separators];
+    fields[separators] = "";
+  }
 
   const [
     idRaw,
@@ -1817,6 +1877,32 @@ const storylineMateriallyEvolved = (prior, update) => {
   return normalizeArray(update.eventIndexes).length > 0;
 };
 
+// The smallest numeric movement the anti-stasis backstop accepts as real hidden
+// evolution. Exported so the motion repair's prompt states the same numbers the
+// validator enforces.
+export const ANTI_STASIS_MIN_PRESSURE_DELTA = 4;
+export const ANTI_STASIS_MIN_MOMENTUM_DELTA = 6;
+
+// The backstop's rule in words, built from the same constants the validator
+// (storylineHasObjectiveEvolution) enforces, so no prompt can promise the model
+// something the validator then rejects. The main pass, the validator's
+// rejection and the motion repair all read it. `withEvent` names the one way
+// out only the main pass has: linking a material event, which the repair may
+// not manufacture.
+export const describeAntiStasisObjectiveRule = ({ withEvent = true } = {}) =>
+  `${withEvent ? "link a material event, " : ""}change status, move pressure by ${ANTI_STASIS_MIN_PRESSURE_DELTA} or more points, or move momentum by ${ANTI_STASIS_MIN_MOMENTUM_DELTA} or more points`;
+
+// Whether a storyline is past its anti-stasis backstop at stopDate: an active
+// war or high-pressure process with no visible milestone for
+// STAGNATION_BACKSTOP_DAYS. The one test behind the repair detector, the
+// validator, and the repair prompt, so the three cannot drift apart.
+export const storylineAtAntiStasisBackstop = (prior, stopDate, world = null) => {
+  if (!prior || normalizeString(prior?.status).toLowerCase() !== "active") return false;
+  const activeWar = Boolean(activeCanonicalWarForStoryline(prior, world));
+  if (!activeWar && clampPercent(prior?.pressure) < HIGH_PRESSURE_STAGNATION_THRESHOLD) return false;
+  return storylineStagnationAgeDays(prior, stopDate) >= STAGNATION_BACKSTOP_DAYS;
+};
+
 // Stronger than storylineMateriallyEvolved: this deliberately ignores prose-only
 // state rewording. At the 45-day anti-stasis backstop, the model must either link
 // a real event, change status, or move pressure/momentum enough to represent an
@@ -1825,8 +1911,8 @@ const storylineHasObjectiveEvolution = (prior, update, candidate = null) => {
   if (!prior || !update) return true;
   const nextStatus = normalizeString(update.status).toLowerCase();
   if (nextStatus && nextStatus !== normalizeString(prior.status).toLowerCase()) return true;
-  if (Math.abs(clampPercent(update.pressure) - clampPercent(prior.pressure)) >= 4) return true;
-  if (Math.abs(clampPercent(update.momentum) - clampPercent(prior.momentum)) >= 6) return true;
+  if (Math.abs(clampPercent(update.pressure) - clampPercent(prior.pressure)) >= ANTI_STASIS_MIN_PRESSURE_DELTA) return true;
+  if (Math.abs(clampPercent(update.momentum) - clampPercent(prior.momentum)) >= ANTI_STASIS_MIN_MOMENTUM_DELTA) return true;
 
   const eventIndexes = normalizeArray(update.eventIndexes);
   return Boolean(
@@ -1891,6 +1977,9 @@ export const findWorldStorylineAntiStasisIssues = (
     const update = updateById.get(id);
     const stagnationAgeAtStop = storylineStagnationAgeDays(prior, stopDate);
     const activeWar = Boolean(activeCanonicalWarForStoryline(prior, world));
+    // The repair's own validator enforces the backstop on either kind of issue,
+    // so the repair prompt has to know when the numeric rule applies.
+    const requiresObjectiveDelta = storylineAtAntiStasisBackstop(prior, stopDate, world);
 
     if (!update) {
       issues.push({
@@ -1899,17 +1988,14 @@ export const findWorldStorylineAntiStasisIssues = (
         update: null,
         activeWar,
         kind: "missing-update",
+        requiresObjectiveDelta,
         stagnationAgeDays: stagnationAgeAtStop,
         reason: `Native-attention storyline ${id} was omitted from the main pass and needs a local semantic repair through ${stopDate || "the pass horizon"}.`,
       });
       continue;
     }
-    const protectedProcess =
-      normalizeString(prior?.status).toLowerCase() === "active" &&
-      (activeWar || clampPercent(prior?.pressure) >= HIGH_PRESSURE_STAGNATION_THRESHOLD);
     if (
-      protectedProcess &&
-      stagnationAgeAtStop >= STAGNATION_BACKSTOP_DAYS &&
+      requiresObjectiveDelta &&
       !storylineHasObjectiveEvolution(prior, update, candidate)
     ) {
       issues.push({
@@ -1918,6 +2004,7 @@ export const findWorldStorylineAntiStasisIssues = (
         update,
         activeWar,
         kind: "anti-stasis",
+        requiresObjectiveDelta,
         stagnationAgeDays: stagnationAgeAtStop,
         reason: `${activeWar ? "Active-war" : "High-pressure"} storyline ${id} has gone ${stagnationAgeAtStop} day(s) without a visible milestone and still has no objective evolution.`,
       });
@@ -1925,6 +2012,217 @@ export const findWorldStorylineAntiStasisIssues = (
   }
 
   return issues;
+};
+
+// ---- Motion repair, judged once per skip ------------------------------------
+// The repair used to run after every segment with no memory: a 92-day segment
+// is longer than the 21-day review and 45-day backstop, so every segment
+// re-flagged the same protected storylines, and a four-segment skip could make
+// 32 unbounded calls on the same few processes. Segments are a transport
+// detail, so the skip is judged as the one round it is: after the last segment,
+// each storyline selected at any point is checked once, from where it stood
+// before the skip to its last update in it.
+
+// A storyline selected by any segment, first sighting kept: the earliest copy
+// is the one closest to the state the skip started from. Deduped by id, so the
+// skip-level check sees each storyline once however many segments chose it.
+export const mergeSkipAttentionStorylines = (existing = [], incoming = []) => {
+  const seen = new Set(normalizeArray(existing).map((entry) => normalizeString(entry?.id)));
+  const merged = [...normalizeArray(existing)];
+  for (const entry of normalizeArray(incoming)) {
+    const id = normalizeString(entry?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(entry);
+  }
+  return merged;
+};
+
+// The skip's storylines as one pass: the last update each storyline received in
+// any segment stands for its end state (its numbers are what the ledger ends
+// on), and its event links are rebuilt from the skip's events, which carry
+// storylineIds once each segment is screened — per-segment eventIndexes point
+// into that segment's own events and mean nothing across the skip.
+export const findSkipStorylineMotionIssues = ({
+  events = [],
+  storylineUpdates = [],
+  existingStorylines = [],
+  selectedStorylines = [],
+  originDate = "",
+  stopDate = "",
+  world = null,
+} = {}) => {
+  const skipEvents = normalizeArray(events);
+  const lastUpdateById = new Map();
+  for (const update of decodeWorldStorylineUpdates(storylineUpdates)) {
+    const id = normalizeString(update?.id);
+    if (id) lastUpdateById.set(id, update);
+  }
+  const netUpdates = [...lastUpdateById.entries()].map(([id, update]) => ({
+    ...update,
+    eventIndexes: skipEvents.reduce((indexes, event, index) => {
+      if (normalizeArray(event?.storylineIds).map(normalizeString).includes(id)) indexes.push(index);
+      return indexes;
+    }, []),
+  }));
+  return findWorldStorylineAntiStasisIssues(
+    { events: skipEvents, storylineUpdates: netUpdates },
+    { existingStorylines, selectedStorylines, originDate, stopDate, world },
+  );
+};
+
+// Limits on what the skip's one repair pass may spend. A skipped repair is
+// handled exactly like a failed one (the storyline stays overdue for the main
+// pass), so these cost staleness, never the turn.
+
+// The most one pass has ever needed: every attention storyline repaired once.
+export const MAX_MOTION_REPAIRS_PER_JUMP = MAX_ATTENTION_STORYLINES;
+// What repairs may use of one skip in total. None starts once it is spent, and
+// the one still running when it runs out is stopped (repairCall.js), so this
+// caps the pass rather than only saying when repairs may start.
+export const MAX_MOTION_REPAIR_MS_PER_JUMP = 600000;
+// A storyline whose repair failed is left to the main pass for this many
+// rounds, unless it changes in the meantime. The main pass is told the same
+// numeric rule the repair is (describeAntiStasisObjectiveRule), so it can move
+// the storyline itself; until it does, the storyline's copy-forwards are
+// withdrawn and it stays overdue.
+export const MOTION_REPAIR_FAILURE_COOLDOWN_ROUNDS = 3;
+const MAX_REMEMBERED_MOTION_REPAIR_FAILURES = 64;
+
+export const createMotionRepairBudget = () => ({
+  calls: 0,
+  ms: 0,
+});
+
+// What a failed repair saw. Anything that moves the storyline (a main-pass
+// update, a newly linked event) changes it and makes the storyline eligible again.
+export const storylineRepairFingerprint = (storyline) => {
+  const normalized = normalizeStorylineForDirector(storyline);
+  if (!normalized) return "";
+  return JSON.stringify([
+    normalized.status,
+    normalized.pressure,
+    normalized.momentum,
+    normalized.accountedThroughDate,
+    normalized.lastUpdatedDate,
+    normalized.lastVisibleEventDate,
+    normalized.state,
+  ]);
+};
+
+const motionRepairFailureKey = (campaignId, id) =>
+  `${normalizeString(campaignId)}::${normalizeString(id)}`;
+
+// "" when the issue may be repaired now, otherwise why not.
+export const motionRepairSkipReason = (
+  issue,
+  { budget = null, failures = null, campaignId = "", round = 0 } = {},
+) => {
+  const id = normalizeString(issue?.id);
+  const currentRound = Number(round) || 0;
+
+  // Only a failure from this round or the few before it counts. A round EARLIER
+  // than the failure means the player rewound (undo, or an older save of the same
+  // campaign): that failure belongs to a future that no longer exists.
+  const failure = failures?.get?.(motionRepairFailureKey(campaignId, id));
+  if (
+    failure &&
+    failure.fingerprint === storylineRepairFingerprint(issue?.prior) &&
+    currentRound >= failure.round &&
+    currentRound < failure.round + MOTION_REPAIR_FAILURE_COOLDOWN_ROUNDS
+  ) {
+    return "failed-recently";
+  }
+
+  if (budget && budget.calls >= MAX_MOTION_REPAIRS_PER_JUMP) return "call-cap";
+  if (budget && budget.ms >= MAX_MOTION_REPAIR_MS_PER_JUMP) return "time-budget";
+  return "";
+};
+
+// Counted whatever the outcome: a failed attempt still spent a call and its time.
+export const recordMotionRepairAttempt = (budget, ms = 0) => {
+  if (!budget) return;
+  budget.calls += 1;
+  budget.ms += Math.max(0, Number(ms) || 0);
+};
+
+export const recordMotionRepairOutcome = (
+  failures,
+  { campaignId = "", id = "", fingerprint = "", round = 0, ok = false } = {},
+) => {
+  if (!failures) return;
+  const key = motionRepairFailureKey(campaignId, id);
+  failures.delete(key);
+  if (ok) return;
+  failures.set(key, { fingerprint, round: Number(round) || 0 });
+  // Map iteration is insertion order, and the delete above re-inserts a
+  // refreshed failure at the end, so the first key is always the oldest.
+  while (failures.size > MAX_REMEMBERED_MOTION_REPAIR_FAILURES) {
+    failures.delete(failures.keys().next().value);
+  }
+};
+
+// How long the next repair may run before the skip's repair time is spent.
+// The repair call is stopped at this (repairCall.js), so the budget holds
+// while a call runs as well as before one starts.
+export const motionRepairTimeRemainingMs = (budget) =>
+  Math.max(0, MAX_MOTION_REPAIR_MS_PER_JUMP - Math.max(0, Number(budget?.ms) || 0));
+
+// What one repair call means for the pass and for the failure memory. Its
+// time always counts against the skip's budget. A repair stopped because the
+// PASS ran out of time is not the storyline failing: it is left overdue like
+// any issue past the budget and starts no cooldown, so the next skip may try
+// it again. Returns "repaired", "failed" or "stopped-at-time-budget".
+export const settleMotionRepairCall = (
+  issue,
+  { budget = null, failures = null, campaignId = "", round = 0, ms = 0, ok = false, stoppedAtTimeBudget = false } = {},
+) => {
+  recordMotionRepairAttempt(budget, ms);
+  if (!ok && stoppedAtTimeBudget) return "stopped-at-time-budget";
+  recordMotionRepairOutcome(failures, {
+    campaignId,
+    id: normalizeString(issue?.id),
+    fingerprint: storylineRepairFingerprint(issue?.prior),
+    round,
+    ok,
+  });
+  return ok ? "repaired" : "failed";
+};
+
+// Each segment's storylineUpdates once the skip's motion repair pass has
+// settled. The skip's copy-forwards are withdrawn for every settled storyline
+// (repaired, failed or skipped) that existed before the skip: a failed or
+// skipped one then keeps its old accounted/review dates and stays overdue next
+// turn instead of being silently pushed forward, and a repaired one ends on its
+// repair. A storyline BORN in the skip keeps its updates — withdrawing them
+// would erase it. The repairs ride on the last segment, after its own updates,
+// so they are the last word on their storylines when the merged updates are
+// applied in order.
+//
+// One entry per segment, index for index. An entry nothing touched comes back
+// as it went in (internal transport may be object records after schema
+// validation, and the native decoder accepts that form), so an untouched
+// segment is never rewritten.
+export const settleSkipStorylineUpdates = (
+  segmentUpdates = [],
+  { settledIds = [], preSkipIds = [], repairedUpdates = [] } = {},
+) => {
+  const preSkip = new Set([...(preSkipIds ?? [])].map((id) => normalizeString(id)).filter(Boolean));
+  const withdraw = new Set(
+    [...(settledIds ?? [])].map((id) => normalizeString(id)).filter((id) => id && preSkip.has(id)),
+  );
+  const settled = (Array.isArray(segmentUpdates) ? segmentUpdates : []).map((raw) => {
+    if (!withdraw.size) return raw;
+    const updates = decodeWorldStorylineUpdates(raw);
+    if (!updates.some((entry) => withdraw.has(normalizeString(entry?.id)))) return raw;
+    return updates.filter((entry) => !withdraw.has(normalizeString(entry?.id)));
+  });
+  const repairs = normalizeArray(repairedUpdates);
+  if (repairs.length && settled.length) {
+    const last = settled.length - 1;
+    settled[last] = [...decodeWorldStorylineUpdates(settled[last]), ...repairs];
+  }
+  return settled;
 };
 
 // Surgical salvage for deferred-storyline bookkeeping mistakes.
@@ -2125,10 +2423,25 @@ export const validateWorldStorylinePayload = (
     // claim that several weeks passed while its status, numeric trajectory,
     // visible milestones, AND semantic state all remained unchanged.
     const prior = existingById.get(id) || normalizeStorylineForDirector(selected);
+    const activeWar = Boolean(activeCanonicalWarForStoryline(prior, world));
 
     // Hidden numeric direction must agree with the linked visible development.
     // Failed talks + renewed threats cannot quietly lower crisis pressure unless
     // the same event establishes a concrete de-escalatory fact.
+    //
+    // Only for a storyline that is actually a crisis: pressure already at the
+    // high-pressure threshold, or a war. The cue list is plain keywords, and on
+    // a quiet programme they fire on ordinary words — a player's Iranian cyber
+    // programme at pressure 18 lost a whole jump to the canned fallback because
+    // its event "deploys" new cryptographic hardware and it eased from 18 to 14.
+    // A low-pressure process drifting a few points lower is not crisis pressure
+    // being quietly erased. "Crisis" is judged from the numbers the engine keeps,
+    // not from the storyline's kind label: the model writes that label freely
+    // and could call a hardware rollout a crisis.
+    const crisisStoryline =
+      activeWar ||
+      normalizeString(prior?.kind).toLowerCase() === "war" ||
+      clampPercent(prior?.pressure) >= HIGH_PRESSURE_STAGNATION_THRESHOLD;
     const linkedEventText = normalizeArray(update?.eventIndexes)
       .map((eventIndex) => normalizeArray(candidate?.events)[eventIndex])
       .filter(Boolean)
@@ -2139,6 +2452,7 @@ export const validateWorldStorylinePayload = (
     const pressureDelta =
       clampPercent(update?.pressure) - clampPercent(prior?.pressure);
     if (
+      crisisStoryline &&
       pressureDelta <= -4 &&
       STORYLINE_ESCALATION_OR_FAILURE_RE.test(linkedEventText) &&
       !STORYLINE_DEESCALATION_RE.test(linkedEventText)
@@ -2155,15 +2469,12 @@ export const validateWorldStorylinePayload = (
     }
 
     const stagnationAgeAtStop = storylineStagnationAgeDays(prior, stopDate);
-    const activeWar = Boolean(activeCanonicalWarForStoryline(prior, world));
     if (
       enforceAntiStasis &&
-      normalizeString(prior?.status).toLowerCase() === "active" &&
-      (activeWar || clampPercent(prior?.pressure) >= HIGH_PRESSURE_STAGNATION_THRESHOLD) &&
-      stagnationAgeAtStop >= STAGNATION_BACKSTOP_DAYS &&
+      storylineAtAntiStasisBackstop(prior, stopDate, world) &&
       !storylineHasObjectiveEvolution(prior, update, candidate)
     ) {
-      return `${activeWar ? "Active-war" : "High-pressure"} storyline ${id} has gone ${stagnationAgeAtStop} day(s) without a visible milestone and reached the ${STAGNATION_BACKSTOP_DAYS}-day anti-stasis backstop. Do not copy the same equilibrium forward again: link a material endogenous/external event, materially change pressure or momentum, or move the process toward a different status.`;
+      return `${activeWar ? "Active-war" : "High-pressure"} storyline ${id} has gone ${stagnationAgeAtStop} day(s) without a visible milestone and reached the ${STAGNATION_BACKSTOP_DAYS}-day anti-stasis backstop. Do not copy the same equilibrium forward again — reworded prose with the same numbers is rejected. You must ${describeAntiStasisObjectiveRule()}.`;
     }
   }
 
@@ -3299,10 +3610,16 @@ export const buildWorldInitiativeContext = (
 
     const stagnationAge = storylineStagnationAgeDays(storyline, horizonDate);
 
+    // The same test the detector and the validator use, so an active war below
+    // the high-pressure line is warned here too. It used to be flagged by the
+    // repair pass afterwards without ever having been told.
+    const atBackstop = storylineAtAntiStasisBackstop(storyline, horizonDate, bundle?.world);
+    const backstopSubject = activeCanonicalWarForStoryline(storyline, bundle?.world)
+      ? "active war"
+      : "active high-pressure process";
     const stagnationReappraisal =
-      storyline.pressure >= HIGH_PRESSURE_STAGNATION_THRESHOLD &&
-      stagnationAge >= STAGNATION_BACKSTOP_DAYS
-        ? `ANTI-STASIS BACKSTOP: this active high-pressure process reaches ${stagnationAge} day(s) without a visible milestone by the pass horizon. Simulate its actors and internal conditions now. The border may remain unchanged, but do NOT copy the same semantic equilibrium forward: produce a material event, materially shift pressure/momentum, cool/de-escalate, or move toward dormant/resolution.`
+      atBackstop
+        ? `ANTI-STASIS BACKSTOP: this ${backstopSubject} reaches ${stagnationAge} day(s) without a visible milestone by the pass horizon. Simulate its actors and internal conditions now. The border may remain unchanged, but do NOT copy the same semantic equilibrium forward — reworded prose with the same numbers is rejected. You must ${describeAntiStasisObjectiveRule()}. Cooling or de-escalation counts when it shows in those numbers or as a move to dormant or resolved.`
         : storyline.pressure >= HIGH_PRESSURE_STAGNATION_THRESHOLD &&
           stagnationAge >= STAGNATION_REAPPRAISAL_DAYS
           ? `ENDOGENOUS REAPPRAISAL REQUIRED: this active high-pressure process reaches ${stagnationAge} day(s) without a visible milestone by the pass horizon. Re-simulate actor objectives, manpower/resources, supply, command, morale, politics, diplomacy, weather, tactics, and opportunities from INSIDE the process. A genuine equilibrium may still hold; do not force a card.`
@@ -3435,7 +3752,7 @@ export const buildWorldInitiativeContext = (
     "For every selected active war/crisis/high-pressure process, actually SIMULATE the actors during this interval before deciding the state is unchanged. Ask: what is each side trying to accomplish; what can it afford; what opportunities/constraints exist; what does the opponent do; what succeeds, partially succeeds, or fails; and what military, political, economic, diplomatic, command, morale, supply, or social consequence follows?",
     "Do not treat relative country size or historical expectation as a deterministic winner. A smaller power may hold, counterattack, recover ground, exploit overextension, force negotiations, or suffer collapse depending on current capabilities and decisions. A larger power may fail locally. Branch from THIS campaign.",
     "WWI-era/trench warfare may produce long stretches with little territorial movement. That is legal. But a static border does not mean a dead process: offensives can fail, casualties/attrition can matter, commanders can change, supply can tighten, morale/politics can move, tactical adaptation can occur, negotiations can emerge, or both sides can deliberately reorganize. Only a material consequence deserves a card.",
-    `At ${STAGNATION_REAPPRAISAL_DAYS}+ days without a visible milestone, a high-pressure active process gets mandatory endogenous reappraisal. At ${STAGNATION_BACKSTOP_DAYS}+ days, it may not simply copy materially the same equilibrium forward again: link a material event, materially move pressure/momentum, change status, or establish a genuinely different hidden operational/political state reflected in those fields. This is an anti-stasis rule, NOT an event quota.`,
+    `At ${STAGNATION_REAPPRAISAL_DAYS}+ days without a visible milestone, a high-pressure active process gets mandatory endogenous reappraisal. At ${STAGNATION_BACKSTOP_DAYS}+ days, an active war or high-pressure process may not copy the same equilibrium forward again: it must ${describeAntiStasisObjectiveRule()}. A genuinely different hidden operational or political state counts only when it shows in those numbers — reworded prose with the same numbers is rejected. This is an anti-stasis rule, NOT an event quota.`,
     "",
     "RISK, MISCALCULATION, AND CONSEQUENT DIVERGENCE",
     conflictRiskLine,
@@ -3460,7 +3777,7 @@ export const buildWorldInitiativeContext = (
     "A visible event does NOT need to be a decade-defining milestone or something the campaign will still care about years later. Keep specific history worth showing through any of three lanes: (A) major/high-pressure change such as a breakthrough, legal/territorial change, new belligerent, severe crisis or government change; (B) ORDINARY CONSEQUENTIAL history such as a concrete policy result, appointment, industrial initiative, completed infrastructure/capability step, labor/social development, diplomatic move, scientific/technical development, or other new fact that changes what actors can do next; (C) HUMAN/PUBLIC TEXTURE such as a public appearance, ceremony, funeral, wedding, fair, sport, culture, university life, scandal, accident, disaster/public response, notable speech, popular craze, or other specific social/personality event that makes the world feel inhabited.",
     "Small-scale is NOT the same as filler. Filler means empty process churn, generic status reporting, calendar padding, or another wording of an unchanged state. A modest event with a concrete outcome, memorable human texture, or a new cause/effect is legitimate history even when it has no structured map impact.",
     "Administrative life exists, but it must not monopolize the feed. Another technical standard, compliance framework, quarterly outlook, routine refinancing window, committee review, inspection protocol, implementation report, or coordination mechanism with no strategic/social/capability delta is normally hidden process, not a visible world event. If several grounded candidate cards are available, compare trajectory value and prefer the ones that change incentives, capabilities, leadership, public behavior, risk, or the trajectory of a live process. A trajectory-4/5 candidate should not lose a scarce visible slot to a trajectory-0/1 administrative success merely because the latter is easy to summarize.",
-    "Routine continuation belongs in storylineUpdates ONLY: repeated artillery exchanges, patrols/probes/skirmishes with no operational consequence, unchanged sieges/fronts, seasonal/weather slowdowns that merely preserve the same posture, recurring intelligence reviews, routine meetings/consultations, and administrative follow-up should not consume timeline slots merely because the process remains active.",
+    "Routine continuation belongs in storylineUpdates ONLY: repeated artillery exchanges, patrols/probes/skirmishes with no operational consequence, unchanged sieges/fronts, seasonal/weather slowdowns that merely preserve the same posture, recurring intelligence reviews, routine meetings/consultations, and administrative follow-up should not consume timeline slots merely because the process remains active. The exception is an entry on the Projects & Operations board: its progress, stalls, milestones and endings are written as events naming the entry exactly as the board names it, however routine, because the board reads every event and the cleanup only decides what is shown.",
     "High pressure is NOT novelty. A pressure-95 war may still produce zero visible events in a particular pass when the equilibrium genuinely holds. But high pressure is also not permission for suspended animation: obey the 21/45-day endogenous reappraisal rules, and cool momentum/de-escalate/dormant a process that has genuinely ceased to evolve instead of manufacturing fresh wording for the same state.",
     "",
     "INDEPENDENT WORLD SWEEP",
@@ -3529,7 +3846,7 @@ export const buildWorldInitiativeContext = (
     "The tool field storylineUpdates is ONE STRING, not an array. Return either an empty string when no storyline needs persistence, or one record per line (maximum 16) using exactly: id~status~pressure~momentum~startedDate~kind~title~participantsCSV~eventNumbersCSV~state",
     "Never use ~ inside a storyline field. status = active | dormant | resolved. pressure and momentum are 0-100. startedDate is YYYY-MM-DD when known for a new process and may be blank for an existing one. For an existing storyline, kind/title/participants may be blank because runtime preserves them. Participants are cumulative canonical actors: include newly involved polities, but omission never means removal of previously involved participants. eventNumbersCSV is an optional compatibility hint and may be blank because native code owns causal linkage. state must describe what is true through the actual stopDate.",
     `For every scheduler-selected storyline, return a compact storylineUpdates record whose state describes what is true through THIS PASS stopDate. High momentum must produce real semantic evolution across multi-week passes. Every canonical ACTIVE war receives endogenous reappraisal at about ${STAGNATION_REAPPRAISAL_DAYS} days regardless of pressure; other high-pressure processes use the same soft guard. Active wars and other protected high-pressure processes reach objective anti-stasis at ${STAGNATION_BACKSTOP_DAYS} days without a visible milestone. Runtime stamps accounting/review dates.`,
-    "When a new event creates an unresolved multi-step process, create a compact storylineUpdates record. You MAY leave eventNumbersCSV blank: native runtime binds storyline records to causally matching events and attaches storylineIds before persistence. Do not spend reasoning effort counting event positions.",
+    "When a new event creates an unresolved multi-step process, create a compact storylineUpdates record. You MAY leave eventNumbersCSV blank: native runtime binds storyline records to causally matching events and attaches storylineIds before persistence. Do not spend reasoning effort counting event positions. One polity's own deliberate Project or Operation belongs on the Projects & Operations board, not in storylineUpdates: it may cause or feed a storyline (a rival's reaction, a standoff), but it is not one.",
     "pressure = seriousness/unresolved stakes. momentum = current rate of meaningful change. High pressure can coexist with low momentum (for example a frozen war).",
   ].join("\n");
 
