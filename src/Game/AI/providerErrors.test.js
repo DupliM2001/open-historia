@@ -344,6 +344,41 @@ test("a used-up daily allowance is Spent", () => {
   assert.equal(classifyProviderFailure({ status: 429, payload: GEMINI_PER_DAY }).kind, "spent");
 });
 
+// TRANSCRIBED FROM A REAL ANSWER (gemini-3.7-flash, free tier, 2026-09-14), key
+// removed. The quota id says per DAY, but the message links to ".../rate-limits"
+// and "ai.dev/rate-limit" and says "Please retry in 47s", and a RetryInfo rides
+// along. The link text used to win: the list waited on a model that was used up
+// until midnight Pacific, and never moved to the next one.
+const GEMINI_PER_DAY_REAL = {
+  error: {
+    code: 429,
+    message: "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.7-flash\nPlease retry in 47.307372861s.",
+    status: "RESOURCE_EXHAUSTED",
+    details: [
+      { "@type": "type.googleapis.com/google.rpc.Help", links: [{ description: "Learn more about Gemini API quotas", url: "https://ai.google.dev/gemini-api/docs/rate-limits" }] },
+      {
+        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+        violations: [{
+          quotaMetric: "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+          quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+          quotaDimensions: { location: "global", model: "gemini-3.7-flash" },
+          quotaValue: "20",
+        }],
+      },
+      { "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "47s" },
+    ],
+  },
+};
+
+test("Google's real per-day answer is Spent, whatever its links and retry hint say", () => {
+  assert.equal(isQuotaExhaustedPayload(GEMINI_PER_DAY_REAL), true);
+  assert.equal(classifyProviderFailure({ status: 429, payload: GEMINI_PER_DAY_REAL }).kind, "spent");
+  // The same answer for a per-minute trip is still a rate limit: the quota id
+  // decides, in both directions.
+  const perMinute = JSON.parse(JSON.stringify(GEMINI_PER_DAY_REAL).replace("GenerateRequestsPerDayPerProjectPerModel", "GenerateRequestsPerMinutePerProjectPerModel"));
+  assert.equal(classifyProviderFailure({ status: 429, payload: perMinute }).kind, "rateLimited");
+});
+
 test("each provider's spelling of a spent allowance or balance is Spent", () => {
   // OpenAI
   assert.equal(classifyProviderFailure({ status: 429, payload: { error: { code: "insufficient_quota", type: "insufficient_quota", message: "You exceeded your current quota, please check your plan and billing details." } } }).kind, "spent");

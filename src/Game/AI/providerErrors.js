@@ -93,11 +93,32 @@ const errorHaystack = (error) => {
     }
 };
 
+// Google's own quota ids ("GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
+// wherever they sit in the payload.
+const quotaIdsOf = (node, found = [], depth = 0) => {
+    if (!node || typeof node !== "object" || depth > 6) return found;
+    for (const [field, value] of Object.entries(node)) {
+        if (field === "quotaId" && typeof value === "string") found.push(value);
+        else quotaIdsOf(value, found, depth + 1);
+    }
+    return found;
+};
+
 // Is this 429 the kind that waiting will NOT fix? Only then is it worth failing
 // the turn over.
 export const isQuotaExhaustedPayload = (error) => {
-    const haystack = errorHaystack(error);
-    if (!haystack) return false;
+    // The quota id, when there is one, is the answer: Google names the window
+    // that ran out. Everything else in its 429 is boilerplate that says both
+    // things at once — every one, per-day included, carries a "retry in 47s"
+    // hint and links to ".../rate-limits" — and the wording below once read a
+    // spent day as a one-minute pause and left the list waiting on it.
+    const quotaIds = quotaIdsOf(typeof error === "object" ? error : null);
+    if (quotaIds.some((id) => /PerDay/i.test(id))) return true;
+    if (quotaIds.length && quotaIds.every((id) => /PerMinute|PerSecond/i.test(id))) return false;
+    // No quota id: judge the words, minus any URL (a help link to a "rate-limits"
+    // page says nothing about which limit this was).
+    const haystack = errorHaystack(error).replace(/https?:\/\/[^\s"\\]+/g, " ");
+    if (!haystack.trim()) return false;
     // A per-minute limit that also happens to mention billing boilerplate ("check
     // your plan and billing details" is in Gemini's generic 429 blurb) is still a
     // per-minute limit, so the retryable signal wins the tie.
