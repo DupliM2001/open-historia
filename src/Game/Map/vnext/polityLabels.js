@@ -286,6 +286,66 @@ const pointInComponentTile = (point, componentPolygons) => (
 // optimizer can score the ACTUAL warped label footprint against owned territory.
 // This stays deliberately coarse/bounded: it is a placement field, not canonical
 // geometry, and avoids shipping every administrative polygon to the main thread.
+const tilePolygonBounds = (polygon) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of polygon?.[0] ?? []) {
+    if (!Array.isArray(point)) continue;
+    minX = Math.min(minX, point[0]);
+    minY = Math.min(minY, point[1]);
+    maxX = Math.max(maxX, point[0]);
+    maxY = Math.max(maxY, point[1]);
+  }
+  return { minX, minY, maxX, maxY };
+};
+
+const buildComponentTileSpatialIndex = ({
+  componentPolygons,
+  minX,
+  minY,
+  maxX,
+  maxY,
+  gridSize = 32,
+}) => {
+  const size = clamp(Math.floor(Number(gridSize) || 32), 8, 64);
+  const width = Math.max(1e-9, maxX - minX);
+  const height = Math.max(1e-9, maxY - minY);
+  const cells = Array.from({ length: size * size }, () => []);
+  const entries = (componentPolygons ?? []).map((polygon) => ({
+    polygon,
+    bounds: tilePolygonBounds(polygon),
+  })).filter(({ bounds }) => Number.isFinite(bounds.minX));
+
+  for (const entry of entries) {
+    const { bounds } = entry;
+    const c0 = clamp(Math.floor(((bounds.minX - minX) / width) * size), 0, size - 1);
+    const c1 = clamp(Math.floor(((bounds.maxX - minX) / width) * size), 0, size - 1);
+    const r0 = clamp(Math.floor(((bounds.minY - minY) / height) * size), 0, size - 1);
+    const r1 = clamp(Math.floor(((bounds.maxY - minY) / height) * size), 0, size - 1);
+    for (let row = r0; row <= r1; row += 1) {
+      for (let column = c0; column <= c1; column += 1) cells[row * size + column].push(entry);
+    }
+  }
+
+  const contains = (point) => {
+    const x = Number(point?.[0]);
+    const y = Number(point?.[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (x < minX || x > maxX || y < minY || y > maxY) return false;
+    const column = clamp(Math.floor(((x - minX) / width) * size), 0, size - 1);
+    const row = clamp(Math.floor(((y - minY) / height) * size), 0, size - 1);
+    for (const { polygon, bounds } of cells[row * size + column]) {
+      if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY) continue;
+      if (pointInPolygonTile([x, y], polygon)) return true;
+    }
+    return false;
+  };
+
+  return { contains, entries, size, cells, minX, minY, maxX, maxY };
+};
+
 const buildPtrCoverageGrid = ({
   componentPolygons,
   minX,
@@ -294,17 +354,27 @@ const buildPtrCoverageGrid = ({
   maxY,
   extent,
   resolution = 48,
+  spatialIndex = null,
 }) => {
   const size = clamp(Math.floor(Number(resolution) || 48), 24, 64);
   const width = Math.max(1e-9, maxX - minX);
   const height = Math.max(1e-9, maxY - minY);
+  const index = spatialIndex ?? buildComponentTileSpatialIndex({
+    componentPolygons,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    gridSize: size,
+  });
+
   const rows = [];
   for (let row = 0; row < size; row += 1) {
     let values = "";
     const y = minY + ((row + 0.5) / size) * height;
     for (let column = 0; column < size; column += 1) {
       const x = minX + ((column + 0.5) / size) * width;
-      values += pointInComponentTile([x, y], componentPolygons) ? "1" : "0";
+      values += index.contains([x, y]) ? "1" : "0";
     }
     rows.push(values);
   }
@@ -316,8 +386,11 @@ const buildPtrCoverageGrid = ({
   };
 };
 
-const polylineInsideComponentTile = (points, componentPolygons) => {
+const polylineInsideComponentTile = (points, componentPolygons, spatialIndex = null) => {
   if (!Array.isArray(points) || points.length < 2) return false;
+  const contains = spatialIndex?.contains
+    ? spatialIndex.contains
+    : (point) => pointInComponentTile(point, componentPolygons);
   for (let index = 1; index < points.length; index += 1) {
     const a = points[index - 1];
     const b = points[index];
@@ -329,14 +402,17 @@ const polylineInsideComponentTile = (points, componentPolygons) => {
         a[0] + (b[0] - a[0]) * fraction,
         a[1] + (b[1] - a[1]) * fraction,
       ];
-      if (!pointInComponentTile(point, componentPolygons)) return false;
+      if (!contains(point)) return false;
     }
   }
   return true;
 };
 
-const componentInteriorPoint = (componentPolygons, preferredPoint = null) => {
-  if (preferredPoint && pointInComponentTile(preferredPoint, componentPolygons)) return preferredPoint;
+const componentInteriorPoint = (componentPolygons, preferredPoint = null, spatialIndex = null) => {
+  const contains = spatialIndex?.contains
+    ? spatialIndex.contains
+    : (point) => pointInComponentTile(point, componentPolygons);
+  if (preferredPoint && contains(preferredPoint)) return preferredPoint;
 
   let best = null;
   for (const polygon of componentPolygons ?? []) {
@@ -1781,6 +1857,7 @@ const buildValidatedPlacementCandidate = ({
   bestOuterTile,
   extraRings,
   componentPolygons,
+  spatialIndex = null,
 }) => {
   const rawPathInfo = buildCurvedLabelPath(bestOuterTile, {
     allowStraight: true,
@@ -1789,7 +1866,7 @@ const buildValidatedPlacementCandidate = ({
     extraRings,
   });
   if (!rawPathInfo?.points?.length) return null;
-  if (!polylineInsideComponentTile(rawPathInfo.points, componentPolygons)) return null;
+  if (!polylineInsideComponentTile(rawPathInfo.points, componentPolygons, spatialIndex)) return null;
 
   const bend = pathBendMetrics(rawPathInfo.points);
   const flow = getPathFlowMetrics(rawPathInfo.points);
@@ -1935,6 +2012,14 @@ const buildLandmassGeometryLayout = ({
   }
   ptrPreferredAngle = normalizeRotation(ptrPreferredAngle);
   const ptrAxisMetrics = projectedAxisMetrics(allOuterPoints, ptrPreferredAngle);
+  const componentSpatialIndex = buildComponentTileSpatialIndex({
+    componentPolygons,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    gridSize: 32,
+  });
   const ptrCoverageGrid = buildPtrCoverageGrid({
     componentPolygons,
     minX,
@@ -1943,6 +2028,7 @@ const buildLandmassGeometryLayout = ({
     maxY,
     extent,
     resolution: 48,
+    spatialIndex: componentSpatialIndex,
   });
 
   const placement = chooseValidatedPlacementCandidate({
@@ -1952,9 +2038,10 @@ const buildLandmassGeometryLayout = ({
     bestOuterTile,
     extraRings,
     componentPolygons,
+    spatialIndex: componentSpatialIndex,
   });
 
-  const fallbackPoint = componentInteriorPoint(componentPolygons, centerTile);
+  const fallbackPoint = componentInteriorPoint(componentPolygons, centerTile, componentSpatialIndex);
   const rawPathInfo = placement?.rawPathInfo ?? null;
   let rotation = placement?.angle ?? (elongation >= 1.12 ? momentAngle : 0);
 
@@ -1967,7 +2054,7 @@ const buildLandmassGeometryLayout = ({
 
   const axisMetrics = projectedAxisMetrics(allOuterPoints, rotation);
   const axisAspectRatio = axisMetrics.axisSpan / Math.max(1, axisMetrics.crossSpan);
-  const validatePath = (points) => polylineInsideComponentTile(points, componentPolygons);
+  const validatePath = (points) => polylineInsideComponentTile(points, componentPolygons, componentSpatialIndex);
   const pathMatchesPresentationAxis = !placement || rotationDistance(rotation, placement.angle) <= 32;
   let safeWarpPath = rawPathInfo && pathMatchesPresentationAxis
     ? buildSafeMapLibreWarpPath(rawPathInfo, validatePath)

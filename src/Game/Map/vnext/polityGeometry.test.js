@@ -16,6 +16,8 @@ test("label geometry aggregation groups canonical ownership without polygon unio
   assert.equal(result.features.length, 1);
   assert.equal(result.features[0].properties.owner, "Alpha");
   assert.equal(result.features[0].properties.regionCount, 2);
+  assert.equal(result.features[0].properties.polygonCount, 2);
+  assert.equal(result.features[0].properties.vertexCount, 10);
   assert.equal(result.features[0].geometry.coordinates.length, 2);
 });
 

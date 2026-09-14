@@ -96,6 +96,12 @@ export const ESRI_BASEMAPS = [
   { id: "shaded", label: "Shaded Relief", service: "World_Shaded_Relief", maxZoom: 13 },
   { id: "physical", label: "Physical", service: "World_Physical_Map", maxZoom: 8 },
   { id: "natgeo", label: "National Geographic", service: "NatGeo_World_Map", maxZoom: 16 },
+  // Promotional/screenshot variant. Runtime World.jsx replaces this registry
+  // entry with the official NatGeo World_Basemap_v2 vector style, darkened and
+  // stripped of political/place labels while preserving physical/water labels.
+  // The raster service remains here as a semantic/fallback source and keeps the
+  // built-in basemap registry/editor contract simple.
+  { id: "natgeo-dark", label: "National Geographic - Dark", service: "NatGeo_World_Map", maxZoom: 16 },
   { id: "ocean", label: "Ocean", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
   { id: "ocean-dark", label: "Ocean - Dark", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
   { id: "light-gray", label: "Light Gray Canvas", service: "Canvas/World_Light_Gray_Base", maxZoom: 16 },

@@ -12,8 +12,7 @@ import {
   aggregatePolityGeometryForOwners,
 } from "./polityGeometry.js";
 import { buildPolityLabelCollections } from "./polityLabels.js";
-import { buildRegionDisplayMeshBlob, isExplicitAuthoredGeometry } from "./regionDisplayMesh.js";
-import { REGION_DISPLAY_MESH_ENABLED } from "./regionDisplayMeshPolicy.js";
+import { buildRegionRenderRepair, isExplicitAuthoredGeometry } from "./regionRenderRepair.js";
 
 const EMPTY_FC = Object.freeze({ type: "FeatureCollection", features: [] });
 
@@ -24,37 +23,45 @@ let cachedTopology = null;
 let boundaryState = null;
 let labelGeometryByOwner = new Map();
 let labelsByOwner = new Map();
+let labelChangeDebtByOwner = new Map();
 let currentOwnershipOverrides = {};
+let currentRegionClaimants = {};
 let currentLabelNames = {};
-let displayMeshGeneration = 0;
+let renderRepairGeneration = 0;
+let renderRepairGeometryById = new Map();
 
-const cancelDisplayMeshBuild = () => {
-  displayMeshGeneration += 1;
+const cancelRenderRepairBuild = () => {
+  renderRepairGeneration += 1;
 };
 
-const scheduleDisplayMeshBuild = ({ requestId, geometryEpoch, regions }) => {
-  const generation = ++displayMeshGeneration;
+const scheduleRegionRenderRepair = ({ requestId, geometryEpoch, regions }) => {
+  const generation = ++renderRepairGeneration;
   const sourceRegions = regions;
 
-  // Catalog readiness and the first boundary/label snapshot publish first. The
-  // topology-safe fill mesh is a geometry-epoch-scoped presentation enhancement
-  // and must never delay gameplay or become canonical region geometry.
+  // Repair only demonstrably malformed presentation geometry. This is NOT the
+  // old whole-world display mesh: canonical region ids/ownership stay untouched,
+  // and clean features never enter the repair collection at all.
   Promise.resolve().then(async () => {
-    const result = await buildRegionDisplayMeshBlob(sourceRegions, {
-      shouldCancel: () => generation !== displayMeshGeneration,
+    const result = await buildRegionRenderRepair(sourceRegions, {
+      shouldCancel: () => generation !== renderRepairGeneration,
     });
-    if (generation !== displayMeshGeneration || result?.cancelled || !result?.blob) return;
+    if (generation !== renderRepairGeneration || result?.cancelled || !result?.data) return;
+    renderRepairGeometryById = new Map(
+      (result.data.features ?? []).map((feature) => [String(feature?.properties?.id ?? ""), feature?.geometry]),
+    );
     self.postMessage({
-      messageType: "display-mesh-ready",
+      messageType: "render-repair-ready",
       requestId,
       geometryEpoch,
-      displayBlob: result.blob,
+      repairData: result.data,
+      repairedIds: result.repairedIds ?? [],
+      disputedData: deriveDisputedData(currentOwnershipOverrides, currentRegionClaimants),
       stats: result.stats ?? {},
     });
   }).catch((error) => {
-    if (generation !== displayMeshGeneration) return;
+    if (generation !== renderRepairGeneration) return;
     self.postMessage({
-      messageType: "display-mesh-error",
+      messageType: "render-repair-error",
       requestId,
       geometryEpoch,
       error: error instanceof Error ? error.message : String(error),
@@ -65,6 +72,93 @@ const scheduleDisplayMeshBuild = ({ requestId, geometryEpoch, regions }) => {
 const toStringArray = (value) => Array.isArray(value)
   ? value.map((entry) => String(entry ?? "")).filter(Boolean)
   : [];
+
+const geometryPolygons = (geometry) => {
+  if (geometry?.type === "Polygon") return [geometry.coordinates];
+  if (geometry?.type === "MultiPolygon") return geometry.coordinates;
+  return [];
+};
+
+// Directional ownership sweeps need the recipient polity's TERRITORIAL mass,
+// not the count of administrative regions. Precompute a cheap equal-area-ish
+// weight once per region so a heavily subdivided coast cannot outweigh a much
+// larger interior simply because it contains more region records.
+const ringTerritoryArea = (ring) => {
+  const points = (Array.isArray(ring) ? ring : []).filter(
+    (point) => Array.isArray(point) && Number.isFinite(point[0]) && Number.isFinite(point[1]),
+  );
+  if (points.length < 3) return 0;
+
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (const point of points) {
+    minLat = Math.min(minLat, point[1]);
+    maxLat = Math.max(maxLat, point[1]);
+  }
+  const cosLat = Math.max(0.08, Math.cos(((((minLat + maxLat) / 2) || 0) * Math.PI) / 180));
+
+  // Unwrap longitudes locally so a dateline-crossing ring does not acquire a
+  // world-sized shoelace area.
+  const xs = [];
+  const ys = [];
+  let previousLng = Number(points[0][0]);
+  for (const point of points) {
+    let lng = Number(point[0]);
+    while (lng - previousLng > 180) lng -= 360;
+    while (lng - previousLng < -180) lng += 360;
+    xs.push(lng * cosLat);
+    ys.push(Number(point[1]));
+    previousLng = lng;
+  }
+
+  let twiceArea = 0;
+  for (let index = 0, previous = points.length - 1; index < points.length; previous = index, index += 1) {
+    twiceArea += xs[previous] * ys[index] - xs[index] * ys[previous];
+  }
+  return Math.abs(twiceArea) / 2;
+};
+
+const geometryTerritoryWeight = (geometry) => {
+  let total = 0;
+  for (const polygon of geometryPolygons(geometry)) {
+    if (!Array.isArray(polygon) || !polygon.length) continue;
+    const outer = ringTerritoryArea(polygon[0]);
+    const holes = polygon.slice(1).reduce((sum, ring) => sum + ringTerritoryArea(ring), 0);
+    total += Math.max(0, outer - holes);
+  }
+  return total;
+};
+
+const geometryBoundsCenter = (geometry) => {
+  let west = Infinity;
+  let east = -Infinity;
+  let south = Infinity;
+  let north = -Infinity;
+  for (const polygon of geometryPolygons(geometry)) {
+    for (const ring of polygon ?? []) {
+      for (const point of ring ?? []) {
+        const lng = Number(point?.[0]);
+        const lat = Number(point?.[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        west = Math.min(west, lng);
+        east = Math.max(east, lng);
+        south = Math.min(south, lat);
+        north = Math.max(north, lat);
+      }
+    }
+  }
+  return Number.isFinite(west)
+    ? { lng: (west + east) / 2, lat: (south + north) / 2 }
+    : null;
+};
+
+const wrappedLongitudeDelta = (fromLng, toLng) => {
+  let delta = Number(toLng) - Number(fromLng);
+  if (!Number.isFinite(delta)) return 0;
+  while (delta > 180) delta -= 360;
+  while (delta < -180) delta += 360;
+  return delta;
+};
 
 const buildMetadata = (regions) => {
   const records = [];
@@ -87,8 +181,12 @@ const buildMetadata = (regions) => {
     const gid0 = String(props.gid0 ?? props.GID_0 ?? "").trim().toUpperCase();
     if (gid0) ownedCountryCodes.add(gid0);
     const centroid = props?.centroid?.coordinates;
-    const lng = Number(Array.isArray(centroid) ? centroid[0] : props?.lng ?? props?.longitude);
-    const lat = Number(Array.isArray(centroid) ? centroid[1] : props?.lat ?? props?.latitude);
+    const boundsCenter = geometryBoundsCenter(feature?.geometry);
+    const rawLng = Number(Array.isArray(centroid) ? centroid[0] : props?.lng ?? props?.longitude);
+    const rawLat = Number(Array.isArray(centroid) ? centroid[1] : props?.lat ?? props?.latitude);
+    const lng = Number.isFinite(rawLng) ? rawLng : Number(boundsCenter?.lng);
+    const lat = Number.isFinite(rawLat) ? rawLat : Number(boundsCenter?.lat);
+    const territoryWeight = geometryTerritoryWeight(feature?.geometry);
 
     records.push({
       id,
@@ -102,6 +200,7 @@ const buildMetadata = (regions) => {
       name: String(props.name ?? props.NAME_1 ?? props.name_1 ?? id),
       lng: Number.isFinite(lng) ? lng : null,
       lat: Number.isFinite(lat) ? lat : null,
+      territoryWeight: territoryWeight > 1e-12 ? territoryWeight : 1,
       tags: toStringArray(props.tags),
       type: props.type ? String(props.type) : "",
       adjacencies: toStringArray(props.adjacencies),
@@ -129,6 +228,7 @@ const deriveDisputedData = (ownershipOverrides = {}, regionClaimants = {}) => {
     if (!claimants.length) continue;
     features.push({
       ...feature,
+      geometry: renderRepairGeometryById.get(id) ?? feature?.geometry,
       properties: {
         ...props,
         id,
@@ -145,8 +245,11 @@ const resetDerivedCaches = () => {
   boundaryState = null;
   labelGeometryByOwner = new Map();
   labelsByOwner = new Map();
+  labelChangeDebtByOwner = new Map();
   currentOwnershipOverrides = {};
+  currentRegionClaimants = {};
   currentLabelNames = {};
+  renderRepairGeometryById = new Map();
 };
 
 const loadRegionsFromUrl = async (url) => {
@@ -286,6 +389,361 @@ const inferChangedRegionIds = (previousOverrides = {}, nextOverrides = {}) => {
   return changed;
 };
 
+
+const LARGE_OWNER_LABEL_VERTEX_THRESHOLD = 60000;
+const LARGE_OWNER_LABEL_MIN_REGIONS = 96;
+const LARGE_OWNER_LABEL_REFRESH_RATIO = 0.025;
+const LARGE_OWNER_LABEL_MIN_DEBT = 4;
+
+const countOwnersInSnapshot = (owners, ownershipOverrides = {}) => {
+  const requested = owners instanceof Set ? owners : new Set(owners ?? []);
+  const counts = new Map([...requested].map((owner) => [owner, 0]));
+  if (!requested.size || !cachedTopology?.regionIds?.length) return counts;
+  for (let index = 0; index < cachedTopology.regionIds.length; index += 1) {
+    const id = cachedTopology.regionIds[index];
+    const owner = toCountryName(ownershipOverrides?.[id] ?? cachedTopology.baseOwners[index] ?? "");
+    if (requested.has(owner)) counts.set(owner, (counts.get(owner) ?? 0) + 1);
+  }
+  return counts;
+};
+
+const changedRegionCountsByOwner = (
+  previousOwnershipOverrides,
+  ownershipOverrides,
+  changedRegionIds,
+) => {
+  const counts = new Map();
+  for (const rawId of changedRegionIds ?? []) {
+    const id = String(rawId ?? "");
+    const index = cachedTopology?.regionIndexById?.get(id);
+    const baseOwner = index == null ? "" : cachedTopology.baseOwners[index];
+    const before = toCountryName(previousOwnershipOverrides?.[id] ?? baseOwner ?? "");
+    const after = toCountryName(ownershipOverrides?.[id] ?? baseOwner ?? "");
+    if (before) counts.set(before, (counts.get(before) ?? 0) + 1);
+    if (after && after !== before) counts.set(after, (counts.get(after) ?? 0) + 1);
+  }
+  return counts;
+};
+
+const chooseOwnershipLabelRefreshOwners = ({
+  ownerList,
+  previousOwnershipOverrides,
+  ownershipOverrides,
+  exactChangedIds,
+  forceFullSnapshot = false,
+  forcedLabelOwners = [],
+}) => {
+  const requested = new Set((ownerList ?? []).map(toCountryName).filter(Boolean));
+  const forced = new Set((forcedLabelOwners ?? []).map(toCountryName).filter(Boolean));
+  if (!requested.size) return { refreshOwners: [], deferredOwners: [] };
+
+  const previousCounts = countOwnersInSnapshot(requested, previousOwnershipOverrides);
+  const nextCounts = countOwnersInSnapshot(requested, ownershipOverrides);
+  const changedCounts = changedRegionCountsByOwner(
+    previousOwnershipOverrides,
+    ownershipOverrides,
+    exactChangedIds,
+  );
+  const refreshOwners = [];
+  const deferredOwners = [];
+
+  for (const owner of requested) {
+    const previousCount = previousCounts.get(owner) ?? 0;
+    const nextCount = nextCounts.get(owner) ?? 0;
+    const changedCount = changedCounts.get(owner) ?? 0;
+    const cachedGeometry = labelGeometryByOwner.get(owner);
+    const cachedVertexCount = Number(cachedGeometry?.properties?.vertexCount ?? 0);
+    const cachedRegionCount = Number(cachedGeometry?.properties?.regionCount ?? previousCount);
+    const largeComplexOwner = cachedVertexCount >= LARGE_OWNER_LABEL_VERTEX_THRESHOLD
+      && Math.max(previousCount, nextCount, cachedRegionCount) >= LARGE_OWNER_LABEL_MIN_REGIONS;
+
+    const previousDebt = labelChangeDebtByOwner.get(owner) ?? 0;
+    const nextDebt = previousDebt + Math.max(1, changedCount);
+    const debtThreshold = Math.max(
+      LARGE_OWNER_LABEL_MIN_DEBT,
+      Math.ceil(Math.max(previousCount, nextCount, cachedRegionCount, 1) * LARGE_OWNER_LABEL_REFRESH_RATIO),
+    );
+
+    const mustRefresh = forceFullSnapshot
+      || forced.has(owner)
+      || previousCount === 0
+      || nextCount === 0
+      || !cachedGeometry
+      || !largeComplexOwner
+      || nextDebt >= debtThreshold;
+
+    if (mustRefresh) {
+      refreshOwners.push(owner);
+      labelChangeDebtByOwner.delete(owner);
+    } else {
+      labelChangeDebtByOwner.set(owner, nextDebt);
+      deferredOwners.push(owner);
+    }
+  }
+
+  return { refreshOwners, deferredOwners };
+};
+
+const regionOwnerAtIndex = (regionIndex, ownershipOverrides = {}) => {
+  const regionId = cachedTopology?.regionIds?.[regionIndex];
+  if (regionId == null) return "";
+  return toCountryName(
+    ownershipOverrides?.[regionId]
+      ?? cachedTopology?.baseOwners?.[regionIndex]
+      ?? cachedMetadata?.records?.[regionIndex]?.owner
+      ?? "",
+  );
+};
+
+const transitionDirectionForChange = ({
+  regionId,
+  toOwner,
+  previousOwnershipOverrides,
+  changedSet,
+}) => {
+  const index = cachedTopology?.regionIndexById?.get(String(regionId));
+  const targetMeta = index == null ? null : cachedMetadata?.records?.[index];
+  const targetLng = Number(targetMeta?.lng);
+  const targetLat = Number(targetMeta?.lat);
+  if (!Number.isFinite(targetLng) || !Number.isFinite(targetLat) || !toOwner) {
+    return { dx: 1, dy: 0, mode: "wipe", basis: "fallback", frontierSegments: [] };
+  }
+
+  // The visual question is not merely "what is the normal of the border?".
+  // That made Finland->Karelia enter almost straight from the north because a
+  // short east-west frontier locally has a south-facing normal, even though the
+  // overwhelming mass of Finnish territory is west / north-west of the target.
+  //
+  // Use the exact PRE-TRANSFER topology to find recipient territory touching
+  // this region, then flood through that recipient-owned connected landmass.
+  // The sweep travels FROM the area-weighted territorial mass of that landmass
+  // TOWARD the transferred region. This preserves the intuitive "the colour
+  // comes from where that polity actually is" rule while ignoring detached
+  // colonies/exclaves that should not pull a local frontier animation sideways.
+  const recipientSeeds = new Set();
+  let contactWeight = 0;
+  let contactLng = 0;
+  let contactLat = 0;
+  let inwardNormalX = 0;
+  let inwardNormalY = 0;
+  let inwardNormalWeight = 0;
+  const sharedFrontierSegments = [];
+  const precision = Number(cachedTopology?.precision ?? 0);
+  const incidentSegments = boundaryState?.regionToSegments?.[index] ?? [];
+
+  if (precision > 0 && boundaryState?.segments && incidentSegments.length) {
+    for (const segmentId of incidentSegments) {
+      const segment = boundaryState.segments.get(segmentId);
+      if (!segment) continue;
+
+      const recipientIndexes = (segment.regionIndexes ?? []).filter((otherIndex) => {
+        if (otherIndex === index) return false;
+        const otherId = String(cachedTopology?.regionIds?.[otherIndex] ?? "");
+        if (!otherId || changedSet.has(otherId)) return false;
+        return regionOwnerAtIndex(otherIndex, previousOwnershipOverrides) === toOwner;
+      });
+      if (!recipientIndexes.length) continue;
+      for (const recipientIndex of recipientIndexes) recipientSeeds.add(recipientIndex);
+
+      const ax = Number(segment.a?.[0]) / precision;
+      const ay = Number(segment.a?.[1]) / precision;
+      const bx = Number(segment.b?.[0]) / precision;
+      const by = Number(segment.b?.[1]) / precision;
+      if (![ax, ay, bx, by].every(Number.isFinite)) continue;
+
+      const midLng = (ax + bx) / 2;
+      const midLat = (ay + by) / 2;
+      const cosSegmentLat = Math.max(0.2, Math.cos((midLat * Math.PI) / 180));
+
+      // Work in the same LOCAL RENDERED/Mercator coordinate convention that
+      // ownershipTransitionWorker consumes: x ~= longitude, y ~= latitude / cos(lat).
+      const tangentX = bx - ax;
+      const tangentY = (by - ay) / cosSegmentLat;
+      const length = Math.hypot(tangentX, tangentY);
+      if (!(length > 1e-9)) continue;
+
+      sharedFrontierSegments.push({ a: [ax, ay], b: [bx, by], length });
+      contactWeight += length;
+      contactLng += midLng * length;
+      contactLat += midLat * length;
+
+      let normalX = -tangentY / length;
+      let normalY = tangentX / length;
+      const towardTargetX = wrappedLongitudeDelta(midLng, targetLng);
+      const towardTargetY = (targetLat - midLat) / cosSegmentLat;
+      if ((normalX * towardTargetX) + (normalY * towardTargetY) < 0) {
+        normalX *= -1;
+        normalY *= -1;
+      }
+      inwardNormalX += normalX * length;
+      inwardNormalY += normalY * length;
+      inwardNormalWeight += length;
+    }
+  }
+
+  const recipientIndexes = new Set();
+  if (recipientSeeds.size && boundaryState?.segments) {
+    const queue = [...recipientSeeds];
+    for (const seed of queue) recipientIndexes.add(seed);
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const regionIndex = queue[cursor];
+      for (const segmentId of boundaryState.regionToSegments?.[regionIndex] ?? []) {
+        const segment = boundaryState.segments.get(segmentId);
+        if (!segment) continue;
+        for (const neighborIndex of segment.regionIndexes ?? []) {
+          if (neighborIndex === regionIndex || recipientIndexes.has(neighborIndex)) continue;
+          const neighborId = String(cachedTopology?.regionIds?.[neighborIndex] ?? "");
+          if (!neighborId || changedSet.has(neighborId)) continue;
+          if (regionOwnerAtIndex(neighborIndex, previousOwnershipOverrides) !== toOwner) continue;
+          recipientIndexes.add(neighborIndex);
+          queue.push(neighborIndex);
+        }
+      }
+    }
+  } else {
+    // Detached acquisition: there is no touching recipient landmass, so use the
+    // polity's whole pre-transfer territorial mass rather than a random/nearest
+    // administrative centroid.
+    for (let candidateIndex = 0; candidateIndex < (cachedMetadata?.records?.length ?? 0); candidateIndex += 1) {
+      const candidateId = String(cachedTopology?.regionIds?.[candidateIndex] ?? "");
+      if (!candidateId || candidateId === String(regionId) || changedSet.has(candidateId)) continue;
+      if (regionOwnerAtIndex(candidateIndex, previousOwnershipOverrides) === toOwner) {
+        recipientIndexes.add(candidateIndex);
+      }
+    }
+  }
+
+  let massX = 0;
+  let massY = 0;
+  let massWeight = 0;
+  for (const recipientIndex of recipientIndexes) {
+    const candidate = cachedMetadata?.records?.[recipientIndex];
+    const lng = Number(candidate?.lng);
+    const lat = Number(candidate?.lat);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+    const weight = Math.max(1e-9, Number(candidate?.territoryWeight) || 1);
+    const meanLat = (targetLat + lat) / 2;
+    const cosLat = Math.max(0.2, Math.cos((meanLat * Math.PI) / 180));
+    // target -> recipient in rendered map space
+    massX += wrappedLongitudeDelta(targetLng, lng) * weight;
+    massY += ((lat - targetLat) / cosLat) * weight;
+    massWeight += weight;
+  }
+
+  const frontierSegments = (sharedFrontierSegments.length <= 4096
+    ? sharedFrontierSegments
+    : [...sharedFrontierSegments].sort((left, right) => right.length - left.length).slice(0, 4096)
+  ).map((segment) => [segment.a, segment.b]);
+
+  if (massWeight > 0) {
+    // Sweep FROM recipient mass TO target: negate target->recipient pull.
+    const dx = -massX / massWeight;
+    const dy = -massY / massWeight;
+    const length = Math.hypot(dx, dy);
+    if (length > 1e-6) {
+      return {
+        dx: dx / length,
+        dy: dy / length,
+        mode: "wipe",
+        basis: recipientSeeds.size ? "recipient-landmass-mass" : "recipient-polity-mass",
+        frontierSegments,
+      };
+    }
+  }
+
+  // If the recipient wraps around the target symmetrically, territorial mass can
+  // cancel. Only then fall back to the local frontier normal/contact geometry.
+  if (inwardNormalWeight > 0) {
+    const length = Math.hypot(inwardNormalX, inwardNormalY);
+    if (length > 1e-6) {
+      return {
+        dx: inwardNormalX / length,
+        dy: inwardNormalY / length,
+        mode: "wipe",
+        basis: "shared-frontier-normal",
+        frontierSegments,
+      };
+    }
+  }
+
+  const targetCosLat = Math.max(0.2, Math.cos((targetLat * Math.PI) / 180));
+  if (contactWeight > 0) {
+    const borderLng = contactLng / contactWeight;
+    const borderLat = contactLat / contactWeight;
+    const dx = wrappedLongitudeDelta(borderLng, targetLng);
+    const dy = (targetLat - borderLat) / targetCosLat;
+    const length = Math.hypot(dx, dy);
+    if (length > 1e-6) {
+      return {
+        dx: dx / length,
+        dy: dy / length,
+        mode: "wipe",
+        basis: "shared-frontier-contact",
+        frontierSegments,
+      };
+    }
+  }
+
+  // Brand-new owners with no existing territory receive a deterministic
+  // direction rather than random animation.
+  let hash = 2166136261;
+  for (const char of String(regionId)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  const angle = ((hash % 16) * Math.PI) / 8;
+  return {
+    dx: Math.cos(angle),
+    dy: Math.sin(angle),
+    mode: "wipe",
+    basis: "deterministic-fallback",
+    frontierSegments,
+  };
+};
+
+const buildOwnershipTransitionData = ({
+  previousOwnershipOverrides,
+  ownershipOverrides,
+  changedRegionIds,
+}) => {
+  const changedSet = new Set((changedRegionIds ?? []).map(String));
+  const features = [];
+  for (const rawId of changedSet) {
+    const id = String(rawId);
+    const index = cachedTopology?.regionIndexById?.get(id);
+    if (index == null) continue;
+    const sourceFeature = cachedRegions?.features?.[index];
+    const geometry = renderRepairGeometryById.get(id) ?? sourceFeature?.geometry;
+    if (!geometry || !["Polygon", "MultiPolygon"].includes(geometry.type)) continue;
+    const baseOwner = cachedTopology?.baseOwners?.[index] ?? sourceFeature?.properties?.owner ?? "";
+    const fromOwner = toCountryName(previousOwnershipOverrides?.[id] ?? baseOwner ?? "");
+    const toOwner = toCountryName(ownershipOverrides?.[id] ?? baseOwner ?? "");
+    if (!fromOwner || !toOwner || fromOwner === toOwner) continue;
+    const direction = transitionDirectionForChange({
+      regionId: id,
+      toOwner,
+      previousOwnershipOverrides,
+      changedSet,
+    });
+    features.push({
+      type: "Feature",
+      id,
+      geometry,
+      properties: {
+        id,
+        fromOwner,
+        toOwner,
+        sweepDx: direction.dx,
+        sweepDy: direction.dy,
+        sweepMode: direction.mode,
+        sweepBasis: direction.basis,
+        frontierSegments: direction.frontierSegments ?? [],
+      },
+    });
+  }
+  return { type: "FeatureCollection", features };
+};
+
 const initializePoliticalCartography = ({ ownershipOverrides, regionClaimants }) => {
   const startedAt = performance.now();
   const topologyStats = ensureTopology();
@@ -325,6 +783,8 @@ const updateOwnershipCartography = ({
   affectedOwners = [],
   changedRegionIds = [],
   forceFullSnapshot = false,
+  forcedLabelOwners = [],
+  onTransitionReady = null,
 }) => {
   const startedAt = performance.now();
   ensureTopology();
@@ -340,6 +800,19 @@ const updateOwnershipCartography = ({
       ? [...new Set(changedRegionIds.map(String).filter(Boolean))]
       : inferChangedRegionIds(previousOwnershipOverrides, ownershipOverrides);
 
+  // Ownership animation must not wait behind boundary/PTR derivation. Build
+  // the cheap presentation payload from PRE-MUTATION topology and publish it
+  // immediately; the main thread can start the sweep while this same worker
+  // continues deriving the new borders and polity labels in parallel.
+  const ownershipTransitionData = buildOwnershipTransitionData({
+    previousOwnershipOverrides,
+    ownershipOverrides,
+    changedRegionIds: exactChangedIds,
+  });
+  if (typeof onTransitionReady === "function" && ownershipTransitionData.features.length) {
+    onTransitionReady({ ownershipTransitionData, exactChangedIds });
+  }
+
   const normalizedAffected = new Set(
     (affectedOwners ?? []).map(toCountryName).filter(Boolean),
   );
@@ -350,26 +823,38 @@ const updateOwnershipCartography = ({
     exactChangedIds,
   )) normalizedAffected.add(owner);
   const ownerList = [...normalizedAffected];
+  const { refreshOwners, deferredOwners } = chooseOwnershipLabelRefreshOwners({
+    ownerList,
+    previousOwnershipOverrides,
+    ownershipOverrides,
+    exactChangedIds,
+    forceFullSnapshot,
+    forcedLabelOwners,
+  });
 
   const boundaryStartedAt = performance.now();
   const boundaryResult = updatePoliticalBoundaryState(boundaryState, ownershipOverrides, exactChangedIds);
   const boundaryMs = performance.now() - boundaryStartedAt;
 
   const labelGeometryStartedAt = performance.now();
-  const labelGeometry = aggregatePolityGeometryForOwners(cachedRegions, ownershipOverrides, ownerList);
+  const labelGeometry = aggregatePolityGeometryForOwners(cachedRegions, ownershipOverrides, refreshOwners);
   const labelGeometryMs = performance.now() - labelGeometryStartedAt;
   const labelStartedAt = performance.now();
-  patchLabelGeometryForOwners(labelGeometry, ownerList);
+  patchLabelGeometryForOwners(labelGeometry, refreshOwners);
   const labels = combinedLabels();
   const labelMs = performance.now() - labelStartedAt;
 
   return {
     boundaryPatch: boundaryResult.patch,
     labels,
+    ownershipTransitionData,
     disputedData: deriveDisputedData(ownershipOverrides, regionClaimants),
     stats: {
       ...boundaryResult.stats,
       affectedOwnerCount: ownerList.length,
+      refreshedLabelOwnerCount: refreshOwners.length,
+      deferredLabelOwnerCount: deferredOwners.length,
+      deferredLabelOwners: deferredOwners,
       changedRegionCount: exactChangedIds.length,
       boundaryMs,
       labelGeometryMs,
@@ -397,7 +882,7 @@ self.onmessage = async ({ data: message }) => {
   try {
     let loadStats = null;
     if (type === "initialize") {
-      cancelDisplayMeshBuild();
+      cancelRenderRepairBuild();
       if (message.regions?.features) {
         cachedRegions = message.regions;
         cachedRegionsUrl = "";
@@ -428,7 +913,13 @@ self.onmessage = async ({ data: message }) => {
       return;
     }
 
+    const previousLabelNames = currentLabelNames;
     currentLabelNames = { ...(labelNames ?? {}) };
+    const forcedLabelOwners = [...new Set([
+      ...Object.keys(previousLabelNames ?? {}),
+      ...Object.keys(currentLabelNames ?? {}),
+    ])].filter((owner) => previousLabelNames?.[owner] !== currentLabelNames?.[owner]);
+    currentRegionClaimants = regionClaimants ?? {};
 
     if (type === "update-claims") {
       currentOwnershipOverrides = ownershipOverrides;
@@ -503,6 +994,16 @@ self.onmessage = async ({ data: message }) => {
           affectedOwners,
           changedRegionIds,
           forceFullSnapshot,
+          forcedLabelOwners,
+          onTransitionReady: ({ ownershipTransitionData, exactChangedIds }) => {
+            self.postMessage({
+              messageType: "ownership-transition-ready",
+              requestId,
+              geometryEpoch,
+              ownershipTransitionData,
+              changedRegionIds: exactChangedIds,
+            });
+          },
         });
     currentOwnershipOverrides = ownershipOverrides;
 
@@ -528,8 +1029,11 @@ self.onmessage = async ({ data: message }) => {
       stats: { ...derived.stats, ...(loadStats ?? {}) },
     });
 
-    if (REGION_DISPLAY_MESH_ENABLED && type === "initialize" && cachedRegions?.features?.length) {
-      scheduleDisplayMeshBuild({
+    if (type === "initialize") {
+      // Always publish repair settlement, even for an empty catalog. Nations
+      // uses this as part of initial scenario readiness; an empty map must not
+      // wait forever for a message that would otherwise never be scheduled.
+      scheduleRegionRenderRepair({
         requestId,
         geometryEpoch,
         regions: cachedRegions,

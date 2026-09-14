@@ -153,3 +153,39 @@ test("PTR-1.7 keeps a temporary legacy line-data fallback for migration snapshot
   assert.equal(records.length, 1);
   assert.equal(records[0].owner, "Russian Empire");
 });
+
+
+test("prominent secondary sovereign sites use optimized placement while small sites stay fast", () => {
+  const prominent = logical(
+    "Maritime Empire",
+    "MARITIME EMPIRE",
+    [[-8, 54], [-2, 55], [2, 53]],
+    {
+      priorityScale: 120000,
+      labelKind: "territory",
+      labelSiteRole: "sovereign-secondary",
+      owner: "__part_maritime_metropole__",
+      sourceOwner: "Maritime Empire",
+    },
+  );
+  prominent.id = "maritime-prominent-ptr";
+  const small = logical(
+    "Maritime Empire",
+    "MARITIME EMPIRE",
+    [[68, 23], [78, 25], [88, 23]],
+    {
+      priorityScale: 80000,
+      labelKind: "territory",
+      labelSiteRole: "sovereign-secondary",
+      owner: "__part_maritime_small__",
+      sourceOwner: "Maritime Empire",
+    },
+  );
+  small.id = "maritime-small-ptr";
+
+  const records = buildPolityTextPtr1Records({
+    ptrLabelData: { type: "FeatureCollection", features: [prominent, small] },
+  });
+  assert.equal(records.find((record) => record.siteId === "maritime-prominent-ptr")?.placementMode, "optimized");
+  assert.equal(records.find((record) => record.siteId === "maritime-small-ptr")?.placementMode, "fast");
+});

@@ -7,18 +7,21 @@
 // fill paint over boundaries and object/symbol layers.
 //
 // This list is the single current-renderer authority for bottom -> top order.
-// Basemap/style-owned layers are intentionally absent and remain underneath.
 export const MAP_LAYER_ORDER = [
   // Political body / local geography.
   "countries-fill",
   "countries-outline",
   "custom-regions-fill-far",
+  "custom-regions-repair-fill-far",
   "regions-fill",
   "regions-disputed",
   "regions-outline",
   "custom-regions-fill",
-  "ownership-transition-fill",
+  "custom-regions-repair-fill",
+  "ownership-transition-flood",
+  "ownership-transition-sweep-fill",
   "custom-regions-local-outline",
+  "custom-regions-repair-local-outline",
   "custom-regions-disputed-vnext",
 
   // Sovereign frontiers are presentation, but must remain above every
@@ -57,10 +60,44 @@ export const MAP_LAYER_ORDER = [
   "units-name",
 ];
 
+const NATGEO_REFERENCE_TIER_METADATA_KEY = "openhistoria:natgeo-reference-tier";
+
+const getNatGeoReferenceLayerIds = (map) => {
+  const styleLayers = map?.getStyle?.()?.layers;
+  if (!Array.isArray(styleLayers)) return { lines: [], labels: [] };
+  const lines = [];
+  const labels = [];
+  for (const layer of styleLayers) {
+    const tier = layer?.metadata?.[NATGEO_REFERENCE_TIER_METADATA_KEY];
+    if (tier === "line") lines.push(layer.id);
+    else if (tier === "label") labels.push(layer.id);
+  }
+  return { lines, labels };
+};
+
+export const buildEffectiveMapLayerOrder = (map) => {
+  const { lines: natGeoLines, labels: natGeoLabels } = getNatGeoReferenceLayerIds(map);
+  if (!natGeoLines.length && !natGeoLabels.length) return MAP_LAYER_ORDER;
+
+  const order = [];
+  for (const id of MAP_LAYER_ORDER) {
+    order.push(id);
+    // NatGeo's roads, coastlines and administrative borders must sit above OH
+    // fills to remain visible, but below canonical OH sovereign borders.
+    if (id === "custom-regions-disputed-vnext") order.push(...natGeoLines);
+    // NatGeo reference text/icons (cities, admin1 names, water/terrain, roads)
+    // must also sit above the political fill. Keep them below OH's own polity
+    // typography and operational overlays so canonical labels stay dominant.
+    if (id === "polity-boundaries") order.push(...natGeoLabels);
+  }
+  return order;
+};
+
 export const enforceMapLayerOrder = (map) => {
   if (!map?.getLayersOrder || !map.getLayer || !map.moveLayer) return false;
 
-  const present = MAP_LAYER_ORDER.filter((id) => map.getLayer(id));
+  const effectiveOrder = buildEffectiveMapLayerOrder(map);
+  const present = effectiveOrder.filter((id) => map.getLayer(id));
   if (!present.length) return false;
 
   const current = map.getLayersOrder();
@@ -68,9 +105,8 @@ export const enforceMapLayerOrder = (map) => {
     return false;
   }
 
-  // Move known app layers to the top one-by-one in canonical bottom->top order.
-  // This leaves every style-owned basemap layer underneath and converges after
-  // the styledata event caused by moveLayer because the next call is a no-op.
+  // Move known app/reference layers to the top one-by-one in canonical
+  // bottom->top order. Untagged style-owned basemap material stays underneath.
   for (const id of present) map.moveLayer(id);
   return true;
 };

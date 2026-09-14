@@ -14,6 +14,42 @@ const rectangle = (id, owner, x0, x1) => ({
   },
 });
 
+
+const box = (id, owner, x0, x1, y0, y1) => ({
+  type: "Feature",
+  id,
+  properties: {
+    id,
+    owner,
+    name: id,
+    centroid: { type: "Point", coordinates: [(x0 + x1) / 2, (y0 + y1) / 2] },
+  },
+  geometry: {
+    type: "Polygon",
+    coordinates: [[
+      [x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0],
+    ]],
+  },
+});
+
+
+const denseRectangle = (id, owner, x0, x1, pointsPerEdge = 160) => {
+  const points = [];
+  const y0 = 0;
+  const y1 = 1;
+  for (let i = 0; i < pointsPerEdge; i += 1) points.push([x0 + ((x1 - x0) * i) / pointsPerEdge, y0]);
+  for (let i = 0; i < pointsPerEdge; i += 1) points.push([x1, y0 + ((y1 - y0) * i) / pointsPerEdge]);
+  for (let i = 0; i < pointsPerEdge; i += 1) points.push([x1 - ((x1 - x0) * i) / pointsPerEdge, y1]);
+  for (let i = 0; i < pointsPerEdge; i += 1) points.push([x0, y1 - ((y1 - y0) * i) / pointsPerEdge]);
+  points.push(points[0]);
+  return {
+    type: "Feature",
+    id,
+    properties: { id, owner, name: id },
+    geometry: { type: "Polygon", coordinates: [points] },
+  };
+};
+
 const regions = {
   type: "FeatureCollection",
   features: [
@@ -65,13 +101,19 @@ test("ownership update removes a polity label when its canonical region membersh
     affectedOwners: ["A", "B"],
     changedRegionIds: ["a1", "a2"],
   });
-  assert.equal(out.length, 1);
-  const result = out[0];
-  assert.equal(result.messageType, "cartography-result");
+  assert.equal(out.length, 2);
+  assert.equal(out[0]?.messageType, "ownership-transition-ready");
+  assert.equal(out[1]?.messageType, "cartography-result");
+  const result = out[1];
   const owners = new Set((result.labels?.labelData?.features ?? []).map((feature) => feature?.properties?.sourceOwner ?? feature?.properties?.owner));
   assert.equal(owners.has("A"), false, "a vanished polity must not retain a derived label");
   assert.equal(owners.has("B"), true);
   assert.ok((result.boundaryPatch?.removeIds?.length ?? 0) + (result.boundaryPatch?.upsert?.length ?? 0) > 0);
+  assert.equal(result.ownershipTransitionData?.features?.length, 2);
+  const transitionIds = new Set(result.ownershipTransitionData.features.map((feature) => feature.properties.id));
+  assert.deepEqual(transitionIds, new Set(["a1", "a2"]));
+  assert.ok(result.ownershipTransitionData.features.every((feature) => Number.isFinite(feature.properties.sweepDx)));
+  assert.ok(result.ownershipTransitionData.features.every((feature) => Number.isFinite(feature.properties.sweepDy)));
 });
 
 test("forceFullSnapshot returns a self-contained current boundary snapshot after an unpublished worker revision", async () => {
@@ -86,7 +128,7 @@ test("forceFullSnapshot returns a self-contained current boundary snapshot after
     changedRegionIds: ["a1"],
     forceFullSnapshot: true,
   });
-  const result = out[0];
+  const result = out.find((message) => message?.messageType === "cartography-result");
   assert.equal(result?.boundaryPatch?.removeAll, true);
   assert.ok(Array.isArray(result?.boundaryPatch?.upsert));
   assert.ok((result?.labels?.labelData?.features?.length ?? 0) >= 2);
@@ -180,10 +222,113 @@ test("forceFullSnapshot derives the complete ownership delta from worker state, 
     affectedOwners: ["A", "C"],
     forceFullSnapshot: true,
   });
-  const result = out[0];
+  const result = out.find((message) => message?.messageType === "cartography-result");
   const ownerGroups = new Set(
     (result?.boundaryPatch?.upsert ?? []).map((feature) => feature?.properties?.owners),
   );
   assert.equal(result?.boundaryPatch?.removeAll, true);
   assert.ok(ownerGroups.has("A | C"), "a1 must be reclassified even though the incremental hint omitted it");
+});
+
+
+test("tiny ownership changes do not synchronously rebuild huge complex polity labels", async () => {
+  const denseRegions = {
+    type: "FeatureCollection",
+    features: [
+      ...Array.from({ length: 100 }, (_, index) => denseRectangle(`huge-${index}`, "Huge", index, index + 0.9)),
+      ...Array.from({ length: 8 }, (_, index) => denseRectangle(`small-${index}`, "Small", 110 + index, 110.9 + index, 4)),
+    ],
+  };
+
+  await send({
+    requestId: 10,
+    type: "initialize",
+    geometryEpoch: "g3",
+    regions: denseRegions,
+    ownershipOverrides: {},
+    regionClaimants: {},
+    labelNames: { Huge: "Huge", Small: "Small" },
+  });
+
+  const out = await send({
+    requestId: 11,
+    type: "update-ownership",
+    geometryEpoch: "g3",
+    ownershipOverrides: { "huge-0": "Small" },
+    regionClaimants: {},
+    labelNames: { Huge: "Huge", Small: "Small" },
+    affectedOwners: ["Huge", "Small"],
+    changedRegionIds: ["huge-0"],
+  });
+  const result = out.find((message) => message?.messageType === "cartography-result");
+  assert.equal(result?.stats?.changedRegionCount, 1);
+  assert.equal(result?.stats?.refreshedLabelOwnerCount, 1, "the small gaining polity should refresh immediately");
+  assert.equal(result?.stats?.deferredLabelOwnerCount, 1, "the huge losing polity should keep its last accepted label for a tiny change");
+  assert.deepEqual(result?.stats?.deferredLabelOwners, ["Huge"]);
+  const owners = new Set((result?.labels?.labelData?.features ?? []).map(
+    (feature) => feature?.properties?.sourceOwner ?? feature?.properties?.owner,
+  ));
+  assert.equal(owners.has("Huge"), true, "the deferred polity must retain its previous accepted label");
+  assert.equal(owners.has("Small"), true, "the gaining polity must publish its current label");
+});
+
+
+test("ownership sweep direction comes from the touching recipient landmass mass, not the local frontier normal", async () => {
+  const directionRegions = {
+    type: "FeatureCollection",
+    features: [
+      // Target sits south-east of the recipient polity. Its ONLY direct shared
+      // frontier is along the target's NORTH edge; a pure frontier-normal rule
+      // would therefore sweep almost straight top->bottom.
+      box("target", "A", 0, 2, 0, 2),
+      box("recipient-touch", "B", 0, 2, 2, 3),
+      // The overwhelming connected territorial mass is WEST / NORTH-WEST.
+      // This is the Finland/Karelia class of case the live videos exposed.
+      box("recipient-main", "B", -8, 0, 2, 8),
+      // A huge detached possession must not drag a local frontier animation
+      // toward itself merely because it contributes lots of global area.
+      box("recipient-detached", "B", 20, 35, -10, 10),
+    ],
+  };
+
+  await send({
+    requestId: 100,
+    type: "initialize",
+    geometryEpoch: "direction-g1",
+    regions: directionRegions,
+    ownershipOverrides: {},
+    regionClaimants: {},
+    labelNames: { A: "A", B: "B" },
+  });
+
+  const out = await send({
+    requestId: 101,
+    type: "update-ownership",
+    geometryEpoch: "direction-g1",
+    ownershipOverrides: { target: "B" },
+    regionClaimants: {},
+    labelNames: { A: "A", B: "B" },
+    affectedOwners: ["A", "B"],
+    changedRegionIds: ["target"],
+  });
+
+  const early = out.find((message) => message?.messageType === "ownership-transition-ready");
+  const result = out.find((message) => message?.messageType === "cartography-result");
+  assert.equal(out[0]?.messageType, "ownership-transition-ready", "sweep geometry must publish before derived cartography");
+  const transition = result?.ownershipTransitionData?.features?.find(
+    (feature) => feature?.properties?.id === "target",
+  );
+  const earlyTransition = early?.ownershipTransitionData?.features?.find(
+    (feature) => feature?.properties?.id === "target",
+  );
+  assert.deepEqual(earlyTransition?.properties, transition?.properties);
+  assert.equal(transition?.properties?.sweepBasis, "recipient-landmass-mass");
+  assert.ok(Array.isArray(transition?.properties?.frontierSegments));
+  assert.ok(transition.properties.frontierSegments.length > 0, "the exact pre-transfer recipient frontier must accompany the macro direction");
+  assert.ok(transition?.properties?.sweepDx > 0.45, "recipient mass west of target must drive the sweep eastward");
+  assert.ok(transition?.properties?.sweepDy < -0.25, "recipient mass north-west of target must also drive the sweep southward");
+  assert.ok(
+    Math.abs(transition?.properties?.sweepDx) > Math.abs(transition?.properties?.sweepDy) * 0.6,
+    "a north-edge contact must not collapse the sweep into a near-vertical frontier normal when most territory is west/north-west",
+  );
 });

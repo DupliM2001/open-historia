@@ -54,10 +54,22 @@ export const coverageGridCentroid = (grid) => {
 
 const sampleRibbonCoverage = ({ points, aspectRatio, coverageGrid, alongSamples = 28 }) => {
   if (!Array.isArray(points) || points.length < 2 || !(Number(aspectRatio) > 0)) {
-    return { ownCoverage: 0, centerlineCoverage: 0 };
+    return {
+      ownCoverage: 0,
+      centerlineCoverage: 0,
+      internalGapFraction: 1,
+      edgeOutsideFraction: 1,
+    };
   }
   const { total } = cumulativeArcLengths(points);
-  if (!(total > 0)) return { ownCoverage: 0, centerlineCoverage: 0 };
+  if (!(total > 0)) {
+    return {
+      ownCoverage: 0,
+      centerlineCoverage: 0,
+      internalGapFraction: 1,
+      edgeOutsideFraction: 1,
+    };
+  }
 
   const height = total / Number(aspectRatio);
   const halfHeight = height / 2;
@@ -66,6 +78,7 @@ const sampleRibbonCoverage = ({ points, aspectRatio, coverageGrid, alongSamples 
   let inside = 0;
   let totalSamples = 0;
   let centerInside = 0;
+  const centerlineInside = [];
 
   for (let sample = 0; sample < samples; sample += 1) {
     const index = Math.round((points.length - 1) * (sample / (samples - 1)));
@@ -80,7 +93,9 @@ const sampleRibbonCoverage = ({ points, aspectRatio, coverageGrid, alongSamples 
     const nx = ty;
     const ny = -tx;
 
-    if (coverageGridContains(coverageGrid, point)) centerInside += 1;
+    const centerOwned = coverageGridContains(coverageGrid, point);
+    centerlineInside.push(centerOwned);
+    if (centerOwned) centerInside += 1;
     for (const fraction of across) {
       const probe = [
         point[0] + nx * halfHeight * fraction,
@@ -91,9 +106,42 @@ const sampleRibbonCoverage = ({ points, aspectRatio, coverageGrid, alongSamples 
     }
   }
 
+  // Total coverage alone cannot distinguish a tiny coastline overhang from a
+  // label that bridges two disconnected islands. Measure the longest OUTSIDE
+  // run that is bounded by owned centerline samples on both sides; that is the
+  // visual signature of an Irish-Sea / strait / large-lake bridge.
+  let longestInternalGap = 0;
+  let runStart = -1;
+  for (let index = 0; index <= centerlineInside.length; index += 1) {
+    const owned = index < centerlineInside.length ? centerlineInside[index] : true;
+    if (!owned && runStart < 0) {
+      runStart = index;
+      continue;
+    }
+    if (owned && runStart >= 0) {
+      const runEnd = index - 1;
+      const boundedLeft = runStart > 0 && centerlineInside[runStart - 1] === true;
+      const boundedRight = index < centerlineInside.length && centerlineInside[index] === true;
+      if (boundedLeft && boundedRight) {
+        longestInternalGap = Math.max(longestInternalGap, runEnd - runStart + 1);
+      }
+      runStart = -1;
+    }
+  }
+
+  let leadingOutside = 0;
+  while (leadingOutside < centerlineInside.length && !centerlineInside[leadingOutside]) leadingOutside += 1;
+  let trailingOutside = 0;
+  while (
+    trailingOutside < centerlineInside.length
+    && !centerlineInside[centerlineInside.length - 1 - trailingOutside]
+  ) trailingOutside += 1;
+
   return {
     ownCoverage: totalSamples > 0 ? inside / totalSamples : 0,
     centerlineCoverage: centerInside / samples,
+    internalGapFraction: longestInternalGap / samples,
+    edgeOutsideFraction: (leadingOutside + trailingOutside) / samples,
   };
 };
 
@@ -143,11 +191,14 @@ export const scoreTerritorialArcCandidate = ({
   let angleDistance = Math.abs((Number(angleDeg) || 0) - (Number(preferredAngleDeg) || 0));
   while (angleDistance > 90) angleDistance = Math.abs(angleDistance - 180);
   const outside = 1 - coverage.ownCoverage;
+  const internalGapPenalty = Math.max(0, coverage.internalGapFraction - 0.055) * 30.0;
+  const edgeOutsidePenalty = Math.max(0, coverage.edgeOutsideFraction - 0.11) * 4.0;
 
   // Ownership dominates. A little coastline overhang is acceptable, but a
   // label that consumes a neighbour/ocean should rapidly lose to a translated
-  // candidate that uses the polity's own empty room. Centerline support is
-  // especially useful for Norway-like thin territories.
+  // candidate that uses the polity's own empty room. Most importantly, a long
+  // unsupported INTERNAL run is much worse than the same amount of harmless
+  // endpoint overhang: it means the word is bridging disconnected landmasses.
   const score = (
     coverage.ownCoverage * 10.0
     + coverage.centerlineCoverage * 3.2
@@ -155,6 +206,8 @@ export const scoreTerritorialArcCandidate = ({
     + centering.crossCentering * 1.8
     + centering.axisCentering * 0.45
     - Math.max(0, outside - 0.055) * 12.0
+    - internalGapPenalty
+    - edgeOutsidePenalty
     - (angleDistance / 20) * 0.22
   );
 
@@ -164,6 +217,8 @@ export const scoreTerritorialArcCandidate = ({
     spanUsage,
     ownCoverage: coverage.ownCoverage,
     centerlineCoverage: coverage.centerlineCoverage,
+    internalGapFraction: coverage.internalGapFraction,
+    edgeOutsideFraction: coverage.edgeOutsideFraction,
     crossCentering: centering.crossCentering,
     axisCentering: centering.axisCentering,
     angleDistance,
@@ -349,6 +404,56 @@ export const optimizeTerritorialArcPlacement = ({
     if (slender) {
       evaluate({ ...seed, bendFactor: 0.8 });
       evaluate({ ...seed, bendFactor: 1.2 });
+    }
+  }
+
+  const provisionalBest = candidates.reduce((winner, candidate) => (
+    !winner || candidate.score > winner.score ? candidate : winner
+  ), null);
+
+  // If the normal ~90%-of-envelope label still bridges a substantial internal
+  // gap, spend a tiny extra budget on smaller supports. Shrinking the word is
+  // preferable to forcing it across water between nearby islands. This is
+  // intentionally adaptive so continental labels keep the fast ~120-candidate
+  // path and only multipart/coastal failures pay the extra probes.
+  const needsCompactRecovery = Boolean(
+    provisionalBest
+    && (
+      provisionalBest.internalGapFraction > 0.055
+      || provisionalBest.ownCoverage < 0.88
+      || provisionalBest.centerlineCoverage < 0.78
+      || provisionalBest.edgeOutsideFraction > 0.08
+    )
+  );
+  if (needsCompactRecovery) {
+    const compactFractions = slender ? [0.52, 0.62, 0.70, 0.80] : [0.52, 0.62, 0.70, 0.78];
+    const compactCenters = uniqueCenters([
+      anchorPoint,
+      provisionalBest?.center,
+    ]);
+    // Recovery must follow the angle that actually won the broad territorial
+    // search. Resetting to the worker's preferred PCA angle can miss the only
+    // compact corridor that fits a multipart/coastal polity (the live failure
+    // mode was a long diagonal ribbon over water while a shorter ribbon at the
+    // already-selected angle fit cleanly on land).
+    const recoveryAngle = Number(provisionalBest?.angleDeg ?? preferred);
+    const compactAngles = [...new Set([
+      recoveryAngle - fineAngleStep,
+      recoveryAngle,
+      recoveryAngle + fineAngleStep,
+      preferred,
+    ].map((value) => Number(value.toFixed(6))))];
+    for (const center of compactCenters) {
+      for (const angleDeg of compactAngles) {
+        for (const fraction of compactFractions) {
+          evaluate({
+            center,
+            angleDeg,
+            chordLength: axisSpan * fraction,
+            bendFactor: slender ? 0.82 : 0.9,
+          });
+        }
+      }
     }
   }
 

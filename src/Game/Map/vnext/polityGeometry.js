@@ -46,11 +46,21 @@ const buildGroups = (regions, ownershipOverrides = {}, ownerFilter = null) => {
       // geometry is immutable for a geometry epoch and label fitting is read-only.
       group.polygons.push(...polygons);
       group.regionCount += 1;
+      group.polygonCount += polygons.length;
+      for (const polygon of polygons) {
+        for (const ring of polygon ?? []) group.vertexCount += Array.isArray(ring) ? ring.length : 0;
+      }
       if (gadm0) group.gadm0Counts.set(gadm0, (group.gadm0Counts.get(gadm0) || 0) + 1);
     } else {
+      let vertexCount = 0;
+      for (const polygon of polygons) {
+        for (const ring of polygon ?? []) vertexCount += Array.isArray(ring) ? ring.length : 0;
+      }
       groups.set(owner, {
         polygons: [...polygons],
         regionCount: 1,
+        polygonCount: polygons.length,
+        vertexCount,
         gadm0Counts: new Map(gadm0 ? [[gadm0, 1]] : []),
       });
     }
@@ -67,6 +77,8 @@ const collectionFromGroups = (groups) => ({
     properties: {
       owner,
       regionCount: group.regionCount,
+      polygonCount: group.polygonCount,
+      vertexCount: group.vertexCount,
       gadm0: [...group.gadm0Counts.entries()]
         .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
         .map(([code]) => code),

@@ -36,6 +36,16 @@ const sourceOwnerOf = (feature) => String(
     ?? "",
 ).trim();
 
+
+const SECONDARY_OPTIMIZED_MIN_PRIORITY_SCALE = 100000;
+
+const placementModeForSite = ({ siteRole, priorityScale }) => (
+  siteRole === "sovereign-primary"
+  || (siteRole === "sovereign-secondary" && Number(priorityScale) >= SECONDARY_OPTIMIZED_MIN_PRIORITY_SCALE)
+    ? "optimized"
+    : "fast"
+);
+
 const coverageGridOf = (value) => {
   const resolution = Math.floor(Number(value?.resolution) || 0);
   const bounds = Array.isArray(value?.bounds)
@@ -131,11 +141,15 @@ export const buildPolityTextPtr1Records = ({
       ptrAxisSpanWorld,
       ptrCrossSpanWorld,
       ptrCoverageGrid: coverageGridOf(properties.ptrCoverageGrid),
-      // Primary sites receive the expensive candidate optimizer. Secondary
-      // disconnected sites use the already-computed worker envelope directly
-      // so colonial/historical worlds gain repeated sovereign names without
-      // multiplying cold-start placement cost.
-      placementMode: siteRole === "sovereign-secondary" ? "fast" : "optimized",
+      // Primary sites always receive the candidate optimizer. Large/prominent
+      // secondary sovereign sites do too: these are the metropole / major
+      // disconnected landmasses where a cheap envelope-only diagonal can span
+      // water or sit across the wrong island. Small secondary sites stay on the
+      // fast path so historical empires do not multiply cold-start cost.
+      placementMode: placementModeForSite({
+        siteRole: siteRole || "sovereign-primary",
+        priorityScale: Math.max(0, stableNumber(properties.priorityScale, properties.areaScale)),
+      }),
     });
   }
 

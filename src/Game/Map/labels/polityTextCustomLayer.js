@@ -19,6 +19,7 @@ import { optimizeTerritorialArcPlacement } from "./polityTextPlacement.js";
 
 export const POLITY_TEXT_RENDERER_LAYER_ID = "polity-text-renderer";
 const RASTER_FONT_SIZE_PX = 128;
+const GPU_UPLOADS_PER_FRAME = 12;
 
 const compileShader = (gl, type, source) => {
   const shader = gl.createShader(type);
@@ -94,6 +95,81 @@ export const buildRibbonVertices = ({ points, aspectRatio }) => {
 };
 
 const buildLineVertices = (points) => new Float32Array(points.flat());
+
+const boundsFromRibbonVertices = (vertices) => {
+  if (!vertices?.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let index = 0; index + 1 < vertices.length; index += 4) {
+    const x = Number(vertices[index]);
+    const y = Number(vertices[index + 1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
+  return { minX, minY, maxX, maxY };
+};
+
+const viewportMercatorBounds = (map) => {
+  const bounds = map?.getBounds?.();
+  if (!bounds) return null;
+  const west = Number(bounds.getWest?.());
+  const east = Number(bounds.getEast?.());
+  const south = Number(bounds.getSouth?.());
+  const north = Number(bounds.getNorth?.());
+  if (![west, east, south, north].every(Number.isFinite)) return null;
+  const span = east - west;
+  // Wrapped/world-scale views can legitimately display more than one world
+  // copy. Skip culling there rather than risking a missing label. Regional
+  // views are where culling pays off and where these bounds are unambiguous.
+  if (!(span > 0 && span < 170) || west < -180 || east > 180) return null;
+  const sw = MercatorCoordinate.fromLngLat({ lng: west, lat: south });
+  const ne = MercatorCoordinate.fromLngLat({ lng: east, lat: north });
+  const minX = Math.min(sw.x, ne.x);
+  const maxX = Math.max(sw.x, ne.x);
+  const minY = Math.min(sw.y, ne.y);
+  const maxY = Math.max(sw.y, ne.y);
+  const padX = Math.max(0.002, (maxX - minX) * 0.04);
+  const padY = Math.max(0.002, (maxY - minY) * 0.04);
+  return {
+    minX: minX - padX,
+    maxX: maxX + padX,
+    minY: minY - padY,
+    maxY: maxY + padY,
+  };
+};
+
+const boundsOverlap = (left, right) => Boolean(
+  !left
+  || !right
+  || (
+    left.minX <= right.maxX
+    && left.maxX >= right.minX
+    && left.minY <= right.maxY
+    && left.maxY >= right.minY
+  )
+);
+
+const sortPreparedEntries = (entries) => [...entries].sort((left, right) => (
+  Number(left?.record?.priorityScale ?? 0) - Number(right?.record?.priorityScale ?? 0)
+));
+
+const releaseEntryGpuResources = (gl, entry) => {
+  if (!entry) return;
+  if (gl && !gl.isContextLost?.()) {
+    try { if (entry.ribbonBuffer) gl.deleteBuffer(entry.ribbonBuffer); } catch {}
+    try { if (entry.lineBuffer) gl.deleteBuffer(entry.lineBuffer); } catch {}
+    try { if (entry.texture) gl.deleteTexture(entry.texture); } catch {}
+  }
+  entry.ribbonBuffer = null;
+  entry.lineBuffer = null;
+  entry.texture = null;
+};
 
 const defaultPtr0Record = () => ({
   id: "ptr0-russia-proof",
@@ -298,6 +374,9 @@ export const finalizePolityTextRenderRecord = ({
     refinedSeeds: optimized.refinedSeeds,
     ownCoverage: optimized.ownCoverage,
     centerlineCoverage: optimized.centerlineCoverage,
+    internalGapFraction: optimized.internalGapFraction,
+    edgeOutsideFraction: optimized.edgeOutsideFraction,
+    chordLength: optimized.chordLength,
     spanUsage: optimized.spanUsage,
     crossCentering: optimized.crossCentering,
     axisCentering: optimized.axisCentering,
@@ -306,11 +385,13 @@ export const finalizePolityTextRenderRecord = ({
     center: optimized.center,
   } : null;
 
+  const ribbonVertices = buildRibbonVertices({ points: supportPoints, aspectRatio: raster.aspectRatio });
   return {
     record,
     raster,
     supportPoints,
-    ribbonVertices: buildRibbonVertices({ points: supportPoints, aspectRatio: raster.aspectRatio }),
+    ribbonVertices,
+    mercatorBounds: boundsFromRibbonVertices(ribbonVertices),
     lineVertices: buildLineVertices(supportPoints),
     supportLength,
     baselineLength: renderBaselineLength,
@@ -332,6 +413,62 @@ export const finalizePolityTextRenderRecord = ({
 export const preparePolityTextRenderRecord = (options) => {
   const plan = measurePolityTextRenderRecord(options);
   return finalizePolityTextRenderRecord({ plan });
+};
+
+
+const ensureEntryGpuResources = (gl, entry, { debugBaseline = false } = {}) => {
+  if (!entry || entry.texture || entry.ribbonBuffer) return Boolean(entry?.texture && entry?.ribbonBuffer);
+  if (gl.isContextLost?.()) return false;
+
+  const ribbonBuffer = gl.createBuffer();
+  const lineBuffer = debugBaseline ? gl.createBuffer() : null;
+  const texture = gl.createTexture();
+  if (!ribbonBuffer || !texture || (debugBaseline && !lineBuffer)) {
+    if (ribbonBuffer) gl.deleteBuffer(ribbonBuffer);
+    if (lineBuffer) gl.deleteBuffer(lineBuffer);
+    if (texture) gl.deleteTexture(texture);
+    return false;
+  }
+
+  try {
+    gl.bindBuffer(gl.ARRAY_BUFFER, ribbonBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, entry.ribbonVertices, gl.STATIC_DRAW);
+
+    if (debugBaseline) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, entry.lineVertices, gl.STATIC_DRAW);
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, entry.raster.canvas);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.generateMipmap(gl.TEXTURE_2D);
+
+    entry.ribbonBuffer = ribbonBuffer;
+    entry.lineBuffer = lineBuffer;
+    entry.texture = texture;
+    return true;
+  } catch (error) {
+    gl.deleteBuffer(ribbonBuffer);
+    if (lineBuffer) gl.deleteBuffer(lineBuffer);
+    gl.deleteTexture(texture);
+    entry.ribbonBuffer = null;
+    entry.lineBuffer = null;
+    entry.texture = null;
+    throw error;
+  } finally {
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  }
 };
 
 export const createPolityTextCustomLayer = ({
@@ -358,20 +495,33 @@ export const createPolityTextCustomLayer = ({
         samples,
       }))
       .filter(Boolean);
+  // Draw priority changes only when the prepared entry set changes. Sorting at
+  // construction / atomic entry replacement avoids allocating + sorting the
+  // same label list on every animation frame.
+  const drawOrder = sortPreparedEntries(prepared);
 
   return {
     id,
     type: "custom",
     renderingMode: "2d",
     _map: null,
+    _gl: null,
     _textureProgram: null,
     _lineProgram: null,
     _entries: prepared,
+    _drawOrder: drawOrder,
+    _pendingEntries: null,
+    _pendingDrawOrder: null,
+    _visibleEntries: new Array(drawOrder.length),
+    _visibleOpacity: new Float32Array(drawOrder.length),
+    _textureLocations: null,
+    _lineLocations: null,
     _didLogFirstRender: false,
     _didWarnMissingMatrix: false,
 
     onAdd(map, gl) {
       this._map = map;
+      this._gl = gl;
       console.info("[map] PTR custom layer onAdd", {
         labels: prepared.map((entry) => ({
           owner: entry.record.owner,
@@ -384,6 +534,8 @@ export const createPolityTextCustomLayer = ({
           placement: entry.placementDiagnostics ? {
             ownCoverage: Number(entry.placementDiagnostics.ownCoverage.toFixed(3)),
             centerlineCoverage: Number(entry.placementDiagnostics.centerlineCoverage.toFixed(3)),
+            internalGapFraction: Number(entry.placementDiagnostics.internalGapFraction.toFixed(3)),
+            edgeOutsideFraction: Number(entry.placementDiagnostics.edgeOutsideFraction.toFixed(3)),
             spanUsage: Number(entry.placementDiagnostics.spanUsage.toFixed(3)),
             crossCentering: Number(entry.placementDiagnostics.crossCentering.toFixed(3)),
             selectedAngle: Number(entry.placementDiagnostics.selectedAngle.toFixed(1)),
@@ -433,34 +585,42 @@ export const createPolityTextCustomLayer = ({
 
       this._textureProgram = createProgram(gl, textureVertexSource, textureFragmentSource);
       this._lineProgram = debugBaseline ? createProgram(gl, lineVertexSource, lineFragmentSource) : null;
+      this._textureLocations = {
+        matrix: gl.getUniformLocation(this._textureProgram, "u_matrix"),
+        texture: gl.getUniformLocation(this._textureProgram, "u_texture"),
+        opacity: gl.getUniformLocation(this._textureProgram, "u_opacity"),
+        position: gl.getAttribLocation(this._textureProgram, "a_pos"),
+        uv: gl.getAttribLocation(this._textureProgram, "a_uv"),
+      };
+      this._lineLocations = this._lineProgram ? {
+        matrix: gl.getUniformLocation(this._lineProgram, "u_matrix"),
+        position: gl.getAttribLocation(this._lineProgram, "a_pos"),
+      } : null;
 
-      for (const entry of this._entries) {
-        entry.ribbonBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, entry.ribbonBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, entry.ribbonVertices, gl.STATIC_DRAW);
-
-        if (debugBaseline) {
-          entry.lineBuffer = gl.createBuffer();
-          gl.bindBuffer(gl.ARRAY_BUFFER, entry.lineBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, entry.lineVertices, gl.STATIC_DRAW);
-        }
-
-        entry.texture = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, entry.texture);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, entry.raster.canvas);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.generateMipmap(gl.TEXTURE_2D);
-      }
-
+      // Do NOT eagerly allocate every polity texture/buffer here. A historical
+      // world can carry 200+ labels, and initial mount / style remount must stay
+      // bounded even though mid-campaign ownership updates are now incremental.
+      // Uploading the whole atlas in one WebGL turn caused large transient GPU
+      // allocation spikes and could lose the map's context while the surrounding
+      // React UI stayed alive. Resources are created lazily for visible labels
+      // in small per-frame batches below.
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    },
+
+    replacePreparedEntries(nextEntries = []) {
+      const next = Array.isArray(nextEntries) ? nextEntries.filter(Boolean) : [];
+      const keep = new Set([...this._entries, ...next]);
+      for (const entry of this._pendingEntries ?? []) {
+        if (!keep.has(entry)) releaseEntryGpuResources(this._gl, entry);
+      }
+      // Do not tear down the accepted snapshot immediately. The render loop
+      // uploads GPU resources for any NEW visible entries first, while the old
+      // labels remain on screen. Only then is the entry set swapped atomically.
+      // This removes the final one-frame PTR disappearance after geometry prep.
+      this._pendingEntries = next;
+      this._pendingDrawOrder = sortPreparedEntries(next);
+      this._map?.triggerRepaint?.();
     },
 
     render(gl, args) {
@@ -475,22 +635,113 @@ export const createPolityTextCustomLayer = ({
       if (!this._textureProgram) return;
 
       const zoom = Number(this._map?.getZoom?.() ?? 0);
-      const visible = this._entries.filter((entry) => (
-        polityTextOpacityAtZoom({
+      const viewportBounds = viewportMercatorBounds(this._map);
+
+      if (this._pendingEntries && this._pendingDrawOrder) {
+        let pendingUploads = 0;
+        let pendingVisibleMissing = false;
+        for (const entry of this._pendingDrawOrder) {
+          const opacity = polityTextOpacityAtZoom({
+            zoom,
+            minZoom: entry.record.minZoom,
+            maxZoom: entry.record.maxZoom,
+            fadeInZoomSpan: entry.record.fadeInZoomSpan,
+            fadeOutStartZoom: entry.record.fadeOutStartZoom,
+          });
+          if (opacity <= 0.002 || !boundsOverlap(entry.mercatorBounds, viewportBounds)) continue;
+          if (entry.texture && entry.ribbonBuffer) continue;
+          pendingVisibleMissing = true;
+          if (pendingUploads >= GPU_UPLOADS_PER_FRAME) continue;
+          try {
+            if (ensureEntryGpuResources(gl, entry, { debugBaseline })) pendingUploads += 1;
+          } catch (error) {
+            if (!gl.isContextLost?.()) {
+              console.warn("[map] PTR pending replacement GPU upload failed", {
+                owner: entry?.record?.owner ?? "",
+                error: String(error?.message ?? error ?? "unknown"),
+              });
+            }
+          }
+        }
+
+        // Recheck after this frame's uploads. Until every NEW visible entry is
+        // drawable, retain the complete old snapshot rather than exposing a
+        // legacy/fallback flash.
+        pendingVisibleMissing = this._pendingDrawOrder.some((entry) => {
+          const opacity = polityTextOpacityAtZoom({
+            zoom,
+            minZoom: entry.record.minZoom,
+            maxZoom: entry.record.maxZoom,
+            fadeInZoomSpan: entry.record.fadeInZoomSpan,
+            fadeOutStartZoom: entry.record.fadeOutStartZoom,
+          });
+          return opacity > 0.002
+            && boundsOverlap(entry.mercatorBounds, viewportBounds)
+            && !(entry.texture && entry.ribbonBuffer);
+        });
+
+        if (!pendingVisibleMissing) {
+          const next = this._pendingEntries;
+          const nextSet = new Set(next);
+          for (const entry of this._entries) {
+            if (!nextSet.has(entry)) releaseEntryGpuResources(gl, entry);
+          }
+          this._entries = next;
+          this._drawOrder = this._pendingDrawOrder;
+          this._pendingEntries = null;
+          this._pendingDrawOrder = null;
+          this._visibleEntries = new Array(this._drawOrder.length);
+          this._visibleOpacity = new Float32Array(this._drawOrder.length);
+        } else if (!gl.isContextLost?.()) {
+          this._map?.triggerRepaint?.();
+        }
+      }
+
+      let visibleCount = 0;
+      for (const entry of this._drawOrder) {
+        const opacity = polityTextOpacityAtZoom({
           zoom,
           minZoom: entry.record.minZoom,
           maxZoom: entry.record.maxZoom,
           fadeInZoomSpan: entry.record.fadeInZoomSpan,
           fadeOutStartZoom: entry.record.fadeOutStartZoom,
-        }) > 0.002
-      ));
-      if (!visible.length) return;
+        });
+        if (opacity <= 0.002 || !boundsOverlap(entry.mercatorBounds, viewportBounds)) continue;
+        this._visibleEntries[visibleCount] = entry;
+        this._visibleOpacity[visibleCount] = opacity;
+        visibleCount += 1;
+      }
+      if (!visibleCount) return;
+
+      let uploadsThisFrame = 0;
+      let pendingVisibleResources = false;
+      for (let index = 0; index < visibleCount; index += 1) {
+        const entry = this._visibleEntries[index];
+        if (!entry || (entry.texture && entry.ribbonBuffer)) continue;
+        if (uploadsThisFrame >= GPU_UPLOADS_PER_FRAME) {
+          pendingVisibleResources = true;
+          continue;
+        }
+        try {
+          if (ensureEntryGpuResources(gl, entry, { debugBaseline })) uploadsThisFrame += 1;
+          else pendingVisibleResources = true;
+        } catch (error) {
+          pendingVisibleResources = true;
+          if (!gl.isContextLost?.()) {
+            console.warn("[map] PTR deferred GPU upload failed", {
+              owner: entry?.record?.owner ?? "",
+              error: String(error?.message ?? error ?? "unknown"),
+            });
+          }
+        }
+      }
+      if (pendingVisibleResources && !gl.isContextLost?.()) this._map?.triggerRepaint?.();
 
       if (!this._didLogFirstRender) {
         this._didLogFirstRender = true;
         console.info("[map] PTR first WebGL render", {
           zoom,
-          visibleOwners: visible.map((entry) => entry.record.owner),
+          visibleOwners: this._visibleEntries.slice(0, visibleCount).map((entry) => entry.record.owner),
         });
       }
 
@@ -499,70 +750,54 @@ export const createPolityTextCustomLayer = ({
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.CULL_FACE);
 
-      if (debugBaseline && this._lineProgram) {
+      if (debugBaseline && this._lineProgram && this._lineLocations) {
         gl.useProgram(this._lineProgram);
-        const matrixLocation = gl.getUniformLocation(this._lineProgram, "u_matrix");
-        const positionLocation = gl.getAttribLocation(this._lineProgram, "a_pos");
-        gl.uniformMatrix4fv(matrixLocation, false, matrix);
-        gl.enableVertexAttribArray(positionLocation);
-        for (const entry of visible) {
-          if (!entry.lineBuffer) continue;
+        gl.uniformMatrix4fv(this._lineLocations.matrix, false, matrix);
+        gl.enableVertexAttribArray(this._lineLocations.position);
+        for (let index = 0; index < visibleCount; index += 1) {
+          const entry = this._visibleEntries[index];
+          if (!entry?.lineBuffer) continue;
           gl.bindBuffer(gl.ARRAY_BUFFER, entry.lineBuffer);
-          gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+          gl.vertexAttribPointer(this._lineLocations.position, 2, gl.FLOAT, false, 0, 0);
           gl.drawArrays(gl.LINE_STRIP, 0, entry.lineVertexCount);
         }
       }
 
+      if (!this._textureLocations) return;
       gl.useProgram(this._textureProgram);
-      const matrixLocation = gl.getUniformLocation(this._textureProgram, "u_matrix");
-      const textureLocation = gl.getUniformLocation(this._textureProgram, "u_texture");
-      const opacityLocation = gl.getUniformLocation(this._textureProgram, "u_opacity");
-      const positionLocation = gl.getAttribLocation(this._textureProgram, "a_pos");
-      const uvLocation = gl.getAttribLocation(this._textureProgram, "a_uv");
-      gl.uniformMatrix4fv(matrixLocation, false, matrix);
+      gl.uniformMatrix4fv(this._textureLocations.matrix, false, matrix);
       gl.activeTexture(gl.TEXTURE0);
-      gl.uniform1i(textureLocation, 0);
-      gl.enableVertexAttribArray(positionLocation);
-      gl.enableVertexAttribArray(uvLocation);
+      gl.uniform1i(this._textureLocations.texture, 0);
+      gl.enableVertexAttribArray(this._textureLocations.position);
+      gl.enableVertexAttribArray(this._textureLocations.uv);
 
-      // Lower-priority labels draw first; stronger polities remain legible on top
-      // during this A/B stage. PTR-3 will replace this with deterministic collisions.
-      const drawOrder = [...visible].sort((left, right) => (
-        Number(left.record.priorityScale ?? 0) - Number(right.record.priorityScale ?? 0)
-      ));
-      for (const entry of drawOrder) {
-        if (!entry.texture || !entry.ribbonBuffer) continue;
-        const opacity = polityTextOpacityAtZoom({
-          zoom,
-          minZoom: entry.record.minZoom,
-          maxZoom: entry.record.maxZoom,
-          fadeInZoomSpan: entry.record.fadeInZoomSpan,
-          fadeOutStartZoom: entry.record.fadeOutStartZoom,
-        });
-        if (opacity <= 0.002) continue;
-        gl.uniform1f(opacityLocation, opacity);
+      for (let index = 0; index < visibleCount; index += 1) {
+        const entry = this._visibleEntries[index];
+        if (!entry?.texture || !entry.ribbonBuffer) continue;
+        gl.uniform1f(this._textureLocations.opacity, this._visibleOpacity[index]);
         gl.bindTexture(gl.TEXTURE_2D, entry.texture);
         gl.bindBuffer(gl.ARRAY_BUFFER, entry.ribbonBuffer);
-        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 16, 0);
-        gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, 16, 8);
+        gl.vertexAttribPointer(this._textureLocations.position, 2, gl.FLOAT, false, 16, 0);
+        gl.vertexAttribPointer(this._textureLocations.uv, 2, gl.FLOAT, false, 16, 8);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, entry.ribbonVertexCount);
       }
     },
 
     onRemove(_map, gl) {
-      for (const entry of this._entries) {
-        if (entry.ribbonBuffer) gl.deleteBuffer(entry.ribbonBuffer);
-        if (entry.lineBuffer) gl.deleteBuffer(entry.lineBuffer);
-        if (entry.texture) gl.deleteTexture(entry.texture);
-        entry.ribbonBuffer = null;
-        entry.lineBuffer = null;
-        entry.texture = null;
+      for (const entry of new Set([...this._entries, ...(this._pendingEntries ?? [])])) {
+        releaseEntryGpuResources(gl, entry);
       }
       if (this._textureProgram) gl.deleteProgram(this._textureProgram);
       if (this._lineProgram) gl.deleteProgram(this._lineProgram);
       this._map = null;
+      this._gl = null;
       this._textureProgram = null;
       this._lineProgram = null;
+      this._textureLocations = null;
+      this._lineLocations = null;
+      this._pendingEntries = null;
+      this._pendingDrawOrder = null;
+      this._visibleEntries.length = 0;
     },
   };
 };
