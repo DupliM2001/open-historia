@@ -8,6 +8,7 @@ import {
     PROVIDER_OPTIONS,
     addConnection,
     addEntry,
+    clearFallbackList,
     connectionDisplayName,
     entriesUsingConnection,
     fillFallbackList,
@@ -787,6 +788,17 @@ const FallbackListSection = () => {
         removeEntry(entry.id);
     };
 
+    // For a Fill that went wrong. Asks first: until a model is added again,
+    // nothing can answer.
+    const clearAll = () => {
+        const count = entries.length;
+        if (!window.confirm(`Remove all ${count} entr${count === 1 ? "y" : "ies"} from the list? Your connections and keys are kept, so Fill can rebuild it. Until you add a model again, the game can't write turns or replies.`)) return;
+        clearFallbackList();
+        setEditingId(null);
+        // An open Fill panel would still say "Added N entries" about rows that are gone.
+        setFilling(false);
+    };
+
     return (
         <SettingsSection
         title="Models"
@@ -836,6 +848,7 @@ const FallbackListSection = () => {
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.6rem" }}>
         <button type="button" onClick={addBackup} style={primaryButtonStyle}>{entries.length ? "+ Add a backup" : "+ Add a model"}</button>
         <button type="button" onClick={() => setFilling((open) => !open)} style={smallButtonStyle}>Fill…</button>
+        {entries.length > 0 && <button type="button" onClick={clearAll} style={smallButtonStyle}>Clear list</button>}
         </div>
         {filling && <FillPanel connections={connections} onDone={() => setFilling(false)} />}
         <div style={{ ...fieldGroupStyle, marginTop: "0.9rem" }}>
@@ -2207,8 +2220,8 @@ const SettingsMenu = ({
                 <div style={grid}>
                     <QuickAction title="General" description="Language, display and accessibility" symbol="◫" tone="blue" onClick={() => openSettingsSection("general")} />
                     <QuickAction title="Map" description="Basemap, labels, globe and camera" symbol="◇" tone="blue" onClick={() => openSettingsSection("map")} />
-                    <QuickAction title="AI" description="Provider, model, reasoning and limits" symbol="✦" onClick={() => openSettingsSection("ai")} />
-                    <QuickAction title="Advanced" description="Provider parameters and expert controls" symbol="⌘" onClick={() => openSettingsSection("advanced")} />
+                    <QuickAction title="AI" description="Models, backups, keys and reasoning" symbol="✦" onClick={() => openSettingsSection("ai")} />
+                    <QuickAction title="Advanced" description="Per-task models and expert controls" symbol="⌘" onClick={() => openSettingsSection("advanced")} />
                 </div>
             </QuickMenuPanel>
         );

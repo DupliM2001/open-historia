@@ -216,6 +216,24 @@ test("entries can be reordered and removed", () => {
   assert.equal(config.getTaskPick("actions"), "");
 });
 
+// For undoing a Fill that went wrong: every entry goes, with its marks and the
+// task picks that pointed at it, and the Connections — the keys — stay.
+test("Clear list removes every entry and keeps every Connection", () => {
+  const [first] = config.getFallbackList();
+  const paid = config.addConnection({ provider: "openai", name: "Paid", apiKey: "sk-PAIDKEY" });
+  config.fillFallbackList([first.connectionId, paid], ["model-a", "model-b"]);
+  const [, second] = config.getFallbackList();
+  config.fallbackStateStore.set(second.id, { spentUntil: 5 });
+  config.setTaskPick("jumpForward", second.id);
+
+  assert.equal(config.clearFallbackList(), 5);
+  assert.deepEqual(config.getFallbackList(), []);
+  assert.equal(config.getConnections().length, 2, "the keys stay");
+  assert.equal(config.fallbackStateStore.get(second.id), undefined);
+  assert.equal(config.getTaskPick("jumpForward"), "");
+  assert.equal(config.getFallbackList().length, 0, "an empty list stays empty rather than migrating again");
+});
+
 test("the rate-limit setting is one choice for the whole list, defaulting to wait", () => {
   assert.equal(config.getRateLimitPolicy(), "wait");
   config.setRateLimitPolicy("next");

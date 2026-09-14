@@ -675,6 +675,22 @@ export function removeConnection(id) {
     return true;
 }
 
+// The Clear list button, for undoing a Fill that went wrong: every entry goes,
+// with its marks and any task pick pointing at it. The Connections stay, so
+// the keys do not have to be pasted again — Fill can rebuild from them. An
+// empty list stays empty (the migration only runs when the list was never
+// stored), and until something is added nothing can answer, which the Settings
+// screen asks about first.
+export function clearFallbackList() {
+    const ids = getFallbackList().map((entry) => entry.id);
+    if (!ids.length) return 0;
+    saveFallbackList([]);
+    dropTaskPicksFor(ids);
+    for (const id of ids) fallbackStateStore.set(id, null);
+    logDebugEvent("setting", `Fallback list cleared: ${ids.length} entr${ids.length === 1 ? "y" : "ies"} removed.`);
+    return ids.length;
+}
+
 export function moveEntry(id, toIndex) {
     const list = getFallbackList();
     const from = list.findIndex((entry) => entry.id === id);
