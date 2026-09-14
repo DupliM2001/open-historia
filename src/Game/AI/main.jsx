@@ -2018,7 +2018,10 @@ const elapsedSeconds = (startedAt) => `${((Date.now() - startedAt) / 1000).toFix
 // output function, or the round budget is spent and the final request is made
 // with only the output function callable. One provider request per round; the
 // system prompt is byte-identical across rounds, so a cached prefix pays off.
-const DEFAULT_LOOKUP_ROUNDS = 8;
+// Three, not more: every round re-sends the whole prompt, and a model that
+// asks one question per round spent seven rounds and three hundred thousand
+// prompt tokens on one jump. The directive tells it to ask everything at once.
+const DEFAULT_LOOKUP_ROUNDS = 3;
 
 // Every round the model spends asking is reported to `onRound` — callAI
 // writes it to the telemetry record and the diagnostics log — so "what did

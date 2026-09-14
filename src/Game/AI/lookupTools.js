@@ -234,12 +234,13 @@ export const LOOKUP_TOOLS = Object.freeze([
 export const LOOKUP_DIRECTIVE = [
   "[Lookup tools]",
   "You have lookup functions beside your output function. They answer from the live campaign and the rendered map, and every name they return is spelled exactly as the map spells it.",
+  "The prompt above carries the powers with their region counts, the last few events, a short view of the chats and the main contested regions. Region names and ids, older events, full conversations, the rest of the contested map, the board and the ledgers are behind the functions.",
   "Rules:",
   "1. Before you write ANY regionTransfers, regionControlOps or regionClaims entry, look the region up (find_region or list_regions) and copy its id and exact name into the entry. Never guess a region name. And the reverse holds: an event that narrates a capture, occupation, liberation or cession MUST carry that entry, with the id you looked up — narration alone never moves the map.",
   "2. Every owner field (fromCode, toCode, ownerCode, claimantCode, actorCode) must be a power's exact name as returned by list_powers or power_info. A short form, a translation or a code names nobody.",
   "3. Who owns what around a place comes from map_around (one region and its surroundings, grouped by owner) and border_between (where two powers' regions touch); region_info for one region's neighbours; find_city when you know the city but not the region. Never ask for a whole power's regions just to see a front.",
   "4. What is already in motion is on the ledgers: storylines, list_projects, war_ledger, relations_between, spy_network. Continue those rather than restarting them.",
-  "5. Ask for everything you need in as few rounds as you can: call several functions in the same turn (every region you will name, every power you will check) rather than one per turn.",
+  "5. You have at most THREE lookup rounds, and the first is the one that counts: call every function you will need in the same turn (every region you will name, every power you will check, the front you will move on) rather than one per turn.",
   "6. Then call the output function once with the complete answer. Do not narrate your lookups.",
 ].join("\n");
 

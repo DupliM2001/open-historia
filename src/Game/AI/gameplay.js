@@ -1153,7 +1153,7 @@ const perfNow = () =>
     ? performance.now()
     : Date.now();
 
-const buildTerritorialControlContext = async (worldLike) => {
+const buildTerritorialControlContext = async (worldLike, { maxRows = 80, viaLookups = false } = {}) => {
   const world = normalizeWorldState(worldLike);
   const catalog = await loadRegionCatalog().catch(() => []);
   const byId = new Map(catalog.map((region) => [region.id, region]));
@@ -1181,7 +1181,9 @@ const buildTerritorialControlContext = async (worldLike) => {
   }
 
   return rows.length > 0
-    ? rows.slice(0, 80).join("\n") + (rows.length > 80 ? `\n(+${rows.length - 80} more non-normal territorial states omitted)` : "")
+    ? rows.slice(0, maxRows).join("\n") + (rows.length > maxRows
+      ? `\n(+${rows.length - maxRows} more non-normal territorial states omitted${viaLookups ? "; contested_regions lists them all" : ""})`
+      : "")
     : "No active occupation/control-vs-sovereignty differences or contested regions are currently recorded.";
 };
 
@@ -1296,7 +1298,7 @@ const buildTemplateVariables = async (bundle, options = {}) => {
     }).text;
   }
   if (wants("territorialControlContext")) {
-    variables.territorialControlContext = await buildTerritorialControlContext(bundle.world);
+    variables.territorialControlContext = await buildTerritorialControlContext(bundle.world, options?.lookups ? { maxRows: 24, viaLookups: true } : {});
   }
   if (wants("canonicalStorylineContext")) {
     variables.canonicalStorylineContext = buildGameMasterStorylineContext(bundle.world);
@@ -2568,7 +2570,7 @@ const generateProjectOps = async (bundle, events, { signal, hiddenEvents = [] } 
   // an empty board that is worth a whole extra request.
   if (board.length === 0 || (events.length === 0 && hidden.length === 0)) return { ops: [], skipped: true };
 
-  const variables = await buildTemplateVariables(bundle, {});
+  const variables = await buildTemplateVariables(bundle, { lookups: true });
   // The events, numbered, because eventIndex is how an op says which one moved
   // the effort. Impacts are deliberately left out: this call decides what the
   // STORY did to the board, and the other levers are noise for that question.
@@ -5661,7 +5663,7 @@ const applySimulationResult = async ({
 
 export const generateActionSuggestions = async ({ force = true } = {}) => {
   const bundle = await readGameStateBundle({ force });
-  const variables = await buildTemplateVariables(bundle);
+  const variables = await buildTemplateVariables(bundle, { lookups: true });
   const { payload } = await runJsonTask("actions", {
     lookups: buildTaskLookups(bundle),
     fallback: () => fallbackActionSuggestions(bundle),
@@ -8084,7 +8086,7 @@ const statsTerritorialPlanMatchesSheet = (sheet, plan = []) => {
 
 export const generateCountryStats = async ({ code, name } = {}) => {
   const bundle = await readGameStateBundle({ force: true });
-  const variables = await buildTemplateVariables(bundle);
+  const variables = await buildTemplateVariables(bundle, { lookups: true });
   const target = name || code || "the polity";
   const playerPolity = variables.playerPolity || bundle?.game?.country || "the player";
   const dossier = await buildTargetDossier(bundle, normalizeString(code));
@@ -8138,7 +8140,7 @@ export const gatherIntelligence = async (target, { signal } = {}) => {
   const disinformation = spy.status === "turned"
     ? "IMPORTANT: this agent has been TURNED by " + name + " and now works for them. Everything reported must be DISINFORMATION designed by " + name + " to mislead " + player + ": plausible, specific, consistent with public facts, and wrong about the things that matter — intentions, timing, alignments. Never hint that it is false."
     : "";
-  const variables = { ...(await buildTemplateVariables(bundle)), targetPolity: name, disinformation };
+  const variables = { ...(await buildTemplateVariables(bundle, { lookups: true })), targetPolity: name, disinformation };
   const dossier = await buildTargetDossier(bundle, name);
   const era = normalizeString(bundle.world?.simulationRules).slice(0, 700);
   // Standing orders. A doubted entry can only be settled from material that
@@ -8426,6 +8428,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
   // Keep this after the bounded/yielding territorial preparation rather than on the
   // click's first synchronous path.
   const variables = await buildTemplateVariables(bundle, {
+    lookups: true,
     taskKey: "countryStatSheet",
     requiredKeys: [
       "date",
@@ -9006,7 +9009,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
 
 export const refinePlayerAction = async (rawInput, { persist = true, signal } = {}) => {
   const bundle = await readGameStateBundle({ force: true });
-  const variables = await buildTemplateVariables(bundle, { actionInput: rawInput });
+  const variables = await buildTemplateVariables(bundle, { actionInput: rawInput, lookups: true });
   const { payload } = await runJsonTask("descriptionToAction", {
     lookups: buildTaskLookups(bundle),
     fallback: () => fallbackDescriptionToAction(rawInput, bundle),
@@ -9085,7 +9088,7 @@ export const consolidateRecentHistory = async ({ limit = 12 } = {}) => {
 
 export const createCatalyst = async ({ force = true } = {}) => {
   const bundle = await readGameStateBundle({ force });
-  const variables = await buildTemplateVariables(bundle);
+  const variables = await buildTemplateVariables(bundle, { lookups: true });
   const { payload } = await runJsonTask("catalystCreation", {
     lookups: buildTaskLookups(bundle),
     fallback: () => ({
@@ -9133,6 +9136,7 @@ export const advanceActiveCatalyst = async (choiceText) => {
     .map((entry) => `${entry.choice}: ${entry.summary}`)
     .join("\n");
   const variables = await buildTemplateVariables(bundle, {
+    lookups: true,
     catalystChoice: choiceText,
     catalystHistory: catalystHistoryText,
     catalystOpening: catalyst.opening || "",
@@ -9649,6 +9653,7 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
     throw new Error("The requested jump exceeds the supported date range.");
   }
   const variables = await buildTemplateVariables(bundle, {
+    lookups: true,
     taskKey: mode === "auto" ? "autoJumpForward" : "jumpForward",
     consolidatedHistoryMaxChars: WORLD_SIMULATION_CONSOLIDATED_HISTORY_MAX_CHARS,
     consolidatedHistorySelection: "coverage",
@@ -10606,7 +10611,7 @@ export const previewGameMasterCommand = async (requestText, { mode = "world-inte
       readJson(JSON_URLS.colors, { defaultValue: {}, force: true }),
     ]);
     const variables = {
-      ...(await buildTemplateVariables(bundle, { taskKey: "gameMaster", gameMasterRequest: request })),
+      ...(await buildTemplateVariables(bundle, { taskKey: "gameMaster", gameMasterRequest: request, lookups: true })),
       gameMasterMode: selectedMode,
     };
 
@@ -11074,7 +11079,7 @@ export const processPendingEventOutreach = async ({ debug = false } = {}) => {
     ].join("\n");
 
     const variables = {
-      ...(await buildTemplateVariables(bundle, { taskKey: "idleDiplomacy" })),
+      ...(await buildTemplateVariables(bundle, { taskKey: "idleDiplomacy", lookups: true })),
       idleChatAllowed: "yes",
       eventDiplomaticReactionContext: eventReactionPromptText(event, bundle.game?.country),
     };
@@ -11621,7 +11626,7 @@ export const maybeGeneratePregameHistory = async () => {
     // the books, and a standing alliance is a fact from day one.
     const canonicalPolities = await buildCurrentCanonicalPolityVocabulary(bundle.world);
     const variables = {
-      ...(await buildTemplateVariables(bundle)),
+      ...(await buildTemplateVariables(bundle, { lookups: true })),
       pregameStartDate: startDate,
       pregameCanonicalPolityVocabulary: canonicalPolities.length
         ? canonicalPolities.map((name) => `- ${name}`).join("\n")
@@ -11838,7 +11843,7 @@ export const maybeSendIdleDiplomacy = async ({ chance = IDLE_PULSE_CHANCE } = {}
     const bundle = await readGameStateBundle({ force: true });
     if (!normalizeString(bundle.game?.country)) return null; // no active game
     const variables = {
-      ...(await buildTemplateVariables(bundle)),
+      ...(await buildTemplateVariables(bundle, { lookups: true })),
       idleChatAllowed: allowChat ? "yes" : "no",
     };
     const openChats = normalizeChats(bundle.chats);

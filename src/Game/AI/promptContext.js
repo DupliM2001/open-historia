@@ -1486,7 +1486,10 @@ export const rankFocusPowers = (regions, world, bundle, { playerName, actorNames
   return labels;
 };
 
-export const buildWorldSummary = async (bundle, regionCatalog = null) => {
+// `regionListsViaTools`: the task has the lookup functions (lookupTools.js),
+// so the summary names the powers with their region counts and leaves the
+// region names and ids to find_region / list_regions / map_around.
+export const buildWorldSummary = async (bundle, regionCatalog = null, { regionListsViaTools = false } = {}) => {
   const world = normalizeWorldState(bundle.world);
   const regions = filterToRenderedRegions(regionCatalog ?? await loadRegions(), world);
   const regionLookup = new Map(regions.map((region) => [region.id, region]));
@@ -1558,6 +1561,7 @@ export const buildWorldSummary = async (bundle, regionCatalog = null) => {
   const regionOwnershipCatalog = buildRegionOwnershipText(regions, world.regionOwnershipOverrides, {
     focusCodes,
     polityNames,
+    ...(regionListsViaTools ? { focusTotalCap: 0, rosterCap: 120 } : {}),
   });
 
   return [
@@ -1572,8 +1576,10 @@ export const buildWorldSummary = async (bundle, regionCatalog = null) => {
     "Territorial changes from the base scenario:",
     territorySummary,
     "",
-    "Map ownership (this IS the comma-separated region list referenced above — the "
-      + "region vocabulary for regionTransfers):",
+    regionListsViaTools
+      ? "Map ownership by power (region counts only; region names and ids come from the lookup functions find_region, list_regions and map_around):"
+      : "Map ownership (this IS the comma-separated region list referenced above — the "
+        + "region vocabulary for regionTransfers):",
     regionOwnershipCatalog,
     "",
     "Dynamic polity overrides:",
@@ -1619,6 +1625,9 @@ export const buildPromptContext = async (bundle, {
   gameMasterRequest = "",
   longEventHistoryMaxChars = 0,
   longEventLimit = 24,
+  // The task has the lookup functions: the prompt keeps the overview and the
+  // functions carry the detail (region lists, older events, full chats).
+  lookups = false,
   requiredKeys = null,
   respondingPolityName = "",
   targetDate = "",
@@ -1655,7 +1664,7 @@ export const buildPromptContext = async (bundle, {
 
   let worldSummary = "";
   if (wants("worldSummary", "worldSummaryNoCity")) {
-    worldSummary = await buildWorldSummary(bundle, regionCatalog);
+    worldSummary = await buildWorldSummary(bundle, regionCatalog, { regionListsViaTools: lookups });
   }
 
   if (wants("citiesSummary")) {
@@ -1731,8 +1740,10 @@ export const buildPromptContext = async (bundle, {
 
     if (wants("recentEventsLong")) {
       const campaignRecentEvents = buildEventHistoryText(bundle.events, { currentDate: bundle.game?.gameDate,
-        limit: longEventLimit,
-        maxChars: longEventHistoryMaxChars,
+        // With lookups, the last eight events in view and recent_events for
+        // the rest; a caller's own tighter cap still wins.
+        limit: lookups ? Math.min(longEventLimit, 8) : longEventLimit,
+        maxChars: lookups && !longEventHistoryMaxChars ? 3000 : longEventHistoryMaxChars,
         world: bundle.world,
       });
       result.recentEventsLong = [
@@ -1803,7 +1814,8 @@ export const buildPromptContext = async (bundle, {
   if (wants("chatHistoryLong")) {
     result.chatHistoryLong = buildDetailedChatHistoryText(promptChats, {
       limit: chatLimit,
-      maxChars: chatHistoryLongMaxChars,
+      // With lookups, a short view; chat_history has the transcripts.
+      maxChars: lookups && !chatHistoryLongMaxChars ? 1500 : chatHistoryLongMaxChars,
       visibleTo: chatVisibleTo,
     });
   }
