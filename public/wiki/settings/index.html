@@ -167,12 +167,12 @@ selected:</p>
 <tr>
 <td>✦</td>
 <td><strong>AI</strong></td>
-<td>Provider, model, reasoning, limits, telemetry</td>
+<td>Models and backups, connections, reasoning, generation limits</td>
 </tr>
 <tr>
 <td>⌘</td>
 <td><strong>Advanced</strong></td>
-<td>Provider parameters, per-task models, profiles, network, diagnostics</td>
+<td>Per-task models, telemetry, experimental, network, diagnostics</td>
 </tr>
 </tbody></table></div>
 <p>So on beta, reaching a setting is two steps — the quick menu, then the section — while tools that
@@ -190,6 +190,11 @@ are buried on stable, such as cheats and the timeline, are one click from the qu
 <td>Set my API key</td>
 <td>⋮ → top of the list</td>
 <td>☰ → Settings → <strong>AI</strong></td>
+</tr>
+<tr>
+<td>Add a backup model</td>
+<td><em>(not available)</em></td>
+<td>☰ → Settings → <strong>AI</strong> → + Add a backup</td>
 </tr>
 <tr>
 <td>Change language</td>
@@ -266,7 +271,12 @@ are buried on stable, such as cheats and the timeline, are one click from the qu
 <code>http://localhost:11434/v1</code> as the OpenAI-compatible endpoint (Ollama&#39;s default).</p>
 <p>Settings are stored <strong>per provider</strong>, so switching to a local model and back does not lose your
 cloud keys.</p>
-<h2 id="limit-ai-generation">Limit AI generation</h2>
+<p class="beta-note"><b>On beta the same options are split in two.</b> A <b>connection</b> holds
+the provider, the key, the endpoint, custom parameters and Strict tool schema. An entry in the
+<b>Models</b> list holds the model, plus, under <b>This model only</b>, custom parameters for that
+model and <b>How the AI answers</b>. Several entries can share one connection, and the list tries
+them from the top as backups. Model reasoning applies to every entry. See
+<a href="/wiki/ai-setup/#backup-models">backup models</a>.</p><h2 id="limit-ai-generation">Limit AI generation</h2>
 <p><strong>Off by default.</strong> Turned on, a generation that goes quiet is abandoned and the turn falls back
 to a canned event instead of hanging indefinitely.</p>
 <p>It measures <strong>silence</strong>, not total elapsed time — a model that is slowly but genuinely producing
@@ -383,12 +393,20 @@ equivalent on stable.</p>
 <td>Anthropic only. Background work (such as history consolidation) rides the Message Batches API at roughly half price. It is not instant, which is why it is only used for work you are not waiting on.</td>
 </tr>
 <tr>
-<td><strong>Per-task model routing</strong></td>
-<td>A cheap model for background tasks, a strong one for the jump itself. The single most effective way to cut cost without making turns worse.</td>
+<td><strong>Backup models</strong></td>
+<td>Settings → AI → <strong>Models</strong>. When one model runs out or can&#39;t answer, the next one in the list takes over. See <a href="/wiki/ai-setup/#backup-models">backup models</a>.</td>
 </tr>
 <tr>
-<td><strong>Configuration profiles</strong></td>
-<td>Saved provider setups — key, model, endpoint, parameters — that you can switch between by name.</td>
+<td><strong>Connections</strong></td>
+<td>Settings → AI. A saved way to reach a provider — a name, the key, the endpoint — used by as many entries in the list as you like. They replace configuration profiles.</td>
+</tr>
+<tr>
+<td><strong>When a model is rate limited</strong></td>
+<td>Settings → AI. Wait and try it again (the default, which keeps your backups&#39; allowance), or try the next one straight away.</td>
+</tr>
+<tr>
+<td><strong>Per-task models</strong></td>
+<td>Settings → Advanced. Point a task at one entry in the list: a cheap model for background tasks, a strong one for the jump itself. The task tries its pick first, then the list from the top. The single most effective way to cut cost without making turns worse.</td>
 </tr>
 </tbody></table></div>
 <h3 id="seeing-what-the-ai-did">Seeing what the AI did</h3>

@@ -121,7 +121,7 @@
     <h1>Troubleshooting</h1>
     <p class="tagline">Blank maps, greyed-out AI, slow turns, CORS errors and the other things that go wrong.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-map-is-blank">The map is blank</a></li><li class="d2"><a href="#the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</a></li><li class="d2"><a href="#turns-fail-or-always-fall-back-to-canned-events">Turns fail, or always fall back to canned events</a></li><li class="d2"><a href="#turns-hang-forever">Turns hang forever</a></li><li class="d2"><a href="#when-a-request-fails">When a request fails</a></li><li class="d3"><a href="#the-advisor">The advisor</a></li><li class="d3"><a href="#diplomatic-messages">Diplomatic messages</a></li><li class="d3"><a href="#a-held-time-skip">A held time skip</a></li><li class="d3"><a href="#a-held-projects-board">A held Projects board</a></li><li class="d3"><a href="#if-retrying-does-not-help">If retrying does not help</a></li><li class="d2"><a href="#rate-limits">Rate limits</a></li><li class="d2"><a href="#cors-errors-with-a-local-model">CORS errors with a local model</a></li><li class="d2"><a href="#everything-is-slow">Everything is slow</a></li><li class="d2"><a href="#i-lost-my-games">I lost my games</a></li><li class="d2"><a href="#a-country-is-behaving-incoherently">A country is behaving incoherently</a></li><li class="d2"><a href="#quotserver-stoppedquot">&quot;Server stopped&quot;</a></li><li class="d2"><a href="#windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</a></li><li class="d2"><a href="#macos-will-not-open-the-app">macOS will not open the app</a></li><li class="d2"><a href="#reporting-a-bug">Reporting a bug</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-map-is-blank">The map is blank</a></li><li class="d2"><a href="#the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</a></li><li class="d2"><a href="#turns-fail-or-always-fall-back-to-canned-events">Turns fail, or always fall back to canned events</a></li><li class="d2"><a href="#turns-hang-forever">Turns hang forever</a></li><li class="d2"><a href="#when-a-request-fails">When a request fails</a></li><li class="d3"><a href="#the-advisor">The advisor</a></li><li class="d3"><a href="#diplomatic-messages">Diplomatic messages</a></li><li class="d3"><a href="#a-held-time-skip">A held time skip</a></li><li class="d3"><a href="#a-held-projects-board">A held Projects board</a></li><li class="d3"><a href="#if-retrying-does-not-help">If retrying does not help</a></li><li class="d2"><a href="#every-model-has-used-its-allowance">Every model has used its allowance</a></li><li class="d2"><a href="#the-writing-suddenly-changed">The writing suddenly changed</a></li><li class="d2"><a href="#rate-limits">Rate limits</a></li><li class="d2"><a href="#cors-errors-with-a-local-model">CORS errors with a local model</a></li><li class="d2"><a href="#everything-is-slow">Everything is slow</a></li><li class="d2"><a href="#i-lost-my-games">I lost my games</a></li><li class="d2"><a href="#a-country-is-behaving-incoherently">A country is behaving incoherently</a></li><li class="d2"><a href="#quotserver-stoppedquot">&quot;Server stopped&quot;</a></li><li class="d2"><a href="#windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</a></li><li class="d2"><a href="#macos-will-not-open-the-app">macOS will not open the app</a></li><li class="d2"><a href="#reporting-a-bug">Reporting a bug</a></li></ul></nav>
     <p>The common failures, and what actually fixes them.</p>
 <p>Before anything else: the <a href="/wiki/cheats/">cheats panel</a> has a <strong>Diagnostics Log</strong> showing errors,
 API failures and the exact context the model was given. It usually explains the problem
@@ -139,7 +139,9 @@ remote desktop, WebGL is often unavailable.</p>
 <h2 id="the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</h2>
 <p>Work through these in order:</p>
 <ol>
-<li><strong>Is a provider configured?</strong> Settings → the provider section. No key, no world.</li>
+<li><strong>Is a provider configured?</strong> Settings → the provider section. No key, no world. On beta,
+look at Settings → AI → <strong>Models</strong>: an entry reading <strong>Unusable</strong> says what is wrong with it,
+such as <code>key rejected (401)</code> or <code>model not found (404)</code>. Fix it and the mark clears.</li>
 <li><strong>Is the key right?</strong> Paste it fresh; keys often pick up whitespace.</li>
 <li><strong>Is the model name right?</strong> OpenAI and OpenAI Compatible have no default model — you must
 type one, and it must exist on that provider.</li>
@@ -217,11 +219,29 @@ the turn runs again from the start.</p>
 held again if the <strong>board</strong> fails a second time.</p>
 <h3 id="if-retrying-does-not-help">If retrying does not help</h3>
 <p>Undo the turn from the time panel and try a shorter skip, or a different model.</p>
+<h2 id="every-model-has-used-its-allowance">Every model has used its allowance</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p><em>&quot;Every model in your Fallback list has used its allowance for now. The first back is …, at …&quot;</em></p>
+<p>No entry in Settings → AI → <strong>Models</strong> can answer: each one is <strong>Spent</strong> or <strong>Unusable</strong>, and
+at least one is Spent. The time skip did not start, rather than fall back to canned events.
+Either wait until the time shown, or add a backup — a paid key or a local model — and play on
+now. If you know a model is back sooner, for example because you just topped up billing, press
+<strong>Reset</strong> on its entry.</p>
+<p>If instead it says <em>&quot;No model in your Fallback list can answer&quot;</em>, nothing is coming back on its
+own: an entry is <strong>Unusable</strong>, and the message names it and what is wrong. See
+<a href="/wiki/ai-setup/#backup-models">backup models</a>.</p>
+<h2 id="the-writing-suddenly-changed">The writing suddenly changed</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>A notice near the top of the screen says when the game moves to a backup model, and why:
+<em>&quot;… has used today&#39;s allowance. Now using …&quot;</em>. A different model writes differently. Settings →
+AI shows which entries are Spent and when each comes back.</p>
 <h2 id="rate-limits">Rate limits</h2>
 <p>Symptoms: turns fail intermittently, or stall on long jumps while short ones work.</p>
 <p>Free tiers have per-minute limits that a long jump can exceed. Options: use the smaller/faster
 model in the family (limits are usually more generous), take shorter jumps, or move to a paid
 tier.</p>
+<p>On beta, a rate limit is not the same as a Spent allowance: the game waits it out and tries the
+same model again, which keeps your backups&#39; allowance for later. Settings → AI → <strong>When a model is
+rate limited</strong> → <strong>Try the next one straight away</strong> moves to the next entry instead: faster, but
+it spends your backups.</p>
 <p class="beta-note"><b>On beta, a busy provider is named as busy.</b> When a provider refuses
 partway through an answer because it is overloaded, beta says so in the log, waits 15 seconds,
 and asks once more — rather than treating it as a model that answered with nothing and re-sending

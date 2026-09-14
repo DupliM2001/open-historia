@@ -53,7 +53,8 @@ Moving from a fast model to a strong one changes the game noticeably. Where you 
 Where you will not see much: short jumps in a quiet period, and anything mechanical.
 
 A reasonable pattern is to play on a cheap model and switch to a stronger one when something
-important is happening.
+important is happening. On beta, **Per-task models** does this for you: the time skip on a strong
+model, small jobs on a cheap one.
 
 ## Costs
 
@@ -63,7 +64,8 @@ things like history consolidation and stat sheets. Diplomacy and the advisor cos
 Rough guidance rather than a price list:
 
 - **Gemini free tier** genuinely covers solo play. Watch the rate limits on the larger models —
-  hitting one mid-jump stalls the turn.
+  hitting one mid-jump stalls the turn. On beta, a
+  [backup model](/wiki/ai-setup/#backup-models) takes over when one runs out.
 - **Cheap tiers** (Haiku, Flash, DeepSeek) run a campaign for small change.
 - **Frontier models** are noticeably better and noticeably more expensive per turn. Long jumps
   cost more than short ones because there is more to write.
@@ -102,6 +104,10 @@ rather than breaking the game.
 **Limit AI generation** abandons a stalled generation and falls back to a canned event. It
 measures silence rather than elapsed time. Recommended with local models.
 
+<p class="beta-note"><b>On beta these live on connections and entries</b> in the Models list,
+with one more per-model setting, <b>How the AI answers</b>. See
+<a href="/wiki/ai-setup/#adding-backups">adding backups</a>.</p>
+
 ## What the beta adds
 ![The beta AI debug console](/wiki/img/beta-debug-console.jpg)
 *Beta's debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.*
@@ -109,12 +115,15 @@ measures silence rather than elapsed time. Recommended with local models.
 
 <p class="beta-note"><b>Beta channel only.</b></p>
 
-Per-task model routing — a cheap model for background work and a strong one for the jump itself —
-saved configuration profiles, prompt caching, batched background tasks at roughly half price on
-Anthropic, and an AI debug console showing every call with its full prompt, answer and cost.
+[Backup models](/wiki/ai-setup/#backup-models): when one runs out, the next one in your list
+takes over. Your keys are saved as connections, shared by as many models as you like.
 
-If you care about cost control or about seeing what the game actually sends, that is where to
-look.
+Per-task models, picked from that list: a cheap model for background work and a strong one for
+the jump itself. Prompt caching. Background tasks batched at roughly half price on Anthropic. And
+an AI debug console showing every call with its full prompt, answer and cost.
+
+If you care about cost control, about a game that keeps going when a free allowance runs out, or
+about seeing what the game actually sends, that is where to look.
 
 ## Next
 

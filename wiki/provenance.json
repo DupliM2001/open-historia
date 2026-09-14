@@ -37,7 +37,11 @@
       "src/Game/AI/providerConfig.js",
       "src/Game/AI/main.jsx",
       "src/Game/AI/modelIds.js",
-      "src/Game/GameUI/apiSetupPrompt.jsx"
+      "src/Game/AI/fallbackRunner.js",
+      "src/Game/AI/providerErrors.js",
+      "src/Game/GameUI/apiSetupPrompt.jsx",
+      "src/Game/GameUI/settings.jsx",
+      "src/Game/GameUI/fallbackSwitchNotice.jsx"
     ],
     "start/how-to-play.md": [
       "src/Game/GameUI/main.jsx",
@@ -189,6 +193,10 @@
       "src/Game/GameUI/time.jsx",
       "src/Game/AI/gameplay.js",
       "src/Game/AI/providerErrors.js",
+      "src/Game/AI/fallbackRunner.js",
+      "src/Game/AI/main.jsx",
+      "src/Game/GameUI/settings.jsx",
+      "src/Game/GameUI/fallbackSwitchNotice.jsx",
       "src/runtime/debugLog.js",
       "src/runtime/saveDebugLog.js"
     ]
@@ -344,9 +352,17 @@
   "knownGaps": [
     "No screenshot of Map vNext for a side-by-side against the legacy renderer.",
     "No screenshot of a held time-skip segment or a held Projects board: both live in in-memory pending state and cannot be authored into a save.",
-    "Beta was verified from source and by driving its menus, not by playing a campaign through turns."
+    "Beta was verified from source and by driving its menus, not by playing a campaign through turns.",
+    "No screenshot of beta's Settings → AI Models list (the Fallback list) or its Connections; the backup-models section is written from source and the Fallback list spec's checks."
   ],
   "pageVerified": {
-    "_comment": "Pages re-verified against a commit NEWER than verifiedAgainst. wiki:check skips a page for a channel whose recorded commit here is at or past the current tip. Only add a page you actually re-read. Emptied on 2026-09-11, when the global record moved past every entry that was here."
+    "_comment": "Pages re-verified against a commit NEWER than verifiedAgainst. wiki:check skips a page for a channel whose recorded commit here is at or past the current tip. Only add a page you actually re-read. Emptied on 2026-09-11, when the global record moved past every entry that was here.",
+    "_note": "2026-09-14: the two AI pages below were re-read against beta after the Fallback list merged (#757). tools/settings.md and reference/troubleshooting.md got their Fallback list text in the same pass but are NOT listed: beta also moved the Diagnostics log out of Cheats into Settings → Diagnostics, and those pages still describe the old place.",
+    "start/ai-setup.md": {
+      "beta": "e23b56471abc8468c17b0be438614f5f20308117"
+    },
+    "reference/ai-providers.md": {
+      "beta": "e23b56471abc8468c17b0be438614f5f20308117"
+    }
   }
 }

@@ -38,8 +38,8 @@ selected:
 |---|---|---|
 | ◫ | **General** | Language, display, accessibility |
 | ◇ | **Map** | Basemap, labels, globe, terrain, camera |
-| ✦ | **AI** | Provider, model, reasoning, limits, telemetry |
-| ⌘ | **Advanced** | Provider parameters, per-task models, profiles, network, diagnostics |
+| ✦ | **AI** | Models and backups, connections, reasoning, generation limits |
+| ⌘ | **Advanced** | Per-task models, telemetry, experimental, network, diagnostics |
 
 So on beta, reaching a setting is two steps — the quick menu, then the section — while tools that
 are buried on stable, such as cheats and the timeline, are one click from the quick menu.
@@ -49,6 +49,7 @@ are buried on stable, such as cheats and the timeline, are one click from the qu
 | I want to… | Stable | Beta |
 |---|---|---|
 | Set my API key | ⋮ → top of the list | ☰ → Settings → **AI** |
+| Add a backup model | *(not available)* | ☰ → Settings → **AI** → + Add a backup |
 | Change language | ⋮ → UI language | ☰ → Settings → **General** |
 | Turn off the globe | ⋮ → 3D Globe | ☰ → Settings → **Map** |
 | Open cheats | ⋮ → 🧪 Cheats | ☰ → **Tools** → Cheats |
@@ -78,6 +79,13 @@ Default models: Gemini `gemini-3.5-flash-lite`, Anthropic `claude-haiku-4-5`, an
 
 Settings are stored **per provider**, so switching to a local model and back does not lose your
 cloud keys.
+
+<p class="beta-note"><b>On beta the same options are split in two.</b> A <b>connection</b> holds
+the provider, the key, the endpoint, custom parameters and Strict tool schema. An entry in the
+<b>Models</b> list holds the model, plus, under <b>This model only</b>, custom parameters for that
+model and <b>How the AI answers</b>. Several entries can share one connection, and the list tries
+them from the top as backups. Model reasoning applies to every entry. See
+<a href="/wiki/ai-setup/#backup-models">backup models</a>.</p>
 
 ## Limit AI generation
 
@@ -182,8 +190,10 @@ equivalent on stable.
 |---|---|
 | **Generate long time skips in segments** | A long skip runs as several shorter requests merged into one round. Costs more tokens; far less likely to time out. See [time and turns](/wiki/time/). |
 | **Batch background AI tasks** | Anthropic only. Background work (such as history consolidation) rides the Message Batches API at roughly half price. It is not instant, which is why it is only used for work you are not waiting on. |
-| **Per-task model routing** | A cheap model for background tasks, a strong one for the jump itself. The single most effective way to cut cost without making turns worse. |
-| **Configuration profiles** | Saved provider setups — key, model, endpoint, parameters — that you can switch between by name. |
+| **Backup models** | Settings → AI → **Models**. When one model runs out or can't answer, the next one in the list takes over. See [backup models](/wiki/ai-setup/#backup-models). |
+| **Connections** | Settings → AI. A saved way to reach a provider — a name, the key, the endpoint — used by as many entries in the list as you like. They replace configuration profiles. |
+| **When a model is rate limited** | Settings → AI. Wait and try it again (the default, which keeps your backups' allowance), or try the next one straight away. |
+| **Per-task models** | Settings → Advanced. Point a task at one entry in the list: a cheap model for background tasks, a strong one for the jump itself. The task tries its pick first, then the list from the top. The single most effective way to cut cost without making turns worse. |
 
 ### Seeing what the AI did
 

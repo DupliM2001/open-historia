@@ -121,7 +121,7 @@
     <h1>Connecting an AI Provider</h1>
     <p class="tagline">Open Historia is driven by a language model you supply. Set up Gemini, OpenAI, Anthropic, or a local model on your own machine.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-the-ai-actually-does">What the AI actually does</a></li><li class="d2"><a href="#where-to-put-the-key">Where to put the key</a></li><li class="d2"><a href="#the-five-provider-types">The five provider types</a></li><li class="d3"><a href="#a-note-on-browser-restrictions">A note on browser restrictions</a></li><li class="d2"><a href="#google-gemini-free-and-the-quickest-start">Google Gemini — free, and the quickest start</a></li><li class="d2"><a href="#anthropic-claude">Anthropic Claude</a></li><li class="d2"><a href="#openai">OpenAI</a></li><li class="d2"><a href="#a-local-model-free-private-offline">A local model — free, private, offline</a></li><li class="d3"><a href="#ollama-easiest">Ollama (easiest)</a></li><li class="d3"><a href="#lm-studio">LM Studio</a></li><li class="d3"><a href="#llamacpp">llama.cpp</a></li><li class="d3"><a href="#be-realistic-about-model-size">Be realistic about model size</a></li><li class="d2"><a href="#other-cloud-services">Other cloud services</a></li><li class="d2"><a href="#worth-knowing">Worth knowing</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-the-ai-actually-does">What the AI actually does</a></li><li class="d2"><a href="#where-to-put-the-key">Where to put the key</a></li><li class="d2"><a href="#the-five-provider-types">The five provider types</a></li><li class="d3"><a href="#a-note-on-browser-restrictions">A note on browser restrictions</a></li><li class="d2"><a href="#google-gemini-free-and-the-quickest-start">Google Gemini — free, and the quickest start</a></li><li class="d2"><a href="#anthropic-claude">Anthropic Claude</a></li><li class="d2"><a href="#openai">OpenAI</a></li><li class="d2"><a href="#a-local-model-free-private-offline">A local model — free, private, offline</a></li><li class="d3"><a href="#ollama-easiest">Ollama (easiest)</a></li><li class="d3"><a href="#lm-studio">LM Studio</a></li><li class="d3"><a href="#llamacpp">llama.cpp</a></li><li class="d3"><a href="#be-realistic-about-model-size">Be realistic about model size</a></li><li class="d2"><a href="#other-cloud-services">Other cloud services</a></li><li class="d2"><a href="#backup-models">Backup models</a></li><li class="d3"><a href="#adding-backups">Adding backups</a></li><li class="d3"><a href="#connections">Connections</a></li><li class="d3"><a href="#what-each-entry-says">What each entry says</a></li><li class="d3"><a href="#when-a-model-can39t-answer">When a model can&#39;t answer</a></li><li class="d3"><a href="#rate-limits-wait-or-move-on">Rate limits: wait, or move on</a></li><li class="d3"><a href="#a-model-for-each-task">A model for each task</a></li><li class="d3"><a href="#if-you-set-up-ai-before-the-list-existed">If you set up AI before the list existed</a></li><li class="d3"><a href="#using-more-than-one-google-account">Using more than one Google account</a></li><li class="d2"><a href="#worth-knowing">Worth knowing</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Open Historia does not ship with a model and does not sell you one. You point it at a provider —
 a cloud API you have a key for, or a model running on your own computer — and it uses that for
 everything the world does.</p>
@@ -164,7 +164,10 @@ lifeless on stable, check here first.</p>
 <h2 id="where-to-put-the-key">Where to put the key</h2>
 <p><strong>Settings → AI → Provider.</strong> (The settings button is <strong>⋮</strong> on the stable build and <strong>☰</strong> on beta.) Pick a provider, paste your key, optionally set a model, and
 close the panel. That is the whole setup.</p>
-<p>Your key is stored in your browser&#39;s local storage, or in the desktop app&#39;s own profile. It is
+<p class="beta-note"><b>On beta</b>, Settings → AI opens a list headed <b>Models</b>. With one
+model in it, it reads like the form above: provider, a connection name, the key and the model.
+The rest of the screen is for <a href="#backup-models">backup models</a>, and you can ignore it
+until you want one.</p><p>Your key is stored in your browser&#39;s local storage, or in the desktop app&#39;s own profile. It is
 never sent to an Open Historia server, never written to your save files, and never included in a
 scenario you export.</p>
 <h2 id="the-five-provider-types">The five provider types</h2>
@@ -214,7 +217,9 @@ and work everywhere.</p>
 free-tier limits.</li>
 </ol>
 <p>If turns feel shallow, move up to a larger Gemini model — but check the free tier&#39;s rate limits
-first, because hitting them mid-turn will stall a time skip.</p>
+first, because hitting them mid-turn will stall a time skip. On beta you can put the larger model
+at the top of the list and keep <code>gemini-3.5-flash-lite</code> below it as a
+<a href="#backup-models">backup</a>.</p>
 <h2 id="anthropic-claude">Anthropic Claude</h2>
 <ol>
 <li>Create a key at <a href="https://console.anthropic.com">console.anthropic.com</a>.</li>
@@ -240,7 +245,8 @@ Use the <strong>OpenAI Compatible</strong> provider for all of these.</p>
 <li>Pull a model: <code>ollama pull llama3.2</code></li>
 <li>Provider <strong>OpenAI Compatible</strong>, endpoint <code>http://localhost:11434/v1</code> — this is already the
 default, so you may not have to type anything. Leave the API key blank. Set the model to
-whatever you pulled.</li>
+whatever you pulled. On beta a new connection starts with no endpoint: press
+<strong>+ Local Ollama</strong> under <strong>Connections</strong> and it is filled in for you.</li>
 </ol>
 <h3 id="lm-studio">LM Studio</h3>
 <ol>
@@ -299,17 +305,150 @@ name.</p>
 <td><code>https://api.fireworks.ai/inference/v1</code></td>
 </tr>
 </tbody></table></div>
+<h2 id="backup-models">Backup models</h2>
+<p class="beta-note"><b>Beta channel only.</b> The stable build uses one provider and one model
+at a time.</p><p>Free tiers give each model a daily allowance, and a time skip uses several requests. When your
+model&#39;s allowance runs out, every AI call fails until it resets — even if another model, a paid
+key or a local model would have answered. On beta you can list backups, and the game carries on
+without you.</p>
+<p>This is your <strong>Fallback list</strong>: the <strong>Models</strong> section of Settings → AI, and the name error
+messages use for it. Each entry in it is one model on one connection. Every AI call starts at the
+top and uses the first entry that can answer. It moves down only when one can&#39;t: its allowance
+has run out, its key or name is wrong, or it is busy for a moment. The list can mix providers. A
+typical list is a few Gemini models on your free key, strongest first, then a paid key or a local
+model at the bottom.</p>
+<p>The game never spreads calls across the list to get more use out of it. The top model answers
+whenever it can.</p>
+<h3 id="adding-backups">Adding backups</h3>
+<ul>
+<li><strong>+ Add a backup</strong> adds an entry below the others and opens it. Pick its connection and type a
+model. The model box suggests models you have used recently.</li>
+<li><strong>Fill…</strong> builds the entries for you. Tick the connections to use, type models strongest
+first, one per line, and press <strong>Fill</strong>. You get every model on every ticked connection,
+strongest model first across all of them: the first model on each connection, then the second,
+and so on. Entries you already have are skipped, so pressing it twice does no harm.</li>
+<li><strong>Clear list</strong> removes every entry, after asking. Your connections and keys are kept, so Fill
+can rebuild it. Until you add a model again, the game can&#39;t write turns or replies.</li>
+<li>On each entry, <strong>↑</strong> and <strong>↓</strong> move it, <strong>Edit</strong> opens it and <strong>✕</strong> removes it.</li>
+</ul>
+<p>An entry&#39;s model can be left blank. On OpenAI and OpenAI Compatible the game then picks a chat
+model from the server&#39;s own list; the other providers use their built-in default. Under <strong>This
+model only</strong>, an entry can have custom parameters of its own, which replace its connection&#39;s, and
+its own <strong>How the AI answers</strong> setting — how structured output is asked for. Leave that on auto;
+changing the entry&#39;s model puts it back to auto.</p>
+<h3 id="connections">Connections</h3>
+<p>A <strong>connection</strong> is a saved way to reach a provider: a name you choose, the key, and the endpoint
+if it needs one. Type a key once and use it in as many entries as you like. Custom parameters and
+<strong>Strict tool schema</strong> are set on the connection, so every entry using it gets them.</p>
+<p>The <strong>Connections</strong> section lists them, each with its provider, whether a key is set, and how many
+entries use it. <strong>+ New connection</strong> makes a blank one; <strong>+ Groq</strong>, <strong>+ OpenRouter</strong> and
+<strong>+ Local Ollama</strong> come with the endpoint filled in. Removing a connection removes the entries
+that use it too, so it asks first and names them.</p>
+<p>Keys stay on this device, as they always have. Each key is used under its provider&#39;s terms.</p>
+<h3 id="what-each-entry-says">What each entry says</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>The entry says</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Ready</strong></td>
+<td>Tried in its turn.</td>
+</tr>
+<tr>
+<td><strong>Spent until …</strong></td>
+<td>Its allowance is used up. Skipped until the time shown.</td>
+</tr>
+<tr>
+<td><strong>Unusable: …</strong></td>
+<td>Something is wrong with it, such as <code>key rejected (401)</code> or <code>model not found (404)</code>. Skipped until you fix it.</td>
+</tr>
+<tr>
+<td><strong>Busy, back in …</strong></td>
+<td>The provider is overloaded. A short pause.</td>
+</tr>
+<tr>
+<td><strong>Rate limited, back in …</strong></td>
+<td>Too many requests in a short time. A short pause.</td>
+</tr>
+</tbody></table></div>
+<p>An entry also shows when it last answered, such as <em>answered 2 min ago</em>. There is no count of
+requests used or left: only the provider knows that for certain. <strong>Reset</strong> on an entry tries it
+again on the next call — after you top up billing, say.</p>
+<h3 id="when-a-model-can39t-answer">When a model can&#39;t answer</h3>
+<ul>
+<li><strong>Spent.</strong> A Gemini model comes back at midnight Pacific time, when Google resets the free
+tier; the entry shows that time in your own time zone. Other providers do not say when they
+reset, so a Spent model there gets one try an hour later.</li>
+<li><strong>Unusable</strong> stays until you edit that entry or its connection. A new key, endpoint or provider
+on a connection clears every mark on its entries, Spent included.</li>
+<li><strong>Busy.</strong> An overloaded model is retried once, then skipped for 60 seconds. A server that
+cannot be reached counts as busy.</li>
+<li>A busy or rate-limited model is still tried last when nothing else can answer. A minute&#39;s
+pause is never what fails a turn.</li>
+</ul>
+<p>The first time the game moves down the list, a short notice near the top of the screen says why:
+<em>gemini-3.7-flash (Main Google) has used today&#39;s allowance. Now using gemini-3.6-flash (Main
+Google).</em> It says so once per switch, not once per call, because the writing may change with the
+model and you should know why.</p>
+<p>When <strong>no</strong> entry can answer — each one Spent or Unusable — a time skip does not start, so you
+do not lose a turn to canned events. It tells you which model comes back first and when, or, if
+none is coming back, which one to fix. Add a backup to keep playing now. A turn that runs out of
+models partway through says the same thing.</p>
+<p>The advisor and leader chats use the list too. A reply that fails after words have appeared is
+not restarted on another model — you would see half a reply replaced by a different one. Press
+<strong>Retry</strong> and it goes through the list, skipping any model that has just been marked.</p>
+<h3 id="rate-limits-wait-or-move-on">Rate limits: wait, or move on</h3>
+<p>A rate limit is a short pause, not a used-up allowance. <strong>When a model is rate limited</strong> decides
+what happens:</p>
+<ul>
+<li><strong>Wait, then try it again</strong> — the default. Keeps your backups&#39; daily allowance for when the top
+model has truly run out.</li>
+<li><strong>Try the next one straight away</strong> — faster, but it spends your backups. The rate-limited model
+is skipped for as long as the provider asked, up to two minutes, or for 60 seconds if it did
+not say.</li>
+</ul>
+<h3 id="a-model-for-each-task">A model for each task</h3>
+<p><strong>Settings → Advanced → Per-task models</strong> points one task — Time skip, Next speaker and so on — at
+one of your entries. That task tries its pick first, then the list from the top, so it only fails
+when every model is used up. Tasks left on <strong>Start at the top of the list</strong> use the list as
+normal. Use it to run time skips on your strongest model and small jobs on a cheap one.</p>
+<h3 id="if-you-set-up-ai-before-the-list-existed">If you set up AI before the list existed</h3>
+<p>The first time beta reads the list, it builds it from your old settings, so the game plays as it
+did:</p>
+<ul>
+<li>Your provider, key and model become the first entry.</li>
+<li>Every provider you had a key or endpoint for becomes a connection, so no key is lost.</li>
+<li>Each saved profile becomes a connection, and its model is offered as a suggestion.</li>
+<li>The per-task models you had set for your provider carry over: each task points at an entry
+with its model, and a model not already in the list is added at the bottom.</li>
+</ul>
+<p>Your old settings stay in storage but are not read again. Connections replace configuration
+profiles.</p>
+<h3 id="using-more-than-one-google-account">Using more than one Google account</h3>
+<p>The Fallback list is for backups: a free key, then a paid key or a local model. Making extra
+Google accounts or projects to get more free requests goes against
+<a href="https://developers.google.com/terms">Google&#39;s API terms</a>. They don&#39;t allow working around usage
+limits. Google can suspend your access to its APIs without notice, and
+<a href="https://policies.google.com/terms">Google&#39;s general terms</a> let it close a Google Account over
+serious or repeated breaches. Open Historia never spreads requests across keys to get more usage.</p>
+<p>Note that Gemini&#39;s <a href="https://ai.google.dev/gemini-api/docs/rate-limits">limits count per project</a>,
+not per key, so several keys in one project share the same allowance.</p>
 <h2 id="worth-knowing">Worth knowing</h2>
 <ul>
-<li><strong>You can switch provider at any time</strong>, mid-campaign. Settings are per-provider, so your
-Gemini key stays put while you try a local model.</li>
+<li><strong>You can switch provider at any time</strong>, mid-campaign. On stable, settings are per-provider, so
+your Gemini key stays put while you try a local model. On beta, each key is a connection and
+stays until you remove it; move an entry to the top to try it first.</li>
 <li><strong>Cancel works.</strong> A time skip that is taking too long can be stopped.</li>
 <li><strong>Limit AI generation</strong> (Settings → AI) is off by default. Turned on, it gives up on a stalled
 generation and falls back to a canned event rather than waiting forever. It measures <em>silence</em>,
 not total time, so a slow-but-working model is not cut off.</li>
-<li><strong>Expert controls</strong> (Settings → Advanced) let you send raw parameters to the provider, pick the
-structured-output mode, and enable reasoning on models that support it. You do not need these
-to play.</li>
+<li><strong>Expert controls</strong> let you send raw parameters to the provider and enable reasoning on models
+that support it. You do not need these to play. On stable they are in the one settings list.
+On beta, custom parameters sit on connections and entries, as <a href="#adding-backups">above</a>, and
+<strong>Model reasoning</strong> applies to every model in the list.</li>
 </ul>
 <h2 id="next">Next</h2>
 <p><a href="/wiki/how-to-play/">How to play</a> — the core loop. Or if something is not connecting,

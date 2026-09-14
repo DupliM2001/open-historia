@@ -22,7 +22,9 @@ remote desktop, WebGL is often unavailable.
 
 Work through these in order:
 
-1. **Is a provider configured?** Settings → the provider section. No key, no world.
+1. **Is a provider configured?** Settings → the provider section. No key, no world. On beta,
+   look at Settings → AI → **Models**: an entry reading **Unusable** says what is wrong with it,
+   such as `key rejected (401)` or `model not found (404)`. Fix it and the mark clears.
 2. **Is the key right?** Paste it fresh; keys often pick up whitespace.
 3. **Is the model name right?** OpenAI and OpenAI Compatible have no default model — you must
    type one, and it must exist on that provider.
@@ -124,6 +126,30 @@ held again if the **board** fails a second time.
 
 Undo the turn from the time panel and try a shorter skip, or a different model.
 
+## Every model has used its allowance
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+*"Every model in your Fallback list has used its allowance for now. The first back is …, at …"*
+
+No entry in Settings → AI → **Models** can answer: each one is **Spent** or **Unusable**, and
+at least one is Spent. The time skip did not start, rather than fall back to canned events.
+Either wait until the time shown, or add a backup — a paid key or a local model — and play on
+now. If you know a model is back sooner, for example because you just topped up billing, press
+**Reset** on its entry.
+
+If instead it says *"No model in your Fallback list can answer"*, nothing is coming back on its
+own: an entry is **Unusable**, and the message names it and what is wrong. See
+[backup models](/wiki/ai-setup/#backup-models).
+
+## The writing suddenly changed
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+A notice near the top of the screen says when the game moves to a backup model, and why:
+*"… has used today's allowance. Now using …"*. A different model writes differently. Settings →
+AI shows which entries are Spent and when each comes back.
+
 ## Rate limits
 
 Symptoms: turns fail intermittently, or stall on long jumps while short ones work.
@@ -131,6 +157,11 @@ Symptoms: turns fail intermittently, or stall on long jumps while short ones wor
 Free tiers have per-minute limits that a long jump can exceed. Options: use the smaller/faster
 model in the family (limits are usually more generous), take shorter jumps, or move to a paid
 tier.
+
+On beta, a rate limit is not the same as a Spent allowance: the game waits it out and tries the
+same model again, which keeps your backups' allowance for later. Settings → AI → **When a model is
+rate limited** → **Try the next one straight away** moves to the next entry instead: faster, but
+it spends your backups.
 
 <p class="beta-note"><b>On beta, a busy provider is named as busy.</b> When a provider refuses
 partway through an answer because it is overloaded, beta says so in the log, waits 15 seconds,
