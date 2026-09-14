@@ -171,7 +171,7 @@ import { MAP_SETTING_KEYS, getMapSetting, isBetaUnits } from "../../runtime/mapS
 import { AI_FIRST_BYTE_TIMEOUT_MS, AI_IDLE_TIMEOUT_MS, createIdleDeadline } from "./idleDeadline.js";
 import { REPAIR_STOP_TIME_BUDGET, runBoundedRepairCall } from "./repairCall.js";
 import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
-import { isProviderConfigured } from "./providerConfig.js";
+import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
@@ -1920,7 +1920,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   // answer and no attempt loop; its result arrives through pollPendingBatches.
   if (!sync && typeof onBatchResult === "function" && batchBackgroundTasksEnabled()) {
     const batchTool = getGameplayTool(taskKey);
-    if (batchTool && providerSupportsBatch()) {
+    if (batchTool && providerSupportsBatch(taskKey)) {
       const customId = `oh_${taskKey}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
       const submitted = await submitAIBatch({
         customId,
@@ -8216,7 +8216,7 @@ const waitForSimulationIdle = async ({ signal, timeoutMs = 10 * 60 * 1000 } = {}
 const firstReadingsInFlight = new Map();
 const firstReading = (kind, target, reason, work) => {
   const name = normalizeString(target);
-  if (!name || typeof window === "undefined" || !isProviderConfigured()) return Promise.resolve(null);
+  if (!name || typeof window === "undefined" || !isFallbackListConfigured()) return Promise.resolve(null);
   const key = `${activeCampaignId()}|${kind}|${name.toLowerCase()}`;
   if (firstReadingsInFlight.has(key)) return firstReadingsInFlight.get(key);
   const run = work(name)

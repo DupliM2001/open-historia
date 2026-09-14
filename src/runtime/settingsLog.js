@@ -26,10 +26,12 @@ import { getStoredChatLanguage, getStoredLanguage, languageDisplayName } from ".
 import {
     AI_TASK_ROUTING,
     endpointHostForLog,
-    getProviderField,
+    getEntryStatus,
     getProviderMeta,
+    getRateLimitPolicy,
     getReasoningEnabled,
-    getStoredProvider,
+    getResolvedFallbackList,
+    getTaskPick,
 } from "../Game/AI/providerConfig.js";
 import { isRatingEnabled, isTelemetryEnabled } from "../Game/AI/telemetry.js";
 
@@ -66,28 +68,43 @@ registerSettingsSnapshot("Map", () => [
     ["Disable camera movement during events", onOff(getMapSetting(MAP_SETTING_KEYS.disableEventCamera))],
 ]);
 
+// Every entry of the Fallback list, in order, with the state it is in: "which
+// model was it trying to use?" has as many answers as the list has entries.
+const describeStatus = (entry) => {
+    const { status, reason, until } = getEntryStatus(entry.id);
+    if (status === "unusable") return `Unusable: ${reason}`;
+    if (status === "spent") return `Spent until ${new Date(until).toISOString()}`;
+    if (status === "busy") return `${reason} until ${new Date(until).toISOString()}`;
+    return "ready";
+};
+
 registerSettingsSnapshot("AI", () => {
-    const provider = getStoredProvider();
-    const field = (name) => String(getProviderField(provider, name) ?? "").trim();
-    const items = [
-        ["Provider", getProviderMeta(provider)?.label || provider],
-        ["Model", field("model") || "(provider default)"],
-        ["API key", field("apiKey") ? "set" : "not set"],
-    ];
-    // Only the self-hosted providers have an endpoint to point somewhere else.
-    if (provider === "openai-compatible" || provider === "anthropic-compatible") {
-        items.push(["Endpoint", endpointHostForLog(field("endpoint"))]);
-    }
-    const customParams = field("customParams");
-    items.push(["Custom parameters", customParams ? `set (${customParams.length} characters)` : "none"]);
-    items.push(["Structured output", field("structuredMode") || "auto"]);
-    if (provider === "openai-compatible") items.push(["Strict tool schema", onOff(field("toolStrict") === "1")]);
-    // Only the tasks routed away from the model above; every other task uses it.
-    const overrides = AI_TASK_ROUTING
-        .map(({ key, label }) => [`${label} model`, field(`model_${key}`)])
-        .filter(([, model]) => model);
-    if (overrides.length) items.push(...overrides);
-    else items.push(["Per-task models", "none — every task uses the model above"]);
+    const list = getResolvedFallbackList();
+    const items = [["Fallback list", `${list.length} entr${list.length === 1 ? "y" : "ies"}`]];
+    list.forEach((entry, index) => {
+        const text = (value) => String(value ?? "").trim();
+        items.push(
+            [`Entry ${index + 1}`, `${entry.connectionName} (${getProviderMeta(entry.provider)?.label || entry.provider})`],
+            ["Model", text(entry.model) || "(provider default)"],
+            ["API key", text(entry.apiKey) ? "set" : "not set"],
+        );
+        // Only the self-hosted providers have an endpoint to point somewhere else.
+        if (entry.provider === "openai-compatible" || entry.provider === "anthropic-compatible") {
+            items.push(["Endpoint", endpointHostForLog(entry.endpoint)]);
+        }
+        const customParams = text(entry.customParams);
+        items.push(["Custom parameters", customParams ? `set (${customParams.length} characters)` : "none"]);
+        items.push(["Structured output", entry.structuredMode || "auto"]);
+        if (entry.provider === "openai-compatible") items.push(["Strict tool schema", onOff(entry.toolStrict)]);
+        items.push(["Status", describeStatus(entry)]);
+    });
+    items.push(["When a model is rate limited", getRateLimitPolicy() === "next" ? "try the next one" : "wait"]);
+    // Only the tasks with a pick of their own; every other task starts at the top.
+    const picks = AI_TASK_ROUTING
+        .map(({ key, label }) => [`${label} model`, list.find((entry) => entry.id === getTaskPick(key))?.label ?? ""])
+        .filter(([, picked]) => picked);
+    if (picks.length) items.push(...picks);
+    else items.push(["Per-task models", "none — every task starts at the top of the list"]);
     items.push(
         ["Model reasoning", onOff(getReasoningEnabled())],
         ["Limit AI generation", onOff(getMapSetting(MAP_SETTING_KEYS.limitAiGeneration))],

@@ -31,8 +31,7 @@ The in-game UI is a flat set of `position: fixed` React components layered over 
 | `activeBottomPanel` | `null` | Which bottom panel (`"chat"`, `"actions"`, `"skip"`, `"history"`) is open — single-slot, so opening one closes another |
 | `isFullscreenEnabled` | `false` | Mirrors the Fullscreen API state; persisted `localStorage["Fullscreen"]` |
 | `showWebGLWarning` | `false` | Set true if `checkWebGL()` fails on mount → renders `WebGLWarningPopup` |
-| `apiProvider` | `getStoredProvider()` | AI provider id; persisted `localStorage["api_provider"]` via effect |
-| `providerSettings` | `loadProviderSettingsFormState()` | Per-provider keys/models/params form state |
+| `aiSetup` | `readAiSetup()` | `{ ready, provider }`: whether the Fallback list has an entry its provider can call, and the top entry's provider for the start-of-game prompt. Re-read on `ai:fallback-changed` |
 | `{ games, loaded }` | `useLibraryState()` | `hasNoGames = loaded && games.length === 0` gates the idle-diplomacy timer |
 
 ### 1.3 Side effects owned by the shell
@@ -43,7 +42,7 @@ The in-game UI is a flat set of `position: fixed` React components layered over 
 | **Idle diplomacy drip** | Every 60 s, if the tab is visible and a game exists, lazy-imports `../AI/gameplay.js` and calls `maybeSendIdleDiplomacy()` | `src/Game/AI/gameplay.js`; drops a message into the diplomatic chat store unprompted |
 | Advisor lazy-load latch | `isAdvisorOpen` → `setShouldLoadAdvisor(true)` (one-way) | Keeps the Chart.js/markdown chunk out of first paint |
 | Fullscreen persist + sync | Writes `localStorage["Fullscreen"]`; listens `fullscreenchange`/`webkitfullscreenchange` | `toggleFullscreen()` probes prefixed APIs (mobile Safari safe) |
-| Provider persist | Writes `localStorage["api_provider"]`; reloads provider form when settings opens | `src/Game/AI/providerConfig.js` |
+| AI header + setup | `syncAiDebugContext()` on mount; re-reads `aiSetup` whenever the Fallback list or a Connection changes | `src/Game/AI/providerConfig.js` |
 | Advisor-width resize guard | On window `resize`, re-clamps `advisorWidth` so a shrunk window never leaves the drawer wider than the viewport | — |
 
 ### 1.4 What `Main` mounts (render order)
@@ -361,8 +360,9 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 
 | Section | Control | Persists to / calls |
 |---|---|---|
-| AI Provider | `ApiProviderSelector` — searchable catalog of `PROVIDER_OPTIONS` | `onApiProviderChange`→`Main.apiProvider`→`localStorage["api_provider"]` |
-| Provider settings | `ProviderSettingsPanel` — per-provider API key/model/custom-params (gemini, openai, anthropic, openai-compatible, anthropic-compatible), **Configuration profiles** for the two compatible providers (`PresetManager`), recent models as suggestions under every model field, the collapsed **Per-task models** section (`TaskModelOverrides`, see `docs/ai-overview.md`) + global **Model reasoning** toggle | `persistProviderSetting` (browser localStorage); `setReasoningEnabled` |
+| Models | `FallbackListSection` — the Fallback list: one row per entry with its status (ready / Spent until … / Unusable: reason / busy, back in …) and when it last answered; reorder, edit, reset, remove; **Add a backup**, **Fill…** (`FillPanel`), and the rate-limit choice. With one entry it is the old single form: provider (`ApiProviderSelector`), key or endpoint, model. See `docs/ai-overview.md` | `providerConfig.js` (`addEntry`, `updateEntry`, `moveEntry`, `fillFallbackList`, `setRateLimitPolicy`…) |
+| Connections | `ConnectionsSection` — saved provider + name + key + endpoint + custom parameters (+ **Strict tool schema** for OpenAI Compatible); templates for Groq, OpenRouter, Local Ollama | `addConnection`, `updateConnection`, `removeConnection` |
+| Model reasoning | `ReasoningSection` — the global **Model reasoning** toggle | `setReasoningEnabled` |
 | Language | `LanguageSelector` — searchable; applying reloads the page | `setStoredLanguage` (server + browser) |
 | Display | **Fullscreen**, **3D Globe**, **3D Terrain** (labeled "Very Experimental") toggles | `Main` toggles / `App.jsx` state |
 | Map | Hide country labels, **Reduce motion** (umbrella over the two below), Disable idle globe rotation, Disable camera movement during events | `setMapSetting(MAP_SETTING_KEYS.*)` (`src/runtime/mapSettings.js`) |

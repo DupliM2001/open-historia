@@ -1,5 +1,6 @@
 /*! Open Historia — portions (reasoning-effort toggle persistence) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import { logDebugEvent, logSettingMessage, setDebugLogContext } from "../../runtime/debugLog.js";
+import { entryStatus } from "./fallbackRunner.js";
 
 export const DEFAULT_PROVIDER = "gemini";
 
@@ -90,36 +91,12 @@ const PROVIDER_SETTINGS = {
     },
 };
 
-const FORM_FIELD_MAP = {
-    geminiApiKey: { provider: "gemini", field: "apiKey" },
-    geminiModel: { provider: "gemini", field: "model" },
-    geminiCustomParams: { provider: "gemini", field: "customParams" },
-    geminiStructuredMode: { provider: "gemini", field: "structuredMode" },
-    openaiApiKey: { provider: "openai", field: "apiKey" },
-    openaiModel: { provider: "openai", field: "model" },
-    openaiCustomParams: { provider: "openai", field: "customParams" },
-    openaiStructuredMode: { provider: "openai", field: "structuredMode" },
-    anthropicApiKey: { provider: "anthropic", field: "apiKey" },
-    anthropicModel: { provider: "anthropic", field: "model" },
-    anthropicCustomParams: { provider: "anthropic", field: "customParams" },
-    anthropicStructuredMode: { provider: "anthropic", field: "structuredMode" },
-    anthropicCompatibleApiKey: { provider: "anthropic-compatible", field: "apiKey" },
-    anthropicCompatibleEndpoint: { provider: "anthropic-compatible", field: "endpoint" },
-    anthropicCompatibleModel: { provider: "anthropic-compatible", field: "model" },
-    anthropicCompatibleCustomParams: { provider: "anthropic-compatible", field: "customParams" },
-    anthropicCompatibleStructuredMode: { provider: "anthropic-compatible", field: "structuredMode" },
-    openaiCompatibleApiKey: { provider: "openai-compatible", field: "apiKey" },
-    openaiCompatibleEndpoint: { provider: "openai-compatible", field: "endpoint" },
-    openaiCompatibleModel: { provider: "openai-compatible", field: "model" },
-    openaiCompatibleCustomParams: { provider: "openai-compatible", field: "customParams" },
-    openaiCompatibleStructuredMode: { provider: "openai-compatible", field: "structuredMode" },
-    openaiCompatibleToolStrict: { provider: "openai-compatible", field: "toolStrict" },
-};
-
 function isSupportedProvider(value) {
     return PROVIDER_OPTIONS.some((provider) => provider.value === value);
 }
 
+// The per-provider settings above are read by the migration to Connections
+// and the Fallback list, and by nothing else (docs/adr/0002).
 function readStoredValue(setting) {
     if (!setting?.storageKey) return setting?.defaultValue ?? "";
 
@@ -134,11 +111,7 @@ function readStoredValue(setting) {
     return setting.defaultValue ?? "";
 }
 
-// A task-scoped model override lives under `model_<taskKey>`. Those fields are
-// synthesized here rather than listed per task in PROVIDER_SETTINGS, so
-// getProviderField/setProviderField work on them with no per-task schema and
-// the task list stays open-ended. Only providers with a base model setting
-// have anything for an override to inherit.
+// An old task-scoped model override lived under `<provider>_model_<taskKey>`.
 const TASK_MODEL_FIELD = /^model_([A-Za-z][A-Za-z0-9_]*)$/;
 
 function getSettingConfig(provider, field) {
@@ -159,7 +132,8 @@ export function normalizeProvider(provider) {
     return isSupportedProvider(provider) ? provider : DEFAULT_PROVIDER;
 }
 
-export function getStoredProvider() {
+// The provider the old settings had active. Migration only.
+function getStoredProvider() {
     return normalizeProvider(localStorage.getItem("api_provider"));
 }
 
@@ -173,17 +147,16 @@ export function providerSupportsModelDiscovery(provider) {
     return normalized === "openai" || normalized === "openai-compatible";
 }
 
-export function getProviderField(provider, field) {
+function getProviderField(provider, field) {
     const setting = getSettingConfig(provider, field);
     return setting ? readStoredValue(setting) : "";
 }
 
-// Per-task model routing (ported from the abdulrahman-2005 fork). Every AI call
-// names its task (a prompt-pack task key, or "advisor"/"diplomacy" for the
-// chats); a task-scoped override wins, otherwise the provider's default model
-// applies, so a player who never opens the advanced section keeps the exact
-// single-model behaviour. Keys outside AI_TASK_ROUTING still resolve — they
-// just always fall back to the default.
+// The tasks a player can give a pick of their own (ported from the
+// abdulrahman-2005 fork's per-task routing). Every AI call names its task (a
+// prompt-pack task key, or "advisor"/"diplomacy" for the chats); a task with a
+// pick tries that Fallback entry first, then the list from the top. Keys
+// outside this list still work — they just always start at the top.
 export const AI_TASK_ROUTING = [
     { key: "jumpForward", label: "Time skip", hint: "Strongest model — the main simulation call", group: "Simulation" },
     { key: "autoJumpForward", label: "Auto time skip", hint: "Strongest model — the main simulation call", group: "Simulation" },
@@ -210,47 +183,6 @@ export const AI_TASK_ROUTING = [
     { key: "diplomacy", label: "Leader chat", hint: "Mid/high-tier: in-character leaders", group: "Chat" },
 ];
 
-export function getModelForTask(provider, taskKey) {
-    const normalized = normalizeProvider(provider);
-    const key = String(taskKey ?? "").trim();
-    if (key && /^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
-        const taskSpecific = getProviderField(normalized, `model_${key}`);
-        if (taskSpecific && taskSpecific.trim()) return taskSpecific.trim();
-    }
-    return getProviderField(normalized, "model");
-}
-
-export function setProviderField(provider, field, value) {
-    const setting = getSettingConfig(provider, field);
-    if (!setting?.storageKey) return;
-
-    // Changing the MODEL retires an explicit structured-output choice.
-    //
-    // That choice is stored per provider (it belongs beside the endpoint and the
-    // key, which is where a player looks for it), but the evidence behind it is
-    // per MODEL: the same gateway can serve one model that honours tool calling
-    // and one that ignores it. Carrying the old choice onto a new model would
-    // silently start it in a weaker mode than it may well support, and because
-    // the ladder only ever steps DOWN, nothing would ever discover otherwise.
-    //
-    // Reverting to "auto" costs at most one wasted attempt, after which the
-    // ladder re-learns and offers the setting again. Getting it wrong the other
-    // way costs enforced schemas on every call, silently, forever.
-    if (field === "model") {
-        const previous = getProviderField(provider, "model");
-        const next = String(value ?? "");
-        if (previous && previous !== next) {
-            const modeSetting = getSettingConfig(provider, "structuredMode");
-            if (modeSetting?.storageKey) localStorage.removeItem(modeSetting.storageKey);
-        }
-    }
-
-    const before = readStoredValue(setting);
-    localStorage.setItem(setting.storageKey, value ?? "");
-    if (String(before ?? "") !== String(value ?? "")) logProviderFieldChange(provider, field, value);
-    syncAiDebugContext();
-}
-
 // The host of an endpoint, for the diagnostics log: "localhost:11434" or
 // "openrouter.ai" says which server a report is about; the path, the query and
 // any credentials in the URL say nothing a reader needs and can carry a token.
@@ -264,86 +196,25 @@ export function endpointHostForLog(value) {
     }
 }
 
-// Every provider setting change, into the diagnostics log (runtime/debugLog.js).
-// The fields save on every keystroke, so each line waits for its field to settle.
-// What a line may say is decided per field: a model name is not a secret and is
-// the most useful line in an AI report; a key is only ever "set" or "cleared";
-// custom parameters can carry headers, so only their size; an endpoint only its
-// host.
-function logProviderFieldChange(provider, field, value) {
-    const name = getProviderMeta(provider)?.label || normalizeProvider(provider);
-    const text = String(value ?? "").trim();
-    const settle = { settle: true };
-    const key = `${normalizeProvider(provider)}:${field}`;
-    const taskMatch = TASK_MODEL_FIELD.exec(String(field ?? ""));
-    if (taskMatch) {
-        const task = AI_TASK_ROUTING.find((entry) => entry.key === taskMatch[1])?.label || taskMatch[1];
-        logSettingMessage(key, `${name} ${task} model set to ${text || "the default model"}.`, settle);
-    } else if (field === "model") {
-        logSettingMessage(key, `${name} model set to ${text || "(provider default)"}.`, settle);
-    } else if (field === "apiKey") {
-        logSettingMessage(key, `${name} API key ${text ? "set" : "cleared"}.`, settle);
-    } else if (field === "endpoint") {
-        logSettingMessage(key, `${name} endpoint set to ${endpointHostForLog(text)}.`, settle);
-    } else if (field === "customParams") {
-        logSettingMessage(key, `${name} custom parameters ${text ? `set (${text.length} characters)` : "cleared"}.`, settle);
-    } else if (field === "structuredMode") {
-        logSettingMessage(key, `${name} structured output set to ${text || "auto"}.`, settle);
-    } else if (field === "toolStrict") {
-        logSettingMessage(key, `${name} strict tool schema turned ${text === "1" ? "on" : "off"}.`, settle);
-    }
-}
-
-// Which provider and model the game is pointed at, into the diagnostics log's
-// header. Read from here rather than pushed in by the settings panel, because
-// the panel is not the only writer (a model picked from the discovery list, a
-// legacy key migrated on read) and a header that disagrees with the running
-// config is worse than no header at all.
+// Which provider and model the game starts each call on, into the diagnostics
+// log's header: the top of the Fallback list. Read from here rather than pushed
+// in by the settings panel, because the panel is not the only writer (a
+// migration on first read, a structured-output suggestion accepted after a
+// turn) and a header that disagrees with the running config is worse than none.
 //
 // Names only, never the key or the endpoint's credentials — see redactSecrets
-// in runtime/debugLog.js. The MODEL is the most useful line in an AI bug report
-// and is not a secret; the key that reaches it never leaves this module.
+// in runtime/debugLog.js. Which entry actually ANSWERED each call is on that
+// call's own log line.
 export function syncAiDebugContext() {
     if (typeof localStorage === "undefined") return;
-    const provider = getStoredProvider();
+    const list = getResolvedFallbackList();
+    const [top] = list;
     setDebugLogContext({
-        provider: getProviderMeta(provider)?.label || provider,
-        model: getProviderField(provider, "model") || "(provider default)",
+        provider: top
+            ? `${getProviderMeta(top.provider).label}${list.length > 1 ? ` (top of a ${list.length}-entry Fallback list)` : ""}`
+            : "(empty Fallback list)",
+        model: top?.model || "(provider default)",
     });
-}
-
-// Called by the settings panel when the player picks a different provider — the
-// switch itself is worth a line, because "it broke when I moved off Gemini" is a
-// report the log should be able to answer on its own.
-export function logProviderSwitch(provider) {
-    const normalized = normalizeProvider(provider);
-    logDebugEvent("setting", `AI provider set to ${getProviderMeta(normalized)?.label || normalized}.`, {
-        model: getProviderField(normalized, "model") || "(provider default)",
-        hasKey: Boolean(getProviderField(normalized, "apiKey")),
-        hasEndpoint: Boolean(getProviderField(normalized, "endpoint")),
-    });
-    syncAiDebugContext();
-}
-
-export function getProviderSettings(provider) {
-    const normalized = normalizeProvider(provider);
-    return {
-        provider: normalized,
-        apiKey: getProviderField(normalized, "apiKey"),
-        endpoint: getProviderField(normalized, "endpoint"),
-        model: getProviderField(normalized, "model"),
-        customParams: getProviderField(normalized, "customParams"),
-        // Where structured-output attempts START on the ladder (see
-        // structuredMode.js). "auto" means the strongest first, stepping down on
-        // failure; anything else names a rung to begin at. Never a lock: the
-        // ladder still walks down from wherever it starts, so a setting chosen
-        // months ago cannot permanently break a campaign.
-        structuredMode: getProviderField(normalized, "structuredMode") || "auto",
-        // Opt-in, so anything other than an explicit "1" leaves it off. Independent
-        // of the ladder above: this only decides whether the "tool" rung sends
-        // strict:true with the schema, not which rung is tried first.
-        toolStrict: getProviderField(normalized, "toolStrict") === "1",
-    };
 }
 
 // What a provider needs before a single call can go out: a hosted provider
@@ -356,11 +227,6 @@ export function providerSetupRequirement(provider) {
 
 export function describeProviderSetupNeed(provider) {
     return providerSetupRequirement(provider) === "endpoint" ? "a server endpoint" : "an API key";
-}
-
-export function isProviderConfigured(provider = getStoredProvider()) {
-    const settings = getProviderSettings(provider);
-    return String(settings[providerSetupRequirement(provider)] ?? "").trim().length > 0;
 }
 
 // Global "model reasoning" toggle — applied by callAI in every provider mode
@@ -378,169 +244,501 @@ export function setReasoningEnabled(enabled) {
     logDebugEvent("setting", `Model reasoning turned ${enabled ? "on" : "off"}.`);
 }
 
-export function loadProviderSettingsFormState() {
-    const state = {};
-
-    for (const [stateKey, mapping] of Object.entries(FORM_FIELD_MAP)) {
-        state[stateKey] = getProviderField(mapping.provider, mapping.field);
-    }
-
-    return state;
-}
-
-export function persistProviderSetting(stateKey, value) {
-    const mapping = FORM_FIELD_MAP[stateKey];
-    if (!mapping) return;
-    setProviderField(mapping.provider, mapping.field, value);
-}
-
-// --- Configuration profiles (ported from the abdulrahman-2005 fork) ---
-//
-// A profile is an endpoint + key + model + custom-params bundle for the two
-// "compatible" providers, so a player who alternates between, say, a local
-// Ollama and OpenRouter switches with one click instead of retyping four
-// fields. Stored as one JSON array; the stock entries are written on first read
-// so they can be edited or deleted like any other.
-
-const PRESETS_STORAGE_KEY = "ai_provider_presets";
-
-const DEFAULT_PRESETS = [
-    {
-        id: "default_groq",
-        provider: "openai-compatible",
-        name: "Groq",
-        settings: { endpoint: "https://api.groq.com/openai/v1", apiKey: "", model: "llama-3.3-70b-versatile", customParams: "" },
-    },
-    {
-        id: "default_openrouter",
-        provider: "openai-compatible",
-        name: "OpenRouter",
-        settings: { endpoint: "https://openrouter.ai/api/v1", apiKey: "", model: "", customParams: "" },
-    },
-    {
-        id: "default_ollama",
-        provider: "openai-compatible",
-        name: "Local Ollama",
-        settings: { endpoint: "http://localhost:11434/v1", apiKey: "", model: "", customParams: "" },
-    },
+// Starting points offered when adding a Connection: the stock profiles, as they
+// were (ported from the abdulrahman-2005 fork), so a Groq or OpenRouter key is
+// one click and a paste away.
+export const CONNECTION_TEMPLATES = [
+    { name: "Groq", provider: "openai-compatible", endpoint: "https://api.groq.com/openai/v1", suggestedModel: "llama-3.3-70b-versatile" },
+    { name: "OpenRouter", provider: "openai-compatible", endpoint: "https://openrouter.ai/api/v1", suggestedModel: "" },
+    { name: "Local Ollama", provider: "openai-compatible", endpoint: "http://localhost:11434/v1", suggestedModel: "" },
 ];
 
+// The old configuration profiles, read by the migration only.
 function readStoredPresets() {
     if (typeof localStorage === "undefined") return null;
     try {
-        const stored = localStorage.getItem(PRESETS_STORAGE_KEY);
+        const stored = localStorage.getItem("ai_provider_presets");
         if (stored === null) return null;
         const parsed = JSON.parse(stored);
         return Array.isArray(parsed) ? parsed : null;
-    } catch (error) {
-        console.warn("Failed to load AI provider profiles", error);
+    } catch {
         return null;
     }
 }
 
-function writeStoredPresets(presets) {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
-}
-
-function normalizePresetSettings(settings) {
-    return {
-        endpoint: String(settings?.endpoint ?? ""),
-        apiKey: String(settings?.apiKey ?? ""),
-        model: String(settings?.model ?? ""),
-        customParams: String(settings?.customParams ?? ""),
-    };
-}
-
-export function getSavedPresets() {
-    const stored = readStoredPresets();
-    if (stored) return stored;
-    const seeded = DEFAULT_PRESETS.map((preset) => ({ ...preset, settings: { ...preset.settings } }));
-    writeStoredPresets(seeded);
-    return seeded;
-}
-
-export function savePreset(provider, name, settings) {
-    const presets = getSavedPresets();
-    const preset = {
-        id: `preset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        provider: normalizeProvider(provider),
-        name: String(name ?? "").trim(),
-        settings: normalizePresetSettings(settings),
-    };
-    writeStoredPresets([...presets, preset]);
-    logDebugEvent("setting", `AI profile "${preset.name}" saved for ${preset.provider}.`);
-    return preset.id;
-}
-
-export function updatePreset(id, name, settings) {
-    const presets = getSavedPresets();
-    const index = presets.findIndex((preset) => preset.id === id);
-    if (index === -1) return false;
-    const next = { ...presets[index] };
-    if (name !== undefined && name !== null) next.name = String(name).trim();
-    if (settings) next.settings = normalizePresetSettings(settings);
-    presets[index] = next;
-    writeStoredPresets(presets);
-    logDebugEvent("setting", `AI profile "${next.name}" updated for ${next.provider}.`);
-    return true;
-}
-
-export function deletePreset(id) {
-    const presets = getSavedPresets();
-    const remaining = presets.filter((preset) => preset.id !== id);
-    if (remaining.length === presets.length) return false;
-    writeStoredPresets(remaining);
-    const removed = presets.find((preset) => preset.id === id);
-    logDebugEvent("setting", `AI profile "${removed?.name || id}" deleted.`);
-    return true;
-}
-
-// Whether a saved profile is the one currently loaded — what the settings list
-// marks ACTIVE, and hides the Apply button for.
+// --- Connections and the Fallback list ---
 //
-// Endpoint and model alone are not enough. Issue #718: two profiles on the same
-// local endpoint with no model set, differing only in their custom params (one
-// with a small max_tokens for ordinary tasks, one with a large one for time
-// skips), BOTH read ACTIVE — so neither showed Apply, and switching between them
-// from the list was impossible. The params are compared by meaning, not by
-// text: key order and whitespace do not make two identical requests different,
-// and a blank field sends exactly what "{}" sends.
-//
-// The API key is deliberately NOT compared. A profile saved without one keeps
-// whatever key is already entered when applied (see apply() in settings.jsx),
-// so a keyless profile must still read as active after being applied.
-const comparableEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
+// docs/world-state.md ("AI access") and docs/adr/0002. A Connection is a saved
+// way to reach one provider: which provider, a name the player gives it, its
+// key, its endpoint, and its custom parameters. A Fallback entry is one
+// Connection and one model, at one place in the Fallback list. Every AI call
+// starts at the top of the list (fallbackRunner.js). These, and nothing else,
+// decide who answers a call: the per-provider settings above are read exactly
+// once, to migrate them, and never again.
 
-const canonicalJson = (value) => {
-    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-    if (value && typeof value === "object") {
-        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-    }
-    return JSON.stringify(value);
-};
+const CONNECTIONS_KEY = "ai_connections";
+const FALLBACK_LIST_KEY = "ai_fallback_list";
+const TASK_PICKS_KEY = "ai_task_picks";
+const RATE_LIMIT_POLICY_KEY = "ai_fallback_rate_limit";
+const ENTRY_STATES_KEY = "ai_fallback_states";
 
-// Invalid JSON is compared as its text rather than as "{}". The request would
-// send nothing either way (main.jsx ignores unparseable params), but a profile
-// with a typo in it is still not the empty profile, and the badge exists to say
-// which one is loaded.
-const comparableCustomParams = (raw) => {
-    const trimmed = String(raw ?? "").trim();
-    if (!trimmed) return "{}";
+const newId = (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const readJsonSetting = (key, fallback) => {
+    if (typeof localStorage === "undefined") return fallback;
     try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return canonicalJson(parsed);
+        const stored = localStorage.getItem(key);
+        if (stored === null) return fallback;
+        const parsed = JSON.parse(stored);
+        return parsed ?? fallback;
     } catch {
-        // fall through to the text
+        return fallback;
     }
-    return `text:${trimmed}`;
 };
 
-export function isPresetActive(preset, current) {
-    const saved = preset?.settings ?? {};
-    return comparableEndpoint(saved.endpoint) === comparableEndpoint(current?.endpoint)
-        && String(saved.model ?? "").trim() === String(current?.model ?? "").trim()
-        && comparableCustomParams(saved.customParams) === comparableCustomParams(current?.customParams);
+const writeJsonSetting = (key, value) => {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(key, JSON.stringify(value));
+};
+
+// Names and models are stored as typed — the Settings fields save on every
+// keystroke — and trimmed where they are used.
+const normalizeConnection = (connection) => ({
+    id: String(connection?.id || newId("conn")),
+    provider: normalizeProvider(connection?.provider),
+    name: connection?.name == null ? getProviderMeta(connection?.provider).label : String(connection.name),
+    apiKey: String(connection?.apiKey ?? ""),
+    endpoint: String(connection?.endpoint ?? ""),
+    customParams: String(connection?.customParams ?? ""),
+    toolStrict: connection?.toolStrict === true,
+    suggestedModel: String(connection?.suggestedModel ?? ""),
+});
+
+const normalizeEntry = (entry) => ({
+    id: String(entry?.id || newId("entry")),
+    connectionId: String(entry?.connectionId ?? ""),
+    model: String(entry?.model ?? ""),
+    customParamsOverride: String(entry?.customParamsOverride ?? ""),
+    structuredMode: String(entry?.structuredMode ?? "").trim() || "auto",
+});
+
+// A value the player actually stored under an old per-provider key, as opposed
+// to a default the old reader would have filled in.
+const storedOldValue = (setting) => {
+    if (!setting?.storageKey || typeof localStorage === "undefined") return null;
+    for (const key of [setting.storageKey, ...(setting.legacyKeys ?? [])]) {
+        const value = localStorage.getItem(key);
+        if (value !== null) return value;
+    }
+    return null;
+};
+
+// Runs on the first read of the list, wherever that happens — the Settings
+// screen, a time skip, or open-historia-harness, which imports the engine with
+// no UI and old-style settings in a fresh storage. The old settings are left in
+// storage untouched, so a rollback of this code still finds them.
+function migrateFromProviderSettings() {
+    const active = getStoredProvider();
+    const connections = [];
+    const connectionFor = {};
+    for (const provider of Object.keys(PROVIDER_SETTINGS)) {
+        const old = PROVIDER_SETTINGS[provider];
+        const apiKey = storedOldValue(old.apiKey) ?? "";
+        const endpoint = storedOldValue(old.endpoint) ?? "";
+        if (provider !== active && !apiKey.trim() && !endpoint.trim()) continue;
+        const connection = normalizeConnection({
+            provider,
+            apiKey,
+            // The active self-hosted provider keeps the endpoint it was really
+            // calling, default included.
+            endpoint: endpoint || (provider === active ? getProviderField(provider, "endpoint") : ""),
+            customParams: storedOldValue(old.customParams) ?? "",
+            toolStrict: storedOldValue(old.toolStrict) === "1",
+        });
+        connections.push(connection);
+        connectionFor[provider] = connection.id;
+    }
+
+    // Profiles become Connections, their model a suggestion. A stock profile
+    // still without a key was never set up, so it is not carried over.
+    for (const preset of readStoredPresets() ?? []) {
+        if (String(preset?.id ?? "").startsWith("default_") && !preset?.settings?.apiKey) continue;
+        connections.push(normalizeConnection({
+            provider: preset?.provider,
+            name: preset?.name,
+            apiKey: preset?.settings?.apiKey,
+            endpoint: preset?.settings?.endpoint,
+            customParams: preset?.settings?.customParams,
+            suggestedModel: preset?.settings?.model,
+        }));
+    }
+
+    const oldActive = PROVIDER_SETTINGS[active];
+    const activeModel = (storedOldValue(oldActive.model) ?? oldActive.model.defaultValue ?? "").trim();
+    const list = [normalizeEntry({
+        connectionId: connectionFor[active],
+        model: activeModel,
+        structuredMode: storedOldValue(oldActive.structuredMode) ?? "auto",
+    })];
+
+    // The active provider's per-task models were the ones in effect. Each
+    // distinct one becomes an entry at the bottom that its tasks point at; one
+    // naming the default model points at entry #1.
+    const picks = {};
+    for (const { key } of AI_TASK_ROUTING) {
+        const model = (storedOldValue(getSettingConfig(active, `model_${key}`)) ?? "").trim();
+        if (!model) continue;
+        let target = list.find((entry) => entry.model === model);
+        if (!target) {
+            target = normalizeEntry({ connectionId: connectionFor[active], model });
+            list.push(target);
+        }
+        picks[key] = target.id;
+    }
+
+    writeJsonSetting(CONNECTIONS_KEY, connections);
+    writeJsonSetting(TASK_PICKS_KEY, picks);
+    // Last: its presence is what marks the migration done.
+    writeJsonSetting(FALLBACK_LIST_KEY, list);
+}
+
+const ensureMigrated = () => {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(FALLBACK_LIST_KEY) === null) migrateFromProviderSettings();
+};
+
+export function getConnections() {
+    ensureMigrated();
+    const stored = readJsonSetting(CONNECTIONS_KEY, []);
+    return Array.isArray(stored) ? stored.map(normalizeConnection) : [];
+}
+
+export function getFallbackList() {
+    ensureMigrated();
+    const stored = readJsonSetting(FALLBACK_LIST_KEY, []);
+    return Array.isArray(stored) ? stored.map(normalizeEntry) : [];
+}
+
+// "gemini-3.5-flash (Main Google)": how an entry is named in notices, logs and
+// errors.
+export const describeEntry = (model, connectionName) => `${model || "default model"} (${connectionName})`;
+
+// A Connection as the player reads it: the name they gave it, or the provider's.
+export const connectionDisplayName = (connection) => String(connection?.name ?? "").trim() || getProviderMeta(connection?.provider).label;
+
+// Everything one call on one entry needs. Custom parameters are the entry's
+// own override when it has one, else its Connection's.
+const resolveEntry = (entry, connectionsById) => {
+    const connection = connectionsById.get(entry.connectionId);
+    if (!connection) return null;
+    const model = entry.model.trim();
+    return {
+        id: entry.id,
+        connectionId: connection.id,
+        provider: connection.provider,
+        connectionName: connectionDisplayName(connection),
+        apiKey: connection.apiKey,
+        endpoint: connection.endpoint,
+        model,
+        customParams: entry.customParamsOverride.trim() ? entry.customParamsOverride : connection.customParams,
+        structuredMode: entry.structuredMode,
+        toolStrict: connection.toolStrict,
+        label: describeEntry(model, connectionDisplayName(connection)),
+    };
+};
+
+// The list in order, each entry resolved. An entry whose Connection is gone is
+// left out rather than failing every call.
+export function getResolvedFallbackList() {
+    const connectionsById = new Map(getConnections().map((connection) => [connection.id, connection]));
+    return getFallbackList().map((entry) => resolveEntry(entry, connectionsById)).filter(Boolean);
+}
+
+// Whether an entry has what its provider needs before a call can go out: a
+// hosted provider its key, a self-hosted one its endpoint.
+const entryIsConfigured = (entry) => String(entry[providerSetupRequirement(entry.provider)] ?? "").trim().length > 0;
+
+export function isFallbackListConfigured() {
+    return getResolvedFallbackList().some(entryIsConfigured);
+}
+
+const saveConnections = (connections) => {
+    writeJsonSetting(CONNECTIONS_KEY, connections);
+    syncAiDebugContext();
+    notifyFallbackChange();
+};
+
+const saveFallbackList = (list) => {
+    writeJsonSetting(FALLBACK_LIST_KEY, list);
+    syncAiDebugContext();
+    notifyFallbackChange();
+};
+
+const connectionName = (id) => {
+    const connection = getConnections().find((candidate) => candidate.id === id);
+    return connection ? connectionDisplayName(connection) : "(removed)";
+};
+
+export function addConnection(fields) {
+    const connection = normalizeConnection({ ...fields, id: undefined });
+    saveConnections([...getConnections(), connection]);
+    logDebugEvent("setting", `AI connection "${connectionDisplayName(connection)}" (${getProviderMeta(connection.provider).label}) added.`, {
+        hasKey: Boolean(connection.apiKey.trim()),
+        endpoint: endpointHostForLog(connection.endpoint),
+    });
+    return connection.id;
+}
+
+export function addEntry(fields) {
+    const entry = normalizeEntry({ ...fields, id: undefined });
+    saveFallbackList([...getFallbackList(), entry]);
+    logDebugEvent("setting", `Fallback list: added ${describeEntry(entry.model, connectionName(entry.connectionId))} as entry ${getFallbackList().length}.`);
+    return entry.id;
+}
+
+// The Fill button: every model (strongest first) on every ticked Connection,
+// model first — the strong model on A, then on B, then the next model on A … —
+// so the list falls back to a weaker model only once the strong one has nowhere
+// left to answer from. A convenience for typing a long list, nothing more: the
+// list it builds is used like any other, from the top, one entry at a time
+// (docs/adr/0001). Appended, skipping any pair already in the list, so pressing
+// it twice adds nothing.
+export function fillFallbackList(connectionIds, models) {
+    const list = getFallbackList();
+    const known = new Set(list.map((entry) => `${entry.connectionId}|${entry.model.trim()}`));
+    const added = [];
+    for (const model of models.map((name) => String(name ?? "").trim()).filter(Boolean)) {
+        for (const connectionId of connectionIds) {
+            const key = `${connectionId}|${model}`;
+            if (known.has(key)) continue;
+            known.add(key);
+            added.push(normalizeEntry({ connectionId, model }));
+        }
+    }
+    if (added.length) {
+        saveFallbackList([...list, ...added]);
+        logDebugEvent("setting", `Fallback list: Fill added ${added.length} entr${added.length === 1 ? "y" : "ies"}.`, {
+            models: models.join(", "),
+            connections: connectionIds.length,
+        });
+    }
+    return added.length;
+}
+
+// --- Entry states: Spent, Unusable, busy, last answered ---
+//
+// Kept under their own key, apart from the list, so that marking an entry never
+// rewrites what the player typed. The runner (fallbackRunner.js) reads and
+// writes them through this store.
+const readEntryStates = () => {
+    const states = readJsonSetting(ENTRY_STATES_KEY, {});
+    return states && typeof states === "object" && !Array.isArray(states) ? states : {};
+};
+
+export const fallbackStateStore = {
+    get: (id) => readEntryStates()[id],
+    set: (id, state) => {
+        const states = readEntryStates();
+        if (state && Object.keys(state).length) states[id] = state;
+        else delete states[id];
+        try { writeJsonSetting(ENTRY_STATES_KEY, states); } catch { /* storage full: the marks are advice, not settings */ }
+        notifyFallbackChange();
+    },
+};
+
+// Anything the Settings rows show changed: a mark, an answer, an edit.
+const notifyFallbackChange = () => {
+    try { window.dispatchEvent(new CustomEvent("ai:fallback-changed")); } catch { /* no window (tests, the harness) */ }
+};
+
+// The marks about an allowance: an edit that leaves the key, the address and
+// the model as they were leaves these alone.
+const KEPT_WHILE_THE_ALLOWANCE_IS_THE_SAME = ["spentUntil", "skipUntil", "skipReason"];
+
+// What a Settings row, the Logging file and batching read about one entry.
+export const getEntryStatus = (id, at = Date.now()) => entryStatus(fallbackStateStore.get(id), at);
+
+// Clears a mark, keeping when it last answered. `keep` names the marks an edit
+// leaves alone (a new name for a Connection says nothing about its allowance).
+const clearMarks = (id, keep = []) => {
+    const state = fallbackStateStore.get(id);
+    if (!state) return;
+    const next = {};
+    for (const field of ["lastAnsweredAt", ...keep]) if (state[field] !== undefined) next[field] = state[field];
+    fallbackStateStore.set(id, next);
+};
+
+// The reset button on a Spent (or Unusable, or busy) row.
+export function resetEntryState(id) {
+    clearMarks(id);
+    const entry = getResolvedFallbackList().find((candidate) => candidate.id === id);
+    logDebugEvent("setting", `Fallback list: ${entry?.label ?? id} reset by the player.`);
+}
+
+// --- Editing ---
+
+const CONNECTION_EDIT_LOG = {
+    name: (connection) => `renamed "${connectionDisplayName(connection)}"`,
+    apiKey: (connection) => `key ${connection.apiKey.trim() ? "set" : "cleared"}`,
+    endpoint: (connection) => `endpoint set to ${endpointHostForLog(connection.endpoint)}`,
+    customParams: (connection) => `custom parameters ${connection.customParams.trim() ? `set (${connection.customParams.trim().length} characters)` : "cleared"}`,
+    toolStrict: (connection) => `strict tool schema turned ${connection.toolStrict ? "on" : "off"}`,
+    suggestedModel: (connection) => `suggested model set to ${connection.suggestedModel || "(none)"}`,
+};
+
+export function updateConnection(id, patch) {
+    const connections = getConnections();
+    const index = connections.findIndex((connection) => connection.id === id);
+    if (index === -1) return false;
+    const before = connections[index];
+    const next = normalizeConnection({ ...before, ...patch, id });
+    connections[index] = next;
+    saveConnections(connections);
+    // A new key or address may well have a fresh allowance, so every mark on
+    // its entries goes; any other edit clears only Unusable.
+    const newAllowance = next.apiKey !== before.apiKey || next.endpoint !== before.endpoint || next.provider !== before.provider;
+    for (const entry of entriesUsingConnection(id)) clearMarks(entry.id, newAllowance ? [] : KEPT_WHILE_THE_ALLOWANCE_IS_THE_SAME);
+    for (const field of Object.keys(CONNECTION_EDIT_LOG)) {
+        if (next[field] !== before[field]) {
+            logSettingMessage(`connection:${id}:${field}`, `AI connection "${connectionDisplayName(next)}": ${CONNECTION_EDIT_LOG[field](next)}.`, { settle: true });
+        }
+    }
+    notifyFallbackChange();
+    return true;
+}
+
+export function entriesUsingConnection(connectionId) {
+    return getFallbackList().filter((entry) => entry.connectionId === connectionId);
+}
+
+export function updateEntry(id, patch) {
+    const list = getFallbackList();
+    const index = list.findIndex((entry) => entry.id === id);
+    if (index === -1) return false;
+    const before = list[index];
+    const next = normalizeEntry({ ...before, ...patch, id });
+    // A structured-output mode is evidence about ONE model: carrying it onto a
+    // new one could start that model in a weaker mode than it supports, and the
+    // ladder only ever steps down, so nothing would find out otherwise.
+    if (next.model !== before.model && patch.structuredMode === undefined) next.structuredMode = "auto";
+    list[index] = next;
+    saveFallbackList(list);
+    // Any edit may be the fix for Unusable. Only a new model or Connection has
+    // an allowance of its own, so only that clears Spent and busy: accepting a
+    // structured-output suggestion must not bring a Spent model back.
+    const newAllowance = next.model.trim() !== before.model.trim() || next.connectionId !== before.connectionId;
+    clearMarks(id, newAllowance ? [] : KEPT_WHILE_THE_ALLOWANCE_IS_THE_SAME);
+    if (next.model !== before.model || next.connectionId !== before.connectionId) {
+        logSettingMessage(`entry:${id}:model`, `Fallback list: entry ${index + 1} is now ${describeEntry(next.model, connectionName(next.connectionId))}.`, { settle: true });
+    }
+    if (next.customParamsOverride !== before.customParamsOverride) {
+        const size = next.customParamsOverride.trim().length;
+        logSettingMessage(`entry:${id}:params`, `Fallback list: entry ${index + 1} custom parameters ${size ? `set (${size} characters)` : "follow its connection"}.`, { settle: true });
+    }
+    if (next.structuredMode !== before.structuredMode) {
+        logSettingMessage(`entry:${id}:mode`, `Fallback list: entry ${index + 1} structured output set to ${next.structuredMode}.`, { settle: true });
+    }
+    notifyFallbackChange();
+    return true;
+}
+
+const dropTaskPicksFor = (entryIds) => {
+    const gone = new Set(entryIds);
+    const picks = readJsonSetting(TASK_PICKS_KEY, {});
+    const kept = Object.fromEntries(Object.entries(picks ?? {}).filter(([, entryId]) => !gone.has(entryId)));
+    writeJsonSetting(TASK_PICKS_KEY, kept);
+};
+
+export function removeEntry(id) {
+    const list = getFallbackList();
+    const removed = list.find((entry) => entry.id === id);
+    if (!removed) return false;
+    saveFallbackList(list.filter((entry) => entry.id !== id));
+    dropTaskPicksFor([id]);
+    fallbackStateStore.set(id, null);
+    logDebugEvent("setting", `Fallback list: removed ${describeEntry(removed.model, connectionName(removed.connectionId))}.`);
+    return true;
+}
+
+// Removes the Connection and every entry using it. The Settings screen asks
+// first, naming those entries (entriesUsingConnection).
+export function removeConnection(id) {
+    const connections = getConnections();
+    const removed = connections.find((connection) => connection.id === id);
+    if (!removed) return false;
+    const using = entriesUsingConnection(id).map((entry) => entry.id);
+    saveFallbackList(getFallbackList().filter((entry) => entry.connectionId !== id));
+    dropTaskPicksFor(using);
+    for (const entryId of using) fallbackStateStore.set(entryId, null);
+    saveConnections(connections.filter((connection) => connection.id !== id));
+    logDebugEvent("setting", `AI connection "${connectionDisplayName(removed)}" removed, with ${using.length} entr${using.length === 1 ? "y" : "ies"}.`);
+    return true;
+}
+
+// The Clear list button, for undoing a Fill that went wrong: every entry goes,
+// with its marks and any task pick pointing at it. The Connections stay, so
+// the keys do not have to be pasted again — Fill can rebuild from them. An
+// empty list stays empty (the migration only runs when the list was never
+// stored), and until something is added nothing can answer, which the Settings
+// screen asks about first.
+export function clearFallbackList() {
+    const ids = getFallbackList().map((entry) => entry.id);
+    if (!ids.length) return 0;
+    saveFallbackList([]);
+    dropTaskPicksFor(ids);
+    for (const id of ids) fallbackStateStore.set(id, null);
+    logDebugEvent("setting", `Fallback list cleared: ${ids.length} entr${ids.length === 1 ? "y" : "ies"} removed.`);
+    return ids.length;
+}
+
+export function moveEntry(id, toIndex) {
+    const list = getFallbackList();
+    const from = list.findIndex((entry) => entry.id === id);
+    if (from === -1) return false;
+    const [moved] = list.splice(from, 1);
+    const target = Math.max(0, Math.min(list.length, Number(toIndex) || 0));
+    list.splice(target, 0, moved);
+    saveFallbackList(list);
+    logDebugEvent("setting", `Fallback list: ${describeEntry(moved.model, connectionName(moved.connectionId))} moved to entry ${target + 1}.`);
+    notifyFallbackChange();
+    return true;
+}
+
+// --- Per-task picks ---
+
+// A task's own pick: the id of the entry it tries first, or "" for none.
+export function getTaskPick(taskKey) {
+    ensureMigrated();
+    const picks = readJsonSetting(TASK_PICKS_KEY, {});
+    return typeof picks?.[taskKey] === "string" ? picks[taskKey] : "";
+}
+
+export function setTaskPick(taskKey, entryId) {
+    ensureMigrated();
+    const picks = { ...readJsonSetting(TASK_PICKS_KEY, {}) };
+    if (entryId) picks[taskKey] = entryId;
+    else delete picks[taskKey];
+    writeJsonSetting(TASK_PICKS_KEY, picks);
+    const task = AI_TASK_ROUTING.find((entry) => entry.key === taskKey)?.label || taskKey;
+    const entry = getResolvedFallbackList().find((candidate) => candidate.id === entryId);
+    logDebugEvent("setting", `${task} ${entry ? `tries ${entry.label} first` : "uses the Fallback list from the top"}.`);
+    notifyFallbackChange();
+}
+
+// --- When an entry is Rate limited ---
+
+// One setting for the whole list. "wait" (the default) retries the same entry
+// as the game always did, protecting the backups' daily allowance; "next"
+// moves straight on.
+export function getRateLimitPolicy() {
+    return typeof localStorage !== "undefined" && localStorage.getItem(RATE_LIMIT_POLICY_KEY) === "next" ? "next" : "wait";
+}
+
+export function setRateLimitPolicy(policy) {
+    const next = policy === "next" ? "next" : "wait";
+    localStorage.setItem(RATE_LIMIT_POLICY_KEY, next);
+    logDebugEvent("setting", `When a model is rate limited: ${next === "next" ? "try the next one" : "wait"}.`);
+    notifyFallbackChange();
 }
 
 // --- Recent models ---

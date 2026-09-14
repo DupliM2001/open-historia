@@ -270,20 +270,38 @@ export const setDebugLogVerbose = (verbose) => {
 //
 // Matched by suffix rather than against a fixed list so a provider added later
 // is covered without anyone remembering to come back here.
+//
+// Connections keep their keys inside one stored JSON list (`ai_connections`),
+// as the profiles before them did (`ai_provider_presets`), so those lists are
+// opened and every `apiKey` field in them counted too. Only lists named so:
+// this runs for every entry, and the log keeps its own megabyte in storage.
+const collectApiKeyFields = (node, into, depth = 0) => {
+    if (!node || typeof node !== "object" || depth > 4) return;
+    for (const [field, value] of Object.entries(node)) {
+        if (field === "apiKey" && typeof value === "string") into.push(value);
+        else collectApiKeyFields(value, into, depth + 1);
+    }
+};
+
 const storedSecretValues = () => {
     if (typeof localStorage === "undefined") return [];
-    const values = [];
+    const found = [];
     try {
         for (let index = 0; index < localStorage.length; index += 1) {
             const key = localStorage.key(index);
-            if (!key || !/(_api_key|_token|_secret)$/i.test(key)) continue;
+            if (!key) continue;
             const value = localStorage.getItem(key);
-            // Very short values are not keys and would redact half the log if
-            // treated as one (a stray "1" would eat every number in it).
-            if (typeof value === "string" && value.trim().length >= 8) values.push(value.trim());
+            if (typeof value !== "string") continue;
+            if (/(_api_key|_token|_secret)$/i.test(key)) {
+                found.push(value);
+            } else if (/(_connections|_presets)$/i.test(key)) {
+                try { collectApiKeyFields(JSON.parse(value), found); } catch { /* not JSON after all */ }
+            }
         }
     } catch { /* storage disabled — fall through to the patterns below */ }
-    return values;
+    // Very short values are not keys and would redact half the log if treated
+    // as one (a stray "1" would eat every number in it).
+    return found.map((value) => value.trim()).filter((value) => value.length >= 8);
 };
 
 // Run over every entry as it is recorded, and over every Desktop log entry as it

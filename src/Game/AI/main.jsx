@@ -1,13 +1,16 @@
 /*! Open Historia — portions (server relay for OpenAI-style APIs + reasoning toggle) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import {
-    getModelForTask,
-    getProviderSettings,
+    fallbackStateStore,
+    getEntryStatus,
+    getRateLimitPolicy,
     getReasoningEnabled,
-    getStoredProvider,
+    getResolvedFallbackList,
+    getTaskPick,
     providerSupportsModelDiscovery,
     saveRecentModel,
-    setProviderField,
+    updateEntry,
 } from "./providerConfig.js";
+import { formatResetTime, runWithFallback } from "./fallbackRunner.js";
 import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord } from "./telemetry.js";
@@ -26,18 +29,18 @@ import { isBetaUnits } from "../../runtime/mapSettings.js";
 import { normalizePromptPack } from "./gameplayPrompts.js";
 import {
     busyProviderMessage,
+    classifyProviderFailure,
     contextWindowMessage,
     describeHtmlErrorPage,
     errorPayloadText,
     isBusyErrorPayload,
     isContextWindowErrorPayload,
     isContextWindowErrorText,
-    isQuotaExhaustedPayload,
     isStreamingRefusal,
     isStreamingRequired,
     looksLikeDeliberation,
     providerErrorReplyMessage,
-    retryDelayMsFromPayload,
+    shouldRetryProviderFailure,
     TOOL_CALL_INSISTENCE,
     toolStreamRefusalError,
 } from "./providerErrors.js";
@@ -334,19 +337,21 @@ function noteStructuredModeLanding(key, startedAt, landedAt, configured) {
     if (structuredModeObserver.shouldSuggest(key, configured)) {
         try {
             window.dispatchEvent(new CustomEvent("ai:structured-mode-suggestion", {
-                detail: { key, mode: landedAt, provider: key.split("|")[0] },
+                detail: { key, mode: landedAt },
             }));
         } catch { /* no window (tests, workers) — the observation still stands */ }
     }
 }
 
 // Asked by the UI when it wants to know whether there is anything to offer.
+// The evidence is kept per Fallback entry — the id is the observer's key — so
+// the first entry with something to offer is the one asked about.
 export const getStructuredModeSuggestion = () => {
-    const provider = getStoredProvider();
-    const settings = getProviderSettings(provider);
-    const key = `${provider}|${settings.model || ""}`;
-    const mode = structuredModeObserver.shouldSuggest(key, settings.structuredMode);
-    return mode ? { key, mode, provider } : null;
+    for (const entry of getResolvedFallbackList()) {
+        const mode = structuredModeObserver.shouldSuggest(entry.id, entry.structuredMode);
+        if (mode) return { key: entry.id, mode, label: entry.label };
+    }
+    return null;
 };
 
 // "No thanks" — remembered for the session so it does not ask again every turn.
@@ -354,12 +359,13 @@ export const declineStructuredModeSuggestion = (key, mode) => {
     structuredModeObserver.decline(key, mode);
 };
 
-// "Yes" — write the setting, then forget the evidence so a later change in the
-// endpoint's behaviour is learned fresh rather than judged against stale data.
-export const acceptStructuredModeSuggestion = (key, mode, provider) => {
-    setProviderField(provider || getStoredProvider(), "structuredMode", mode);
+// "Yes" — write the setting on that entry, then forget the evidence so a later
+// change in the endpoint's behaviour is learned fresh rather than judged
+// against stale data.
+export const acceptStructuredModeSuggestion = (key, mode) => {
+    updateEntry(key, { structuredMode: mode });
     structuredModeObserver.clear(key);
-    logDebugEvent("ai", `Structured output set to ${mode} for ${provider}.`, { key });
+    logDebugEvent("ai", `Structured output set to ${mode} for a Fallback entry.`, { key });
 };
 
 const PAGE_IS_LOCAL = isLocallyServed();
@@ -503,7 +509,7 @@ function emptyReplyMessage(providerLabel) {
 function streamFailureError(providerLabel, streamResult, { retried = false, fallbackMessage } = {}) {
     const detail = errorPayloadText(streamResult.streamError);
     const busy = isBusyErrorPayload(streamResult.streamError);
-    return aiFailureError(
+    const error = aiFailureError(
         streamResult.streamError
             ? (busy ? busyProviderMessage(providerLabel, detail, retried) : providerErrorReplyMessage(providerLabel, detail))
             : fallbackMessage,
@@ -516,6 +522,10 @@ function streamFailureError(providerLabel, streamResult, { retried = false, fall
             sampleFrames: streamResult.sample,
         },
     );
+    // The provider's own refusal says whether another Fallback entry is worth
+    // asking; a stream that simply came back empty does not.
+    if (streamResult.streamError) error.providerFailure = classifyProviderFailure({ payload: streamResult.streamError });
+    return error;
 }
 
 // One retry, five seconds later. Long enough for a load spike to pass, short
@@ -530,7 +540,32 @@ const OVERLOADED_RETRY_DELAY = 5000;
 // inside a stream — this just makes the HTTP status agree with the stream frame.
 // Without it a 502 threw immediately while an identical 502 delivered as a frame
 // got three attempts, and a single gateway hiccup cost a chat reply or a turn.
-const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503, 504]);
+// 529 is Anthropic's own status for overloaded_error, the same thing again.
+const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503, 504, 529]);
+
+// One of the statuses above: wait and go round again, or throw an error that
+// says why, for the Fallback list. A spent quota never retries — every
+// provider but Gemini used to retry it three times, OpenAI's insufficient_quota
+// included — and how often busy and Rate limited retry is the list's rule
+// (shouldRetryProviderFailure), so every provider path agrees. Gemini has its
+// own (callGemini), because its messages name its quotas.
+async function retryOrFailByStatus(response, { attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel }) {
+    const payload = await readErrorPayload(response);
+    const failure = classifyProviderFailure({ status: response.status, payload });
+    const details = extractErrorMessage(payload, "");
+    if (failure.kind === "spent") {
+        throw providerFailureError(`${providerLabel} says the quota or balance on this key is used up. ${details}`.trim(), failure);
+    }
+    const wait = failure.kind === "rateLimited" ? (failure.waitMs ?? retryDelay) : retryDelay;
+    if (!shouldRetryProviderFailure({ failure, attempt, retries, canFallBack, rateLimitPolicy }) || !canRetryBeforeDeadline(deadline, wait)) {
+        const message = failure.kind === "rateLimited"
+            ? `${providerLabel} is rate limiting this key after ${attempt} attempt${attempt === 1 ? "" : "s"}. ${details}`.trim()
+            : extractErrorMessage(payload, `${providerLabel} is busy right now. Try again in a moment.`);
+        throw providerFailureError(message, failure);
+    }
+    console.warn(`${providerLabel} ${failure.kind === "rateLimited" ? "is rate limiting" : "is busy"}. Retrying in ${wait / 1000}s... (attempt ${attempt}/${retries})`);
+    await sleep(wait, signal);
+}
 
 async function streamTextSSE(response, extractDelta, onChunk) {
     const reader = response.body.getReader();
@@ -646,8 +681,31 @@ function toAnthropicMessages(history) {
     }));
 }
 
-// The model one call runs with: the task's own override when the player set one
-// in Settings → Per-task models, else the provider default (typed, or discovered
+// An error that says how the call failed, for the Fallback list
+// (fallbackRunner.js): Spent, Unusable, Rate limited, busy or other. Only the
+// first four move a call to the next entry.
+function providerFailureError(message, failure, extra = {}) {
+    const error = Object.assign(new Error(message), extra);
+    error.providerFailure = failure;
+    return error;
+}
+
+// Spent and Unusable: no retry, and none of a provider's own concessions
+// (streaming off, a lower structured-output rung) can fix them either.
+const waitingCannotFix = (failure) => failure.kind === "unusable" || failure.kind === "spent";
+
+// A server the browser could not reach at all (a local model that is not
+// running, the network down) is busy for the Fallback list: worth skipping for a
+// minute, and worth trying again after. Matched on the browsers' own wording, so
+// a TypeError from a bug in this file is never mistaken for one.
+const UNREACHABLE_TEXT = /failed to fetch|fetch failed|networkerror|load failed|network request failed/i;
+const isUnreachableError = (error) => error instanceof TypeError && UNREACHABLE_TEXT.test(String(error.message));
+
+// An entry that is missing what its provider needs cannot answer until the
+// player edits it — the same as a rejected key.
+const missingSetupError = (message, reason) => providerFailureError(message, { kind: "unusable", reason });
+
+// The model one call runs with: the Fallback entry's own (typed, or discovered
 // below). Recorded afterwards so the model fields can suggest what was used.
 async function resolveModel(provider, options = {}) {
     const model = await resolveConfiguredModel(provider, options);
@@ -655,8 +713,13 @@ async function resolveModel(provider, options = {}) {
     return model;
 }
 
-async function resolveConfiguredModel(provider, { endpoint = "", headers = {}, fallbackModel = "", providerLabel, signal, taskKey } = {}) {
-    const configuredModel = getModelForTask(provider, taskKey).trim();
+// A model discovered from a server's /models list, per entry, for the session.
+// Never written into the entry: a blank model means "whatever the server
+// serves", and should keep meaning that when the server's list changes.
+const discoveredModels = new Map(); // entry id -> model id
+
+async function resolveConfiguredModel(provider, { entrySettings, endpoint = "", headers = {}, fallbackModel = "", providerLabel, signal } = {}) {
+    const configuredModel = String(entrySettings?.model ?? "").trim();
 
     if (configuredModel) {
         if (provider === "gemini") return normalizeGeminiModel(configuredModel);
@@ -668,14 +731,17 @@ async function resolveConfiguredModel(provider, { endpoint = "", headers = {}, f
     }
 
     if (!providerSupportsModelDiscovery(provider)) {
-        throw new Error(`Go to **settings** and enter a model for ${providerLabel}.`);
+        throw missingSetupError(`Go to **settings** and enter a model for ${providerLabel}.`, "no model set");
     }
 
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
     if (!normalizedEndpoint) {
-        throw new Error(`Go to **settings** and enter an endpoint for ${providerLabel}.`);
+        throw missingSetupError(`Go to **settings** and enter an endpoint for ${providerLabel}.`, "no endpoint set");
     }
+
+    const cached = entrySettings?.id ? discoveredModels.get(entrySettings.id) : "";
+    if (cached) return cached;
 
     try {
         const response = await providerFetch(`${normalizedEndpoint}/models`, { method: "GET", headers, signal });
@@ -693,12 +759,17 @@ async function resolveConfiguredModel(provider, { endpoint = "", headers = {}, f
         }
 
         console.log(`Auto-detected ${providerLabel} model:`, discoveredModel);
-        setProviderField(provider, "model", discoveredModel);
+        if (entrySettings?.id) discoveredModels.set(entrySettings.id, discoveredModel);
         return discoveredModel;
     } catch (error) {
         if (signal?.aborted) throw signal.reason ?? error;
         console.warn(`Could not auto-detect model for ${providerLabel}:`, error);
-        throw new Error(`Could not auto-detect a model for ${providerLabel}. Enter a model manually in **settings**.`);
+        // A server that cannot be reached may come back; one that answers
+        // with no models needs the player.
+        throw providerFailureError(
+            `Could not auto-detect a model for ${providerLabel}. Enter a model manually in **settings**.`,
+            isUnreachableError(error) ? { kind: "busy", reason: "could not be reached" } : { kind: "unusable", reason: "no model found on the server" },
+        );
     }
 }
 
@@ -761,34 +832,66 @@ async function matchServedModel(provider, configuredModel, { endpoint = "", head
 }
 
 async function callGemini(systemPrompt, history, {
+    canFallBack = false,
     deadline,
+    entrySettings,
     maxTokens = 8192,
     onActivity,
     onChunk,
     onUsage,
+    rateLimitPolicy = "wait",
     retries = 3,
     retryDelay = 15000,
     onModel,
     signal,
-    taskKey,
     tool,
 } = {}) {
-    const settings = getProviderSettings("gemini");
+    const settings = entrySettings;
     const apiKey = settings.apiKey.trim();
 
     if (!apiKey) {
-        throw new Error("Go to **settings** and paste your Gemini API key - you can get it at https://aistudio.google.com/app/apikey");
+        throw missingSetupError("Go to **settings** and paste your Gemini API key - you can get it at https://aistudio.google.com/app/apikey", "no API key");
     }
 
     const model = await resolveModel("gemini", {
+        entrySettings,
         fallbackModel: GEMINI_DEFAULT_MODEL,
         providerLabel: "Gemini",
         signal,
-        taskKey,
     });
     onModel?.(model);
 
     const customParams = parseCustomParams(settings.customParams, "Gemini");
+
+    // Sorted once for every retryable status either path below can see, so the
+    // Fallback list and the retry count agree (shouldRetryProviderFailure).
+    // Chat waits less for a busy model than a turn does: a player is watching.
+    const retryOrFail = async (response, attempt, busyDelay = retryDelay) => {
+        const payload = await readErrorPayload(response);
+        const failure = classifyProviderFailure({ status: response.status, payload });
+        const details = extractErrorMessage(payload, `Gemini returned ${response.status}.`);
+        if (failure.kind === "spent") {
+            throw providerFailureError(`Gemini returned 429: the allowance or balance on this key is used up. ${details}`.trim(), failure);
+        }
+        // Honour the provider's own RetryInfo when it sent one; it knows the
+        // window better than a fixed guess does.
+        const wait = failure.kind === "rateLimited" ? (failure.waitMs ?? retryDelay) : busyDelay;
+        if (!shouldRetryProviderFailure({ failure, attempt, retries, canFallBack, rateLimitPolicy }) || !canRetryBeforeDeadline(deadline, wait)) {
+            if (failure.kind === "rateLimited") {
+                throw providerFailureError(
+                    `Gemini is rate limiting this key after ${attempt} attempt${attempt === 1 ? "" : "s"}. ${details} `
+                    + "Wait a minute and try again, or lower the request rate in Settings.".trim(),
+                    failure,
+                );
+            }
+            if (failure.kind === "busy") {
+                throw providerFailureError(`Gemini is temporarily unavailable after ${attempt} attempt${attempt === 1 ? "" : "s"}. Try again in a minute.`, failure);
+            }
+            throw providerFailureError(extractErrorMessage(payload, `Gemini API request failed (${response.status})`), failure);
+        }
+        console.warn(`[ai] Gemini ${failure.kind === "rateLimited" ? "rate limited" : "is busy"}. Retrying in ${wait / 1000}s... (attempt ${attempt}/${retries})`);
+        await sleep(wait, signal);
+    };
 
     // Advisor/chat streaming: with an onChunk callback (and no tool), use the
     // streaming endpoint so the reply appears token-by-token. maxOutputTokens
@@ -796,9 +899,11 @@ async function callGemini(systemPrompt, history, {
     // deliberately sends NO cap so long simulations are never truncated.
     if (onChunk && !tool) {
         const streamUrl = getGeminiStreamUrl(model, apiKey);
-        // Two passes at most: the second only ever happens when the first came
-        // back with an overloaded/unavailable error INSIDE the stream, which
-        // arrives as an HTTP 200 and so never reaches the status-code retry.
+        // A busy or Rate limited status is retried as the Fallback list's rule
+        // says (one retry when there is somewhere to fall back to). An
+        // overloaded error INSIDE the stream arrives as an HTTP 200, never
+        // reaches that check, and gets its own single retry.
+        let retriedInStream = false;
         for (let pass = 1; ; pass += 1) {
             const response = await fetch(streamUrl, {
                 method: "POST",
@@ -814,19 +919,27 @@ async function callGemini(systemPrompt, history, {
                 }),
                 signal,
             });
+            if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
+                await retryOrFail(response, pass, OVERLOADED_RETRY_DELAY);
+                continue;
+            }
             if (!response.ok) {
                 const payload = await readErrorPayload(response);
-                throw new Error(extractErrorMessage(payload, `Gemini API request failed (${response.status})`));
+                throw providerFailureError(
+                    extractErrorMessage(payload, `Gemini API request failed (${response.status})`),
+                    classifyProviderFailure({ status: response.status, payload }),
+                );
             }
             const streamResult = await streamTextSSE(response, geminiStreamDelta, onChunk);
             if (streamResult.text) return streamResult.text;
-            if (pass === 1 && isBusyErrorPayload(streamResult.streamError) && canRetryBeforeDeadline(deadline, OVERLOADED_RETRY_DELAY)) {
+            if (!retriedInStream && isBusyErrorPayload(streamResult.streamError) && canRetryBeforeDeadline(deadline, OVERLOADED_RETRY_DELAY)) {
+                retriedInStream = true;
                 console.warn(`[ai] Gemini reported "${errorPayloadText(streamResult.streamError)}" mid-stream; retrying once in ${OVERLOADED_RETRY_DELAY / 1000}s`);
                 await sleep(OVERLOADED_RETRY_DELAY, signal);
                 continue;
             }
             throw streamFailureError("Gemini", streamResult, {
-                retried: pass > 1,
+                retried: retriedInStream,
                 fallbackMessage: "Gemini response did not contain text.",
             });
         }
@@ -875,45 +988,19 @@ async function callGemini(systemPrompt, history, {
         // A 429 used to be fatal here while every other provider retried it, so
         // one per-minute trip on a free-tier key destroyed the turn and dropped
         // the player to canned events. Only a SPENT quota (daily allowance, or
-        // billing) is worth failing over; a rate limit is what waiting is for.
-        if (response.status === 429) {
-            const payload = await readErrorPayload(response);
-            const details = extractErrorMessage(payload, "Gemini returned 429.");
-
-            if (isQuotaExhaustedPayload(payload)) {
-                throw new Error(`Gemini returned 429. Your balance or quota appears to be exhausted. ${details}`.trim());
-            }
-
-            // Honour the provider's own RetryInfo when it sent one; it knows the
-            // window better than a fixed guess does.
-            const wait = retryDelayMsFromPayload(payload) ?? retryDelay;
-            if (attempt === retries || !canRetryBeforeDeadline(deadline, wait)) {
-                throw new Error(
-                    `Gemini is rate limiting this key after ${retries} attempts. ${details} `
-                    + "Wait a minute and try again, or lower the request rate in Settings.".trim(),
-                );
-            }
-
-            console.warn(`[ai] Gemini rate limited. Retrying in ${wait / 1000}s... (attempt ${attempt}/${retries})`);
-            await sleep(wait, signal);
-            continue;
-        }
-
-        // 429 is handled above (a rate limit and a spent quota need different
-        // answers). This is every other transient gateway failure.
+        // billing) is worth failing over; a rate limit is what waiting is for —
+        // unless the player chose to move straight to the next Fallback entry.
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            if (attempt === retries || !canRetryBeforeDeadline(deadline, retryDelay)) {
-                throw new Error(`Gemini is temporarily unavailable after ${retries} attempts. Try again in a minute.`);
-            }
-
-            console.warn(`Gemini is busy. Retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${retries})`);
-            await sleep(retryDelay, signal);
+            await retryOrFail(response, attempt);
             continue;
         }
 
         if (!response.ok) {
             const payload = await readErrorPayload(response);
-            throw new Error(extractErrorMessage(payload, `Gemini API request failed (${response.status})`));
+            throw providerFailureError(
+                extractErrorMessage(payload, `Gemini API request failed (${response.status})`),
+                classifyProviderFailure({ status: response.status, payload }),
+            );
         }
 
         // Branch on what actually came back, not on what was asked for: an edge
@@ -974,6 +1061,8 @@ async function callOpenAIStyleChatCompletions({
     toolStrict = false,
     retries = 3,
     retryDelay = 15000,
+    canFallBack = false,
+    rateLimitPolicy = "wait",
     deadline,
     signal,
     tool,
@@ -1127,6 +1216,10 @@ async function callOpenAIStyleChatCompletions({
         if ([400, 422].includes(response.status)) {
             const payload = await readErrorPayload(response);
             const errorMessage = extractErrorMessage(payload, `${providerLabel} request failed (${response.status})`);
+            // A bad key, a missing model or a spent balance can arrive as a 400
+            // too; none of the concessions below would fix those.
+            const failure = classifyProviderFailure({ status: response.status, payload });
+            if (waitingCannotFix(failure)) throw providerFailureError(errorMessage, failure);
 
             // Cheapest concession first. A gateway that refuses stream+tools still
             // does tools, it just stops keeping the connection warm — whereas
@@ -1151,7 +1244,7 @@ async function callOpenAIStyleChatCompletions({
                     continue;
                 }
 
-                throw new Error(errorMessage);
+                throw providerFailureError(errorMessage, failure);
             }
 
             if (structuredMode === "json_schema" && allowJsonSchemaFallback) {
@@ -1167,17 +1260,13 @@ async function callOpenAIStyleChatCompletions({
             // Nothing left to concede. Throw the message we already read rather
             // than falling through to the generic handler below, which would try
             // to read this same body a second time and get nothing.
-            throw new Error(errorMessage);
+            throw providerFailureError(errorMessage, failure);
         }
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            if (attempt === retries || !canRetryBeforeDeadline(deadline, retryDelay)) {
-                const payload = await readErrorPayload(response);
-                throw new Error(extractErrorMessage(payload, `${providerLabel} is busy right now. Try again in a moment.`));
-            }
-
-            console.warn(`${providerLabel} is busy. Retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${retries})`);
-            await sleep(retryDelay, signal);
+            await retryOrFailByStatus(response, {
+                attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel,
+            });
             attempt += 1;
             continue;
         }
@@ -1190,7 +1279,7 @@ async function callOpenAIStyleChatCompletions({
             if (isContextWindowErrorPayload(payload?.error ?? payload)) {
                 throw new Error(contextWindowMessage(providerLabel, detail, requestChars));
             }
-            throw new Error(detail);
+            throw providerFailureError(detail, classifyProviderFailure({ status: response.status, payload }));
         }
 
         // Advisor/chat streaming: forward tokens to the UI as they arrive. Guard
@@ -1373,11 +1462,12 @@ async function callOpenAIStyleChatCompletions({
 }
 
 async function callOpenAI(systemPrompt, history, opts = {}) {
-    const settings = getProviderSettings("openai");
+    const { entrySettings, ...rest } = opts;
+    const settings = entrySettings;
     const apiKey = settings.apiKey.trim();
 
     if (!apiKey) {
-        throw new Error("Go to **settings** and paste your OpenAI API key.");
+        throw missingSetupError("Go to **settings** and paste your OpenAI API key.", "no API key");
     }
 
     const headers = {
@@ -1386,11 +1476,11 @@ async function callOpenAI(systemPrompt, history, opts = {}) {
     };
 
     const model = await resolveModel("openai", {
+        entrySettings,
         endpoint: OPENAI_API_ENDPOINT,
         headers,
         providerLabel: "OpenAI",
         signal: opts.signal,
-        taskKey: opts.taskKey,
     });
     opts.onModel?.(model);
 
@@ -1404,18 +1494,19 @@ async function callOpenAI(systemPrompt, history, opts = {}) {
         customParams: parseCustomParams(settings.customParams, "OpenAI"),
         allowJsonSchemaFallback: false,
         configuredStructuredMode: settings.structuredMode,
-        observerKey: `${settings.provider}|${model}`,
+        observerKey: settings.id,
         tokenLimitField: "max_completion_tokens",
-        ...opts,
+        ...rest,
     });
 }
 
 async function callOpenAICompatible(systemPrompt, history, opts = {}) {
-    const settings = getProviderSettings("openai-compatible");
+    const { entrySettings, ...rest } = opts;
+    const settings = entrySettings;
     const endpoint = normalizeEndpoint(settings.endpoint);
 
     if (!endpoint) {
-        throw new Error("Go to **settings**, select OpenAI Compatible, and enter your endpoint (for example http://localhost:11434/v1).");
+        throw missingSetupError("Go to **settings** and enter the OpenAI Compatible endpoint (for example http://localhost:11434/v1).", "no endpoint set");
     }
 
     const headers = {
@@ -1424,11 +1515,11 @@ async function callOpenAICompatible(systemPrompt, history, opts = {}) {
     };
 
     const model = await resolveModel("openai-compatible", {
+        entrySettings,
         endpoint,
         headers,
         providerLabel: "OpenAI Compatible",
         signal: opts.signal,
-        taskKey: opts.taskKey,
     });
     opts.onModel?.(model);
 
@@ -1443,9 +1534,9 @@ async function callOpenAICompatible(systemPrompt, history, opts = {}) {
         toolStrict: settings.toolStrict === true,
         allowJsonSchemaFallback: true,
         configuredStructuredMode: settings.structuredMode,
-        observerKey: `${settings.provider}|${model}`,
+        observerKey: settings.id,
         tokenLimitField: "max_tokens",
-        ...opts,
+        ...rest,
     });
 }
 
@@ -1474,35 +1565,37 @@ function buildAnthropicSystemContent(systemPrompt, staticPrefixEnd) {
 }
 
 async function callAnthropic(systemPrompt, history, {
+    canFallBack = false,
     deadline,
+    entrySettings,
     maxTokens,
     onActivity,
     onChunk,
     onUsage,
+    rateLimitPolicy = "wait",
     retries = 3,
     retryDelay = 15000,
     onModel,
     signal,
     staticPrefixEnd,
-    taskKey,
     tool,
 } = {}) {
     let retriedAfterOverload = false;
     // Anthropic tool calls stream (see the request body below); this flips if the
     // endpoint refuses to, so the call retries buffered instead of failing.
     let streamingDisabled = false;
-    const settings = getProviderSettings("anthropic");
+    const settings = entrySettings;
     const apiKey = settings.apiKey.trim();
 
     if (!apiKey) {
-        throw new Error("Go to **settings** and paste your Anthropic API key.");
+        throw missingSetupError("Go to **settings** and paste your Anthropic API key.", "no API key");
     }
 
     const model = await resolveModel("anthropic", {
+        entrySettings,
         fallbackModel: ANTHROPIC_DEFAULT_MODEL,
         providerLabel: "Anthropic",
         signal,
-        taskKey,
     });
     onModel?.(model);
 
@@ -1564,19 +1657,19 @@ async function callAnthropic(systemPrompt, history, {
         });
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            if (attempt === retries || !canRetryBeforeDeadline(deadline, retryDelay)) {
-                const payload = await readErrorPayload(response);
-                throw new Error(extractErrorMessage(payload, "Anthropic is busy right now. Try again in a moment."));
-            }
-
-            console.warn(`Anthropic is busy. Retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${retries})`);
-            await sleep(retryDelay, signal);
+            await retryOrFailByStatus(response, {
+                attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel: "Anthropic",
+            });
             continue;
         }
 
         if (!response.ok) {
             const payload = await readErrorPayload(response);
             const message = extractErrorMessage(payload, `Anthropic request failed (${response.status})`);
+            // A spent balance ("credit balance is too low") and a bad key both
+            // arrive as errors none of the concessions below can fix.
+            const failure = classifyProviderFailure({ status: response.status, payload });
+            if (waitingCannotFix(failure)) throw providerFailureError(message, failure);
             // The cap was removed on purpose; honor the MODEL's own ceiling. Anthropic 400s
             // "max_tokens: <sent> > <max>, ..." — learn <max>, cache it, and retry at it.
             const capMatch = /max_tokens:\s*\d+\s*>\s*(\d+)/i.exec(message);
@@ -1603,7 +1696,7 @@ async function callAnthropic(systemPrompt, history, {
                 console.warn("[ai] Anthropic refused a streamed request; retrying buffered — long turns may time out.");
                 continue;
             }
-            throw new Error(message);
+            throw providerFailureError(message, failure);
         }
 
         if (onChunk && !tool && String(response.headers.get("content-type") || "").includes("text/event-stream")) {
@@ -1670,36 +1763,38 @@ async function callAnthropic(systemPrompt, history, {
 }
 
 async function callAnthropicCompatible(systemPrompt, history, {
+    canFallBack = false,
     deadline,
+    entrySettings,
     maxTokens,
     onActivity,
     onChunk,
     onUsage,
+    rateLimitPolicy = "wait",
     retries = 3,
     retryDelay = 15000,
     onModel,
     signal,
     staticPrefixEnd,
-    taskKey,
     tool,
 } = {}) {
     let retriedAfterOverload = false;
     // Same as the native path: tool calls stream, and this flips if the proxy
     // refuses to so the call retries buffered.
     let streamingDisabled = false;
-    const settings = getProviderSettings("anthropic-compatible");
+    const settings = entrySettings;
     const endpoint = normalizeEndpoint(settings.endpoint);
 
     if (!endpoint) {
-        throw new Error("Go to **settings**, select Anthropic Compatible, and enter your endpoint (a self-hosted Anthropic Messages API proxy).");
+        throw missingSetupError("Go to **settings** and enter the Anthropic Compatible endpoint (a self-hosted Anthropic Messages API proxy).", "no endpoint set");
     }
 
     const apiKey = settings.apiKey.trim();
     const model = await resolveModel("anthropic-compatible", {
+        entrySettings,
         fallbackModel: ANTHROPIC_DEFAULT_MODEL,
         providerLabel: "Anthropic Compatible",
         signal,
-        taskKey,
     });
     onModel?.(model);
 
@@ -1735,10 +1830,10 @@ async function callAnthropicCompatible(systemPrompt, history, {
     const anthropicStartMode = startingStructuredMode(settings.structuredMode) === "tool" ? "tool" : "text_json";
     let structuredMode = tool ? anthropicStartMode : "text";
     let insistedOnToolCall = false;
-    // Derived here rather than threaded in: this caller already knows both halves,
-    // and the observation is per provider AND model (the same proxy can front one
-    // model that honours tool calling and one that does not).
-    const observerKey = `anthropic-compatible|${model}`;
+    // Per Fallback entry: the observation is per provider AND model (the same
+    // proxy can front one model that honours tool calling and one that does not),
+    // and an entry is exactly that pair.
+    const observerKey = settings.id;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         const useToolChannel = Boolean(tool) && structuredMode === "tool";
@@ -1782,19 +1877,17 @@ async function callAnthropicCompatible(systemPrompt, history, {
         const response = await providerFetch(`${endpoint}/messages`, { headers, payload: body, signal });
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
-            if (attempt === retries || !canRetryBeforeDeadline(deadline, retryDelay)) {
-                const payload = await readErrorPayload(response);
-                throw new Error(extractErrorMessage(payload, "The Anthropic-compatible endpoint is busy right now. Try again in a moment."));
-            }
-
-            console.warn(`Anthropic-compatible endpoint is busy. Retrying in ${retryDelay / 1000}s... (attempt ${attempt}/${retries})`);
-            await sleep(retryDelay, signal);
+            await retryOrFailByStatus(response, {
+                attempt, retries, retryDelay, deadline, signal, canFallBack, rateLimitPolicy, providerLabel: "The Anthropic-compatible endpoint",
+            });
             continue;
         }
 
         if (!response.ok) {
             const payload = await readErrorPayload(response);
             const message = extractErrorMessage(payload, `Anthropic-compatible request failed (${response.status})`);
+            const failure = classifyProviderFailure({ status: response.status, payload });
+            if (waitingCannotFix(failure)) throw providerFailureError(message, failure);
             // Honor the model's own max_tokens ceiling (the cap was removed on purpose).
             const capMatch = /max_tokens:\s*\d+\s*>\s*(\d+)/i.exec(message);
             if (response.status === 400 && capMatch && Number(capMatch[1]) > 0
@@ -1820,7 +1913,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
                 console.warn("[ai] Anthropic-compatible refused a streamed request; retrying buffered — long turns may time out.");
                 continue;
             }
-            throw new Error(message);
+            throw providerFailureError(message, failure);
         }
 
         if (onChunk && !tool && String(response.headers.get("content-type") || "").includes("text/event-stream")) {
@@ -1947,6 +2040,50 @@ const conversationShape = (systemPrompt, history) => ({
 
 const elapsedSeconds = (startedAt) => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 
+// A call that failed without the provider saying why, because it never reached
+// the provider at all (isUnreachableError).
+const asUnreachable = (error, signal) => {
+    if (error?.providerFailure || signal?.aborted || error?.name === "AbortError") return error;
+    if (isUnreachableError(error)) error.providerFailure = { kind: "busy", reason: "could not be reached" };
+    return error;
+};
+
+// What happened to an entry, in the words a Settings row and a notice use.
+const describeFailure = (entry, failure) => {
+    switch (failure?.kind) {
+    case "spent": return entry.provider === "gemini" ? "has used today's allowance" : "has used its allowance";
+    case "unusable": return `can't be used: ${failure.reason}`;
+    case "rateLimited": return "is rate limited";
+    default: return failure?.reason === "could not be reached" ? "could not be reached" : "is busy";
+    }
+};
+
+// Every mark, into the Diagnostics log with when it clears: a turn answered by
+// three models is otherwise impossible to read back.
+function logFallbackMark(label, entry, failure, state) {
+    const clears = state.unusable
+        ? "until it is edited"
+        : `until ${formatResetTime(state.spentUntil ?? state.skipUntil)}`;
+    logDebugEvent("ai", `${label}: Fallback list — ${entry.label} ${describeFailure(entry, failure)}; skipped ${clears}.`, {
+        provider: entry.provider,
+        kind: failure.kind,
+        reason: failure.reason || "(none given)",
+    }, { problem: failure.kind === "unusable" });
+}
+
+// Once per switch, not once per call (the runner only reports the entries a
+// call marked itself). The game UI shows it as a short notice.
+// `to` is null when nothing below answered either: the notice then says only
+// what ran out, and the call's own error says the rest.
+function announceFallbackSwitch({ skipped, to }) {
+    const lost = skipped.map(({ entry, failure }) => `${entry.label} ${describeFailure(entry, failure)}`).join("; ");
+    const message = to ? `${lost}. Now using ${to.label}.` : `${lost}.`;
+    logDebugEvent("ai", `Fallback list: ${message}`);
+    try {
+        window.dispatchEvent(new CustomEvent("ai:fallback-switch", { detail: { message } }));
+    } catch { /* no window (tests, the harness) — the log line stands */ }
+}
+
 export async function callAI(systemPrompt, history, opts = {}) {
     // Non-English players get replies in their language at the source —
     // native answers beat post-translating them (see runtime/i18n.js).
@@ -1967,7 +2104,11 @@ export async function callAI(systemPrompt, history, opts = {}) {
         systemPrompt = `${systemPrompt}\n\n${directive}`;
     }
 
-    const provider = getStoredProvider();
+    const entries = getResolvedFallbackList();
+    const preferredEntryId = providerOpts.taskKey ? getTaskPick(providerOpts.taskKey) : "";
+    // Named for where the call STARTS; the answer names who actually answered.
+    const firstChoice = entries.find((entry) => entry.id === preferredEntryId) ?? entries[0];
+    const provider = firstChoice?.provider ?? "(none)";
     const label = logLabel || "AI call";
     const startedAt = Date.now();
     // Telemetry (Settings → AI debug console): one record per call — prompt,
@@ -1986,13 +2127,13 @@ export async function callAI(systemPrompt, history, opts = {}) {
         })
         : null;
     if (debugSink && typeof debugSink === "object") debugSink.record = record;
-    logDebugEvent("ai-call", `${label}: request to ${provider}.`, {
+    const callShape = {
         ...conversationShape(systemPrompt, history),
         streaming: Boolean(providerOpts.onChunk),
         tool: providerOpts.tool?.name || "(none — raw JSON expected)",
         maxTokens: providerOpts.maxTokens ?? "(provider maximum)",
         reasoning: getReasoningEnabled(),
-    }, { verbose: true });
+    };
 
     // What the call actually cost, and how long it sat before answering.
     //
@@ -2008,14 +2149,35 @@ export async function callAI(systemPrompt, history, opts = {}) {
     let usage = null;
 
     try {
-        const result = await dispatchToProvider(provider, systemPrompt, history, {
-            ...providerOpts,
-            onActivity: timer.note,
-            onUsage: (data) => { usage = normalizeUsage(data) ?? usage; },
-            // The model the provider actually resolved (overrides, discovery).
-            onModel: (model) => { if (record) record.model = String(model ?? ""); },
+        // The Fallback list (fallbackRunner.js): the task's own pick first,
+        // then the list from the top, moving down only past an entry that is
+        // Spent, Unusable or busy.
+        const { result, entry: answeredBy } = await runWithFallback({
+            entries,
+            preferredEntryId,
+            store: fallbackStateStore,
+            rateLimitPolicy: getRateLimitPolicy(),
+            onChunk: providerOpts.onChunk,
+            attempt: (entry, { canFallBack, onChunk }) => {
+                if (record) record.provider = entry.provider;
+                logDebugEvent("ai-call", `${label}: request to ${entry.label} [${entry.provider}].`, callShape, { verbose: true });
+                return dispatchToProvider(entry.provider, systemPrompt, history, {
+                    ...providerOpts,
+                    onChunk,
+                    entrySettings: entry,
+                    canFallBack,
+                    rateLimitPolicy: getRateLimitPolicy(),
+                    onActivity: timer.note,
+                    onUsage: (data) => { usage = normalizeUsage(data) ?? usage; },
+                    // The model the provider actually resolved (discovery).
+                    onModel: (model) => { if (record) record.model = String(model ?? ""); },
+                }).catch((error) => { throw asUnreachable(error, providerOpts.signal); });
+            },
+            onMark: ({ entry, failure, state }) => logFallbackMark(label, entry, failure, state),
+            onSwitch: announceFallbackSwitch,
+            formatTime: formatResetTime,
         });
-        logDebugEvent("ai-call", `${label}: ${provider} answered in ${elapsedSeconds(startedAt)}.`, {
+        logDebugEvent("ai-call", `${label}: ${answeredBy.label} [${answeredBy.provider}] answered in ${elapsedSeconds(startedAt)}.`, {
             replyChars: typeof result === "string" ? result.length : String(result?.rawText ?? "").length,
             viaToolCall: Boolean(result?.toolInput),
             // Omitted rather than zeroed when unknown: a buffered call never
@@ -2040,7 +2202,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
         // failure at all: the player pressed the button.
         const cancelled = error?.name === "AbortError";
         logDebugEvent("ai-call",
-            `${label}: ${provider} ${cancelled ? "call cancelled" : "call FAILED"} after ${elapsedSeconds(startedAt)}.`,
+            `${label}: ${cancelled ? "call cancelled" : "call FAILED"} after ${elapsedSeconds(startedAt)}${error?.fallbackUnavailable ? " — nothing in the Fallback list can answer" : ""}.`,
             error,
             { verbose: cancelled });
         attachCallMetrics(record, { usage, firstByteMs: timer.firstByteMs });
@@ -2642,7 +2804,20 @@ export async function sendDiplomaticMessageOnceOff({ playerMessage, speakingAs, 
 // gateways — takes the normal synchronous call. A submission that fails for any
 // reason also falls back; batching must never break a task. Opt-in from
 // Settings → Batch background AI tasks; gameplay.js checks that switch.
-export const providerSupportsBatch = (provider = getStoredProvider()) => provider === "anthropic";
+//
+// With a Fallback list, batching is decided by the entry the task would START
+// on: the task's own pick if it has one, else the first entry that can answer.
+// A task that batches is answered by that entry alone — batching has no way to
+// fall back mid-request — and a refused submission runs the task synchronously,
+// through the list as usual.
+const batchEntryFor = (taskKey) => {
+    const entries = getResolvedFallbackList();
+    const pick = taskKey ? getTaskPick(taskKey) : "";
+    const ready = (entry) => getEntryStatus(entry.id).status === "ready";
+    return entries.find((entry) => entry.id === pick && ready(entry)) ?? entries.find(ready) ?? null;
+};
+
+export const providerSupportsBatch = (taskKey) => batchEntryFor(taskKey)?.provider === "anthropic";
 
 const anthropicBatchHeaders = (apiKey) => ({
     "x-api-key": apiKey,
@@ -2651,24 +2826,25 @@ const anthropicBatchHeaders = (apiKey) => ({
 });
 
 // The provider's batch id is what retrieval polls; the custom id names our
-// request inside it. In memory, like the registry in gameplay.js.
-const pendingBatchIds = new Map(); // customId -> provider batch id
+// request inside it. In memory, like the registry in gameplay.js. The key rides
+// along because retrieval must ask the same account that was sent the batch.
+const pendingBatchIds = new Map(); // customId -> { batchId, apiKey }
 
 // Resolves to { customId } when the batch was accepted, null when batching is
 // unavailable or the submission was refused — the caller then runs the task
 // synchronously.
 export async function submitAIBatch({ customId, systemPrompt, history, taskKey, tool }) {
-    if (!providerSupportsBatch()) return null;
-    const settings = getProviderSettings("anthropic");
-    const apiKey = settings.apiKey.trim();
+    const entry = batchEntryFor(taskKey);
+    if (entry?.provider !== "anthropic") return null;
+    const apiKey = entry.apiKey.trim();
     if (!apiKey) return null;
 
     let model;
     try {
         model = await resolveModel("anthropic", {
+            entrySettings: entry,
             fallbackModel: ANTHROPIC_DEFAULT_MODEL,
             providerLabel: "Anthropic",
-            taskKey,
         });
     } catch {
         return null;
@@ -2714,7 +2890,7 @@ export async function submitAIBatch({ customId, systemPrompt, history, taskKey, 
         const batch = await response.json();
         const batchId = String(batch?.id ?? "").trim();
         if (!batchId) return null;
-        pendingBatchIds.set(customId, batchId);
+        pendingBatchIds.set(customId, { batchId, apiKey });
         logDebugEvent("ai-call", `Batch submission for "${taskKey}" accepted as ${batchId}.`);
         return { customId, batchId, record };
     } catch (error) {
@@ -2729,9 +2905,7 @@ export async function submitAIBatch({ customId, systemPrompt, history, taskKey, 
 // answered in text — the caller parses rawText); validation and application
 // stay with the caller.
 export async function retrieveAIBatch(customId) {
-    const batchId = pendingBatchIds.get(customId);
-    const settings = getProviderSettings("anthropic");
-    const apiKey = settings.apiKey.trim();
+    const { batchId, apiKey } = pendingBatchIds.get(customId) ?? {};
     if (!batchId || !apiKey) return { status: "failed", payload: null, rawText: "" };
     const headers = anthropicBatchHeaders(apiKey);
 
