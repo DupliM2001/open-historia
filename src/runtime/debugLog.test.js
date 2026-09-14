@@ -77,6 +77,23 @@ test("R2 a stored key for a gateway is redacted even though it looks like nothin
     assert.equal(out.includes("[redacted API key]"), true);
 });
 
+test("R2b a key kept only inside a saved Connection or profile is redacted too", () => {
+    reset();
+    // Connections (Game/AI/providerConfig.js) keep their keys inside one JSON
+    // list, not under a *_api_key setting, and so did the profiles before them.
+    store.set("ai_connections", JSON.stringify([
+        { id: "c1", provider: "openai-compatible", name: "Home", apiKey: "hunter3hunter3", endpoint: "http://x" },
+        { id: "c2", provider: "gemini", name: "Main", apiKey: "" },
+    ]));
+    store.set("ai_provider_presets", JSON.stringify([
+        { id: "p1", provider: "openai-compatible", name: "Mine", settings: { apiKey: "profilekey-plain", endpoint: "http://y" } },
+    ]));
+    logDebugEvent("ai", "Authorization failed for hunter3hunter3 and profilekey-plain");
+    const raw = JSON.stringify(getDebugLogEntries());
+    assert.equal(raw.includes("hunter3hunter3"), false);
+    assert.equal(raw.includes("profilekey-plain"), false);
+});
+
 test("R3 a very short stored value is NOT treated as a key", () => {
     reset();
     // Guard against redacting half the log because some key held "1".

@@ -148,14 +148,16 @@ test("settings.txt can never carry a key or a whole endpoint", () => {
   // The block that rides inside an exported game is the Logging file's own, and it
   // is redacted at the source: the key only ever as set/not set, the endpoint only
   // by host. This pins those two, because settings.txt travels to strangers.
+  // One block per Fallback list entry (docs/world-state.md, "AI access").
   const settingsLog = readSource("runtime", "settingsLog.js");
-  assert.match(settingsLog, /field\("apiKey"\) \? "set" : "not set"/, "the key is a yes/no, never a value");
-  assert.match(settingsLog, /endpointHostForLog\(field\("endpoint"\)\)/, "an endpoint is reduced to its host");
+  assert.match(settingsLog, /\["API key", text\(entry\.apiKey\) \? "set" : "not set"\]/, "the key is a yes/no, never a value");
+  assert.match(settingsLog, /\["Endpoint", endpointHostForLog\(entry\.endpoint\)\]/, "an endpoint is reduced to its host");
   assert.equal(
-    /\["']Endpoint["'], *field\(["']endpoint["']\)\]/.test(settingsLog),
+    /\["']Endpoint["'], *(?:text\()?entry\.endpoint\)?\]/.test(settingsLog),
     false,
     "no raw endpoint is ever put in the block",
   );
+  assert.equal(/entry\.apiKey\s*\]/.test(settingsLog), false, "no raw key is ever put in the block");
 
   const debugLog = readSource("runtime", "debugLog.js");
   assert.match(debugLog, /export const buildSettingsReport/, "the report the zip carries is built here");

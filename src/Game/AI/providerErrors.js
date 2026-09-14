@@ -105,6 +105,65 @@ export const isQuotaExhaustedPayload = (error) => {
     return QUOTA_SPENT_TEXT.test(haystack);
 };
 
+// ---------------------------------------------------------------------------
+// Sorting a failed call for the Fallback list
+// ---------------------------------------------------------------------------
+//
+// The Fallback list (fallbackRunner.js) moves a call down to the next entry
+// only for failures that say something about the ENTRY: its allowance is Spent,
+// it is Unusable (a bad key, a model the provider does not know), or it is
+// Rate limited or busy for the moment. Everything else is "other" and is never
+// a reason to change model: a context-window error or a malformed answer would
+// fail the same way on the next entry, and a bad answer is the task runner's
+// business, not the list's.
+export const classifyProviderFailure = ({ status, payload } = {}) => {
+    const code = Number(status) || 0;
+    const error = payload?.error ?? payload;
+    const text = errorPayloadText(error) || String(payload?.rawText ?? "");
+    // First, because nothing about it is the entry's fault: the same prompt is
+    // too big for the next model too, or needs a bigger one the player picks.
+    if (isContextWindowErrorPayload(error)) return { kind: "other", reason: text };
+    if (isQuotaExhaustedPayload(payload)) return { kind: "spent", reason: "used today's allowance" };
+    if (code === 429) return { kind: "rateLimited", reason: "rate limited", waitMs: retryDelayMsFromPayload(payload) };
+    if (code === 401 || code === 403 || BAD_KEY_TEXT.test(text)) return { kind: "unusable", reason: `key rejected (${code || "no status"})` };
+    if (MODEL_NOT_FOUND_TEXT.test(text)) return { kind: "unusable", reason: `model not found (${code || "no status"})` };
+    if (code === 404) return { kind: "unusable", reason: "not found (404): check the endpoint address" };
+    if (BUSY_HTTP_STATUSES.has(code) || isBusyErrorPayload(error)) return { kind: "busy", reason: "busy" };
+    return { kind: "other", reason: text };
+};
+
+// Whether a provider should ask the same entry again, or give up and let the
+// Fallback list move on. Shared by every provider path so they agree:
+//
+//   Spent, Unusable, other — never; waiting fixes none of them.
+//   Busy — one retry, then the next entry.
+//   Rate limited — the player's setting: "wait" retries as it always did,
+//                  "next" gives up at once.
+//
+// With no entry left to fall back to, busy and Rate limited keep the full retry
+// count they had before the list existed: giving up early then would only lose
+// the turn sooner.
+export const shouldRetryProviderFailure = ({ failure, attempt, retries, canFallBack, rateLimitPolicy } = {}) => {
+    const kind = failure?.kind;
+    if (kind !== "busy" && kind !== "rateLimited") return false;
+    if (attempt >= retries) return false;
+    if (!canFallBack) return true;
+    if (kind === "busy") return attempt < 2;
+    return rateLimitPolicy !== "next";
+};
+
+// 529 is Anthropic's own status for overloaded_error.
+const BUSY_HTTP_STATUSES = new Set([502, 503, 504, 529]);
+
+// Gemini says a bad key with a 400, so the status alone is not enough.
+const BAD_KEY_TEXT = /api key not valid|invalid api key|incorrect api key|invalid x-api-key|invalid_api_key|api key expired/i;
+
+// Each provider's way of saying the model does not exist: Gemini's "is not
+// found for API version", OpenAI's "does not exist", Ollama's "model 'x' not
+// found".
+// Model ids carry dots ("gemini-3.5-flash"), so the gap may too.
+const MODEL_NOT_FOUND_TEXT = /model_not_found|\bmodels?\b[^\n]{0,100}?\b(?:not found|does not exist|is not supported for generateContent)|no such model|unknown model/i;
+
 // Google answers a 429 with a RetryInfo telling you exactly how long to wait:
 //   {"error":{"details":[{"@type":".../google.rpc.RetryInfo","retryDelay":"35s"}]}}
 // Honouring it beats a fixed 15s guess in both directions. Returns null when the
@@ -216,6 +275,9 @@ export const toolStreamRefusalError = (providerLabel, error, retried) => {
         ? busyProviderMessage(providerLabel, detail, retried)
         : providerErrorReplyMessage(providerLabel, detail));
     refusal.providerRefusal = { busy, detail };
+    // And for the Fallback list: busy after the provider's one retry moves the
+    // call to the next entry.
+    refusal.providerFailure = classifyProviderFailure({ payload: error });
     return refusal;
 };
 

@@ -12,6 +12,8 @@ import {
 } from "../../runtime/assets.js";
 import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplay.js";
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
+import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
+import { fallbackAvailability } from "../AI/fallbackRunner.js";
 import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
@@ -1233,12 +1235,12 @@ const TimelineSkipPanel = ({
             }}
             >
             <div>
-            <strong>Turns could be faster.</strong> Your AI model can&apos;t use the
+            <strong>Turns could be faster.</strong> Your AI model{modeSuggestion.label ? <> (<span data-no-translate>{modeSuggestion.label}</span>)</> : null} can&apos;t use the
             method the game tries first, so every turn wastes time working that
             out. The game can skip straight to what works — on a long turn that
             can save several minutes. Nothing else changes.
             <div style={{ color: "rgba(191,219,254,0.62)", fontSize: "0.72rem", marginTop: "0.4rem" }}>
-            You can undo this any time under Settings → Advanced → How the AI answers.
+            You can undo this any time under Settings → AI: edit that model, then How the AI answers.
             </div>
             </div>
             <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -1739,6 +1741,21 @@ const DateWidget = ({
             return;
         }
 
+        // Nothing in the Fallback list can answer: say when the first model
+        // comes back, rather than spend the turn finding out and falling back
+        // to canned events.
+        const availability = fallbackAvailability({ entries: getResolvedFallbackList(), store: fallbackStateStore });
+        if (!availability.canAnswer && availability.nextEntry) {
+            const at = new Date(availability.nextResetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            setPanel("skip");
+            setError(`Every model in your Fallback list has used its allowance for now. The first back is ${availability.nextEntry.label}, at ${at}. Add a backup in Settings → AI to keep playing now.`);
+            logDebugEvent("turn", "Timeline jump not started: every model in the Fallback list is Spent.", {
+                firstBack: availability.nextEntry.label,
+                at: new Date(availability.nextResetAt).toISOString(),
+            });
+            return;
+        }
+
         setPanel("skip");
         setIsLoading(true);
         setJumpProgress("");
@@ -1981,7 +1998,7 @@ const DateWidget = ({
 
     const acceptModeSuggestion = () => {
         if (!modeSuggestion) return;
-        acceptStructuredModeSuggestion(modeSuggestion.key, modeSuggestion.mode, modeSuggestion.provider);
+        acceptStructuredModeSuggestion(modeSuggestion.key, modeSuggestion.mode);
         setModeSuggestion(null);
     };
 

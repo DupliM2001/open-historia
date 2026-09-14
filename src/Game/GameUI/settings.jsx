@@ -3,21 +3,36 @@ import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "reac
 import { createPortal } from "react-dom";
 import {
     AI_TASK_ROUTING,
+    CONNECTION_TEMPLATES,
     DEFAULT_PROVIDER,
     PROVIDER_OPTIONS,
-    deletePreset,
-    getProviderField,
+    addConnection,
+    addEntry,
+    connectionDisplayName,
+    entriesUsingConnection,
+    fallbackStateStore,
+    fillFallbackList,
+    getConnections,
+    getFallbackList,
     getProviderMeta,
+    getRateLimitPolicy,
     getReasoningEnabled,
     getRecentModels,
-    getSavedPresets,
-    isPresetActive,
+    getResolvedFallbackList,
+    getTaskPick,
+    moveEntry,
+    providerSetupRequirement,
     providerSupportsModelDiscovery,
-    savePreset,
-    setProviderField,
+    removeConnection,
+    removeEntry,
+    resetEntryState,
+    setRateLimitPolicy,
     setReasoningEnabled,
-    updatePreset,
+    setTaskPick,
+    updateConnection,
+    updateEntry,
 } from "../AI/providerConfig.js";
+import { entryStatus } from "../AI/fallbackRunner.js";
 import {
     isRatingEnabled,
     isTelemetryEnabled,
@@ -536,216 +551,406 @@ const SettingsInput = ({
     );
 };
 
-// Configuration profiles (ported from the abdulrahman-2005 fork): saved
-// endpoint/key/model/parameter bundles for the two "compatible" providers, so
-// switching between a local server and a hosted gateway is one click.
-const PROFILE_FORM_PREFIX = {
-    "openai-compatible": "openaiCompatible",
-    "anthropic-compatible": "anthropicCompatible",
+// --- The Fallback list (docs/world-state.md, "AI access") ---
+//
+// Settings → AI is the Fallback list: backup models, tried from the top, each
+// one a Connection (a provider, a name, a key) and a model. With one entry it
+// reads like the old single-provider form; "Add a backup" and Fill are the only
+// new things a player who never uses them sees. Every field saves as it is
+// typed (providerConfig.js), and every save announces itself, which is what
+// re-renders this screen and the start-of-game prompt.
+
+// What the screen shows, re-read on every change and every 15 seconds so a
+// "back in 40s" counts down.
+const readFallbackView = () => {
+    const at = Date.now();
+    const resolved = new Map(getResolvedFallbackList().map((entry) => [entry.id, entry]));
+    return {
+        at,
+        connections: getConnections(),
+        entries: getFallbackList().map((entry) => ({
+            ...entry,
+            resolved: resolved.get(entry.id) ?? null,
+            status: entryStatus(fallbackStateStore.get(entry.id), at),
+        })),
+        rateLimitPolicy: getRateLimitPolicy(),
+    };
 };
 
-const EMPTY_PROFILE_FORM = { name: "", endpoint: "", apiKey: "", model: "", customParams: "" };
+const useFallbackView = () => {
+    const [view, setView] = useState(readFallbackView);
+    useEffect(() => {
+        const refresh = () => setView(readFallbackView());
+        window.addEventListener("ai:fallback-changed", refresh);
+        const timer = setInterval(refresh, 15000);
+        return () => {
+            window.removeEventListener("ai:fallback-changed", refresh);
+            clearInterval(timer);
+        };
+    }, []);
+    return view;
+};
 
-const PresetManager = ({ provider, settings, onSettingChange }) => {
-    const prefix = PROFILE_FORM_PREFIX[provider];
-    const loadPresets = () => getSavedPresets().filter((preset) => preset.provider === provider);
-    // Keyed by provider where it is mounted, so a provider switch remounts it
-    // with fresh state instead of syncing in an effect.
-    const [presets, setPresets] = useState(loadPresets);
-    const [editingId, setEditingId] = useState(null);
-    const [form, setForm] = useState(EMPTY_PROFILE_FORM);
+const formatClock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-    if (!prefix) return null;
+const formatAgo = (ms, at) => {
+    const minutes = Math.round(Math.max(0, at - ms) / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    return hours < 24 ? `${hours} h ago` : new Date(ms).toLocaleDateString();
+};
 
-    const currentEndpoint = settings[`${prefix}Endpoint`] ?? "";
-    const currentModel = settings[`${prefix}Model`] ?? "";
-    const setField = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+const STATUS_COLORS = {
+    ready: { color: "#86efac", border: "rgba(134,239,172,0.28)", background: "rgba(34,197,94,0.1)" },
+    spent: { color: "#fbbf24", border: "rgba(245,158,11,0.32)", background: "rgba(245,158,11,0.1)" },
+    unusable: { color: "#fca5a5", border: "rgba(248,113,113,0.34)", background: "rgba(239,68,68,0.1)" },
+    busy: { color: "#93c5fd", border: "rgba(96,165,250,0.3)", background: "rgba(59,130,246,0.1)" },
+};
 
-    const apply = (preset) => {
-        onSettingChange(`${prefix}Endpoint`, preset.settings?.endpoint ?? "");
-        // A profile saved without a key leaves the current key alone: the stock
-        // profiles have none, and wiping a pasted key on "Apply" is never wanted.
-        if (preset.settings?.apiKey) onSettingChange(`${prefix}ApiKey`, preset.settings.apiKey);
-        onSettingChange(`${prefix}Model`, preset.settings?.model ?? "");
-        onSettingChange(`${prefix}CustomParams`, preset.settings?.customParams ?? "");
-    };
-
-    const startCreate = () => {
-        // Prefilled from the fields above, so "save this setup" is one click.
-        setForm({
-            name: "",
-            endpoint: currentEndpoint,
-            apiKey: settings[`${prefix}ApiKey`] ?? "",
-            model: currentModel,
-            customParams: settings[`${prefix}CustomParams`] ?? "",
-        });
-        setEditingId("new");
-    };
-
-    const startEdit = (preset) => {
-        setForm({
-            name: preset.name ?? "",
-            endpoint: preset.settings?.endpoint ?? "",
-            apiKey: preset.settings?.apiKey ?? "",
-            model: preset.settings?.model ?? "",
-            customParams: preset.settings?.customParams ?? "",
-        });
-        setEditingId(preset.id);
-    };
-
-    const saveForm = () => {
-        const name = form.name.trim();
-        if (!name) return;
-        const values = { endpoint: form.endpoint, apiKey: form.apiKey, model: form.model, customParams: form.customParams };
-        if (editingId === "new") savePreset(provider, name, values);
-        else updatePreset(editingId, name, values);
-        setPresets(loadPresets());
-        setEditingId(null);
-    };
-
-    const remove = (preset) => {
-        if (!window.confirm(`Delete the "${preset.name}" profile?`)) return;
-        deletePreset(preset.id);
-        setPresets(loadPresets());
-    };
-
-    const box = {
-        marginBottom: "0.85rem",
-        padding: "0.7rem",
-        borderRadius: "8px",
-        border: "1px solid rgba(255,255,255,0.12)",
-        backgroundColor: "rgba(0,0,0,0.12)",
-    };
-
-    if (editingId) {
-        return (
-            <div style={box}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.6rem" }}>
-            {editingId === "new" ? "New profile" : "Edit profile"}
-            </div>
-            <SettingsInput label="Profile name" value={form.name} onChange={setField("name")} placeholder="My local server" />
-            <SettingsInput label="API endpoint" value={form.endpoint} onChange={setField("endpoint")} placeholder="http://localhost:11434/v1" />
-            <SettingsInput
-            label="API key (optional)"
-            type="password"
-            value={form.apiKey}
-            onChange={setField("apiKey")}
-            placeholder="Leave empty to keep the current key when applied"
-            />
-            <SettingsInput label="Model" value={form.model} onChange={setField("model")} placeholder="Leave blank to auto-pick if supported" />
-            <SettingsInput
-            label="Custom parameters (JSON)"
-            multiline
-            value={form.customParams}
-            onChange={setField("customParams")}
-            placeholder='{"top_p": 0.9}'
-            />
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button type="button" onClick={saveForm} disabled={!form.name.trim()} style={{ ...primaryButtonStyle, opacity: form.name.trim() ? 1 : 0.5 }}>
-            Save profile
-            </button>
-            <button type="button" onClick={() => setEditingId(null)} style={smallButtonStyle}>
-            Cancel
-            </button>
-            </div>
-            </div>
-        );
+const describeRowStatus = (status, at) => {
+    if (status.status === "spent") return `Spent until ${formatClock(status.until)}`;
+    if (status.status === "unusable") return `Unusable: ${status.reason}`;
+    if (status.status === "busy") {
+        const seconds = Math.max(1, Math.ceil((status.until - at) / 1000));
+        return `${status.reason === "rate limited" ? "Rate limited" : "Busy"}, back in ${seconds < 90 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`}`;
     }
+    return "Ready";
+};
 
+const StatusChip = ({ status, at }) => {
+    const colors = STATUS_COLORS[status.status] ?? STATUS_COLORS.ready;
     return (
-        <div style={box}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-        <div style={{ fontSize: "0.8rem", fontWeight: 700 }}>Configuration profiles</div>
-        <button type="button" onClick={startCreate} style={primaryButtonStyle}>+ Save current</button>
+        <span style={{ background: colors.background, border: `1px solid ${colors.border}`, borderRadius: "999px", color: colors.color, fontSize: "0.66rem", fontWeight: 750, padding: "0.12rem 0.5rem", whiteSpace: "nowrap" }}>
+            {describeRowStatus(status, at)}
+        </span>
+    );
+};
+
+// The first Connection, made if there is none: an entry cannot exist without one.
+const ensureConnectionId = (connections) => connections[0]?.id ?? addConnection({ provider: DEFAULT_PROVIDER });
+
+// A Connection's own fields: where it is and what reaches it. Shared by every
+// entry that uses it, which the editor says when it is more than one.
+const ConnectionFields = ({ connection, sharedBy = 1 }) => {
+    const set = (field) => (value) => updateConnection(connection.id, { [field]: value });
+    const selfHosted = providerSetupRequirement(connection.provider) === "endpoint";
+    const meta = getProviderMeta(connection.provider);
+    return (
+        <>
+        <ApiProviderSelector provider={connection.provider} onProviderChange={set("provider")} />
+        <SettingsInput label="Connection name" value={connection.name} onChange={set("name")} placeholder={meta.label} />
+        {selfHosted && (
+            <SettingsInput
+            label="API endpoint"
+            value={connection.endpoint}
+            onChange={set("endpoint")}
+            placeholder={connection.provider === "openai-compatible" ? "http://localhost:11434/v1" : "https://my-proxy.example/v1"}
+            // A server on the player's own machine works from the website too, but only
+            // if it allows this origin — otherwise the browser silently drops the reply.
+            // Say so up front here rather than letting it surface as "Failed to fetch".
+            helperText={connection.provider === "openai-compatible"
+                ? (import.meta.env.VITE_OH_WEB
+                    ? "Base URL that exposes /chat/completions and /models. A server on your own machine (Ollama, LM Studio) also has to allow this site: start Ollama with OLLAMA_ORIGINS set to this site's address, or use the desktop app."
+                    : "Base URL that exposes /chat/completions and /models.")
+                : "Base URL of a self-hosted proxy that speaks the Anthropic Messages API (POST /messages)."}
+            />
+        )}
+        <SettingsInput
+        label={selfHosted ? "API key (optional)" : `${meta.label} API key`}
+        type="password"
+        value={connection.apiKey}
+        onChange={set("apiKey")}
+        placeholder={selfHosted ? "Leave empty if your server needs none" : `Paste ${meta.label} API key`}
+        helperText={`Stored only in this browser.${sharedBy > 1 ? ` Shared by ${sharedBy} entries in your list.` : ""}`}
+        />
+        <SettingsInput
+        label="Custom parameters (JSON)"
+        multiline
+        value={connection.customParams}
+        onChange={set("customParams")}
+        placeholder={connection.provider === "gemini" ? '{"generationConfig": {"topP": 0.9}}' : '{"top_p": 0.9}'}
+        helperText="Optional. Merged into every request this connection sends — e.g. to limit reasoning budget/effort. An entry can override them. Invalid JSON is ignored."
+        />
+        {connection.provider === "openai-compatible" && (
+            <>
+            <Toggle label="Strict tool schema" enabled={connection.toolStrict} onToggle={() => set("toolStrict")(!connection.toolStrict)} />
+            <div style={{ ...helperStyle, marginTop: "-0.6rem" }}>
+            Sends strict:true with the tool call so a self-hosted backend constrains
+            generation to the schema (SGLang/xgrammar, vLLM). Leave off for OpenAI and
+            Azure: they reject a schema that does not list every property as required.
+            </div>
+            </>
+        )}
+        </>
+    );
+};
+
+// One entry: its Connection (and that Connection's fields, where a rejected key
+// is fixed), its model, and the per-model knobs.
+const EntryEditor = ({ entry, connections, entries }) => {
+    const connection = connections.find((candidate) => candidate.id === entry.connectionId) ?? null;
+    const provider = connection?.provider ?? DEFAULT_PROVIDER;
+    const sharedBy = entries.filter((other) => other.connectionId === entry.connectionId).length;
+    const suggestions = [...new Set([connection?.suggestedModel, ...getRecentModels(provider)].filter(Boolean))];
+    const set = (field) => (value) => updateEntry(entry.id, { [field]: value });
+    return (
+        <div>
+        {connections.length > 1 && (
+            <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Connection</label>
+            <select data-no-translate value={entry.connectionId} onChange={(event) => set("connectionId")(event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+            {connections.map((candidate) => (
+                <option key={candidate.id} value={candidate.id} style={{ color: "black" }}>
+                {connectionDisplayName(candidate)} — {getProviderMeta(candidate.provider).label}
+                </option>
+            ))}
+            </select>
+            </div>
+        )}
+        {connection && <ConnectionFields connection={connection} sharedBy={sharedBy} />}
+        <SettingsInput
+        label="Model"
+        value={entry.model}
+        onChange={set("model")}
+        suggestions={suggestions}
+        placeholder={provider === "gemini" ? "gemini-3.5-flash-lite" : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
+        helperText={providerSupportsModelDiscovery(provider)
+            ? "Leave blank to auto-pick a chat-capable model from the server's /models."
+            : "Leave blank to use the built-in default."}
+        />
+        <details style={{ marginBottom: "0.4rem" }}>
+        <summary style={{ cursor: "pointer", fontSize: "0.74rem", color: "rgba(255,255,255,0.62)", marginBottom: "0.6rem" }}>This model only</summary>
+        <SettingsInput
+        label="Custom parameters for this model (JSON)"
+        multiline
+        value={entry.customParamsOverride}
+        onChange={set("customParamsOverride")}
+        placeholder="Blank uses the connection's"
+        helperText="Replaces the connection's custom parameters for this entry — e.g. the same model with a larger max_tokens, picked by the Time skip task."
+        />
+        <StructuredModeSelect value={entry.structuredMode} onChange={set("structuredMode")} />
+        </details>
         </div>
-        {presets.length === 0 ? (
-            <div style={{ ...helperStyle, marginTop: 0 }}>No profiles yet. Save the current endpoint and model as one to switch back to it later.</div>
-        ) : presets.map((preset) => {
-            // Custom params count too: two profiles on one endpoint used to both
-            // read ACTIVE and neither offered Apply (#718). See isPresetActive.
-            const active = isPresetActive(preset, {
-                endpoint: currentEndpoint,
-                model: currentModel,
-                customParams: settings[`${prefix}CustomParams`] ?? "",
-            });
-            return (
-                <div key={preset.id} style={profileCardStyle}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: "0.82rem", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {preset.name}
-                {active && (
-                    <span style={{ marginLeft: "0.4rem", fontSize: "0.68rem", fontWeight: 700, color: "rgba(147,197,253,0.95)" }}>ACTIVE</span>
-                )}
-                </div>
-                <div style={{ ...helperStyle, marginTop: "0.1rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {preset.settings?.endpoint || "Default endpoint"}
-                {preset.settings?.model ? ` · ${preset.settings.model}` : ""}
-                </div>
-                </div>
-                <div style={{ display: "flex", gap: "0.3rem", flexShrink: 0 }}>
-                {!active && <button type="button" onClick={() => apply(preset)} style={primaryButtonStyle}>Apply</button>}
-                <button type="button" onClick={() => startEdit(preset)} style={smallButtonStyle}>Edit</button>
-                <button type="button" onClick={() => remove(preset)} style={smallButtonStyle} title="Delete profile">✕</button>
-                </div>
-                </div>
-            );
-        })}
-        <div style={{ ...helperStyle, marginTop: "0.2rem" }}>
-        Stored only in this browser. A profile saved without a key keeps whatever key is entered above when applied.
+    );
+};
+
+const rowButtonStyle = { ...smallButtonStyle, padding: "0.25rem 0.5rem", fontSize: "0.72rem" };
+
+// The Fill button's panel: tick Connections, type models strongest first.
+const FillPanel = ({ connections, onDone }) => {
+    const [ticked, setTicked] = useState(() => connections.map((connection) => connection.id));
+    const [models, setModels] = useState("");
+    const [added, setAdded] = useState(null);
+    const toggle = (id) => setTicked((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));
+    const fill = () => {
+        const order = connections.map((connection) => connection.id).filter((id) => ticked.includes(id));
+        setAdded(fillFallbackList(order, models.split(/[\n,]/)));
+    };
+    return (
+        <div style={{ marginTop: "0.7rem", padding: "0.75rem", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.03)" }}>
+        <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.4rem" }}>Fill the list</div>
+        <div style={{ ...helperStyle, marginTop: 0, marginBottom: "0.6rem" }}>
+        Every model on every ticked connection, strongest model first across all of
+        them: the first model on each connection, then the second, and so on. Rows
+        you already have are skipped.
+        </div>
+        {connections.map((connection) => (
+            <label key={connection.id} style={{ alignItems: "center", display: "flex", gap: "0.5rem", fontSize: "0.8rem", marginBottom: "0.35rem", cursor: "pointer" }}>
+            <input type="checkbox" checked={ticked.includes(connection.id)} onChange={() => toggle(connection.id)} />
+            {connectionDisplayName(connection)} <span style={{ color: "rgba(255,255,255,0.45)" }}>({getProviderMeta(connection.provider).label})</span>
+            </label>
+        ))}
+        <SettingsInput label="Models, strongest first (one per line)" multiline value={models} onChange={setModels} placeholder={"gemini-3.7-flash\ngemini-3.6-flash\ngemini-3.5-flash\ngemini-3.5-flash-lite"} />
+        <div style={{ alignItems: "center", display: "flex", gap: "0.5rem" }}>
+        <button type="button" onClick={fill} disabled={!ticked.length || !models.trim()} style={{ ...primaryButtonStyle, opacity: ticked.length && models.trim() ? 1 : 0.5 }}>Fill</button>
+        <button type="button" onClick={onDone} style={smallButtonStyle}>Close</button>
+        {added !== null && <span style={{ ...helperStyle, marginTop: 0 }}>{added ? `Added ${added} entr${added === 1 ? "y" : "ies"}.` : "Nothing new to add."}</span>}
         </div>
         </div>
     );
 };
 
-// Per-task model routing (ported from the abdulrahman-2005 fork). Collapsed by
-// default: blank fields inherit the provider default, so the single-model
-// experience is untouched until a player opts in. Hints are placeholders —
-// nothing is written until the player types.
-const TaskModelOverrides = ({ provider, suggestions }) => {
-    const [expanded, setExpanded] = useState(false);
-    // Keyed by provider at the mount site (see PresetManager).
-    const [overrides, setOverrides] = useState(() => Object.fromEntries(AI_TASK_ROUTING.map(({ key }) => [
-        key,
-        getProviderField(provider, `model_${key}`),
-    ])));
+const FallbackListSection = () => {
+    const view = useFallbackView();
+    const [editingId, setEditingId] = useState(null);
+    const [filling, setFilling] = useState(false);
+    const { at, connections, entries } = view;
+    const single = entries.length === 1;
 
-    const update = (key, value) => {
-        setOverrides((current) => ({ ...current, [key]: value }));
-        setProviderField(provider, `model_${key}`, value);
+    const addBackup = () => {
+        const connectionId = entries[entries.length - 1]?.connectionId ?? ensureConnectionId(connections);
+        setEditingId(addEntry({ connectionId, model: "" }));
     };
 
-    const activeCount = Object.values(overrides).filter((value) => value && value.trim()).length;
-    const groups = [...new Set(AI_TASK_ROUTING.map((entry) => entry.group))];
+    const remove = (entry) => {
+        const label = entry.resolved?.label ?? "this entry";
+        if (!window.confirm(`Remove ${label} from the list?`)) return;
+        removeEntry(entry.id);
+    };
 
     return (
-        <div style={{ marginBottom: "0.85rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-        <button
-        type="button"
-        onClick={() => setExpanded((current) => !current)}
-        style={{ ...smallButtonStyle, width: "100%", display: "flex", justifyContent: "space-between" }}
+        <SettingsSection
+        title="Models"
+        description="Backup models: when one runs out, the next one takes over. Every AI call starts at the top of the list and moves down only when a model can't answer."
         >
+        {entries.length === 0 && (
+            <div style={{ ...helperStyle, marginTop: 0, marginBottom: "0.7rem" }}>No models yet. Add one to let the game write turns and replies.</div>
+        )}
+        {single && (
+            <>
+            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+            <StatusChip status={entries[0].status} at={at} />
+            {entries[0].status.status !== "ready" && <button type="button" onClick={() => resetEntryState(entries[0].id)} style={rowButtonStyle}>Reset</button>}
+            </div>
+            <EntryEditor entry={entries[0]} connections={connections} entries={entries} />
+            </>
+        )}
+        {!single && entries.map((entry, index) => (
+            <div key={entry.id} style={{ ...profileCardStyle, flexDirection: "column", alignItems: "stretch" }}>
+            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+            <div data-no-translate style={{ fontSize: "0.82rem", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ color: "rgba(255,255,255,0.4)", marginRight: "0.4rem" }}>{index + 1}</span>
+            {entry.resolved?.label ?? "(connection removed)"}
+            </div>
+            <div style={{ ...helperStyle, marginTop: "0.15rem" }}>
+            {getProviderMeta(entry.resolved?.provider).label}
+            {entry.status.lastAnsweredAt ? ` · answered ${formatAgo(entry.status.lastAnsweredAt, at)}` : ""}
+            </div>
+            </div>
+            <StatusChip status={entry.status} at={at} />
+            </div>
+            <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.45rem", flexWrap: "wrap" }}>
+            <button type="button" onClick={() => moveEntry(entry.id, index - 1)} disabled={index === 0} aria-label="Move up" title="Move up" style={{ ...rowButtonStyle, opacity: index === 0 ? 0.4 : 1 }}>↑</button>
+            <button type="button" onClick={() => moveEntry(entry.id, index + 1)} disabled={index === entries.length - 1} aria-label="Move down" title="Move down" style={{ ...rowButtonStyle, opacity: index === entries.length - 1 ? 0.4 : 1 }}>↓</button>
+            <button type="button" onClick={() => setEditingId(editingId === entry.id ? null : entry.id)} style={rowButtonStyle}>{editingId === entry.id ? "Done" : "Edit"}</button>
+            {entry.status.status !== "ready" && <button type="button" onClick={() => resetEntryState(entry.id)} title="Try it again on the next call" style={rowButtonStyle}>Reset</button>}
+            <button type="button" onClick={() => remove(entry)} aria-label="Remove" title="Remove from the list" style={rowButtonStyle}>✕</button>
+            </div>
+            {editingId === entry.id && (
+                <div style={{ marginTop: "0.75rem" }}>
+                <EntryEditor entry={entry} connections={connections} entries={entries} />
+                </div>
+            )}
+            </div>
+        ))}
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.6rem" }}>
+        <button type="button" onClick={addBackup} style={primaryButtonStyle}>{entries.length ? "+ Add a backup" : "+ Add a model"}</button>
+        <button type="button" onClick={() => setFilling((open) => !open)} style={smallButtonStyle}>Fill…</button>
+        </div>
+        {filling && <FillPanel connections={connections} onDone={() => setFilling(false)} />}
+        <div style={{ ...fieldGroupStyle, marginTop: "0.9rem" }}>
+        <label style={labelStyle}>When a model is rate limited</label>
+        <select data-no-translate value={view.rateLimitPolicy} onChange={(event) => setRateLimitPolicy(event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+        <option value="wait" style={{ color: "black" }}>Wait, then try it again (default)</option>
+        <option value="next" style={{ color: "black" }}>Try the next one straight away</option>
+        </select>
+        <div style={helperStyle}>
+        A rate limit is a short pause, not a used-up allowance. Waiting keeps your
+        backups' daily allowance for when the top model has truly run out.
+        </div>
+        </div>
+        <div style={{ ...helperStyle, marginBottom: 0 }}>
+        Mix a free key with a paid one, or with a local model. Each key is used under its provider's terms.
+        </div>
+        </SettingsSection>
+    );
+};
+
+// Every saved Connection: add one (from a template or blank), edit it, or
+// remove it along with the entries that use it.
+const ConnectionsSection = () => {
+    const { connections, entries } = useFallbackView();
+    const [editingId, setEditingId] = useState(null);
+
+    const remove = (connection) => {
+        const using = entriesUsingConnection(connection.id).length;
+        const name = connectionDisplayName(connection);
+        const question = using
+            ? `Remove "${name}"? ${using} entr${using === 1 ? "y" : "ies"} in your list use${using === 1 ? "s" : ""} it and will be removed too.`
+            : `Remove "${name}"?`;
+        if (!window.confirm(question)) return;
+        removeConnection(connection.id);
+    };
+
+    return (
+        <SettingsSection title="Connections" description="Saved ways to reach a provider: a name you choose, the key, and the endpoint if it needs one. Type a key once and use it in as many entries as you like.">
+        {connections.map((connection) => {
+            const using = entries.filter((entry) => entry.connectionId === connection.id).length;
+            const selfHosted = providerSetupRequirement(connection.provider) === "endpoint";
+            return (
+                <div key={connection.id} style={{ ...profileCardStyle, flexDirection: "column", alignItems: "stretch" }}>
+                <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: "0.82rem", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionDisplayName(connection)}</div>
+                <div style={{ ...helperStyle, marginTop: "0.1rem" }}>
+                {getProviderMeta(connection.provider).label}
+                {selfHosted ? ` · ${connection.endpoint || "no endpoint"}` : ` · key ${connection.apiKey.trim() ? "set" : "not set"}`}
+                {` · used by ${using} entr${using === 1 ? "y" : "ies"}`}
+                </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.3rem", flexShrink: 0 }}>
+                <button type="button" onClick={() => setEditingId(editingId === connection.id ? null : connection.id)} style={rowButtonStyle}>{editingId === connection.id ? "Done" : "Edit"}</button>
+                <button type="button" onClick={() => remove(connection)} aria-label="Remove" title="Remove connection" style={rowButtonStyle}>✕</button>
+                </div>
+                </div>
+                {editingId === connection.id && (
+                    <div style={{ marginTop: "0.75rem" }}>
+                    <ConnectionFields connection={connection} sharedBy={using} />
+                    </div>
+                )}
+                </div>
+            );
+        })}
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.4rem" }}>
+        <button type="button" onClick={() => setEditingId(addConnection({ provider: DEFAULT_PROVIDER, name: "" }))} style={primaryButtonStyle}>+ New connection</button>
+        {CONNECTION_TEMPLATES.map((template) => (
+            <button key={template.name} type="button" onClick={() => setEditingId(addConnection(template))} style={smallButtonStyle}>+ {template.name}</button>
+        ))}
+        </div>
+        </SettingsSection>
+    );
+};
+
+// Per-task picks (ported from the abdulrahman-2005 fork's per-task routing):
+// a task can start at an entry of its own, then falls back through the list
+// from the top like every other call.
+const TaskPicks = () => {
+    const { entries } = useFallbackView();
+    const [expanded, setExpanded] = useState(false);
+    const [picks, setPicks] = useState(() => Object.fromEntries(AI_TASK_ROUTING.map(({ key }) => [key, getTaskPick(key)])));
+    const groups = [...new Set(AI_TASK_ROUTING.map((entry) => entry.group))];
+    const labelled = entries.filter((entry) => entry.resolved);
+    const activeCount = Object.values(picks).filter((id) => labelled.some((entry) => entry.id === id)).length;
+
+    const update = (key, entryId) => {
+        setPicks((current) => ({ ...current, [key]: entryId }));
+        setTaskPick(key, entryId);
+    };
+
+    return (
+        <div>
+        <button type="button" onClick={() => setExpanded((current) => !current)} style={{ ...smallButtonStyle, width: "100%", display: "flex", justifyContent: "space-between" }}>
         <span>Per-task models{activeCount ? ` (${activeCount} set)` : ""}</span>
         <span>{expanded ? "Hide" : "Show"}</span>
         </button>
         {expanded && (
             <div style={{ marginTop: "0.6rem" }}>
-            <div style={{ ...helperStyle, marginTop: 0, marginBottom: "0.7rem" }}>
-            Route individual AI tasks to a cheaper or a stronger model. Blank means the
-            default model above. Saved per provider, so switching providers switches the
-            whole set.
-            </div>
             {groups.map((group) => (
                 <div key={group}>
                 <div style={{ fontSize: "0.76rem", fontWeight: 700, opacity: 0.8, margin: "0.5rem 0 0.4rem" }}>{group}</div>
                 {AI_TASK_ROUTING.filter((entry) => entry.group === group).map(({ key, label, hint }) => (
-                    <SettingsInput
-                    key={key}
-                    label={label}
-                    value={overrides[key] ?? ""}
-                    onChange={(value) => update(key, value)}
-                    placeholder={hint}
-                    suggestions={suggestions}
-                    />
+                    <div key={key} style={fieldGroupStyle}>
+                    <label style={labelStyle}>{label}</label>
+                    <select data-no-translate value={labelled.some((entry) => entry.id === picks[key]) ? picks[key] : ""} onChange={(event) => update(key, event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+                    <option value="" style={{ color: "black" }}>Start at the top of the list</option>
+                    {labelled.map((entry, index) => (
+                        <option key={entry.id} value={entry.id} style={{ color: "black" }}>{index + 1}. {entry.resolved.label}</option>
+                    ))}
+                    </select>
+                    <div style={helperStyle}>{hint}</div>
+                    </div>
                 ))}
                 </div>
             ))}
@@ -755,239 +960,22 @@ const TaskModelOverrides = ({ provider, suggestions }) => {
     );
 };
 
-// Per-provider expert fields, keyed by the form-state names the settings host
-// persists (providerConfig.js FORM_FIELD_MAP).
-const PROVIDER_EXPERT_FIELDS = {
-    gemini: { customParams: "geminiCustomParams", placeholder: '{"generationConfig": {"topP": 0.9}}' },
-    openai: { customParams: "openaiCustomParams", placeholder: '{"top_p": 0.9}', structuredMode: "openaiStructuredMode" },
-    anthropic: { customParams: "anthropicCustomParams", placeholder: '{"top_p": 0.9}' },
-    "openai-compatible": {
-        customParams: "openaiCompatibleCustomParams",
-        placeholder: '{"top_p": 0.9}',
-        structuredMode: "openaiCompatibleStructuredMode",
-        toolStrict: "openaiCompatibleToolStrict",
-    },
-    "anthropic-compatible": {
-        customParams: "anthropicCompatibleCustomParams",
-        placeholder: '{"top_p": 0.9}',
-        structuredMode: "anthropicCompatibleStructuredMode",
-    },
-};
-
-// The connection: where the provider is and what runs there. Everything a
-// player touches once (credentials, model, profiles, reasoning) lives here;
-// request parameters, the structured-output ladder and per-task routing are
-// in the Advanced section so routine setup stays readable.
-const ProviderConnectionPanel = ({ provider, settings, onSettingChange }) => {
-    const meta = getProviderMeta(provider);
-    const supportsModelDiscovery = providerSupportsModelDiscovery(provider);
-    const recentModels = getRecentModels(provider);
-    // Global reasoning toggle — one switch, applied in every provider mode.
+// The global reasoning switch: one toggle, applied in every provider mode.
+const ReasoningSection = () => {
     const [reasoningOn, setReasoningOn] = useState(() => getReasoningEnabled());
     const toggleReasoning = () => {
         const next = !reasoningOn;
         setReasoningOn(next);
         setReasoningEnabled(next);
     };
-
     return (
-        <SettingsSection title={`${meta.label} connection`} description={meta.description}>
-        <PresetManager key={provider} provider={provider} settings={settings} onSettingChange={onSettingChange} />
-
-        {provider === "gemini" && (
-            <>
-            <SettingsInput
-            label="Gemini API Key"
-            type="password"
-            value={settings.geminiApiKey ?? ""}
-            onChange={(value) => onSettingChange("geminiApiKey", value)}
-            placeholder="Paste Gemini API key"
-            helperText="Stored only in this browser."
-            />
-            <SettingsInput
-            label="Model"
-            value={settings.geminiModel ?? ""}
-            onChange={(value) => onSettingChange("geminiModel", value)}
-            suggestions={recentModels}
-            placeholder="gemini-3.5-flash-lite"
-            helperText="Leave blank to use the built-in Gemini default."
-            />
-            </>
-        )}
-
-        {provider === "openai" && (
-            <>
-            <SettingsInput
-            label="OpenAI API Key"
-            type="password"
-            value={settings.openaiApiKey ?? ""}
-            onChange={(value) => onSettingChange("openaiApiKey", value)}
-            placeholder="Paste OpenAI API key"
-            helperText="Stored only in this browser."
-            />
-            <SettingsInput
-            label="Model"
-            value={settings.openaiModel ?? ""}
-            onChange={(value) => onSettingChange("openaiModel", value)}
-            suggestions={recentModels}
-            placeholder="gpt-..."
-            helperText={
-                supportsModelDiscovery
-                    ? "Leave blank to auto-pick a chat-capable model from /v1/models."
-                    : "Enter the exact model id."
-            }
-            />
-            </>
-        )}
-
-        {provider === "anthropic" && (
-            <>
-            <SettingsInput
-            label="Anthropic API Key"
-            type="password"
-            value={settings.anthropicApiKey ?? ""}
-            onChange={(value) => onSettingChange("anthropicApiKey", value)}
-            placeholder="Paste Anthropic API key"
-            helperText="Stored only in this browser."
-            />
-            <SettingsInput
-            label="Model"
-            value={settings.anthropicModel ?? ""}
-            onChange={(value) => onSettingChange("anthropicModel", value)}
-            suggestions={recentModels}
-            placeholder="claude-haiku-4-5"
-            helperText="Claude model ids are manual here. Leave blank to use the built-in default."
-            />
-            </>
-        )}
-
-        {provider === "openai-compatible" && (
-            <>
-            <SettingsInput
-            label="API Endpoint"
-            value={settings.openaiCompatibleEndpoint ?? ""}
-            onChange={(value) => onSettingChange("openaiCompatibleEndpoint", value)}
-            placeholder="http://localhost:11434/v1"
-            // A server on the player's own machine works from the website too, but only
-            // if it allows this origin — otherwise the browser silently drops the reply.
-            // Say so up front here rather than letting it surface as "Failed to fetch".
-            helperText={import.meta.env.VITE_OH_WEB
-                ? "Base URL that exposes /chat/completions and /models. A server on your own machine (Ollama, LM Studio) also has to allow this site: start Ollama with OLLAMA_ORIGINS set to this site's address, or use the desktop app."
-                : "Base URL that exposes /chat/completions and /models."}
-            />
-            <SettingsInput
-            label="API Key (optional)"
-            type="password"
-            value={settings.openaiCompatibleApiKey ?? ""}
-            onChange={(value) => onSettingChange("openaiCompatibleApiKey", value)}
-            placeholder="Leave empty for local Ollama"
-            helperText="Use a bearer token if your gateway requires authentication."
-            />
-            <SettingsInput
-            label="Model"
-            value={settings.openaiCompatibleModel ?? ""}
-            onChange={(value) => onSettingChange("openaiCompatibleModel", value)}
-            suggestions={recentModels}
-            placeholder="llama / qwen / gpt / mistral"
-            helperText="Leave blank to auto-pick a model from /models."
-            />
-            </>
-        )}
-
-        {provider === "anthropic-compatible" && (
-            <>
-            <SettingsInput
-            label="API Endpoint"
-            value={settings.anthropicCompatibleEndpoint ?? ""}
-            onChange={(value) => onSettingChange("anthropicCompatibleEndpoint", value)}
-            placeholder="https://my-proxy.example/v1"
-            helperText="Base URL of a self-hosted proxy that speaks the Anthropic Messages API (POST /messages). Routed through the game server to avoid CORS."
-            />
-            <SettingsInput
-            label="API Key (optional)"
-            type="password"
-            value={settings.anthropicCompatibleApiKey ?? ""}
-            onChange={(value) => onSettingChange("anthropicCompatibleApiKey", value)}
-            placeholder="Sent as x-api-key if set"
-            helperText="Leave empty if your proxy doesn't require a key."
-            />
-            <SettingsInput
-            label="Model"
-            value={settings.anthropicCompatibleModel ?? ""}
-            onChange={(value) => onSettingChange("anthropicCompatibleModel", value)}
-            suggestions={recentModels}
-            placeholder="claude-haiku-4-5"
-            helperText="The model id your proxy expects. Leave blank to use the built-in default."
-            />
-            </>
-        )}
-
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", marginTop: "0.35rem", paddingTop: "0.8rem" }}>
-        <Toggle
-        label="Model reasoning"
-        enabled={reasoningOn}
-        onToggle={toggleReasoning}
-        />
+        <SettingsSection title="Model reasoning" description="Applies to every model in the list.">
+        <Toggle label="Model reasoning" enabled={reasoningOn} onToggle={toggleReasoning} />
         <div style={{ ...helperStyle, marginTop: "-0.6rem", marginBottom: 0 }}>
         Lets thinking-capable models reason before answering (Gemini thinking, OpenAI
         reasoning effort, Claude extended thinking). Slower and costs more tokens;
         needs a model that supports it.
         </div>
-        </div>
-        </SettingsSection>
-    );
-};
-
-// Expert controls for the active provider: the request-body escape hatch, the
-// structured-output ladder (structuredMode.js) and the strict tool schema.
-const ProviderAdvancedPanel = ({ provider, settings, onSettingChange, onOpenAiSettings }) => {
-    const meta = getProviderMeta(provider);
-    const field = PROVIDER_EXPERT_FIELDS[provider] ?? PROVIDER_EXPERT_FIELDS[DEFAULT_PROVIDER];
-
-    return (
-        <SettingsSection
-        title="Custom request parameters"
-        description={`Active provider: ${meta.label}. These values go straight to the provider and should normally be left empty.`}
-        right={(
-            <button
-            type="button"
-            onClick={onOpenAiSettings}
-            style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.24)", borderRadius: "8px", color: "#bfdbfe", cursor: "pointer", fontSize: "0.72rem", fontWeight: 750, padding: "0.45rem 0.65rem" }}
-            >
-            AI settings
-            </button>
-        )}
-        >
-        <SettingsInput
-        label="Custom parameters (JSON)"
-        multiline
-        value={settings[field.customParams] ?? ""}
-        onChange={(value) => onSettingChange(field.customParams, value)}
-        placeholder={field.placeholder}
-        helperText="Optional. Merged into the request body — e.g. to limit reasoning budget/effort. Invalid JSON is ignored."
-        />
-        {field.structuredMode && (
-            <StructuredModeSelect
-            value={settings[field.structuredMode] ?? "auto"}
-            onChange={(value) => onSettingChange(field.structuredMode, value)}
-            />
-        )}
-        {field.toolStrict && (
-            <>
-            <Toggle
-            label="Strict tool schema"
-            enabled={settings[field.toolStrict] === "1"}
-            onToggle={() => onSettingChange(field.toolStrict, settings[field.toolStrict] === "1" ? "" : "1")}
-            />
-            <div style={{ ...helperStyle, marginTop: "-0.6rem" }}>
-            Sends strict:true with the tool call so a self-hosted backend constrains
-            generation to the schema (SGLang/xgrammar, vLLM). Stops malformed or
-            mistyped tool arguments. Leave off for OpenAI and Azure: they reject a
-            schema that does not list every property as required. Only affects the
-            tool rung of the structured-output ladder above.
-            </div>
-            </>
-        )}
         </SettingsSection>
     );
 };
@@ -1591,8 +1579,8 @@ const settingsHelper = { ...helperStyle, marginTop: "-0.55rem", marginBottom: "0
 const SETTINGS_SECTIONS = [
     { key: "general", label: "General", icon: "◫", description: "Language, display and accessibility" },
     { key: "map", label: "Map", icon: "◇", description: "Basemap, labels, globe and camera" },
-    { key: "ai", label: "AI", icon: "✦", description: "Provider, model, reasoning and limits" },
-    { key: "advanced", label: "Advanced", icon: "⌘", description: "Provider parameters and expert controls" },
+    { key: "ai", label: "AI", icon: "✦", description: "Models, backups, keys and reasoning" },
+    { key: "advanced", label: "Advanced", icon: "⌘", description: "Per-task models and expert controls" },
 ];
 
 // The small menu becoming the workspace. `fromRect` is the small menu's card
@@ -1649,10 +1637,6 @@ const SettingsWorkspace = ({
     onToggleFullscreen,
     onToggleGlobe,
     onToggleTerrain,
-    selectedProvider,
-    onApiProviderChange,
-    providerSettings,
-    onProviderSettingChange,
     mapSettings,
     updateMapSetting,
     basemapStyle,
@@ -1813,10 +1797,9 @@ const SettingsWorkspace = ({
 
             {activeSection === "ai" && (
                 <>
-                <SettingsSection title="Provider" description="Choose which model service Open Historia uses. Provider-specific credentials stay with the selected provider.">
-                    <ApiProviderSelector provider={selectedProvider} onProviderChange={onApiProviderChange ?? (() => {})} />
-                </SettingsSection>
-                <ProviderConnectionPanel provider={selectedProvider} settings={providerSettings ?? {}} onSettingChange={onProviderSettingChange ?? (() => {})} />
+                <FallbackListSection />
+                <ConnectionsSection />
+                <ReasoningSection />
                 <SettingsSection title="Generation behavior" description="Bound model waiting behavior without changing the deterministic fallback path.">
                     <Toggle label="Limit AI generation" enabled={mapSettings.limitAiGeneration} onToggle={() => updateMapSetting("limitAiGeneration", MAP_SETTING_KEYS.limitAiGeneration, !mapSettings.limitAiGeneration)} />
                     <div style={settingsHelper}>
@@ -1836,14 +1819,20 @@ const SettingsWorkspace = ({
 
             {activeSection === "advanced" && (
                 <>
-                <SettingsSection title="Expert controls" description="Uncommon provider-level overrides live here so routine configuration stays readable.">
-                    <div style={{ color: "rgba(255,255,255,0.52)", fontSize: "0.7rem", lineHeight: 1.5 }}>
-                        These values are passed directly to the selected AI provider. They can alter request behavior in provider-specific ways and should normally be left empty.
-                    </div>
-                </SettingsSection>
-                <ProviderAdvancedPanel provider={selectedProvider} settings={providerSettings ?? {}} onSettingChange={onProviderSettingChange ?? (() => {})} onOpenAiSettings={() => onSectionChange("ai")} />
-                <SettingsSection title="Per-task models" description="Route individual AI tasks to a cheaper or a stronger model. Blank means the provider's default model. Saved per provider.">
-                    <TaskModelOverrides key={selectedProvider} provider={selectedProvider} suggestions={getRecentModels(selectedProvider)} />
+                <SettingsSection
+                title="Per-task models"
+                description="Route individual AI tasks to a cheaper or a stronger model from your list. A task tries its pick first, then the list from the top, so it only fails when every model is used up."
+                right={(
+                    <button
+                    type="button"
+                    onClick={() => onSectionChange("ai")}
+                    style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.24)", borderRadius: "8px", color: "#bfdbfe", cursor: "pointer", fontSize: "0.72rem", fontWeight: 750, padding: "0.45rem 0.65rem", whiteSpace: "nowrap" }}
+                    >
+                    AI settings
+                    </button>
+                )}
+                >
+                    <TaskPicks />
                 </SettingsSection>
                 <SettingsSection
                 title="Telemetry"
@@ -2012,10 +2001,6 @@ const SettingsMenu = ({
     onToggleFullscreen,
     onToggleGlobe,
     onToggleTerrain,
-    apiProvider,
-    onApiProviderChange,
-    providerSettings,
-    onProviderSettingChange,
     onOpenCheats,
     onOpenDebugConsole,
     onOpenEvents,
@@ -2030,7 +2015,6 @@ const SettingsMenu = ({
     // the player to "ai"); null opens the quick menu.
     initialSection = null,
 }) => {
-    const selectedProvider = apiProvider ?? DEFAULT_PROVIDER;
     const isMobile = useIsMobile();
     const [activeSettingsSection, setActiveSettingsSection] = useState(initialSection || null);
     const [activeQuickTab, setActiveQuickTab] = useState(initialSection ? "settings" : "tools");
@@ -2186,10 +2170,6 @@ const SettingsMenu = ({
             onToggleFullscreen={onToggleFullscreen}
             onToggleGlobe={onToggleGlobe}
             onToggleTerrain={onToggleTerrain}
-            selectedProvider={selectedProvider}
-            onApiProviderChange={onApiProviderChange}
-            providerSettings={providerSettings}
-            onProviderSettingChange={onProviderSettingChange}
             mapSettings={mapSettings}
             updateMapSetting={updateMapSetting}
             basemapStyle={basemapStyle}
