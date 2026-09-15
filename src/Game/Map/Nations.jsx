@@ -1566,6 +1566,11 @@ const WorldMap = ({ isGlobe = false }) => {
 
     const restartWorker = ({ initialFailure = false } = {}) => {
       if (worker !== polityBoundaryWorkerRef.current) return;
+      // The stalled revision's presentation holds die with its worker: the
+      // replacement only runs initialize, which never releases them, and a held
+      // region would otherwise keep its previous fill for the rest of the
+      // session while borders and labels already show the current owner.
+      releaseAllOwnershipPresentation();
       polityBoundarySchedulerRef.current?.stop?.();
       worker.terminate();
       polityBoundaryWorkerRef.current = null;

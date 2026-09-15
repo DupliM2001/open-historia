@@ -47,6 +47,18 @@ export const resolveUnitFlagUrl = (ownerCode, customFlags, polities) => {
 export const unitFlagPixelCacheKey = (ownerCode, url) => `${String(ownerCode ?? "")}\u0000${String(url ?? "")}`;
 const pixelCache = new Map();
 const inFlight = new Map();
+// The URL each owner was last asked for. A replacement flag evicts the previous
+// URL's pixels (custom flags are data URLs, so an entry holds the image twice)
+// instead of keeping every flag a player ever tried for the whole session.
+const latestUrlByOwner = new Map();
+const forgetPreviousFlag = (ownerCode, url) => {
+  const previous = latestUrlByOwner.get(ownerCode);
+  if (previous === url) return;
+  latestUrlByOwner.set(ownerCode, url);
+  if (previous === undefined) return;
+  const previousKey = unitFlagPixelCacheKey(ownerCode, previous);
+  if (!inFlight.has(previousKey)) pixelCache.delete(previousKey);
+};
 
 // The style image atlas is per MapLibre map/style. Track which URL is currently
 // installed under each stable owner icon so a changed flag can update the same
@@ -161,6 +173,7 @@ export const syncUnitFlagIcons = (map, wanted, onChange) => {
     if (!ownerCode || !url) continue;
     const id = iconIdFor(ownerCode);
     const cacheKey = unitFlagPixelCacheKey(ownerCode, url);
+    forgetPreviousFlag(ownerCode, url);
     const cached = pixelCache.get(cacheKey);
 
     if (cached) {

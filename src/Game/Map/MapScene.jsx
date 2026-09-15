@@ -19,6 +19,18 @@ import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
 const LegacyScene = lazy(() => import("./legacy/index.jsx"));
 const LegacyLayerOrder = lazy(() => import("./legacy/index.jsx").then((module) => ({ default: module.LegacyLayerOrder })));
 
+// Opt-in only (?mapFillProbe=1, or localStorage oh:mapFillProbe = "1"): a
+// diagnostic, not something every player's console and window should carry.
+const isMapFillProbeEnabled = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    if (new URLSearchParams(window.location.search).get("mapFillProbe") === "1") return true;
+    return window.localStorage?.getItem("oh:mapFillProbe") === "1";
+  } catch {
+    return false;
+  }
+};
+
 // Temporary PCPv2 rendered-layer probe. This lives INSIDE the react-map-gl
 // context so useMap() hands us the actual active MapLibre instance, avoiding
 // outer-ref/remount timing ambiguity while we diagnose the persistent wedges.
@@ -145,9 +157,10 @@ const MapFillProbe = () => {
 // Settings announces the redraw so the game loading screen covers it.
 const MapScene = ({ isGlobe = false }) => {
   const legacy = useMapSetting(MAP_SETTING_KEYS.legacyMapRenderer);
+  const fillProbeEnabled = React.useMemo(() => isMapFillProbeEnabled(), []);
   return (
     <>
-      <MapFillProbe />
+      {fillProbeEnabled && <MapFillProbe />}
       {legacy ? (
         <Suspense fallback={null}>
           <LegacyScene isGlobe={isGlobe} />
