@@ -1658,7 +1658,6 @@ const SettingsWorkspace = ({
     updateBasemapStyle,
     labelFont,
     updateLabelFont,
-    updateBetaUnits,
     telemetryOn,
     onToggleTelemetry,
     ratingOn,
@@ -2106,7 +2105,6 @@ const SettingsMenu = ({
             updateBasemapStyle={updateBasemapStyle}
             labelFont={labelFontShown}
             updateLabelFont={updateLabelFont}
-            updateBetaUnits={updateBetaUnits}
             telemetryOn={telemetryOn}
             onToggleTelemetry={toggleTelemetry}
             ratingOn={ratingOn}
