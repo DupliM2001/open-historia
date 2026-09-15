@@ -172,7 +172,11 @@ export const fetchHubPosts = async ({ force = false } = {}) => {
   const issues = await response.json();
   const posts = (Array.isArray(issues) ? issues : [])
     .filter((issue) => !issue.pull_request)
-    .map((issue) => parsePost(issue, importsById));
+    .map((issue) => parsePost(issue, importsById))
+    // The parser already decides whether a post has an importable scenario
+    // bundle. Do not surface malformed or misfiled "scenario" issues whose
+    // Import button would otherwise be disabled.
+    .filter((post) => Boolean(post.bundleUrl));
   hubCache = { at: Date.now(), posts };
   return posts;
 };
@@ -233,7 +237,10 @@ const cardSurface = {
   flexDirection: "column",
   flex: "0 0 19rem",
   gap: "0.55rem",
+  maxWidth: "19rem",
+  minWidth: 0,
   padding: "0.9rem",
+  width: "19rem",
 };
 
 const pillButton = {
@@ -281,22 +288,42 @@ const handleScenarioCoverError = (event) => {
   image.src = DEFAULT_SCENARIO_COVER;
 };
 
-const ScenarioCard = ({ post, busy, onImport, onSelect }) => (
+// Covers can arrive in any source dimensions. The viewport owns the geometry;
+// the image only fills/crops inside it and therefore cannot resize a card.
+const ScenarioCover = ({ post, borderRadius = "10px", marginBottom }) => (
   <div
-    style={{ ...cardSurface, cursor: "pointer" }}
-    onClick={() => onSelect(post)}
+    style={{
+      aspectRatio: "16 / 9",
+      borderRadius,
+      flex: "0 0 auto",
+      maxWidth: "100%",
+      minWidth: 0,
+      overflow: "hidden",
+      width: "100%",
+      ...(marginBottom ? { marginBottom } : {}),
+    }}
   >
     <img
       src={post.coverImageUrl || DEFAULT_SCENARIO_COVER}
       alt=""
       onError={handleScenarioCoverError}
       style={{
-        aspectRatio: "16 / 9",
-        borderRadius: "10px",
+        display: "block",
+        height: "100%",
+        maxWidth: "100%",
         objectFit: "cover",
         width: "100%",
       }}
     />
+  </div>
+);
+
+const ScenarioCard = ({ post, busy, onImport, onSelect }) => (
+  <div
+    style={{ ...cardSurface, cursor: "pointer" }}
+    onClick={() => onSelect(post)}
+  >
+    <ScenarioCover post={post} />
     <div style={{ alignItems: "center", display: "flex", gap: "0.55rem" }}>
       {post.avatarUrl && (
         <img src={post.avatarUrl} alt={post.author} style={{ borderRadius: "50%", height: "1.6rem", width: "1.6rem" }} />
@@ -422,18 +449,7 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
 
     <StatusBanner notice={notice} error={error} />
 
-    <img
-      src={post.coverImageUrl || DEFAULT_SCENARIO_COVER}
-      alt=""
-      onError={handleScenarioCoverError}
-      style={{
-        aspectRatio: "16 / 9",
-        borderRadius: "14px",
-        marginBottom: "0.9rem",
-        objectFit: "cover",
-        width: "100%",
-      }}
-    />
+    <ScenarioCover post={post} borderRadius="14px" marginBottom="0.9rem" />
 
     <div style={{ alignItems: "center", display: "flex", gap: "0.6rem", marginBottom: "0.3rem" }}>
       {post.avatarUrl && (
