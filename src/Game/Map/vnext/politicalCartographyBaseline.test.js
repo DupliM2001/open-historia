@@ -19,7 +19,7 @@ test("political fills and province outlines are inserted below thick polity bord
     "regions-fill",
     "regions-outline",
     "custom-regions-fill",
-    "ownership-transition-fill",
+    "ownership-transition-sweep-fill",
     "custom-regions-local-outline",
     "custom-regions-disputed-vnext",
   ]) {
