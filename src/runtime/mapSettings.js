@@ -58,6 +58,13 @@ export const MAP_SETTING_KEYS = {
     // one; a player whose provider drops long requests turns them on from
     // Settings → AI.
     chunkLongJumps: "ai_chunk_long_jumps",
+    // The lookup functions (AI/lookupTools.js): the structured tasks declare
+    // them beside their output function so the model can ask for exact names,
+    // ids and ledgers before answering. ON by default — read with
+    // getMapSettingDefaultOn, so an absent key means "on". A player whose
+    // provider handles tool calls badly, or who wants the single cheaper
+    // request per task, turns them off from Settings → AI.
+    lookupFunctions: "ai_lookup_functions",
 };
 
 // Families the label-font pickers suggest — Settings → Map and the game and
@@ -84,8 +91,8 @@ export function getMapSetting(key) {
 // A default-on setting CANNOT use getMapSetting above — an absent key reads as
 // "1" !== null, i.e. off — so every consumer of such a key must come through here.
 //
-// No key ships on today: the two AI toggles that did (limitAiGeneration and
-// chunkLongJumps) went default-off in the beta. Kept for the next one.
+// lookupFunctions ships on; limitAiGeneration and chunkLongJumps, which used
+// to, went default-off in the beta.
 export function getMapSettingDefaultOn(key) {
     if (typeof localStorage === "undefined") return true;
     return localStorage.getItem(key) !== "0";
@@ -101,6 +108,7 @@ const SETTING_LABELS = {
     [MAP_SETTING_KEYS.limitAiGeneration]: "Limit AI generation",
     [MAP_SETTING_KEYS.batchBackgroundTasks]: "Batch background AI tasks",
     [MAP_SETTING_KEYS.chunkLongJumps]: "Generate long time skips in segments",
+    [MAP_SETTING_KEYS.lookupFunctions]: "AI lookup functions",
 };
 
 export function setMapSetting(key, value) {

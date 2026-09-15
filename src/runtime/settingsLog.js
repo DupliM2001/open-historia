@@ -21,7 +21,7 @@
 // parameters (they can carry headers — only their size), and an endpoint only by
 // its host. Everything is redacted again as the file is built.
 import { isDebugLogEnabled, isDebugLogVerbose, registerSettingsSnapshot } from "./debugLog.js";
-import { MAP_SETTING_KEYS, getMapSetting, getMapSettingValue } from "./mapSettings.js";
+import { MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn, getMapSettingValue } from "./mapSettings.js";
 import { getStoredChatLanguage, getStoredLanguage, languageDisplayName } from "./i18n.js";
 import {
     AI_TASK_ROUTING,
@@ -108,6 +108,7 @@ registerSettingsSnapshot("AI", () => {
         ["Model reasoning", onOff(getReasoningEnabled())],
         ["Limit AI generation", onOff(getMapSetting(MAP_SETTING_KEYS.limitAiGeneration))],
         ["Generate long time skips in segments", onOff(getMapSetting(MAP_SETTING_KEYS.chunkLongJumps))],
+        ["AI lookup functions", onOff(getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions))],
         ["Batch background AI tasks", onOff(getMapSetting(MAP_SETTING_KEYS.batchBackgroundTasks))],
         ["Record AI telemetry", onOff(isTelemetryEnabled())],
         ["Rate AI generations", onOff(isRatingEnabled())],

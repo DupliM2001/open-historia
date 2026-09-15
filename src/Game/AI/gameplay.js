@@ -174,7 +174,7 @@ import {
 } from "../../runtime/countryStats.js";
 import { beginTurnPerfStage, endTurnPerfStage, measureTurnPerfStage, recordTurnPerfAiAttempt } from "../../runtime/turnPerf.js";
 import { difficultyDirective } from "../../runtime/difficulty.js";
-import { MAP_SETTING_KEYS, getMapSetting } from "../../runtime/mapSettings.js";
+import { MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn } from "../../runtime/mapSettings.js";
 import { AI_FIRST_BYTE_TIMEOUT_MS, AI_IDLE_TIMEOUT_MS, createIdleDeadline } from "./idleDeadline.js";
 import { REPAIR_STOP_TIME_BUDGET, runBoundedRepairCall } from "./repairCall.js";
 import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
@@ -1285,7 +1285,10 @@ const buildTemplateVariables = async (bundle, options = {}) => {
       );
   const wants = (key) => !requiredSet || requiredSet.has(key);
 
-  const variables = await buildPromptContext(bundle, { ...options, requiredKeys, taskKey });
+  // A task that declares the lookup functions gets the slim prompt (the
+  // functions carry the detail); with the setting off it gets the full one.
+  const lookups = Boolean(options?.lookups) && lookupFunctionsEnabled();
+  const variables = await buildPromptContext(bundle, { ...options, lookups, requiredKeys, taskKey });
   // The diplomatic slice is bounded to the player plus, for a chat task, the
   // polities in the thread; wars are few enough to show whole.
   const focusActors = normalizeArray(options?.chat?.countries)
@@ -1302,7 +1305,7 @@ const buildTemplateVariables = async (bundle, options = {}) => {
     }).text;
   }
   if (wants("territorialControlContext")) {
-    variables.territorialControlContext = await buildTerritorialControlContext(bundle.world, options?.lookups ? { maxRows: 24, viaLookups: true } : {});
+    variables.territorialControlContext = await buildTerritorialControlContext(bundle.world, lookups ? { maxRows: 24, viaLookups: true } : {});
   }
   if (wants("canonicalStorylineContext")) {
     variables.canonicalStorylineContext = buildGameMasterStorylineContext(bundle.world);
@@ -1404,7 +1407,12 @@ const abortableWait = (ms, signal) => new Promise((resolve, reject) => {
 // catalog load and a city read, paid only when the model actually asks.
 // `bundle` is what the task is shown (a jump segment passes the ledgers as the
 // segments in hand left them), so lookups and prompt never disagree.
+// Settings → AI → AI lookup functions. Off: no task declares them, and the
+// prompt carries the region lists and ledgers itself (buildTemplateVariables).
+const lookupFunctionsEnabled = () => getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions);
+
 const buildTaskLookups = (bundle, { maxRounds } = {}) => {
+  if (!lookupFunctionsEnabled()) return null;
   let contextPromise = null;
   const context = () => {
     if (!contextPromise) {

@@ -55,7 +55,7 @@ import {
     setStoredChatLanguage,
     setStoredLanguage,
 } from "../../runtime/i18n.js";
-import { LABEL_FONT_SUGGESTIONS, MAP_SETTING_KEYS, getMapSetting, setMapSetting, setMapSettingValue, useMapSettingValue } from "../../runtime/mapSettings.js";
+import { LABEL_FONT_SUGGESTIONS, MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn, setMapSetting, setMapSettingValue, useMapSettingValue } from "../../runtime/mapSettings.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { copyToClipboard } from "../../runtime/clipboard.js";
 import {
@@ -1813,6 +1813,10 @@ const SettingsWorkspace = ({
                     <div style={settingsHelper}>
                     Off (default): the whole skip is generated in a single request. On: skips of more than a few months are generated in several shorter requests and merged into one round — slower and costlier in tokens, but far less likely to time out on a hosted provider.
                     </div>
+                    <Toggle label="AI lookup functions" enabled={mapSettings.lookupFunctions} onToggle={() => updateMapSetting("lookupFunctions", MAP_SETTING_KEYS.lookupFunctions, !mapSettings.lookupFunctions)} />
+                    <div style={settingsHelper}>
+                    On (default): before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
+                    </div>
                     <Toggle label="Batch background AI tasks" enabled={mapSettings.batchBackgroundTasks} onToggle={() => updateMapSetting("batchBackgroundTasks", MAP_SETTING_KEYS.batchBackgroundTasks, !mapSettings.batchBackgroundTasks)} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
                     Anthropic only. On: history consolidation runs through the Message Batches API at about half the price and lands a little later, applied between turns. Off (default): every task answers in the same call. Other providers are unaffected either way.
@@ -2019,6 +2023,8 @@ const SettingsMenu = ({
         limitAiGeneration: getMapSetting(MAP_SETTING_KEYS.limitAiGeneration),
         // Same again: ships ON.
         chunkLongJumps: getMapSetting(MAP_SETTING_KEYS.chunkLongJumps),
+        // Ships ON: an absent key reads as on (see mapSettings.js).
+        lookupFunctions: getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions),
         batchBackgroundTasks: getMapSetting(MAP_SETTING_KEYS.batchBackgroundTasks),
     }));
 
