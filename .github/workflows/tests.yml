@@ -1,0 +1,41 @@
+# Runs the test suite on every pull request into beta or main, and on every push
+# to beta, so a change that breaks the suite is visible on the pull request —
+# not first discovered when the desktop installer workflow refuses to build
+# (its "Run the tests" step is this same `npm test`). Twice on 2026-09-15 a PR
+# merged into beta with one failing source-text guard, and both times the next
+# installer run was the thing that noticed.
+#
+# Like desktop-beta.yml, a pull_request run uses the copy of this file on the
+# PR's BASE branch, so PRs into main only get it once main carries it too.
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - beta
+      - main
+  push:
+    branches:
+      - beta
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The same step the installer workflows run before they build.
+      - name: Run the tests
+        run: npm test
