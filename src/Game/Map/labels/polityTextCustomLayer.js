@@ -50,12 +50,117 @@ const createProgram = (gl, vertexSource, fragmentSource) => {
   return program;
 };
 
-const matrixFromRenderArgs = (args) => {
+// ------------- Projection -------------
+const PROJECTION_VERTEX_INPUT = "a_pos";
+
+// Pre-v5 MapLibre had no shaderData/projection uniforms, only a mercator matrix.
+// Keep a working mercator-only path there instead of failing to render.
+const LEGACY_SHADER_DATA = Object.freeze({
+  variantName: "legacy-mercator",
+  define: "",
+  vertexShaderPrelude: `const float PI = 3.141592653589793;
+uniform mat4 u_projection_matrix;
+vec4 projectTile(vec2 p) {
+  return u_projection_matrix * vec4(p, 0.0, 1.0);
+}`,
+});
+
+const shaderDataFromRenderArgs = (args) => {
+  const shaderData = args?.shaderData;
+  if (typeof shaderData?.vertexShaderPrelude === "string" && shaderData.variantName) {
+    return { define: "", ...shaderData };
+  }
+  return LEGACY_SHADER_DATA;
+};
+
+const legacyMatrixFromRenderArgs = (args) => {
   if (args?.defaultProjectionData?.mainMatrix) return args.defaultProjectionData.mainMatrix;
   if (args?.modelViewProjectionMatrix) return args.modelViewProjectionMatrix;
   if (Array.isArray(args) || ArrayBuffer.isView(args)) return args;
   return null;
 };
+
+const projectionDataFromRenderArgs = (args) => {
+  const data = args?.defaultProjectionData;
+  if (data?.mainMatrix) return data;
+  const mainMatrix = legacyMatrixFromRenderArgs(args);
+  if (!mainMatrix) return null;
+  return {
+    mainMatrix,
+    fallbackMatrix: mainMatrix,
+    tileMercatorCoords: [0, 0, 1, 1],
+    clippingPlane: [0, 0, 0, 0],
+    projectionTransition: 0,
+  };
+};
+
+// MapLibre deliberately hands custom layers 64-bit matrices so CPU-side
+// transforms keep their precision. uniformMatrix4fv wants a Float32Array, and
+// letting WebIDL coerce a Float64Array every frame allocates; convert into a
+// buffer owned by the layer instead.
+const writeFloat32Matrix = (matrix, target) => {
+  if (!matrix) return null;
+  if (matrix instanceof Float32Array) return matrix;
+  for (let index = 0; index < 16; index += 1) target[index] = Number(matrix[index]) || 0;
+  return target;
+};
+
+// > 0 means the globe is contributing to this frame (1 = fully globe, fractional
+// during the globe<->mercator animation at high zoom).
+const isGlobeContributing = (projection) => Number(projection?.projectionTransition ?? 0) > 0.0001;
+
+const projectionUniformLocations = (gl, program) => ({
+  matrix: gl.getUniformLocation(program, "u_projection_matrix"),
+  tileMercatorCoords: gl.getUniformLocation(program, "u_projection_tile_mercator_coords"),
+  clippingPlane: gl.getUniformLocation(program, "u_projection_clipping_plane"),
+  transition: gl.getUniformLocation(program, "u_projection_transition"),
+  fallbackMatrix: gl.getUniformLocation(program, "u_projection_fallback_matrix"),
+});
+
+// `#version` must be the first line; the prelude carries no version directive.
+// `define` follows the prelude exactly as MapLibre's custom-layer docs specify.
+const buildTextureVertexSource = (shaderData) => `#version 300 es
+precision highp float;
+${shaderData.vertexShaderPrelude}
+${shaderData.define}
+in vec2 ${PROJECTION_VERTEX_INPUT};
+in vec2 a_uv;
+out vec2 v_uv;
+void main() {
+  gl_Position = projectTile(${PROJECTION_VERTEX_INPUT});
+  v_uv = a_uv;
+}
+`;
+
+const buildLineVertexSource = (shaderData) => `#version 300 es
+precision highp float;
+${shaderData.vertexShaderPrelude}
+${shaderData.define}
+in vec2 ${PROJECTION_VERTEX_INPUT};
+void main() {
+  gl_Position = projectTile(${PROJECTION_VERTEX_INPUT});
+}
+`;
+
+const TEXTURE_FRAGMENT_SOURCE = `#version 300 es
+precision mediump float;
+uniform sampler2D u_texture;
+uniform float u_opacity;
+in vec2 v_uv;
+out vec4 fragColor;
+void main() {
+  vec4 texel = texture(u_texture, v_uv);
+  fragColor = vec4(texel.rgb, texel.a * u_opacity);
+}
+`;
+
+const LINE_FRAGMENT_SOURCE = `#version 300 es
+precision mediump float;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(1.0, 0.86, 0.0, 0.58);
+}
+`;
 
 const mercatorPointsFromLngLat = (lngLatPoints) => lngLatPoints.map(([lng, lat]) => {
   const coordinate = MercatorCoordinate.fromLngLat({ lng, lat });
@@ -481,6 +586,8 @@ export const createPolityTextCustomLayer = ({
   haloWidthPx = 5,
   samples = 128,
   debugBaseline = true,
+  // diagnostics only
+  isGlobe = false,
 } = {}) => {
   const sourceRecords = Array.isArray(records) && records.length ? records : [defaultPtr0Record()];
   const prepared = Array.isArray(preparedEntries)
@@ -516,6 +623,10 @@ export const createPolityTextCustomLayer = ({
     _visibleOpacity: new Float32Array(drawOrder.length),
     _textureLocations: null,
     _lineLocations: null,
+    _programVariant: null,
+    _failedProgramVariant: null,
+    _mainMatrixF32: new Float32Array(16),
+    _fallbackMatrixF32: new Float32Array(16),
     _didLogFirstRender: false,
     _didWarnMissingMatrix: false,
 
@@ -545,57 +656,12 @@ export const createPolityTextCustomLayer = ({
         })),
       });
 
-      const textureVertexSource = `#version 300 es
-        precision highp float;
-        uniform mat4 u_matrix;
-        in vec2 a_pos;
-        in vec2 a_uv;
-        out vec2 v_uv;
-        void main() {
-          gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
-          v_uv = a_uv;
-        }
-      `;
-      const textureFragmentSource = `#version 300 es
-        precision mediump float;
-        uniform sampler2D u_texture;
-        uniform float u_opacity;
-        in vec2 v_uv;
-        out vec4 fragColor;
-        void main() {
-          vec4 texel = texture(u_texture, v_uv);
-          fragColor = vec4(texel.rgb, texel.a * u_opacity);
-        }
-      `;
-      const lineVertexSource = `#version 300 es
-        precision highp float;
-        uniform mat4 u_matrix;
-        in vec2 a_pos;
-        void main() {
-          gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
-        }
-      `;
-      const lineFragmentSource = `#version 300 es
-        precision mediump float;
-        out vec4 fragColor;
-        void main() {
-          fragColor = vec4(1.0, 0.86, 0.0, 0.58);
-        }
-      `;
-
-      this._textureProgram = createProgram(gl, textureVertexSource, textureFragmentSource);
-      this._lineProgram = debugBaseline ? createProgram(gl, lineVertexSource, lineFragmentSource) : null;
-      this._textureLocations = {
-        matrix: gl.getUniformLocation(this._textureProgram, "u_matrix"),
-        texture: gl.getUniformLocation(this._textureProgram, "u_texture"),
-        opacity: gl.getUniformLocation(this._textureProgram, "u_opacity"),
-        position: gl.getAttribLocation(this._textureProgram, "a_pos"),
-        uv: gl.getAttribLocation(this._textureProgram, "a_uv"),
-      };
-      this._lineLocations = this._lineProgram ? {
-        matrix: gl.getUniformLocation(this._lineProgram, "u_matrix"),
-        position: gl.getAttribLocation(this._lineProgram, "a_pos"),
-      } : null;
+      // Shaders are NOT compiled here. Their source depends on the projection
+      // prelude MapLibre supplies per frame, and the projection can change
+      // without the layer being re-added. They are compiled on first render and
+      // recompiled whenever the projection variant changes.
+      this._programVariant = null;
+      this._failedProgramVariant = null;
 
       // Do NOT eagerly allocate every polity texture/buffer here. A historical
       // world can carry 200+ labels, and initial mount / style remount must stay
@@ -606,6 +672,89 @@ export const createPolityTextCustomLayer = ({
       // in small per-frame batches below.
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    },
+
+    // Compile against the CURRENT projection's prelude. MapLibre changes
+    // `shaderData.variantName` whenever that prelude changes, so it is the cache
+    // key. A globe/mercator toggle therefore swaps programs without touching any
+    // prepared label geometry.
+    _ensurePrograms(gl, shaderData) {
+      if (this._textureProgram && this._programVariant === shaderData.variantName) return true;
+      if (this._failedProgramVariant === shaderData.variantName) return false;
+      if (gl.isContextLost?.()) return false;
+
+      let textureProgram = null;
+      let lineProgram = null;
+      try {
+        textureProgram = createProgram(gl, buildTextureVertexSource(shaderData), TEXTURE_FRAGMENT_SOURCE);
+        lineProgram = debugBaseline
+          ? createProgram(gl, buildLineVertexSource(shaderData), LINE_FRAGMENT_SOURCE)
+          : null;
+      } catch (error) {
+        if (textureProgram) gl.deleteProgram(textureProgram);
+        if (lineProgram) gl.deleteProgram(lineProgram);
+        this._failedProgramVariant = shaderData.variantName;
+        console.warn("[map] PTR could not compile shaders for projection variant", {
+          variantName: shaderData.variantName,
+          error: String(error?.message ?? error ?? "unknown"),
+        });
+        return false;
+      }
+
+      if (this._textureProgram) gl.deleteProgram(this._textureProgram);
+      if (this._lineProgram) gl.deleteProgram(this._lineProgram);
+
+      this._textureProgram = textureProgram;
+      this._lineProgram = lineProgram;
+      this._textureLocations = {
+        ...projectionUniformLocations(gl, textureProgram),
+        texture: gl.getUniformLocation(textureProgram, "u_texture"),
+        opacity: gl.getUniformLocation(textureProgram, "u_opacity"),
+        position: gl.getAttribLocation(textureProgram, PROJECTION_VERTEX_INPUT),
+        uv: gl.getAttribLocation(textureProgram, "a_uv"),
+      };
+      this._lineLocations = lineProgram ? {
+        ...projectionUniformLocations(gl, lineProgram),
+        position: gl.getAttribLocation(lineProgram, PROJECTION_VERTEX_INPUT),
+      } : null;
+      this._programVariant = shaderData.variantName;
+      this._failedProgramVariant = null;
+      console.info("[map] PTR shaders compiled for projection", {
+        variantName: shaderData.variantName,
+        reactIsGlobe: Boolean(isGlobe),
+      });
+      return true;
+    },
+
+    // Under mercator only `u_projection_matrix` exists and the rest resolve to
+    // null locations, which WebGL treats as no-ops.
+    _applyProjectionUniforms(gl, locations, projection) {
+      if (!locations) return;
+      if (locations.matrix) {
+        gl.uniformMatrix4fv(
+          locations.matrix,
+          false,
+          writeFloat32Matrix(projection.mainMatrix, this._mainMatrixF32),
+        );
+      }
+      if (locations.tileMercatorCoords) {
+        // Custom-layer projection data is always set up so projectTile() takes
+        // mercator [0,1] directly, which is exactly what the ribbon buffers hold.
+        gl.uniform4fv(locations.tileMercatorCoords, projection.tileMercatorCoords ?? [0, 0, 1, 1]);
+      }
+      if (locations.clippingPlane) {
+        gl.uniform4fv(locations.clippingPlane, projection.clippingPlane ?? [0, 0, 0, 0]);
+      }
+      if (locations.transition) {
+        gl.uniform1f(locations.transition, Number(projection.projectionTransition ?? 0));
+      }
+      if (locations.fallbackMatrix) {
+        gl.uniformMatrix4fv(
+          locations.fallbackMatrix,
+          false,
+          writeFloat32Matrix(projection.fallbackMatrix ?? projection.mainMatrix, this._fallbackMatrixF32),
+        );
+      }
     },
 
     replacePreparedEntries(nextEntries = []) {
@@ -624,18 +773,26 @@ export const createPolityTextCustomLayer = ({
     },
 
     render(gl, args) {
-      const matrix = matrixFromRenderArgs(args);
-      if (!matrix) {
+      const projection = projectionDataFromRenderArgs(args);
+      if (!projection) {
         if (!this._didWarnMissingMatrix) {
           this._didWarnMissingMatrix = true;
-          console.warn("[map] PTR render received no projection matrix", args);
+          console.warn("[map] PTR render received no projection data", args);
         }
         return;
       }
-      if (!this._textureProgram) return;
+      if (!this._ensurePrograms(gl, shaderDataFromRenderArgs(args))) return;
 
       const zoom = Number(this._map?.getZoom?.() ?? 0);
-      const viewportBounds = viewportMercatorBounds(this._map);
+      // The mercator AABB cull is only meaningful while the view IS a mercator
+      // plane. On the globe, getBounds() describes a lat/lng box around a curved
+      // visible cap, and near the horizon or the antimeridian that box can
+      // exclude labels that are genuinely on screen. Skip it and let the globe's
+      // own clipping plane (applied inside projectTile) discard the far side of
+      // the planet instead; a null bounds makes boundsOverlap() pass everything.
+      const viewportBounds = isGlobeContributing(projection)
+        ? null
+        : viewportMercatorBounds(this._map);
 
       if (this._pendingEntries && this._pendingDrawOrder) {
         let pendingUploads = 0;
@@ -741,6 +898,8 @@ export const createPolityTextCustomLayer = ({
         this._didLogFirstRender = true;
         console.info("[map] PTR first WebGL render", {
           zoom,
+          projectionVariant: this._programVariant,
+          projectionTransition: Number(projection.projectionTransition ?? 0),
           visibleOwners: this._visibleEntries.slice(0, visibleCount).map((entry) => entry.record.owner),
         });
       }
@@ -752,7 +911,7 @@ export const createPolityTextCustomLayer = ({
 
       if (debugBaseline && this._lineProgram && this._lineLocations) {
         gl.useProgram(this._lineProgram);
-        gl.uniformMatrix4fv(this._lineLocations.matrix, false, matrix);
+        this._applyProjectionUniforms(gl, this._lineLocations, projection);
         gl.enableVertexAttribArray(this._lineLocations.position);
         for (let index = 0; index < visibleCount; index += 1) {
           const entry = this._visibleEntries[index];
@@ -765,7 +924,7 @@ export const createPolityTextCustomLayer = ({
 
       if (!this._textureLocations) return;
       gl.useProgram(this._textureProgram);
-      gl.uniformMatrix4fv(this._textureLocations.matrix, false, matrix);
+      this._applyProjectionUniforms(gl, this._textureLocations, projection);
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(this._textureLocations.texture, 0);
       gl.enableVertexAttribArray(this._textureLocations.position);
@@ -795,6 +954,8 @@ export const createPolityTextCustomLayer = ({
       this._lineProgram = null;
       this._textureLocations = null;
       this._lineLocations = null;
+      this._programVariant = null;
+      this._failedProgramVariant = null;
       this._pendingEntries = null;
       this._pendingDrawOrder = null;
       this._visibleEntries.length = 0;
