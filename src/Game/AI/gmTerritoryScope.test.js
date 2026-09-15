@@ -11,6 +11,18 @@ const catalog = [
   { id: "FRA.2", name: "Normandie", country: "France", countryCode: "FRA" },
 ];
 
+// A wider world for the qualifier cases: the countries a partial request names.
+const wider = [
+  ...catalog,
+  { id: "UKR.1", name: "Kharkiv", country: "Ukraine", countryCode: "UKR" },
+  { id: "UKR.2", name: "Kyiv", country: "Ukraine", countryCode: "UKR" },
+  { id: "UKR.3", name: "Lviv", country: "Ukraine", countryCode: "UKR" },
+  { id: "POL.1", name: "Lubelskie", country: "Poland", countryCode: "POL" },
+  { id: "POL.2", name: "Mazowieckie", country: "Poland", countryCode: "POL" },
+  { id: "RUS.1", name: "Belgorod", country: "Russian Federation", countryCode: "RUS" },
+  { id: "USA.1", name: "Guam", country: "United States", countryCode: "USA" },
+];
+
 test("detects all North Korean states as one base-geography footprint", () => {
   const scope = detectExplicitBaseTerritoryScope(
     "make the DPRK independent, in all north korean states. not just contested - legally as well.",
@@ -34,4 +46,24 @@ test("does not expand a single-region request", () => {
 
 test("fails closed when a broad request does not identify one rendered base geography", () => {
   assert.equal(detectExplicitBaseTerritoryScope("transfer all occupied regions to Germany", catalog), null);
+});
+
+test("an unqualified whole-footprint phrase still expands, with filler and a hand-over after the noun", () => {
+  assert.equal(detectExplicitBaseTerritoryScope("give all Ukrainian regions to Russia", wider)?.countryCode, "UKR");
+  assert.equal(detectExplicitBaseTerritoryScope("grant independence to all the north korean states", wider)?.countryCode, "PRK");
+  assert.equal(detectExplicitBaseTerritoryScope("all United States territories go to Mexico", wider)?.countryCode, "USA");
+});
+
+test("a request that narrows the scope to part of a country never expands to the whole footprint", () => {
+  for (const request of [
+    "Poland cedes all its eastern provinces to the Soviet Union",
+    "transfer all Ukrainian regions east of the Dnieper to Novorossiya",
+    "Transfer all the Ukrainian regions on the left bank of the Dnieper to Novorossiya",
+    "Novorossiya takes control of every Ukrainian province it occupies",
+    "Ukraine loses all of its territory east of the Dnieper; the rest stays",
+    "All French overseas territories in the Caribbean go to the United States",
+    "Give Zmiiv to Russia and settle all the border areas quietly",
+  ]) {
+    assert.equal(detectExplicitBaseTerritoryScope(request, wider), null, request);
+  }
 });

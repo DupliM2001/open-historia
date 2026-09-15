@@ -1435,11 +1435,11 @@ export const primeCustomRegionCatalog = (
   const rawEntries = [];
   for (const feature of geojson?.features ?? []) {
     const props = feature?.properties ?? {};
-    const id = props.id != null
-      ? String(props.id)
-      : props.GID_1 != null
-        ? String(props.GID_1)
-        : "";
+    // The same id vocabulary the AI's Preview resolver reads from these features
+    // (resolveRegionTransfers in gameplay.js), so an id Preview accepted is never
+    // "missing" from the compact catalog when Apply revalidates it.
+    const rawId = props.id ?? props.GID_1 ?? props.gid_1 ?? props.HASC_1 ?? feature?.id;
+    const id = rawId != null ? String(rawId) : "";
     if (!id) continue;
     const centroid = props?.centroid?.coordinates;
     rawEntries.push({

@@ -3321,7 +3321,11 @@ const resolveRegionTransfers = async (containers, world, {
         resolved.push({
           ...transfer,
           regionId,
-          regionName: normalizeString(row?.name) || normalizeString(transfer?.regionName) || regionId,
+          // Preview already named the region from the rendered features. Apply
+          // keeps that name: the compact catalog spells a few GADM ids and every
+          // placeholder differently, and a respelled candidate would no longer
+          // match the approved one ("would reinterpret this preview").
+          regionName: normalizeString(transfer?.regionName) || normalizeString(row?.name) || regionId,
         });
       }
       if (impacts && Array.isArray(impacts.regionTransfers)) impacts.regionTransfers = resolved;
