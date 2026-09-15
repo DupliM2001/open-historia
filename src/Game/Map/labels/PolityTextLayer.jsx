@@ -162,6 +162,9 @@ export default function PolityTextLayer({
   textColor,
   haloColor,
   debugBaseline = true,
+  // Globe and flat maps now use the SAME polity-name renderer. The projection
+  // is handed to the custom layer so it can apply projection per map projection
+  isGlobe = false,
   onStatusChange,
 }) {
   const runtimeRef = useRef(null);
@@ -180,6 +183,7 @@ export default function PolityTextLayer({
       fontFamilies: [...(fontFamilies ?? [])],
       recordCount: mode === "ptr1" ? records.length : 1,
       owners: mode === "ptr1" ? records.map((record) => record.owner) : ["Russian Federation"],
+      isGlobe: Boolean(isGlobe),
       projection: mapInstance?.getProjection?.()?.type ?? "unknown",
     };
     const reportStatus = (patch = {}) => {
@@ -315,6 +319,7 @@ export default function PolityTextLayer({
             fillStyle: "rgba(255, 48, 214, 0.98)",
             haloStyle: haloColor || "rgba(3, 4, 8, 0.98)",
             debugBaseline,
+            isGlobe,
           });
           if (!addExistingLayerIfNeeded()) {
             reportStatus({ waitingForStyle: true });
@@ -383,6 +388,7 @@ export default function PolityTextLayer({
               fillStyle: textColor || "rgba(250, 249, 244, 0.995)",
               haloStyle: haloColor || "rgba(3, 4, 8, 0.98)",
               debugBaseline,
+              isGlobe,
             });
             if (!addExistingLayerIfNeeded()) return null;
           } else {
@@ -549,6 +555,7 @@ export default function PolityTextLayer({
     mapInstance.on?.("styledata", onMapReady);
     mapInstance.on?.("load", onMapReady);
     mapInstance.on?.("idle", onMapReady);
+    mapInstance.on?.("projectiontransition", onMapReady);
 
     return () => {
       runtime.cancelled = true;
@@ -558,6 +565,7 @@ export default function PolityTextLayer({
       mapInstance.off?.("styledata", onMapReady);
       mapInstance.off?.("load", onMapReady);
       mapInstance.off?.("idle", onMapReady);
+      mapInstance.off?.("projectiontransition", onMapReady);
       try {
         if (mapInstance.getLayer?.(POLITY_TEXT_RENDERER_LAYER_ID)) mapInstance.removeLayer(POLITY_TEXT_RENDERER_LAYER_ID);
       } catch {}
@@ -580,7 +588,7 @@ export default function PolityTextLayer({
       if (globalThis.__OH_POLITY_TEXT_PTR0__ === requestedProbe) delete globalThis.__OH_POLITY_TEXT_PTR0__;
       if (runtimeRef.current === runtime) runtimeRef.current = null;
     };
-  }, [debugBaseline, enabled, fontFamilies, haloColor, map, mode, onStatusChange, textColor]);
+  }, [debugBaseline, enabled, fontFamilies, haloColor, isGlobe, map, mode, onStatusChange, textColor]);
 
   // Record publications are incremental. Do not make them a dependency of the
   // mount effect: that was the source of the visible PTR -> legacy -> PTR flash

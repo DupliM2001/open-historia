@@ -492,7 +492,7 @@ const WorldMap = ({ isGlobe = false }) => {
   // A player's own choice from Settings > Map. Empty means "whatever the
   // scenario author set", so it changes nothing until it is filled in.
   const labelFontOverride = useMapSettingValue(MAP_SETTING_KEYS.labelFont);
-  // PTR-1.7 is the default flat-map polity-name renderer. The old MapLibre
+  // PTR-1.7 is the default polity-name renderer The old MapLibre
   // label stack remains mounted only as a last-resort fallback while PTR is
   // waiting for canonical records, if PTR fails to mount, or when explicitly
   // disabled via ?legacyPolityText=1 / localStorage value "0".
@@ -729,13 +729,12 @@ const WorldMap = ({ isGlobe = false }) => {
     && worldKnown
     && customFlag
     && useLivePolityLabels
-    && !isGlobe
     && !mapDisplaySettings.hideCountryLabels
   );
+  //without this the globe would reveal a frame of legacy MapLibre labels and then snap them away.
   const ptrBlocksInitialReadiness = Boolean(
     ptr1PolityTextEnabled
     && customFlag
-    && !isGlobe
     && !mapDisplaySettings.hideCountryLabels
   );
   const ptr1PolityTextAuthoritative = Boolean(
@@ -1921,7 +1920,7 @@ const WorldMap = ({ isGlobe = false }) => {
 
   // Opening-screen readiness now includes the authoritative PTR first paint
   // AND targeted geometry-safety settlement. Catalog metadata still publishes
-  // early for gameplay/GM consumers, but a custom flat map keeps the existing
+  // early for gameplay/GM consumers, but a custom map keeps the existing
   // scenario loading screen up until the initial worker revision has produced
   // polity records, malformed-region presentation repair has settled, and PTR
   // has mounted.
@@ -3337,12 +3336,12 @@ const WorldMap = ({ isGlobe = false }) => {
 
       <PolityTextLayer
         map={map}
+        isGlobe={isGlobe}
         enabled={Boolean(
           ptr1PolityTextRequested
           || (
             ptr0PolityTextEnabled
             && !ptr1PolityTextEnabled
-            && !isGlobe
             && !mapDisplaySettings.hideCountryLabels
           )
         )}
