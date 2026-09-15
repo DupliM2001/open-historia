@@ -76,6 +76,14 @@ test("K17 canonical key still ignores event id and createdAt", () => {
   assert.equal(eventCanonicalKey(a), eventCanonicalKey(b));
 });
 
+test("K18 dedupeEventLog keyed canonically keeps same-prose events with different effects and drops true repeats", () => {
+  const first = ev({ id: "a", impacts: { regionTransfers: [{ regionId: "Guangzhouwan", fromCode: "France", toCode: "Germany" }] } });
+  const corrected = ev({ id: "b", impacts: { regionTransfers: [{ regionId: "Metropolitan-France", fromCode: "France", toCode: "Germany" }] } });
+  const repeat = ev({ id: "c", impacts: JSON.parse(JSON.stringify(corrected.impacts)) });
+  assert.deepEqual(ids(dedupeEventLog([first, corrected, repeat], { keyOf: eventCanonicalKey })), ["a", "b"]);
+  assert.deepEqual(ids(dedupeEventLog([first, corrected, repeat])), ["a"]);
+});
+
 // ---- Group L: dedupeGeneratedEvents ----------------------------------------
 
 test("L1 drops a generated event that restates one in the base log", () => {

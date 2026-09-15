@@ -84,7 +84,7 @@ test("GM exact approved events bypass ordinary prose-only write de-dup", async (
 test("event writer has an explicit exact-GM preservation path without weakening ordinary AI de-dup", async () => {
   const source = await sourceText(gameStatePath);
   assert.match(source, /preserveApprovedEvents = false/);
-  assert.match(source, /preserveApprovedEvents\s*\?\s*normalizedEvents\s*:\s*dedupeEventLog\(normalizedEvents\)/s);
+  assert.match(source, /preserveApprovedEvents\s*\?\s*dedupeEventLog\(normalizedEvents, \{ keyOf: eventCanonicalKey \}\)\s*:\s*dedupeEventLog\(normalizedEvents\)/s);
 });
 
 test("GM lifecycle identity does not treat stock geography or mapRefs as political existence", async () => {

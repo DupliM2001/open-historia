@@ -51,11 +51,11 @@ export const eventCanonicalKey = (event) => {
 
 // Keep only the generated events that are NOT a restatement of an event already in
 // `baseEvents` (the pre-turn log) or of an earlier event in the same batch.
-export const dedupeGeneratedEvents = (baseEvents, generatedEvents) => {
-  const seen = new Set((Array.isArray(baseEvents) ? baseEvents : []).map(eventContentKey));
+export const dedupeGeneratedEvents = (baseEvents, generatedEvents, { keyOf = eventContentKey } = {}) => {
+  const seen = new Set((Array.isArray(baseEvents) ? baseEvents : []).map((event) => keyOf(event)));
   const fresh = [];
   for (const event of Array.isArray(generatedEvents) ? generatedEvents : []) {
-    const key = eventContentKey(event);
+    const key = keyOf(event);
     if (seen.has(key)) continue;
     seen.add(key);
     fresh.push(event);
@@ -65,4 +65,6 @@ export const dedupeGeneratedEvents = (baseEvents, generatedEvents) => {
 
 // Collapse exact duplicates within a single log (keeps the first occurrence). The
 // choke-point every write funnels through, so no writer can persist a repeating log.
-export const dedupeEventLog = (events) => dedupeGeneratedEvents([], events);
+// `keyOf` says what "exact" means: the prose key (default), or eventCanonicalKey
+// for a writer whose duplicates are only those with the same structured effects.
+export const dedupeEventLog = (events, options) => dedupeGeneratedEvents([], events, options);

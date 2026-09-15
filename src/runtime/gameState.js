@@ -4,7 +4,7 @@ import { getBetaUnitsToStamp } from "./mapSettings.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
-import { dedupeEventLog } from "./eventDedup.js";
+import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
 import { normalizeEventTags } from "./eventTags.js";
 import { buildOwnerAliasMap, createOwnerResolver, toCountryName } from "./ownerNames.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
@@ -3651,8 +3651,10 @@ export const writeEventsState = async (events, options = {}) => {
   // check includes structured effects. A corrected transaction may therefore reuse
   // the same date/title/description while intentionally carrying different impacts.
   const normalizedEvents = normalizeEvents(events);
+  // Even then the log stays free of TRUE duplicates — same prose AND the same
+  // structured effects (eventCanonicalKey), the rule Apply itself checks with.
   const normalized = preserveApprovedEvents
-    ? normalizedEvents
+    ? dedupeEventLog(normalizedEvents, { keyOf: eventCanonicalKey })
     : dedupeEventLog(normalizedEvents);
   // New/edited event text follows the UI language immediately (see above).
   enqueueContentStrings(normalized);
