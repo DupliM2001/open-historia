@@ -98,7 +98,11 @@ test("PTR steady-state rendering avoids per-frame global sort and offscreen draw
   assert.match(polityTextCustomLayer, /_visibleEntries: new Array\(drawOrder\.length\)/);
   assert.match(polityTextCustomLayer, /_visibleOpacity: new Float32Array\(drawOrder\.length\)/);
   assert.match(polityTextCustomLayer, /_textureLocations = \{/);
-  assert.match(polityTextCustomLayer, /_lineLocations = this\._lineProgram \? \{/);
+  // Since #764 the programs are compiled per projection variant in
+  // _ensurePrograms, which is where the locations are resolved — once per
+  // variant, never per frame. render() only asks it to make sure they exist.
+  assert.match(polityTextCustomLayer, /_lineLocations = lineProgram \? \{/);
+  assert.match(polityTextCustomLayer, /if \(this\._textureProgram && this\._programVariant === shaderData\.variantName\) return true;/);
   const renderStart = polityTextCustomLayer.indexOf("    render(gl, args) {");
   const removeStart = polityTextCustomLayer.indexOf("    onRemove(", renderStart);
   const renderBody = polityTextCustomLayer.slice(renderStart, removeStart);
