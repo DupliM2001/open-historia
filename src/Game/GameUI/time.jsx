@@ -35,7 +35,7 @@ import {
 import { setWorldStateOverride } from "../Map/useWorldState.js";
 import { setUnitsOverride } from "../Map/unitsController.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
-import { MAP_SETTING_KEYS, isBetaUnits, useMapSetting } from "../../runtime/mapSettings.js";
+import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
 import { formatGameDateReadable, isGameDate, normalizeGameDate } from "../../runtime/gameDates.js";
 import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
 
@@ -2326,16 +2326,13 @@ const DateWidget = ({
             // here — the reveal is a partial state by definition, and the map's
             // position tween absorbs the difference when the override clears.
             //
-            // "Same as the persisted turn" is the whole point, so this has to
-            // track the unit system exactly as applySimulationResult does.
-            motion: isBetaUnits()
-                ? {
-                    originDate: record.fromDate || "",
-                    round: record.round || 0,
-                    tick: 0,
-                }
-                : null,
-            betaEngine: isBetaUnits(),
+            // "Same as the persisted turn" is the whole point, so this mirrors
+            // applySimulationResult's motion exactly.
+            motion: {
+                originDate: record.fromDate || "",
+                round: record.round || 0,
+                tick: 0,
+            },
             world: stagedBase.world,
         });
         setWorldStateOverride(stagedWorld);

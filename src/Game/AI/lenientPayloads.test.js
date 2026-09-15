@@ -137,3 +137,11 @@ test("idle diplomacy: a real note is untouched, and its unit ops get the same le
   assert.deepEqual(normalized.chat, note);
   assert.equal(normalized.unitOps[0].unit.posture, "exercise");
 });
+
+test("countryStatSheet: a missing, null or zero statsSchemaVersion is filled before validation", () => {
+  assert.equal(normalizeGameplayPayload("countryStatSheet", { capital: "Kyiv" }).statsSchemaVersion, 1);
+  assert.equal(normalizeGameplayPayload("countryStatSheet", { statsSchemaVersion: 0 }).statsSchemaVersion, 1);
+  assert.equal(normalizeGameplayPayload("countryStatSheet", { statsSchemaVersion: null }).statsSchemaVersion, 1);
+  assert.equal(normalizeGameplayPayload("countryStatSheet", { statsSchemaVersion: 2 }).statsSchemaVersion, 2);
+  assert.equal(normalizeGameplayPayload("countryStatSheet", "not an object"), "not an object");
+});

@@ -13,7 +13,7 @@ import {
 import { formatResetTime, runWithFallback } from "./fallbackRunner.js";
 import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
-import { attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord } from "./telemetry.js";
+import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import {
@@ -25,7 +25,6 @@ import {
 } from "../../runtime/diplomaticEnvelope.js";
 import { chatLanguageDirective, languageDirective } from "../../runtime/i18n.js";
 import { difficultyDirective } from "../../runtime/difficulty.js";
-import { isBetaUnits } from "../../runtime/mapSettings.js";
 import { normalizePromptPack } from "./gameplayPrompts.js";
 import {
     busyProviderMessage,
@@ -46,9 +45,20 @@ import {
 } from "./providerErrors.js";
 import { ANSWER_SENTINEL_DIRECTIVE } from "./jsonSalvage.js";
 import { createModeObserver, nextStructuredMode, startingStructuredMode } from "./structuredMode.js";
-import { createFirstByteTimer, normalizeUsage } from "./usageStats.js";
+import { createFirstByteTimer, normalizeUsage, sumUsage } from "./usageStats.js";
 import { toGeminiSchema } from "./geminiSchema.js";
 import { readAnthropicStreamedResponse, readGeminiStreamedResponse, readOpenAIStreamedResponse } from "./streamAssembly.js";
+import {
+    anthropicMessagesFromHistory,
+    appendLookupRound,
+    describeLookupCall,
+    geminiContentsFromHistory,
+    lookupCallsFromAnthropic,
+    lookupCallsFromGemini,
+    lookupCallsFromOpenAI,
+    lookupRoundCount,
+    openAiMessagesFromHistory,
+} from "./toolTurns.js";
 import {
     buildPromptContext,
     formatDateReadable,
@@ -658,27 +668,16 @@ const anthropicStreamDelta = (json) => {
     return "";
 };
 
+// The conversation is kept in Gemini's shape ({ role, parts }) and rendered per
+// provider here. Text turns render as they always did; a lookup round (a model
+// turn of functionCall parts answered by a user turn of functionResponse
+// parts, toolTurns.js) renders as that provider's tool-call exchange.
 function toOpenAIMessages(systemPrompt, history) {
-    const messages = [{ role: "system", content: systemPrompt }];
-
-    for (const entry of history) {
-        messages.push({
-            role: entry.role === "model" ? "assistant" : "user",
-            content: entry.parts?.[0]?.text ?? "",
-        });
-    }
-
-    return messages;
+    return openAiMessagesFromHistory(systemPrompt, history);
 }
 
 function toAnthropicMessages(history) {
-    return history.map((entry) => ({
-        role: entry.role === "model" ? "assistant" : "user",
-        content: [{
-            type: "text",
-            text: entry.parts?.[0]?.text ?? "",
-        }],
-    }));
+    return anthropicMessagesFromHistory(history);
 }
 
 // An error that says how the call failed, for the Fallback list
@@ -845,8 +844,14 @@ async function callGemini(systemPrompt, history, {
     onModel,
     signal,
     tool,
+    lookupTools,
+    requireOutputTool = false,
 } = {}) {
     const settings = entrySettings;
+    // Lookup functions (lookupTools.js) declared beside the output function.
+    // They stay declared for the whole conversation (the history carries calls
+    // to them); which ones the model may CALL this round is allowedFunctionNames.
+    const lookupDeclarations = tool && Array.isArray(lookupTools) ? lookupTools : [];
     const apiKey = settings.apiKey.trim();
 
     if (!apiKey) {
@@ -910,7 +915,7 @@ async function callGemini(systemPrompt, history, {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     system_instruction: { parts: [{ text: systemPrompt }] },
-                    contents: history,
+                    contents: geminiContentsFromHistory(history),
                     generationConfig: {
                         maxOutputTokens: Math.max(1, Number(maxTokens) || 8192),
                         ...(getReasoningEnabled() ? { thinkingConfig: { thinkingBudget: 8192 } } : {}),
@@ -964,21 +969,29 @@ async function callGemini(systemPrompt, history, {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 system_instruction: { parts: [{ text: systemPrompt }] },
-                contents: history,
+                contents: geminiContentsFromHistory(history),
                 // Reasoning toggle (settings): let thinking-capable Gemini models think.
                 ...(getReasoningEnabled()
                      ? { generationConfig: { thinkingConfig: { thinkingBudget: 8192 } } }
                      : {}),
                 ...customParams,
                 ...(tool ? {
-                    tools: [{ functionDeclarations: [{
-                        name: tool.name,
-                        description: tool.description,
-                        parameters: toGeminiSchema(tool.schema),
-                    }] }],
+                    tools: [{ functionDeclarations: [
+                        {
+                            name: tool.name,
+                            description: tool.description,
+                            parameters: toGeminiSchema(tool.schema),
+                        },
+                        ...lookupDeclarations.map((entry) => ({
+                            name: entry.name,
+                            description: entry.description,
+                            parameters: toGeminiSchema(entry.schema),
+                        })),
+                    ] }],
                     toolConfig: { functionCallingConfig: {
                         mode: "ANY",
-                        allowedFunctionNames: [tool.name],
+                        // The final round of a lookup conversation may only answer.
+                        allowedFunctionNames: [tool.name, ...(requireOutputTool ? [] : lookupDeclarations.map((entry) => entry.name))],
                     } },
                 } : {}),
             }),
@@ -1013,6 +1026,12 @@ async function callGemini(systemPrompt, history, {
         if (tool) {
             const toolInput = extractGeminiToolInput(data, tool);
             if (toolInput) return { rawText: joinGeminiParts(data?.candidates?.[0]?.content?.parts), toolInput };
+            // Not the answer but a question: the model called lookup functions.
+            // Handed back to callAI, which answers them and asks again.
+            if (lookupDeclarations.length) {
+                const lookupCalls = lookupCallsFromGemini(data, tool.name);
+                if (lookupCalls.length) return { rawText: joinGeminiParts(data?.candidates?.[0]?.content?.parts), toolInput: null, lookupCalls };
+            }
 
             // Now that tool calls stream, an overloaded model can refuse INSIDE
             // the stream — HTTP 200, an error frame, no function call — where the
@@ -1074,7 +1093,15 @@ async function callOpenAIStyleChatCompletions({
     observerKey = "",
     maxTokens,
     tokenLimitField = "max_tokens",
+    lookupTools,
+    requireOutputTool = false,
 }) {
+    // Lookup functions (lookupTools.js) beside the output function. On the
+    // round that must end in an answer they are left out altogether: with one
+    // tool declared, tool_choice "required" IS the forcing, on every gateway
+    // that honours it at all. (The history still carries the earlier calls;
+    // the chat-completions API does not require those tools to be declared.)
+    const lookupDeclarations = tool && Array.isArray(lookupTools) && !requireOutputTool ? lookupTools : [];
     // Where to BEGIN on the ladder. "auto" (the default) starts at the strongest
     // method; a configured mode starts lower, skipping rungs this endpoint has
     // already been shown not to honour. Either way the ladder can still walk
@@ -1188,7 +1215,10 @@ async function callOpenAIStyleChatCompletions({
                     // the schema as-is and constrain generation with it, which is
                     // what stops a model emitting an unbalanced or mistyped argument.
                     ...(toolStrict ? { strict: true } : {}),
-                    } }],
+                    } }, ...lookupDeclarations.map((entry) => ({
+                        type: "function",
+                        function: { name: entry.name, description: entry.description, parameters: entry.schema },
+                    }))],
                     // The string form, NOT OpenAI's {type:"function",function:{name}}
                     // object: llama.cpp-based servers (LM Studio, Jan, local Qwen et
                     // al.) only parse a string here — the object form logged
@@ -1351,6 +1381,11 @@ async function callOpenAIStyleChatCompletions({
         if (tool) {
             const toolInput = structuredMode === "tool" ? extractOpenAIToolInput(data, tool) : null;
             if (toolInput) return { rawText: text, toolInput };
+            // Not the answer but a question: the model called lookup functions.
+            if (structuredMode === "tool" && lookupDeclarations.length) {
+                const lookupCalls = lookupCallsFromOpenAI(data, tool.name);
+                if (lookupCalls.length) return { rawText: text, toolInput: null, lookupCalls };
+            }
 
             // Now that tool calls stream, an overloaded provider can refuse INSIDE
             // the stream — HTTP 200, an error frame, no tool call — where the same
@@ -1579,8 +1614,12 @@ async function callAnthropic(systemPrompt, history, {
     signal,
     staticPrefixEnd,
     tool,
+    lookupTools,
+    requireOutputTool = false,
 } = {}) {
     let retriedAfterOverload = false;
+    // Lookup functions (lookupTools.js) declared beside the output function.
+    const lookupDeclarations = tool && Array.isArray(lookupTools) ? lookupTools : [];
     // Anthropic tool calls stream (see the request body below); this flips if the
     // endpoint refuses to, so the call retries buffered instead of failing.
     let streamingDisabled = false;
@@ -1645,8 +1684,13 @@ async function callAnthropic(systemPrompt, history, {
             messages: toAnthropicMessages(history),
             ...customParams,
             ...(tool ? {
-                tools: [{ name: tool.name, description: tool.description, input_schema: tool.schema }],
-                tool_choice: { type: "tool", name: tool.name },
+                tools: [
+                    { name: tool.name, description: tool.description, input_schema: tool.schema },
+                    ...lookupDeclarations.map((entry) => ({ name: entry.name, description: entry.description, input_schema: entry.schema })),
+                ],
+                // "any" while lookups are allowed (the model picks a lookup or
+                // the answer); the answer alone once the round budget is spent.
+                tool_choice: lookupDeclarations.length && !requireOutputTool ? { type: "any" } : { type: "tool", name: tool.name },
             } : {}),
         };
         const response = await fetch(`${ANTHROPIC_API_ENDPOINT}/messages`, {
@@ -1728,6 +1772,11 @@ async function callAnthropic(systemPrompt, history, {
         if (tool) {
             const toolInput = extractAnthropicToolInput(data, tool);
             if (toolInput) return { rawText: extractAnthropicText(data), toolInput };
+            // Not the answer but a question: the model called lookup functions.
+            if (lookupDeclarations.length) {
+                const lookupCalls = lookupCallsFromAnthropic(data, tool.name);
+                if (lookupCalls.length) return { rawText: extractAnthropicText(data), toolInput: null, lookupCalls };
+            }
 
             // Streaming moved the overload refusal from an HTTP status into an
             // error EVENT on a 200, which the status-code retry above cannot see.
@@ -1777,8 +1826,12 @@ async function callAnthropicCompatible(systemPrompt, history, {
     signal,
     staticPrefixEnd,
     tool,
+    lookupTools,
+    requireOutputTool = false,
 } = {}) {
     let retriedAfterOverload = false;
+    // Lookup functions (lookupTools.js) declared beside the output function.
+    const lookupDeclarations = tool && Array.isArray(lookupTools) ? lookupTools : [];
     // Same as the native path: tool calls stream, and this flips if the proxy
     // refuses to so the call retries buffered.
     let streamingDisabled = false;
@@ -1870,8 +1923,11 @@ async function callAnthropicCompatible(systemPrompt, history, {
             messages: toAnthropicMessages(history),
             ...customParams,
             ...(useToolChannel ? {
-                tools: [{ name: tool.name, description: tool.description, input_schema: tool.schema }],
-                tool_choice: { type: "tool", name: tool.name },
+                tools: [
+                    { name: tool.name, description: tool.description, input_schema: tool.schema },
+                    ...lookupDeclarations.map((entry) => ({ name: entry.name, description: entry.description, input_schema: entry.schema })),
+                ],
+                tool_choice: lookupDeclarations.length && !requireOutputTool ? { type: "any" } : { type: "tool", name: tool.name },
             } : {}),
         };
         const response = await providerFetch(`${endpoint}/messages`, { headers, payload: body, signal });
@@ -1945,6 +2001,11 @@ async function callAnthropicCompatible(systemPrompt, history, {
         if (tool) {
             const toolInput = extractAnthropicToolInput(data, tool);
             if (toolInput) return { rawText: extractAnthropicText(data), toolInput };
+            // Not the answer but a question: the model called lookup functions.
+            if (lookupDeclarations.length) {
+                const lookupCalls = lookupCallsFromAnthropic(data, tool.name);
+                if (lookupCalls.length) return { rawText: extractAnthropicText(data), toolInput: null, lookupCalls };
+            }
 
             // Streaming moved the overload refusal from an HTTP status into an
             // error EVENT on a 200, which the status-code retry above cannot see.
@@ -2040,6 +2101,84 @@ const conversationShape = (systemPrompt, history) => ({
 
 const elapsedSeconds = (startedAt) => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 
+// Lookup rounds (lookupTools.js, toolTurns.js). A structured task may hand
+// callAI `lookups: { tools, execute, maxRounds?, onRound? }`: the lookup
+// functions are declared beside the task's output function, and when the model
+// calls them instead of answering, each call is answered here (from the live
+// campaign, by the task's executor) and the exchange goes back as the next
+// turns of the same conversation. That repeats until the model calls the
+// output function, or the round budget is spent and the final request is made
+// with only the output function callable. One provider request per round; the
+// system prompt is byte-identical across rounds, so a cached prefix pays off.
+// Three, not more: every round re-sends the whole prompt, and a model that
+// asks one question per round spent seven rounds and three hundred thousand
+// prompt tokens on one jump. The directive tells it to ask everything at once.
+const DEFAULT_LOOKUP_ROUNDS = 3;
+
+// Every round the model spends asking is reported to `onRound` — callAI
+// writes it to the telemetry record and the diagnostics log — so "what did
+// the model look up before it answered" is answerable from the console.
+async function runWithLookups(lookups, history, dispatch, { label, provider, onRound = null }) {
+    const tools = Array.isArray(lookups?.tools) ? lookups.tools.filter((entry) => entry?.name && entry?.schema) : [];
+    if (!tools.length || typeof lookups?.execute !== "function") return dispatch(history, {});
+    const maxRounds = Number.isInteger(lookups.maxRounds) && lookups.maxRounds >= 0 ? lookups.maxRounds : DEFAULT_LOOKUP_ROUNDS;
+    let conversation = Array.isArray(history) ? history : [];
+    let roundStartedAt = Date.now();
+    for (let round = 0; ; round += 1) {
+        const requireOutputTool = round >= maxRounds;
+        if (round > 0) lookups.onRound?.(round);
+        const result = await dispatch(conversation, { lookupTools: tools, requireOutputTool });
+        const calls = Array.isArray(result?.lookupCalls) ? result.lookupCalls : [];
+        // The answer, or a request that could not be turned into one (a final
+        // round still asking questions falls through to the runner's retry).
+        if (!calls.length || result?.toolInput || requireOutputTool) {
+            if (round > 0) {
+                logDebugEvent("ai-call", `${label}: ${provider} answered after ${round} lookup round${round === 1 ? "" : "s"}${result?.toolInput ? "" : " without calling the output function"}.`,
+                    { lookupRounds: lookupRoundCount(conversation), answered: Boolean(result?.toolInput), forcedOutput: requireOutputTool });
+            }
+            return result;
+        }
+        const elapsedMs = Date.now() - roundStartedAt;
+        const results = [];
+        const answered = [];
+        for (const call of calls) {
+            const startedAt = Date.now();
+            let response;
+            try {
+                response = await lookups.execute(call.name, call.args);
+            } catch (error) {
+                response = { error: String(error?.message || error) };
+            }
+            if (response == null || typeof response !== "object" || Array.isArray(response)) response = { result: response ?? null };
+            results.push({ id: call.id, name: call.name, response });
+            answered.push({
+                name: call.name,
+                args: call.args,
+                label: describeLookupCall(call),
+                response: JSON.stringify(response),
+                ms: Date.now() - startedAt,
+                error: typeof response.error === "string" && response.error.length > 0,
+            });
+        }
+        // Always logged: the calls and what they cost, one line. The full
+        // arguments and answers ride along only in detailed mode.
+        logDebugEvent("ai-call", `${label}: lookup round ${round + 1} on ${provider}: ${answered.map((entry) => entry.label).join("; ")}.`, {
+            answers: answered.map((entry) => `${entry.name} ${entry.error ? "ERROR " : ""}${entry.response.length} chars`).join("; "),
+            modelMs: elapsedMs,
+        });
+        logDebugEvent("ai-call", `${label}: lookup round ${round + 1} in full.`, answered.map((entry) => ({
+            call: entry.label, args: entry.args, response: entry.response,
+        })), { verbose: true });
+        try {
+            onRound?.({ round: round + 1, calls: answered, elapsedMs });
+        } catch (error) {
+            console.warn("[ai] a lookup-round observer threw; continuing.", error);
+        }
+        conversation = appendLookupRound(conversation, calls, results);
+        roundStartedAt = Date.now();
+    }
+}
+
 // A call that failed without the provider saying why, because it never reached
 // the provider at all (isUnreachableError).
 const asUnreachable = (error, signal) => {
@@ -2096,7 +2235,9 @@ export async function callAI(systemPrompt, history, opts = {}) {
     // `__debug` (task, attempt, simulated days) and `__debugSink` (where the
     // task runner wants the record back, to attach the validation outcome)
     // are ours too, and stripped for the same reason.
-    const { languageMode = "ui", logLabel = "", __debug: debugMeta = null, __debugSink: debugSink = null, ...providerOpts } = opts;
+    // `lookups` is ours as well: the loop above runs it, the providers only
+    // ever see the per-round `lookupTools` / `requireOutputTool` it derives.
+    const { languageMode = "ui", logLabel = "", __debug: debugMeta = null, __debugSink: debugSink = null, lookups = null, ...providerOpts } = opts;
     const directive = languageMode === "none" ? ""
         : languageMode === "chat" ? chatLanguageDirective()
         : languageDirective();
@@ -2131,6 +2272,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
         ...conversationShape(systemPrompt, history),
         streaming: Boolean(providerOpts.onChunk),
         tool: providerOpts.tool?.name || "(none — raw JSON expected)",
+        lookupTools: Array.isArray(lookups?.tools) ? lookups.tools.length : 0,
         maxTokens: providerOpts.maxTokens ?? "(provider maximum)",
         reasoning: getReasoningEnabled(),
     };
@@ -2146,12 +2288,19 @@ export async function callAI(systemPrompt, history, opts = {}) {
     // The timer wraps the caller's own onActivity (runJsonTask passes the idle
     // watchdog's note()), so it observes the first chunk without displacing it.
     const timer = createFirstByteTimer(providerOpts.onActivity);
+    // Summed across the rounds of a lookup conversation (each round is a
+    // whole request); the latest round's own figure is what a lookup round
+    // is recorded with.
     let usage = null;
+    let roundUsage = null;
+    let lookupRounds = 0;
+    let lookupCalls = 0;
 
     try {
         // The Fallback list (fallbackRunner.js): the task's own pick first,
         // then the list from the top, moving down only past an entry that is
-        // Spent, Unusable or busy.
+        // Spent, Unusable or busy. Each attempt runs the whole lookup
+        // conversation (runWithLookups) against that one entry.
         const { result, entry: answeredBy } = await runWithFallback({
             entries,
             preferredEntryId,
@@ -2161,17 +2310,32 @@ export async function callAI(systemPrompt, history, opts = {}) {
             attempt: (entry, { canFallBack, onChunk }) => {
                 if (record) record.provider = entry.provider;
                 logDebugEvent("ai-call", `${label}: request to ${entry.label} [${entry.provider}].`, callShape, { verbose: true });
-                return dispatchToProvider(entry.provider, systemPrompt, history, {
+                return runWithLookups(lookups, history, (roundHistory, roundOpts) => dispatchToProvider(entry.provider, systemPrompt, roundHistory, {
                     ...providerOpts,
+                    ...roundOpts,
                     onChunk,
                     entrySettings: entry,
                     canFallBack,
                     rateLimitPolicy: getRateLimitPolicy(),
                     onActivity: timer.note,
-                    onUsage: (data) => { usage = normalizeUsage(data) ?? usage; },
-                    // The model the provider actually resolved (discovery).
+                    onUsage: (data) => {
+                        const reported = normalizeUsage(data);
+                        if (!reported) return;
+                        roundUsage = reported;
+                        usage = sumUsage(usage, reported);
+                    },
+                    // The model the provider actually resolved (overrides, discovery).
                     onModel: (model) => { if (record) record.model = String(model ?? ""); },
-                }).catch((error) => { throw asUnreachable(error, providerOpts.signal); });
+                }).catch((error) => { throw asUnreachable(error, providerOpts.signal); }), {
+                    label,
+                    provider: entry.provider,
+                    onRound: ({ round, calls, elapsedMs }) => {
+                        lookupRounds = round;
+                        lookupCalls += calls.length;
+                        attachLookupRound(record, { round, calls, elapsedMs, usage: roundUsage });
+                        roundUsage = null;
+                    },
+                });
             },
             onMark: ({ entry, failure, state }) => logFallbackMark(label, entry, failure, state),
             onSwitch: announceFallbackSwitch,
@@ -2180,6 +2344,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
         logDebugEvent("ai-call", `${label}: ${answeredBy.label} [${answeredBy.provider}] answered in ${elapsedSeconds(startedAt)}.`, {
             replyChars: typeof result === "string" ? result.length : String(result?.rawText ?? "").length,
             viaToolCall: Boolean(result?.toolInput),
+            ...(lookupRounds ? { lookupRounds, lookupCalls } : {}),
             // Omitted rather than zeroed when unknown: a buffered call never
             // fires onActivity, and plenty of gateways report no usage at all.
             ...(timer.firstByteMs === null ? {} : { firstByteMs: timer.firstByteMs }),
@@ -2324,14 +2489,10 @@ ${forcePosture}`;
 // button that places the unit, instead of the player reading coordinates off the
 // screen and clicking the map themselves. Appended at call time for the same
 // frozen-prompt reason as the two directives above.
-// What the player can actually do with a formation differs between the two unit
-// systems, and the advisor must not offer what the UI cannot deliver: in beta
-// there is no manual movement or combat at all, while classic is the wargame
-// where the player marches and fights their own units.
-const buildAdvisorDeployDirective = (betaUnits) => `[Placing Forces]
-The player can place their own formations on the map${betaUnits
-    ? "; they cannot move or fight them, so never offer to march or attack with anything"
-    : ", and can move and attack with them directly"}. When you specifically recommend placing a NEW formation of theirs somewhere, and you know where, append a fenced \`\`\`deploy block after your normal prose (never instead of it) containing a JSON array with one entry per recommended deployment: {"type":"infantry|armor|air|naval|artillery|garrison","name":"<what to call it>","composition":"<what it is made of, e.g. 2 frigates>","strength":<1-100, percent of established strength>,"lng":<real longitude>,"lat":<real latitude>}.
+// The advisor must not offer what the UI cannot deliver: the player places
+// formations and states intent for them, and never moves or fights them by hand.
+const ADVISOR_DEPLOY_DIRECTIVE = `[Placing Forces]
+The player can place their own formations on the map; they cannot move or fight them, so never offer to march or attack with anything. When you specifically recommend placing a NEW formation of theirs somewhere, and you know where, append a fenced \`\`\`deploy block after your normal prose (never instead of it) containing a JSON array with one entry per recommended deployment: {"type":"infantry|armor|air|naval|artillery|garrison","name":"<what to call it>","composition":"<what it is made of, e.g. 2 frigates>","strength":<1-100, percent of established strength>,"lng":<real longitude>,"lat":<real latitude>}.
 Use real coordinates for the place you are actually recommending — 0,0 is open ocean and is never valid. Omit the block entirely unless you are recommending a specific placement at a specific place; most replies need none, and a general discussion of strategy is not a deployment. Anything the player places is a REQUEST: the simulation confirms, repositions or rejects it, so say so rather than promising it will stand.
 
 Example:
@@ -2475,16 +2636,12 @@ async function buildAdvisorSystemPrompt() {
         renderTemplate(promptPack.advisor, { ...variables, ...helperValues }),
         variables,
     );
-    // The forces directive is beta-only — promptContext leaves forcePosture empty
-    // in the classic system rather than paying for the territory index, so the
-    // heading would introduce a section with nothing under it.
-    const betaUnits = isBetaUnits();
     const directives = [
         buildAdvisorActionsDirective(variables.plannedActionsWithIds),
         ADVISOR_MESSAGE_DRAFT_DIRECTIVE,
-        buildAdvisorDeployDirective(betaUnits),
+        ADVISOR_DEPLOY_DIRECTIVE,
         buildAdvisorProjectsDirective(variables.projectsSummary),
-        ...(betaUnits ? [buildAdvisorForcesDirective(variables.forcePosture)] : []),
+        buildAdvisorForcesDirective(variables.forcePosture),
         ADVISOR_FORMATTING_DIRECTIVE,
     ];
     return `${rendered}\n\n${directives.join("\n\n")}`;

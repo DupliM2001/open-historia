@@ -104,3 +104,14 @@ test("the first-byte timer works with no wrapped callback", () => {
   assert.doesNotThrow(() => timer.note());
   assert.equal(typeof timer.firstByteMs, "number");
 });
+
+test("usage sums field by field across the rounds of one call", async () => {
+  const { sumUsage } = await import("./usageStats.js");
+  assert.equal(sumUsage(null, null), null);
+  assert.deepEqual(sumUsage(null, { promptTokens: 10, outputTokens: 2 }), { promptTokens: 10, outputTokens: 2 });
+  assert.deepEqual(sumUsage({ promptTokens: 10, outputTokens: 2 }, null), { promptTokens: 10, outputTokens: 2 });
+  assert.deepEqual(
+    sumUsage({ promptTokens: 1000, outputTokens: 40, cachedTokens: 900 }, { promptTokens: 1100, outputTokens: 400, thinkingTokens: 50 }),
+    { promptTokens: 2100, outputTokens: 440, cachedTokens: 900, thinkingTokens: 50 },
+  );
+});

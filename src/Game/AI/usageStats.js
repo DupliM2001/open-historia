@@ -114,6 +114,20 @@ const compact = (usage) => {
     return Object.keys(out).length ? out : null;
 };
 
+// Two usage blocks added field by field. A call with lookup rounds is several
+// provider requests, each billed for the whole prompt again, so the record of
+// that call has to carry the sum and not the last request's figure.
+export const sumUsage = (a, b) => {
+    if (!a || typeof a !== "object") return b && typeof b === "object" ? { ...b } : null;
+    if (!b || typeof b !== "object") return { ...a };
+    const out = { ...a };
+    for (const [key, value] of Object.entries(b)) {
+        if (typeof value !== "number") continue;
+        out[key] = typeof out[key] === "number" ? out[key] + value : value;
+    }
+    return out;
+};
+
 /**
  * A first-byte stopwatch that piggybacks on the activity signal the streaming
  * readers already emit.

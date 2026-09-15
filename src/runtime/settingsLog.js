@@ -21,7 +21,7 @@
 // parameters (they can carry headers — only their size), and an endpoint only by
 // its host. Everything is redacted again as the file is built.
 import { isDebugLogEnabled, isDebugLogVerbose, registerSettingsSnapshot } from "./debugLog.js";
-import { MAP_SETTING_KEYS, getMapSetting, getMapSettingValue, resolveBetaUnits } from "./mapSettings.js";
+import { MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn, getMapSettingValue } from "./mapSettings.js";
 import { getStoredChatLanguage, getStoredLanguage, languageDisplayName } from "./i18n.js";
 import {
     AI_TASK_ROUTING,
@@ -63,7 +63,6 @@ registerSettingsSnapshot("Map", () => [
     ["3D Globe", onOff(storedBoolean("Globe", false))],
     ["3D Terrain", onOff(storedBoolean("Terrain", true))],
     ["Hide country labels", onOff(getMapSetting(MAP_SETTING_KEYS.hideCountryLabels))],
-    ["Legacy map renderer", onOff(getMapSetting(MAP_SETTING_KEYS.legacyMapRenderer))],
     ["Disable idle globe rotation", onOff(getMapSetting(MAP_SETTING_KEYS.disableIdleRotation))],
     ["Disable camera movement during events", onOff(getMapSetting(MAP_SETTING_KEYS.disableEventCamera))],
 ]);
@@ -109,19 +108,13 @@ registerSettingsSnapshot("AI", () => {
         ["Model reasoning", onOff(getReasoningEnabled())],
         ["Limit AI generation", onOff(getMapSetting(MAP_SETTING_KEYS.limitAiGeneration))],
         ["Generate long time skips in segments", onOff(getMapSetting(MAP_SETTING_KEYS.chunkLongJumps))],
+        ["AI lookup functions", onOff(getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions))],
         ["Batch background AI tasks", onOff(getMapSetting(MAP_SETTING_KEYS.batchBackgroundTasks))],
         ["Record AI telemetry", onOff(isTelemetryEnabled())],
         ["Rate AI generations", onOff(isRatingEnabled())],
     );
     return items;
 });
-
-// The save's own settings. Difficulty and the unit system the session is running
-// are in the file's header already; this is what the save itself says, which a
-// toggle flipped mid-session can make differ from the running one until reload.
-registerSettingsSnapshot("This save", () => [
-    ["Beta unit system", onOff(resolveBetaUnits())],
-]);
 
 // The server's LAN sharing, which is what lets a phone in. A request away, and
 // absent on the web and Android builds (their in-browser API answers 404), where

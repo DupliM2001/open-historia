@@ -345,3 +345,43 @@ test("a stream with no accounting gains no usage key", async () => {
   const gemini = await readGeminiStreamedResponse(sseResponse([{ candidates: [{ content: { parts: [{ text: "x" }] } }] }]));
   assert.equal("usageMetadata" in gemini, false);
 });
+
+test("openai: several tool calls in one turn are kept apart by index, ids included", () => {
+  const state = runOpenAI([
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_a", function: { name: "list_powers", arguments: "" } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 1, id: "call_b", function: { name: "find_region", arguments: "{\"na" } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{}" } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: "me\":\"Crimea\"}" } }] } }] },
+    { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+  ]);
+  const calls = finishOpenAIStream(state).choices[0].message.tool_calls;
+  assert.deepEqual(calls.map((call) => [call.id, call.function.name, call.function.arguments]), [
+    ["call_a", "list_powers", "{}"],
+    ["call_b", "find_region", "{\"name\":\"Crimea\"}"],
+  ]);
+});
+
+test("openai: a buffered message with complete calls and no indexes still yields one call each", () => {
+  const state = runOpenAI([
+    { choices: [{ message: { tool_calls: [
+      { id: "call_1", function: { name: "list_powers", arguments: "{}" } },
+      { id: "call_2", function: { name: "war_ledger", arguments: "{}" } },
+    ] } }] },
+  ]);
+  const calls = finishOpenAIStream(state).choices[0].message.tool_calls;
+  assert.deepEqual(calls.map((call) => [call.id, call.function.name]), [["call_1", "list_powers"], ["call_2", "war_ledger"]]);
+});
+
+test("gemini: a signed function call keeps its thoughtSignature on the rebuilt part", () => {
+  const state = runGemini([
+    { candidates: [{ content: { parts: [
+      { functionCall: { name: "list_powers", args: {} }, thoughtSignature: "sig-one" },
+      { functionCall: { name: "find_region", args: { name: "Kharkiv" } } },
+    ] }, finishReason: "STOP" }] },
+  ]);
+  const parts = finishGeminiStream(state).candidates[0].content.parts;
+  assert.deepEqual(parts, [
+    { functionCall: { name: "list_powers", args: {} }, thoughtSignature: "sig-one" },
+    { functionCall: { name: "find_region", args: { name: "Kharkiv" } } },
+  ]);
+});

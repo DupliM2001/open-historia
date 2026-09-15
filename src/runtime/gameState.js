@@ -1,6 +1,5 @@
 /*! Open Historia — portions (troop deployments + era troop types) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import { JSON_URLS, primeJson, readJson, reportPerfOperation, writeJson } from "./assets.js";
-import { getBetaUnitsToStamp } from "./mapSettings.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
@@ -2321,8 +2320,9 @@ const PATROL_ORDER_ROUNDS = 12;
 
 const UNIT_SYSTEM_SET = new Set(["beta", "classic"]);
 
-// Bring standing orders back into the present after time has passed under the
-// classic system, which has no engine to advance or expire them.
+// Bring standing orders back into the present after time passed under the old
+// classic unit system (gone now; a save it last wrote still carries its stamp),
+// which had no engine to advance or expire them.
 //
 // A patrol carries an ABSOLUTE expiry round, so ten rounds of classic play would
 // leave every dormant patrol already past its untilRound — and the next beta jump
@@ -2355,17 +2355,12 @@ export const resumeStandingOrders = (world, { round = 0, previousSystem = "" } =
 // Ops referencing unknown ids are silently ignored; units reduced to <=0 strength
 // are dropped.
 //
-// context: { markers, gameDate, elapsedDays, round, extraAnchors, eventId, betaEngine }
+// context: { markers, gameDate, elapsedDays, round, extraAnchors, eventId }
 //   elapsedDays === null | undefined  ->  no travel clamp (the old behaviour, and
 //   what a non-Gregorian scenario date must fall back to).
-//   betaEngine === false  ->  the classic unit system is running: no standing
-//   orders are minted and a spawn is taken at face value. Defaults to true so
-//   this stays directly callable — it is the caller (gameplay.js, time.jsx) that
-//   knows which system the session is in, never this module. See
-//   runtime/mapSettings.js isBetaUnits.
 export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
   const {
-    gameDate = "", elapsedDays = null, round = 0, extraAnchors = [], eventId = "", betaEngine = true,
+    gameDate = "", elapsedDays = null, round = 0, extraAnchors = [], eventId = "",
   } = context;
   let next = normalizeUnits(units);
   let nextOrders = normalizePendingUnitOrders(orders);
@@ -2393,9 +2388,9 @@ export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
 
       const unit = { ...op.unit };
       const anchors = buildOwnerFootprint({ units: next, markers }, unit.ownerCode, extraAnchors);
-      // Reach/supply feasibility is a beta-engine rule; the classic system takes a
-      // spawn where the model put it, exactly as it always has.
-      if (betaEngine && isUnsupportedSpawn(unit, anchors, unit.type, gameDate)) {
+      // Reach/supply feasibility: a spawn its owner could not support where the
+      // model put it is downgraded rather than dropped.
+      if (isUnsupportedSpawn(unit, anchors, unit.type, gameDate)) {
         // A fixed installation is the one thing that cannot simply be detected
         // into existence — it has to be built. Downgrade it to the troops it
         // would take rather than dropping the op, because a silently dropped op
@@ -2408,7 +2403,7 @@ export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
       if (eventId && !unit.eventId) unit.eventId = eventId;
       next.push(unit);
 
-      if (betaEngine && unit.posture === "patrol") {
+      if (unit.posture === "patrol") {
         upsertOrder(
           normalizePendingUnitOrderEntry({
             unitId: unit.id,
@@ -2440,7 +2435,7 @@ export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
 
         if (step.arrived) {
           dropOrder(unit.id);
-          if (betaEngine && posture === "patrol") {
+          if (posture === "patrol") {
             upsertOrder(
               normalizePendingUnitOrderEntry({
                 unitId: unit.id,
@@ -2458,24 +2453,17 @@ export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
           // actually get and keep a standing order to the FULL destination, so
           // the journey continues by itself next turn. This is what makes
           // over-long move ops safe for the model to write.
-          //
-          // Unreachable in the classic system, which never clamps travel
-          // (elapsedDays is null, so the budget is Infinity and every step
-          // arrives). Guarded anyway so the rule is stated once, here, rather
-          // than resting on that coincidence holding forever.
-          if (betaEngine) {
-            upsertOrder(
-              normalizePendingUnitOrderEntry({
-                unitId: unit.id,
-                kind: "move",
-                toLng: op.toLng,
-                toLat: op.toLat,
-                note: op.note,
-                issuedAt: gameDate,
-                issuedRound: round,
-              }),
-            );
-          }
+          upsertOrder(
+            normalizePendingUnitOrderEntry({
+              unitId: unit.id,
+              kind: "move",
+              toLng: op.toLng,
+              toLat: op.toLat,
+              note: op.note,
+              issuedAt: gameDate,
+              issuedRound: round,
+            }),
+          );
         }
 
         return {
@@ -2605,9 +2593,9 @@ export const advanceStandingOrders = (
 // save repair, not a rule: both systems used to mint these and both are fixed at
 // the source now.
 //
-//   * The classic system teleports an in-leash move straight to its destination
-//     and used to stamp "moving" on the unit standing on it (unitsController's
-//     moveUnitTo), and classic has no engine that could ever clear it again.
+//   * The old classic system teleported an in-leash move straight to its
+//     destination and stamped "moving" on the unit standing on it, with no
+//     engine that could ever clear it again.
 //   * The beta move op used to read `step.arrived && posture === "patrol"`, so a
 //     unit that arrived under any other posture was stamped "moving" — and
 //     pruneSatisfiedUnitOrders then dropped its order, leaving nothing behind to
@@ -3460,11 +3448,11 @@ const canonicalizeDateString = (value) => {
 
 export const normalizeGameData = (game) => {
   const nextGame = game && typeof game === "object" ? game : {};
-  // Pulled out of the spread below rather than overwritten after it: absent is a
-  // third state here (see the betaUnits note further down), and a save carrying an
-  // explicit null — which is what a stripped-out choice looks like — has to come
-  // back absent rather than as a null nobody downstream expects.
-  const { betaUnits, ...restGame } = nextGame;
+  // `betaUnits` was the per-save unit-system choice while the classic system
+  // still existed; there is one system now, so the field is dropped on the way
+  // through rather than carried forever.
+  const restGame = { ...nextGame };
+  delete restGame.betaUnits;
 
   return {
     ...GAME_DEFAULTS,
@@ -3478,13 +3466,6 @@ export const normalizeGameData = (game) => {
         ? Math.trunc(Number(nextGame.round))
         : GAME_DEFAULTS.round,
     startDate: canonicalizeDateString(nextGame.startDate),
-    // Which unit system this SAVE plays under (runtime/mapSettings.js). Kept out
-    // of GAME_DEFAULTS on purpose: absent is a third state, and it has to stay
-    // distinguishable from an explicit `false`. A save that has never chosen
-    // inherits the app-wide default, which is what silently migrates every save
-    // written before the setting moved off localStorage — defaulting it to false
-    // here would instead switch those saves to classic behind the player.
-    ...(betaUnits === undefined || betaUnits === null ? {} : { betaUnits: Boolean(betaUnits) }),
   };
 };
 
@@ -3612,27 +3593,8 @@ export const writeWorldState = async (world, options = {}) => {
 export const readGameData = async ({ force = false } = {}) =>
   normalizeGameData(await readJson(JSON_URLS.game, { defaultValue: GAME_DEFAULTS, force }));
 
-// Every game.json write re-stamps the player's unit-system choice rather than
-// trusting whatever the caller is holding, because none of these callers holds a
-// current copy: a turn writes a game object it read before the turn started, and
-// rollBackToSnapshot writes one captured a whole turn ago. Without this, flipping
-// the toggle while a jump generates — or rolling that jump back afterwards —
-// silently put the old value back, and the setting only shows its effect after a
-// reload, so the player would see it revert for no visible reason. The unit
-// system is a setting, not turn state; it does not roll back with the turn.
-//
-// null means no save is open to stamp, and then nothing is written — see
-// mapSettings.getBetaUnitsToStamp, which also covers why a save that has never
-// chosen has its inherited value written down here rather than on load.
-export const writeGameData = async (game, options = {}) => {
-  const next = normalizeGameData(game);
-  const chosenBetaUnits = getBetaUnitsToStamp();
-  return writeJson(
-    JSON_URLS.game,
-    chosenBetaUnits === null ? next : { ...next, betaUnits: chosenBetaUnits },
-    { pretty: true, ...options },
-  );
-};
+export const writeGameData = async (game, options = {}) =>
+  writeJson(JSON_URLS.game, normalizeGameData(game), { pretty: true, ...options });
 
 export const readActionsState = async ({ force = false } = {}) =>
   normalizeActions(await readJson(JSON_URLS.actions, { defaultValue: [], force }));
@@ -3746,8 +3708,6 @@ const previewPolityOverrides = (polityOverrides, pendingChanges) => {
 // programme has sat still. It defaults to 0 (meaning "leave the stamp alone")
 // rather than being required, because the staged event reveal in time.jsx replays
 // impacts purely for display and must not age the projects it is only redrawing.
-// `betaEngine` reaches applyUnitOpBatch unchanged — see its context docs. Pass
-// false alongside motion: null to run a jump entirely under the classic rules.
 // The territory-and-identity half of applying impacts: region transfers, region
 // claims, and everything a polityChange carries (name, colour, reputation, stats,
 // tags).
@@ -4068,7 +4028,7 @@ const applyPolityAndTerritoryImpacts = ({
 // ops apply exactly as any event's, completion effects included, but they are
 // not stamped into an entry's activity, which lists timeline events only.
 export const applyEventImpactsToWorld = ({
-  colors = {}, events = [], world, motion = null, round = 0, betaEngine = true, boardOnlyEventIds = [],
+  colors = {}, events = [], world, motion = null, round = 0, boardOnlyEventIds = [],
 }) => {
   const boardOnly = new Set(normalizeArray(boardOnlyEventIds).map(normalizeOptionalString).filter(Boolean));
   const nextColors = cloneValue(colors) ?? {};
@@ -4140,7 +4100,6 @@ export const applyEventImpactsToWorld = ({
           elapsedDays: motion ? daysBetweenDates(cursorDate, event.date) : null,
           round: motion?.round ?? 0,
           eventId: event.id,
-          betaEngine,
         },
       );
       nextWorld.units = applied.units;
@@ -4203,9 +4162,10 @@ export const applyEventImpactsToWorld = ({
 
   return {
     colors: nextColors,
-    // Record which system took this turn, so a later resume can tell that game
-    // time passed while the beta engine was not running (resumeStandingOrders).
-    world: { ...nextWorld, unitSystem: betaEngine ? "beta" : "classic" },
+    // Stamp the turn as the engine's. A save last written by the old classic
+    // system still says "classic", which is how resumeStandingOrders knows game
+    // time passed with nothing advancing its orders.
+    world: { ...nextWorld, unitSystem: "beta" },
   };
 };
 

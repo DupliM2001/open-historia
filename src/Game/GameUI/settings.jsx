@@ -55,10 +55,8 @@ import {
     setStoredChatLanguage,
     setStoredLanguage,
 } from "../../runtime/i18n.js";
-import { LABEL_FONT_SUGGESTIONS, MAP_SETTING_KEYS, applySaveBetaUnits, getMapSetting, isBetaUnits, resolveBetaUnits, setMapSetting, setMapSettingValue, useMapSettingValue } from "../../runtime/mapSettings.js";
+import { LABEL_FONT_SUGGESTIONS, MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn, setMapSetting, setMapSettingValue, useMapSettingValue } from "../../runtime/mapSettings.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { announceMapRerender } from "../../runtime/mapReadiness.js";
-import { readGameData, writeGameData } from "../../runtime/gameState.js";
 import { copyToClipboard } from "../../runtime/clipboard.js";
 import {
     buildLoggingFile,
@@ -1789,17 +1787,6 @@ const SettingsWorkspace = ({
                     </div>
                     <Toggle label="Hide country labels" enabled={mapSettings.hideCountryLabels} onToggle={() => updateMapSetting("hideCountryLabels", MAP_SETTING_KEYS.hideCountryLabels, !mapSettings.hideCountryLabels)} />
                 </SettingsSection>
-                <SettingsSection title="Renderer" description="Which renderer draws the map. A rendering choice only: no world state, save data or geometry differs between them.">
-                    <ExperimentalPill />
-                    {/* Announced BEFORE the setting changes: World.jsx keys the map
-                        instance on the renderer, so the flip replaces the map and
-                        the game loading screen covers the redraw — the globe switch
-                        does the same (App.jsx). */}
-                    <Toggle label="Legacy map renderer" enabled={mapSettings.legacyMapRenderer} onToggle={() => { announceMapRerender(); updateMapSetting("legacyMapRenderer", MAP_SETTING_KEYS.legacyMapRenderer, !mapSettings.legacyMapRenderer); }} />
-                    <div style={settingsHelper}>
-                    Off (default): Map vNext — dissolved polity surfaces, stitched frontiers and curved polity labels. On: the renderer used before it, with per-region fills and its own country labels. Switching redraws the map.
-                    </div>
-                </SettingsSection>
                 <SettingsSection title="3D map" description="Globe and terrain rendering are presentation features; they do not change world state.">
                     <ExperimentalPill />
                     <Toggle label="3D Globe" enabled={isGlobeEnabled} onToggle={onToggleGlobe} />
@@ -1825,6 +1812,10 @@ const SettingsWorkspace = ({
                     <Toggle label="Generate long time skips in segments" enabled={mapSettings.chunkLongJumps} onToggle={() => updateMapSetting("chunkLongJumps", MAP_SETTING_KEYS.chunkLongJumps, !mapSettings.chunkLongJumps)} />
                     <div style={settingsHelper}>
                     Off (default): the whole skip is generated in a single request. On: skips of more than a few months are generated in several shorter requests and merged into one round — slower and costlier in tokens, but far less likely to time out on a hosted provider.
+                    </div>
+                    <Toggle label="AI lookup functions" enabled={mapSettings.lookupFunctions} onToggle={() => updateMapSetting("lookupFunctions", MAP_SETTING_KEYS.lookupFunctions, !mapSettings.lookupFunctions)} />
+                    <div style={settingsHelper}>
+                    On (default): before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
                     </div>
                     <Toggle label="Batch background AI tasks" enabled={mapSettings.batchBackgroundTasks} onToggle={() => updateMapSetting("batchBackgroundTasks", MAP_SETTING_KEYS.batchBackgroundTasks, !mapSettings.batchBackgroundTasks)} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
@@ -1872,42 +1863,6 @@ const SettingsWorkspace = ({
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
                     A small 1-10 bar after each time skip, Game Master edit and catalyst. Ratings sit beside the call in the console and its exports.
                     </div>
-                </SettingsSection>
-                <SettingsSection title="Experimental" description="Work-in-progress systems. Stored with the save, so a copy of the campaign keeps the choice.">
-                    <ExperimentalPill />
-                    <Toggle label="Beta unit system" enabled={mapSettings.betaUnits} onToggle={() => updateBetaUnits(!mapSettings.betaUnits)} />
-                    <div style={{ ...settingsHelper, marginBottom: mapSettings.betaUnits !== isBetaUnits() ? "0.6rem" : 0 }}>
-                    On: the AI drives movement and combat, units hold a posture, and standing orders advance every turn. Expect bugs. Off (default): you move and attack your units yourself. Your save works with both, and switching back and forth loses nothing.
-                    </div>
-                    {/* The running session is pinned to what THIS SAVE said when it was opened
-                        (see isBetaUnits), so a flip only means something after the page is
-                        loaded again — the save already has the new value on disk by then.
-                        Shown only while the two actually disagree. Nothing needs quitting: the
-                        pin is module state in the page's own bundle, and every bit of campaign
-                        state lives on the server, so a reload is the whole of it. */}
-                    {mapSettings.betaUnits !== isBetaUnits() && (
-                        <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem", fontSize: "0.72rem", color: "#ffd24a", lineHeight: 1.35 }}>
-                        <span>Takes effect when the game reloads.</span>
-                        <button
-                        type="button"
-                        onClick={() => window.location.reload()}
-                        title="Reloads the page. Your campaign is saved on the server, so nothing is lost — but finish any turn that is still generating first."
-                        style={{
-                            background: "rgba(255,210,74,0.14)",
-                            border: "1px solid rgba(255,210,74,0.5)",
-                            borderRadius: "6px",
-                            color: "#ffd24a",
-                            cursor: "pointer",
-                            fontFamily: "sans-serif",
-                            fontSize: "0.72rem",
-                            fontWeight: 700,
-                            padding: "0.2rem 0.55rem",
-                        }}
-                        >
-                        Reload now
-                        </button>
-                        </div>
-                    )}
                 </SettingsSection>
                 {!import.meta.env.VITE_OH_WEB && (
                     <SettingsSection title="Network" description="Other devices — the Android app, a browser on another computer — reach this server only while you say so.">
@@ -2061,7 +2016,6 @@ const SettingsMenu = ({
 
     const [mapSettings, setMapSettingsState] = useState(() => ({
         hideCountryLabels: getMapSetting(MAP_SETTING_KEYS.hideCountryLabels),
-        legacyMapRenderer: getMapSetting(MAP_SETTING_KEYS.legacyMapRenderer),
         disableIdleRotation: getMapSetting(MAP_SETTING_KEYS.disableIdleRotation),
         disableEventCamera: getMapSetting(MAP_SETTING_KEYS.disableEventCamera),
         // Not getMapSetting: this one ships ON, and an absent key must read as
@@ -2069,11 +2023,9 @@ const SettingsMenu = ({
         limitAiGeneration: getMapSetting(MAP_SETTING_KEYS.limitAiGeneration),
         // Same again: ships ON.
         chunkLongJumps: getMapSetting(MAP_SETTING_KEYS.chunkLongJumps),
+        // Ships ON: an absent key reads as on (see mapSettings.js).
+        lookupFunctions: getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions),
         batchBackgroundTasks: getMapSetting(MAP_SETTING_KEYS.batchBackgroundTasks),
-        // Not getMapSetting: this one belongs to the save, not the browser
-        // profile (see mapSettings.js). resolveBetaUnits falls back to the
-        // localStorage key for a save that has never chosen.
-        betaUnits: resolveBetaUnits(),
     }));
 
     const updateMapSetting = (stateKey, settingKey, value) => {
@@ -2101,21 +2053,6 @@ const SettingsMenu = ({
     const toggleTelemetry = () => { const next = !telemetryOn; setTelemetryOn(next); setTelemetryEnabled(next); logSettingChange("Record AI telemetry", next); };
     const toggleRating = () => { const next = !ratingOn; setRatingOn(next); setRatingEnabled(next); logSettingChange("Rate AI generations", next); };
 
-    // The save's own value arrives asynchronously (library.js reads game.json),
-    // and it changes again whenever a different save is activated — both of them
-    // after this panel's state was seeded. Without this the checkbox keeps
-    // showing the app-wide default, which for a beta save is the wrong box.
-    useEffect(() => {
-        const onUpdated = () =>
-            setMapSettingsState((current) => {
-                const next = resolveBetaUnits();
-                return current.betaUnits === next ? current : { ...current, betaUnits: next };
-            });
-        onUpdated();
-        window.addEventListener("mapSettings:updated", onUpdated);
-        return () => window.removeEventListener("mapSettings:updated", onUpdated);
-    }, []);
-
     // Escape closes the quick menu; the workspace handles its own (it goes back
     // to the quick menu first).
     useEffect(() => {
@@ -2126,30 +2063,6 @@ const SettingsMenu = ({
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
     }, [activeSettingsSection, onClose]);
-
-    // The unit system is stored in the active save's game.json so it survives a
-    // restart and travels with a copied or duplicated save. The localStorage write
-    // still happens (through updateMapSetting): it is no longer where the setting
-    // lives, only the default handed to the next save that has never chosen one.
-    //
-    // Order matters — applySaveBetaUnits first, because writeGameData re-stamps
-    // the flag from it rather than from the object it is handed, which is what
-    // makes this safe to do while a turn is generating.
-    const updateBetaUnits = (value) => {
-        updateMapSetting("betaUnits", MAP_SETTING_KEYS.betaUnits, value);
-        const gameId = getLibraryState().activeGameId;
-        // With no save open there is nothing to store it on, and writing game.json
-        // anyway would have the server CREATE a session from the selected scenario
-        // — a settings click must not start a campaign. The localStorage default
-        // above is enough: the save the player opens next inherits it.
-        if (!gameId) return;
-        applySaveBetaUnits(gameId, value);
-        readGameData({ force: true })
-            .then((game) => writeGameData(game))
-            .catch((error) => {
-                console.warn("Failed to store the unit system on this save:", error);
-            });
-    };
 
     const runAndClose = (action) => {
         action?.();

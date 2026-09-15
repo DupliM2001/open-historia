@@ -77,7 +77,7 @@ Every fixed element declares its own `zIndex`. From back to front (source-verifi
 | 9997 | In-game floating cluster (session summary pill, **⌂ Exit Game**) | `libraryBar.jsx:1993` / `:2061` |
 | 9998 | Timeline panels (`panelSurface`), **Actions** panel, **Chat** panel | `time.jsx:149`, `actions.jsx:427`, `chat.jsx:851` |
 | 9999 | `DateWidget` pill, bottom `Toolbar`, `Search`, `Other` flag badge, 🧭 `AdvisorButton`, ⋮ `SettingsButton`, `SettingsMenu`, `ForcesPanel` body, `WebGLWarningPopup` | shared `baseStyle`/`widgetSurface` |
-| 10000 | Forces **mode banner** (deploy/move/attack hint) | `forces.jsx:156` |
+| 10000 | Forces **mode banner** (deploy hint) | `forces.jsx:156` |
 | 10028 | "Loading games and scenarios…" indicator | `libraryBar.jsx:2565` |
 | 10040 | **Advisor drawer** | `advisor.jsx:320` |
 | 10045 | **Cheats panel** | `cheats.jsx:280` |
@@ -323,7 +323,7 @@ Two authors create the board's entries (the player only sets a priority or aband
 |---|---|---|
 | Unit list | `subscribeUnits`/`getUnits`; split into "Your units" (`getPlayerCode`) and dimmed "Other forces". Clicking a unit `flyTo`s it | `src/Game/Map/unitsController.js` |
 | Deploy controls | type (restricted by scenario `getAllowedUnitTypes()`), strength (1–1000), optional name → `setInteractionMode({kind:"deploy", params})` then closes the panel | unitsController |
-| **Mode banner** (z 10000) | Global hint while `mode.kind !== "idle"` (deploy/move/attack) + Cancel (`clearInteractionMode`) | interaction-mode state |
+| **Mode banner** (z 10000) | Global hint while `mode.kind !== "idle"` (deploy) + Cancel (`clearInteractionMode`) | interaction-mode state |
 
 Owner codes render as full names via `ensurePolityNames`/`polityDisplayName` (re-renders once the lookup warms). `TYPE_GLYPH`/`TYPE_LABEL` map unit types to icons/labels; strength color-codes >600 green / >250 amber / else red.
 
@@ -366,7 +366,7 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 | Language | `LanguageSelector` — searchable; applying reloads the page | `setStoredLanguage` (server + browser) |
 | Display | **Fullscreen**, **3D Globe**, **3D Terrain** (labeled "Very Experimental") toggles | `Main` toggles / `App.jsx` state |
 | Map | Hide country labels, **Reduce motion** (umbrella over the two below), Disable idle globe rotation, Disable camera movement during events | `setMapSetting(MAP_SETTING_KEYS.*)` (`src/runtime/mapSettings.js`) |
-| AI | **Limit AI generation** (off by default; 5-min silence cap then canned fallback vs. wait-as-long-as-needed); **Generate long time skips in segments** (off by default); **Batch background AI tasks** (Anthropic only, off by default — the event consolidator rides the Message Batches API, see `docs/ai-overview.md`) | `MAP_SETTING_KEYS.limitAiGeneration`, `MAP_SETTING_KEYS.batchBackgroundTasks`; **Record AI telemetry** / **Rate AI generations** (`telemetry.js`, both default on) and the **📊 AI debug console** button (`debugConsole.jsx`, lazy; see `docs/ai-overview.md`) |
+| AI | **Limit AI generation** (off by default; 5-min silence cap then canned fallback vs. wait-as-long-as-needed); **Generate long time skips in segments** (off by default); **AI lookup functions** (on by default: the model may call lookup functions before answering, see `docs/ai-overview.md`); **Batch background AI tasks** (Anthropic only, off by default — the event consolidator rides the Message Batches API, see `docs/ai-overview.md`) | `MAP_SETTING_KEYS.limitAiGeneration`, `MAP_SETTING_KEYS.batchBackgroundTasks`; **Record AI telemetry** / **Rate AI generations** (`telemetry.js`; recording on, rating off by default) and the **📊 AI debug console** button (`debugConsole.jsx`, lazy; see `docs/ai-overview.md`) |
 | Diagnostics | `DiagnosticsPanel` — **📋 Copy log** / **💾 Save as file** (the Logging file, Desktop log merged in), **🔎 View log** (`DiagnosticsLogViewer`: the same entries, newest first, problems-only filter, click to expand), Clear, and the **Keep a diagnostics log** / **Detailed logging** switches | `buildLoggingFile` / `getLoggingFileEntries` / `setDebugLogEnabled` / `setDebugLogVerbose` (`src/runtime/debugLog.js`, see `docs/runtime-services.md`) |
 | Footer | **🧪 Cheats** (→ `onOpenCheats`), **📖 Guides** (`/guides/`), Discord/Reddit/GitHub links | — |
 

@@ -53,7 +53,7 @@ const reset = () => {
     setDebugLogContext({
         build: "", gameName: "", gameId: "", scenario: "", playerCountry: "",
         gameDate: "", round: "", difficulty: "", provider: "", model: "",
-        unitSystem: "", language: "",
+        language: "",
     });
 };
 

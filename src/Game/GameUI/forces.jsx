@@ -10,7 +10,6 @@ import {
   clearInteractionMode,
 } from "../Map/unitsController.js";
 import { UNIT_TYPES } from "../../runtime/gameState.js";
-import { isBetaUnits } from "../../runtime/mapSettings.js";
 import { ensurePolityNames, polityDisplayName } from "../../runtime/polityNames.js";
 
 const TYPE_LABEL = {
@@ -49,15 +48,8 @@ export const POSTURE_LABEL = {
   assaulting: "Assaulting",
 };
 
-// Deploy exists in both unit systems. Move and attack are CLASSIC-only, but they
-// are very much still reachable there — the unit popup arms them and the click
-// dispatcher in Nations.jsx consumes them — so their hints have to stay. Trimming
-// this to `deploy` alone left a classic player who pressed Move with the generic
-// "Select a target" fallback, which is not even the right instruction.
 const MODE_HINT = {
   deploy: "Click the map to place your unit",
-  move: "Click a destination to move the unit",
-  attack: "Click an enemy unit, a city, or a structure to attack",
 };
 
 const surface = {
@@ -71,22 +63,13 @@ const surface = {
   boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
 };
 
-// What the row says a formation is doing.
-//
-// Posture belongs to the beta system: it is the AI's statement of intent and the
-// engine acts on it. In classic nothing does — but a save carried over from beta
-// play still HOLDS its postures on disk (that is what makes switching lossless), so
-// showing them there would label a fleet "Patrolling" with no engine patrolling it,
-// while the map's own heading lines and station rings correctly hide themselves.
-// Gate on the system, exactly as Map/Units.jsx does.
+// What the row says a formation is doing: its posture — the AI's statement of
+// intent, which the engine acts on — falling back to the lifecycle status.
 //
 // The label is the player's word for it, not the schema's token — "Holding
 // position", not "holding" — matching the unit popup, which reads POSTURE_LABEL
 // from here.
-const unitActivity = (unit) => {
-  if (!isBetaUnits()) return unit.status;
-  return POSTURE_LABEL[unit.posture] || unit.posture || unit.status;
-};
+const unitActivity = (unit) => POSTURE_LABEL[unit.posture] || unit.posture || unit.status;
 
 const UnitRow = ({ unit, dimmed, onClick }) => (
   <button

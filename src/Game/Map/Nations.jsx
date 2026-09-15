@@ -10,10 +10,6 @@ import {
   clearInteractionMode,
   deployUnit,
   placeUnitAdmin,
-  moveUnitTo,
-  attackWith,
-  attackFeature,
-  attackRegion,
 } from "./unitsController.js";
 import { recordMapTrace, recordMapWork } from "../../runtime/mapPerfTrace.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
@@ -1151,39 +1147,6 @@ const WorldMap = ({ isGlobe = false }) => {
       clearInteractionMode();
       return;
     }
-    if (mode.kind === "move") {
-      const hit = resolveRegionHit();
-      moveUnitTo(mode.unitId, event.lngLat.lng, event.lngLat.lat, hit);
-      clearInteractionMode();
-      return;
-    }
-    if (mode.kind === "attack") {
-      const target = unitsAt();
-      if (target.length) {
-        attackWith(mode.unitId, target[0].properties.id);
-        clearInteractionMode();
-        return;
-      }
-      const feature = featureAt();
-      if (feature) {
-        const result = await attackFeature(mode.unitId, feature);
-        if (!result?.ownTarget) clearInteractionMode();
-        return;
-      }
-      const hit = resolveRegionHit();
-      if (hit) {
-        const result = await attackRegion(mode.unitId, {
-          regionId: hit.regionId,
-          regionName: hit.regionName,
-          owner: hit.owner,
-          lng: event.lngLat.lng,
-          lat: event.lngLat.lat,
-        });
-        if (!result?.ownTarget) clearInteractionMode();
-      }
-      return;
-    }
-
     const unitHits = unitsAt();
     if (unitHits.length) {
       dismissRegionPopup();

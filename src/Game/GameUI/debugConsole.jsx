@@ -209,6 +209,16 @@ const PreBlock = ({ title, text, emptyText = "(empty)" }) => {
 
 const statusColor = (record) => (record.ok === false ? COLORS.danger : record.ok === true ? COLORS.ok : COLORS.muted);
 
+// A lookup answer is stored as compact JSON; shown indented when it parses.
+const prettyLookupResponse = (text) => {
+    if (typeof text !== "string" || !text) return "";
+    try {
+        return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+        return text;
+    }
+};
+
 const GenerationRow = ({ record, selected, onSelect }) => (
     <button
         type="button"
@@ -234,6 +244,9 @@ const GenerationRow = ({ record, selected, onSelect }) => (
             {record.taskKey || "direct"}{record.batch ? " (batch)" : ""}{record.maxAttempts > 1 ? ` #${record.attempt}` : ""}
         </span>
         <span style={{ flex: 1, minWidth: 0, color: COLORS.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={record.model}>{record.model || "unknown model"}</span>
+        <span style={{ width: "4.2rem", flexShrink: 0, textAlign: "right", color: COLORS.muted, fontFamily: MONO }} title={record.lookups?.calls ? `${record.lookups.calls} lookup call${record.lookups.calls === 1 ? "" : "s"} over ${record.lookups.rounds} round${record.lookups.rounds === 1 ? "" : "s"}` : undefined}>
+            {record.lookups?.calls ? `fn ×${record.lookups.calls}` : ""}
+        </span>
         <span style={{ width: "8rem", flexShrink: 0, textAlign: "right", color: COLORS.muted, fontFamily: MONO }}>
             {record.usage ? `↑${fmtInt(record.usage.promptTokens)} ↓${fmtInt(record.usage.outputTokens)}` : "no usage"}
         </span>
@@ -278,6 +291,13 @@ const GenerationDetail = ({ record, onRate }) => {
                 <Card label="Tokens in" value={fmtInt(usage.promptTokens)} sub={usage.cachedTokens ? `${fmtInt(usage.cachedTokens)} from cache` : undefined} />
                 <Card label="Tokens out" value={fmtInt(usage.outputTokens)} sub={usage.thinkingTokens ? `${fmtInt(usage.thinkingTokens)} thinking` : undefined} />
                 <Card label="Latency" value={fmtMs(record.latencyMs)} sub={Number.isFinite(record.firstByteMs) ? `first byte ${fmtMs(record.firstByteMs)}` : undefined} />
+                {record.lookups?.calls ? (
+                    <Card
+                        label="Lookups"
+                        value={fmtInt(record.lookups.calls)}
+                        sub={`${record.lookups.rounds} round${record.lookups.rounds === 1 ? "" : "s"} · ${fmtInt(record.lookups.chars)} chars answered`}
+                    />
+                ) : null}
                 <Card
                     label="Status"
                     value={record.ok === false ? "Failed" : record.ok === true ? "OK" : "Pending"}
@@ -311,6 +331,19 @@ const GenerationDetail = ({ record, onRate }) => {
                 <RatingWidget rating={record.rating ?? 0} onRate={(rating) => onRate(record.id, rating)} />
             </Section>
 
+            {record.lookups?.entries?.length ? (
+                <Section title="Function calls" right={<span style={{ color: COLORS.muted, fontFamily: MONO, fontSize: "0.62rem" }}>{record.lookups.rounds} round{record.lookups.rounds === 1 ? "" : "s"} before the answer</span>}>
+                    {record.lookups.entries.map((entry, index) => (
+                        <PreBlock
+                            key={`${entry.round}-${index}`}
+                            title={`round ${entry.round} · ${entry.label || entry.name}${entry.error ? " · ERROR" : ""}${Number.isFinite(entry.ms) ? ` · ${entry.ms} ms` : ""} · ${fmtInt(entry.responseChars)} chars`}
+                            text={prettyLookupResponse(entry.response)}
+                            emptyText="(no answer recorded)"
+                        />
+                    ))}
+                </Section>
+            ) : null}
+
             <Section title="Prompt & response">
                 <PreBlock title="System prompt" text={record.systemPrompt} emptyText="(not captured for this record)" />
                 <PreBlock title="User message" text={record.userMessage} />
@@ -326,6 +359,7 @@ const emptyRow = (label) => ({
     label,
     calls: 0,
     failed: 0,
+    lookups: 0,
     tokensIn: 0,
     tokensOut: 0,
     cacheRead: 0,
@@ -338,6 +372,7 @@ const emptyRow = (label) => ({
 const addRecordToRow = (row, record) => {
     row.calls += 1;
     if (record.ok === false) row.failed += 1;
+    row.lookups += record.lookups?.calls ?? 0;
     if (record.usage) {
         row.tokensIn += record.usage.promptTokens ?? 0;
         row.tokensOut += record.usage.outputTokens ?? 0;
@@ -355,6 +390,7 @@ const RowsTable = ({ rows, firstHeader }) => (
                     <th style={thStyle}>{firstHeader}</th>
                     <th style={thStyle}>Calls</th>
                     <th style={thStyle}>Failed</th>
+                    <th style={thStyle}>Lookups</th>
                     <th style={thStyle}>Tokens in</th>
                     <th style={thStyle}>Tokens out</th>
                     <th style={thStyle}>Cache read</th>
@@ -368,6 +404,7 @@ const RowsTable = ({ rows, firstHeader }) => (
                         <td style={{ ...tdStyle, fontWeight: 700, maxWidth: "16rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.label}>{row.label}</td>
                         <td style={monoTd}>{row.calls}</td>
                         <td style={monoTd}>{row.failed || ""}</td>
+                        <td style={monoTd}>{row.lookups || ""}</td>
                         <td style={monoTd}>{fmtInt(row.tokensIn)}</td>
                         <td style={monoTd}>{fmtInt(row.tokensOut)}</td>
                         <td style={monoTd}>{fmtInt(row.cacheRead)}</td>
@@ -424,7 +461,7 @@ export const DebugConsole = ({ open, onClose }) => {
                 if (statusFilter === "ok" && record.ok !== true) return false;
                 if (statusFilter === "failed" && record.ok !== false) return false;
                 if (needle) {
-                    const haystack = `${record.taskKey} ${record.model} ${record.systemPrompt ?? ""} ${record.rawResponse ?? ""} ${record.validationError ?? ""}`.toLowerCase();
+                    const haystack = `${record.taskKey} ${record.model} ${(record.lookups?.entries ?? []).map((entry) => entry.label || entry.name).join(" ")} ${record.systemPrompt ?? ""} ${record.rawResponse ?? ""} ${record.validationError ?? ""}`.toLowerCase();
                     if (!haystack.includes(needle)) return false;
                 }
                 return true;

@@ -1,4 +1,5 @@
 import { EVENT_TAG_ENUM, MAX_EVENT_TAGS } from "../../runtime/eventTags.js";
+import { extractJsonArray } from "./jsonSalvage.js";
 const textSchema = (description) => ({
   type: "string",
   description,
@@ -313,22 +314,13 @@ const polityChangeSchema = {
   additionalProperties: false,
 };
 
-// `composition` and `posture` below belong to the beta unit system, and are
-// DELIBERATELY left in the schema when the classic system is running.
-//
-// Stripping them looks tidier and is a trap. Every op object here is
-// additionalProperties: false, so a provider that does not enforce the tool
-// schema server-side (not all of the supported ones do) would have a stray
-// `posture` rejected by validateGameplayPayload — and that fails the WHOLE turn's
-// structured output into a fallback simulation, which is exactly the failure the
-// note field on the spawn op was added to prevent (see its comment below).
-// Trading a guaranteed-safe default mode for a few dozen tokens of schema is a
-// bad deal.
-//
-// Nothing acts on them in classic: applyUnitOpBatch's betaEngine gate ignores
-// posture, and promptContext stops describing either field, so the model is not
-// invited to use them. If one arrives anyway it is stored verbatim and simply
-// waits — which is what makes switching to beta later lossless.
+// `composition` and `posture` below are the unit system's own fields. Every op
+// object here is additionalProperties: false, so a provider that does not
+// enforce the tool schema server-side (not all of the supported ones do) would
+// have a stray value rejected by validateGameplayPayload — and that fails the
+// WHOLE turn's structured output into a fallback simulation, which is exactly
+// the failure the note field on the spawn op was added to prevent (see its
+// comment below).
 const unitSchema = {
   type: "object",
   description: "A military unit to create on the map.",
@@ -1795,10 +1787,19 @@ const parseGameMasterTransportArray = (value, field) => {
   const text = String(value ?? "").trim();
   if (!text) return [];
   let parsed;
+  let strictError = null;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new Error(`$.${field} must contain valid JSON array text: ${error?.message || error}.`);
+    strictError = error;
+    // The same salvage the task runner gives a whole answer (jsonSalvage.js):
+    // a trailing remark after the array, a smart quote, a trailing comma or a
+    // second array must not cost the whole transaction. Only after the strict
+    // parse failed, so well-formed text is never touched.
+    parsed = extractJsonArray(text);
+    if (parsed === null) {
+      throw new Error(`$.${field} must contain valid JSON array text: ${strictError?.message || strictError}.`);
+    }
   }
   if (!Array.isArray(parsed)) {
     throw new Error(`$.${field} must decode to a JSON array.`);
@@ -3006,9 +3007,21 @@ const normalizeProjectsShape = (value) => {
   };
 };
 
+// The stat sheet's version field is the runtime's to fill ("the runtime fills
+// this when omitted", says its description) — so a missing, null or zero value
+// from the model is filled here, before the schema sees it, rather than
+// costing the sheet its attempt.
+const normalizeCountryStatSheetShape = (value) => {
+  if (!isPlainRecord(value)) return value;
+  const version = Number(value.statsSchemaVersion);
+  if (Number.isInteger(version) && version >= 1) return value;
+  return { ...value, statsSchemaVersion: 1 };
+};
+
 export const normalizeGameplayPayload = (taskKey, value) => {
   if (taskKey === "idleDiplomacy") return normalizeIdleDiplomacyShape(value);
   if (taskKey === "projects") return normalizeProjectsShape(value);
+  if (taskKey === "countryStatSheet") return normalizeCountryStatSheetShape(value);
   if (taskKey !== "jumpForward" && taskKey !== "autoJumpForward") return value;
   if (!isPlainRecord(value)) return value;
 

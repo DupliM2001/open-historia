@@ -223,6 +223,29 @@ export const stripBeforeSentinel = (text) => {
   return at === -1 ? body : body.slice(at + ANSWER_SENTINEL.length);
 };
 
+// One JSON ARRAY out of a text that should be one. Strict first; then the
+// same repairs extractJsonPayload makes (smart quotes, trailing commas, an
+// unescaped inner quote); then the first balanced [...] block in the text that
+// parses, so a comment or a second array after the real one no longer costs
+// the whole transaction. Null when nothing array-shaped survives — the caller
+// decides whether that is an error.
+export const extractJsonArray = (rawText) => {
+  const text = normalizeString(rawText);
+  if (!text) return null;
+  const direct = lenientJsonParse(text);
+  if (Array.isArray(direct)) return direct;
+  for (const fence of text.matchAll(/```[a-z]*\s*([\s\S]*?)```/gi)) {
+    const parsed = fence[1] ? lenientJsonParse(fence[1].trim()) : null;
+    if (Array.isArray(parsed)) return parsed;
+  }
+  for (const candidate of balancedJsonCandidates(text)) {
+    if (candidate[0] !== "[") continue;
+    const parsed = lenientJsonParse(candidate);
+    if (Array.isArray(parsed)) return parsed;
+  }
+  return null;
+};
+
 export const extractJsonPayload = (rawText) => {
   // Reasoning models (and several Ollama chat templates) prepend a think block
   // the strict parser chokes on; the answer follows it.
