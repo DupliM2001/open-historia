@@ -23,9 +23,9 @@ import {
 
 test.beforeEach(async () => { await clearAiRecords(); });
 
-test("recording and rating default to on when nothing is stored", () => {
+test("recording defaults to on and rating to off when nothing is stored", () => {
   assert.equal(isTelemetryEnabled(), true);
-  assert.equal(isRatingEnabled(), true);
+  assert.equal(isRatingEnabled(), false);
 });
 
 test("a direct call's record is complete when it finishes", async () => {

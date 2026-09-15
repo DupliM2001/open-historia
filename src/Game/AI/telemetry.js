@@ -25,17 +25,19 @@ const MAX_SESSION_RECORDS = 500;
 // full text; only this record was cut. Storage is bounded by record COUNT
 // (MAX_SESSION_RECORDS / MAX_PERSISTED_RECORDS), never by trimming their text.
 
-// Settings (localStorage, same pattern as mapSettings/providerConfig). Both
-// default ON: only an explicit "0" turns them off.
+// Settings (localStorage, same pattern as mapSettings/providerConfig).
+// Recording ships ON: only an explicit "0" turns it off. Rating ships OFF: the
+// 1-10 bar after every skip is opt-in, so only an explicit "1" turns it on.
 const TELEMETRY_SETTING_KEY = "ai_debug_telemetry";
 const RATING_SETTING_KEY = "ai_rate_generations";
 export const TELEMETRY_SETTINGS_EVENT = "oh:telemetry-settings";
 
-const readFlag = (key) => {
+const readFlag = (key, { defaultOn = true } = {}) => {
   try {
-    return localStorage.getItem(key) !== "0";
+    const stored = localStorage.getItem(key);
+    return defaultOn ? stored !== "0" : stored === "1";
   } catch {
-    return true;
+    return defaultOn;
   }
 };
 
@@ -50,7 +52,7 @@ const writeFlag = (key, enabled) => {
 
 export const isTelemetryEnabled = () => readFlag(TELEMETRY_SETTING_KEY);
 export const setTelemetryEnabled = (enabled) => writeFlag(TELEMETRY_SETTING_KEY, enabled);
-export const isRatingEnabled = () => readFlag(RATING_SETTING_KEY);
+export const isRatingEnabled = () => readFlag(RATING_SETTING_KEY, { defaultOn: false });
 export const setRatingEnabled = (enabled) => writeFlag(RATING_SETTING_KEY, enabled);
 
 // Tasks whose completion is worth an immediate "rate this" prompt — the
