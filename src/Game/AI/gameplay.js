@@ -460,8 +460,18 @@ Hard rules:
 const buildDiplomaticLedgerDirective = (variables) => {
   const playerName = normalizeString(variables?.playerPolity) || "the player's polity";
   const canonicalDiplomacy = normalizeString(variables?.canonicalDiplomaticContext);
+  // The Native World Director context (jump tasks) already carries this slice —
+  // its CANONICAL DIPLOMATIC STATE section, built from the same ledger for the
+  // same segment, with the attention storylines' participants added. Rendering
+  // it here too sent every jump request the same relations twice, about five
+  // thousand characters; point at that copy instead. Prompts without the
+  // director (idle diplomacy, the pregame bootstrap) keep their own.
+  const sliceInDirector = normalizeString(variables?.worldInitiativeContext).includes("CANONICAL DIPLOMATIC STATE");
+  const state = sliceInDirector
+    ? "The bounded relevant slice of this ledger — attention actors, bilateral relations, formal agreements — is the CANONICAL DIPLOMATIC STATE section of the Native World Director context above; it is not repeated here."
+    : (canonicalDiplomacy || "No canonical bilateral relations or formal agreements are recorded yet.");
   return `[Canonical Diplomatic Ledger]
-${canonicalDiplomacy || "No canonical bilateral relations or formal agreements are recorded yet."}
+${state}
 
 Lasting bilateral political shifts use top-level relationUpdates; signed, ratified or concluded formal treaties, alliances, guarantees and pacts use top-level agreementUpdates. polityChanges remains for polity metadata and reputation, regionTransfers for legal territorial settlements, and unitOps for concrete military coordination. A.I.-controlled polities have their own diplomacy and may negotiate, threaten, align, mediate, trade or make agreements among themselves without waiting for ${playerName}; private A.I.-to-A.I. diplomacy belongs in the TIMELINE as events, never in a chat the player is not part of.
 
