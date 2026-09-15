@@ -4,7 +4,7 @@ import { getBetaUnitsToStamp } from "./mapSettings.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
-import { dedupeEventLog } from "./eventDedup.js";
+import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
 import { normalizeEventTags } from "./eventTags.js";
 import { buildOwnerAliasMap, createOwnerResolver, toCountryName } from "./ownerNames.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
@@ -3644,12 +3644,21 @@ export const readEventsState = async ({ force = false } = {}) =>
   normalizeEvents(await readJson(JSON_URLS.events, { defaultValue: [], force }));
 
 export const writeEventsState = async (events, options = {}) => {
-  // Choke-point safety net: no writer can persist a log that already contains
-  // exact-duplicate events (the AI restating its own timeline). See eventDedup.js.
-  const normalized = dedupeEventLog(normalizeEvents(events));
+  const { preserveApprovedEvents = false, ...writeOptions } = options || {};
+  // Choke-point safety net: ordinary AI writers cannot persist a log that already
+  // contains prose-identical repeats. The GM Console is different: Apply persists
+  // the EXACT administrator-approved transaction, and its own canonical duplicate
+  // check includes structured effects. A corrected transaction may therefore reuse
+  // the same date/title/description while intentionally carrying different impacts.
+  const normalizedEvents = normalizeEvents(events);
+  // Even then the log stays free of TRUE duplicates — same prose AND the same
+  // structured effects (eventCanonicalKey), the rule Apply itself checks with.
+  const normalized = preserveApprovedEvents
+    ? dedupeEventLog(normalizedEvents, { keyOf: eventCanonicalKey })
+    : dedupeEventLog(normalizedEvents);
   // New/edited event text follows the UI language immediately (see above).
   enqueueContentStrings(normalized);
-  return writeJson(JSON_URLS.events, normalized, { pretty: true, ...options });
+  return writeJson(JSON_URLS.events, normalized, { pretty: true, ...writeOptions });
 };
 
 // Spy intercepts live in their own asset rather than in world.json: they are

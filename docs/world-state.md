@@ -30,6 +30,16 @@ _Avoid_: Effort, item, card
 An ongoing situation no single polity controls, with unresolved stakes, such as a war, a crisis, a rivalry or unrest. Hidden from the player. A Project can cause or feed a Storyline, but the same thing is never both.
 _Avoid_: Process, thread, arc
 
+### Library
+
+**Scenario**:
+An authored starting position — the map, the polities and the opening state — that a Game is started from. Never written to during play, so one Scenario can seed many Games.
+_Avoid_: Preset, map, mod
+
+**Game**:
+One playthrough of a Scenario: everything the player has done and everything the world has become since it started. The thing a player names, continues, archives and exports.
+_Avoid_: Save, save game, campaign, session (as the term for the record)
+
 ### Events
 
 **Canonical event**:
@@ -39,6 +49,54 @@ _Avoid_: Accepted card
 **Hidden event**:
 A Canonical event kept off the timeline because it was routine, low-value or already covered. It still happened. Distinct from a rejected event, which the simulation judged untrue and which never happened.
 _Avoid_: Dropped event (for anything that still happened)
+
+### Diagnostics
+
+**Diagnostics log**:
+The one log a player sends with a bug report: what they did and what went wrong, in order. It is kept on every platform, and on desktop it also carries the Desktop log's entries.
+_Avoid_: Debug log, app log, server log
+
+**Desktop log**:
+Where the desktop app itself and its local server note their own start-up, update and server errors, because they cannot reach the Diagnostics log directly. It is not a second log: its entries appear in the Diagnostics log.
+_Avoid_: app.log (as the name of a log), server log
+
+**Detailed logging**:
+The switch that adds whole AI exchanges, conversations and world changes to the Diagnostics log. Off by default.
+_Avoid_: Verbose mode, debug mode
+
+**Logging file**:
+The single text file a player saves from the Diagnostics log to attach to a report: at most 1 MB of log, with the problem being reported on top, and never more than 2 MB in all.
+_Avoid_: Debug report, bug report (for the file itself)
+
+**Prompt fingerprint**:
+The size and a short hash of each section of a prompt sent to the model, noted for every attempt under Detailed logging, so a prompt rebuilt from the save can be checked against the one actually sent.
+_Avoid_: Prompt dump
+
+### AI access
+
+**Fallback list**:
+The player's ordered list of models to answer AI calls, which may mix providers. Every call starts at the top and uses the first entry that is not Spent. It moves down only when an entry cannot answer, and never spreads calls across entries to get more usage.
+_Avoid_: Rotator, rotation, key rotation, model chain
+
+**Connection**:
+A saved way to reach one provider: which provider it is, a name the player gives it, its key, and its endpoint when the provider needs one. Many Fallback entries can share one Connection.
+_Avoid_: Profile, preset, account
+
+**Fallback entry**:
+One Connection and one model, at one place in the Fallback list. A task that has its own pick names a Fallback entry: it tries that entry first, then the list from the top.
+_Avoid_: Slot, route, step
+
+**Spent**:
+A Fallback list entry that has used up its allowance. It is skipped until its allowance resets or the player resets it.
+_Avoid_: Exhausted, maxed out, dead
+
+**Rate limited**:
+Refused for the moment because of too many requests in a short window. Waiting fixes it, so a Rate limited entry is not Spent.
+_Avoid_: Quota exceeded (for a short-window limit)
+
+**Unusable**:
+A Fallback entry that failed in a way waiting cannot fix, such as a rejected key or a model the provider does not know. It is skipped until the player edits it, and it shows the player what went wrong.
+_Avoid_: Broken, Spent (for this case)
 
 ---
 

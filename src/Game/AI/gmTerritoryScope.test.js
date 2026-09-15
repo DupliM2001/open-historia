@@ -1,0 +1,69 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { detectExplicitBaseTerritoryScope, scopeContainsRegion } from "./gmTerritoryScope.js";
+
+const catalog = [
+  { id: "PRK.1", name: "Sinuiju", country: "North Korea", countryCode: "PRK" },
+  { id: "PRK.2", name: "Pyongyang", country: "North Korea", countryCode: "PRK" },
+  { id: "PRK.3", name: "Hamhung", country: "North Korea", countryCode: "PRK" },
+  { id: "KOR.1", name: "Seoul", country: "South Korea", countryCode: "KOR" },
+  { id: "FRA.1", name: "Ile-de-France", country: "France", countryCode: "FRA" },
+  { id: "FRA.2", name: "Normandie", country: "France", countryCode: "FRA" },
+];
+
+// A wider world for the qualifier cases: the countries a partial request names.
+const wider = [
+  ...catalog,
+  { id: "UKR.1", name: "Kharkiv", country: "Ukraine", countryCode: "UKR" },
+  { id: "UKR.2", name: "Kyiv", country: "Ukraine", countryCode: "UKR" },
+  { id: "UKR.3", name: "Lviv", country: "Ukraine", countryCode: "UKR" },
+  { id: "POL.1", name: "Lubelskie", country: "Poland", countryCode: "POL" },
+  { id: "POL.2", name: "Mazowieckie", country: "Poland", countryCode: "POL" },
+  { id: "RUS.1", name: "Belgorod", country: "Russian Federation", countryCode: "RUS" },
+  { id: "USA.1", name: "Guam", country: "United States", countryCode: "USA" },
+];
+
+test("detects all North Korean states as one base-geography footprint", () => {
+  const scope = detectExplicitBaseTerritoryScope(
+    "make the DPRK independent, in all north korean states. not just contested - legally as well.",
+    catalog,
+  );
+  assert.equal(scope?.countryCode, "PRK");
+  assert.deepEqual(scope?.regionIds, ["PRK.1", "PRK.2", "PRK.3"]);
+  assert.equal(scopeContainsRegion(scope, "PRK.2"), true);
+  assert.equal(scopeContainsRegion(scope, "KOR.1"), false);
+});
+
+test("detects an exhaustive France footprint without treating current ownership as the scope", () => {
+  const scope = detectExplicitBaseTerritoryScope("transfer all of France territories to Germany", catalog);
+  assert.equal(scope?.countryCode, "FRA");
+  assert.deepEqual(scope?.regionIds, ["FRA.1", "FRA.2"]);
+});
+
+test("does not expand a single-region request", () => {
+  assert.equal(detectExplicitBaseTerritoryScope("transfer Sinuiju to the DPRK", catalog), null);
+});
+
+test("fails closed when a broad request does not identify one rendered base geography", () => {
+  assert.equal(detectExplicitBaseTerritoryScope("transfer all occupied regions to Germany", catalog), null);
+});
+
+test("an unqualified whole-footprint phrase still expands, with filler and a hand-over after the noun", () => {
+  assert.equal(detectExplicitBaseTerritoryScope("give all Ukrainian regions to Russia", wider)?.countryCode, "UKR");
+  assert.equal(detectExplicitBaseTerritoryScope("grant independence to all the north korean states", wider)?.countryCode, "PRK");
+  assert.equal(detectExplicitBaseTerritoryScope("all United States territories go to Mexico", wider)?.countryCode, "USA");
+});
+
+test("a request that narrows the scope to part of a country never expands to the whole footprint", () => {
+  for (const request of [
+    "Poland cedes all its eastern provinces to the Soviet Union",
+    "transfer all Ukrainian regions east of the Dnieper to Novorossiya",
+    "Transfer all the Ukrainian regions on the left bank of the Dnieper to Novorossiya",
+    "Novorossiya takes control of every Ukrainian province it occupies",
+    "Ukraine loses all of its territory east of the Dnieper; the rest stays",
+    "All French overseas territories in the Caribbean go to the United States",
+    "Give Zmiiv to Russia and settle all the border areas quietly",
+  ]) {
+    assert.equal(detectExplicitBaseTerritoryScope(request, wider), null, request);
+  }
+});

@@ -14,18 +14,23 @@ import { Toolbar } from "./chat";
 import { Search } from "./search";
 import { ForcesPanel } from "./forces";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
-import { logDebugEvent } from "../../runtime/debugLog.js";
+import { logDebugEvent, logSettingChange } from "../../runtime/debugLog.js";
 import {
   describeProviderSetupNeed,
   getProviderMeta,
-  getStoredProvider,
-  isProviderConfigured,
-  loadProviderSettingsFormState,
-  logProviderSwitch,
-  normalizeProvider,
-  persistProviderSetting,
+  getResolvedFallbackList,
+  isFallbackListConfigured,
   syncAiDebugContext,
 } from "../AI/providerConfig.js";
+import { FallbackSwitchNotice } from "./fallbackSwitchNotice.jsx";
+
+// Whether anything in the Fallback list has what its provider needs, and the
+// top entry's provider for the start-of-game prompt's wording. Re-read whenever
+// the list or a Connection changes (providerConfig.js announces it).
+const readAiSetup = () => {
+  const [top] = getResolvedFallbackList();
+  return { ready: isFallbackListConfigured(), provider: top?.provider ?? "gemini" };
+};
 
 // The advisor drawer is user-resizable — drag its left edge (see advisor.jsx).
 // Width is kept in px so the drag maps 1:1 to the pointer, persisted in
@@ -209,8 +214,7 @@ const Main = ({
   const [isFullscreenEnabled, setIsFullscreenEnabled] = useState(false);
   const [showWebGLWarning, setShowWebGLWarning] = useState(false);
 
-  const [apiProvider, setApiProvider] = useState(() => getStoredProvider());
-  const [providerSettings, setProviderSettings] = useState(() => loadProviderSettingsFormState());
+  const [aiSetup, setAiSetup] = useState(readAiSetup);
   const { activeGame, games, loaded, runtimeScenario } = useLibraryState();
   // The game menu names the campaign the way the library does.
   const activeCountryName = useCountryDisplayName(activeGame?.country || "");
@@ -218,15 +222,14 @@ const Main = ({
   const hasNoGames = loaded && (games?.length ?? 0) === 0;
 
   // Starting a game with nothing to call the AI with: a prompt, once per game
-  // per session, offering the AI settings. providerSettings is a dependency so
-  // the prompt goes away the moment a key is typed into the settings.
+  // per session, offering the AI settings. It goes away the moment a key is
+  // typed into the settings, because every edit announces itself.
   const mainMenuOpen = useMainMenuOpen();
   // The screen a game opens under, until the map has drawn it (this UI is
   // remounted per game, so it starts over with every game opened).
   const gameLoading = useGameLoading();
   const showGameLoading = gameLoading.active && Boolean(activeGame?.id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const providerReady = useMemo(() => isProviderConfigured(apiProvider), [apiProvider, providerSettings]);
+  const providerReady = aiSetup.ready;
   const [apiPromptAnsweredFor, setApiPromptAnsweredFor] = useState(() => {
     try { return sessionStorage.getItem("oh:api-setup-answered") || ""; } catch { return ""; }
   });
@@ -302,28 +305,14 @@ const Main = ({
     localStorage.setItem("Fullscreen", JSON.stringify(isFullscreenEnabled));
   }, [isFullscreenEnabled]);
 
+  // The report header names the top of the Fallback list from the moment the
+  // game loads; every later change to the list keeps it in step.
   useEffect(() => {
-    const normalized = normalizeProvider(apiProvider);
-    const previous = localStorage.getItem("api_provider");
-    localStorage.setItem("api_provider", normalized);
-    // First run of this effect is the mount, not a choice, so only a real change
-    // is worth a log line; the context sync runs either way so the report header
-    // is populated from the moment the game loads.
-    if (previous !== null && previous !== normalized) logProviderSwitch(normalized);
-    else syncAiDebugContext();
-  }, [apiProvider]);
-
-  useEffect(() => {
-    if (isSettingsOpen) {
-      setApiProvider(getStoredProvider());
-      setProviderSettings(loadProviderSettingsFormState());
-    }
-  }, [isSettingsOpen]);
-
-  const handleProviderSettingChange = (key, value) => {
-    setProviderSettings((prev) => ({ ...prev, [key]: value }));
-    persistProviderSetting(key, value);
-  };
+    syncAiDebugContext();
+    const refresh = () => setAiSetup(readAiSetup());
+    window.addEventListener("ai:fallback-changed", refresh);
+    return () => window.removeEventListener("ai:fallback-changed", refresh);
+  }, []);
 
   const toggleFullscreen = (shouldBeFull) => {
     // Mobile Safari (iOS/iPad) exposes the Fullscreen API webkit-prefixed, and
@@ -490,8 +479,8 @@ const Main = ({
       </Presence>
       <Presence open={showApiPrompt}>
         <ApiSetupPrompt
-          providerLabel={getProviderMeta(apiProvider)?.label || "the selected provider"}
-          missing={describeProviderSetupNeed(apiProvider)}
+          providerLabel={getProviderMeta(aiSetup.provider)?.label || "the selected provider"}
+          missing={describeProviderSetupNeed(aiSetup.provider)}
           onDismiss={answerApiPrompt}
           onConfigure={() => {
             answerApiPrompt();
@@ -545,15 +534,19 @@ const Main = ({
             const newState = !isFullscreenEnabled;
             setIsFullscreenEnabled(newState);
             toggleFullscreen(newState);
+            logSettingChange("Fullscreen", newState);
           }}
-          onToggleGlobe={() => setIsGlobeEnabled(!isGlobeEnabled)}
-          onToggleTerrain={() => setIsTerrainEnabled(!isTerrainEnabled)}
-          apiProvider={apiProvider}
-          onApiProviderChange={setApiProvider}
-          providerSettings={providerSettings}
-          onProviderSettingChange={handleProviderSettingChange}
+          onToggleGlobe={() => {
+            setIsGlobeEnabled(!isGlobeEnabled);
+            logSettingChange("3D Globe", !isGlobeEnabled);
+          }}
+          onToggleTerrain={() => {
+            setIsTerrainEnabled(!isTerrainEnabled);
+            logSettingChange("3D Terrain", !isTerrainEnabled);
+          }}
         />
       </Presence>
+      <FallbackSwitchNotice />
     </>
   );
 };

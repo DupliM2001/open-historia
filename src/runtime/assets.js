@@ -96,6 +96,12 @@ export const ESRI_BASEMAPS = [
   { id: "shaded", label: "Shaded Relief", service: "World_Shaded_Relief", maxZoom: 13 },
   { id: "physical", label: "Physical", service: "World_Physical_Map", maxZoom: 8 },
   { id: "natgeo", label: "National Geographic", service: "NatGeo_World_Map", maxZoom: 16 },
+  // Promotional/screenshot variant. Runtime World.jsx replaces this registry
+  // entry with the official NatGeo World_Basemap_v2 vector style, darkened and
+  // stripped of political/place labels while preserving physical/water labels.
+  // The raster service remains here as a semantic/fallback source and keeps the
+  // built-in basemap registry/editor contract simple.
+  { id: "natgeo-dark", label: "National Geographic - Dark", service: "NatGeo_World_Map", maxZoom: 16 },
   { id: "ocean", label: "Ocean", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
   { id: "ocean-dark", label: "Ocean - Dark", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
   { id: "light-gray", label: "Light Gray Canvas", service: "Canvas/World_Light_Gray_Base", maxZoom: 16 },
@@ -221,6 +227,8 @@ let countryNamesPromise = null;
 let countryNamesPromiseKey = "";
 let regionCatalogPromise = null;
 let regionCatalogPromiseKey = "";
+let regionTileIdSetPromise = null;
+let regionTileIdSetPromiseKey = "";
 let primedCustomRegionCatalog = null;
 let primedCustomRegionCatalogKey = "";
 
@@ -1206,6 +1214,47 @@ export const decodeVectorTile = async (data) => {
   return new VectorTile(new Pbf(data));
 };
 
+// Exact id index for the region PMTiles archive currently exposed by the
+// runtime. A scenario is allowed to hand close-zoom political rendering and
+// hit-testing to that archive only when its stock-like region ids match this
+// vocabulary exactly. `loadRegionCatalog` below already treats the z0 region
+// tile as the compact catalog index, so this reuses the same authoritative
+// source rather than loading world geometry on the UI thread.
+export const loadRegionTileIdSet = async () => {
+  const cacheKey = PMTILES_ARCHIVES.regions;
+  if (regionTileIdSetPromise && regionTileIdSetPromiseKey === cacheKey) {
+    return regionTileIdSetPromise;
+  }
+
+  regionTileIdSetPromiseKey = cacheKey;
+  const promise = (async () => {
+    const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+    const tileData = await pmtiles.getZxy(0, 0, 0);
+    if (!tileData?.data) return new Set();
+
+    const tile = await decodeVectorTile(tileData.data);
+    const layer = tile.layers.regions;
+    if (!layer) return new Set();
+
+    const ids = new Set();
+    for (let index = 0; index < layer.length; index += 1) {
+      const props = layer.feature(index).properties;
+      const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
+      if (id != null && String(id)) ids.add(String(id));
+    }
+    return ids;
+  })().catch((error) => {
+    if (regionTileIdSetPromise === promise) {
+      regionTileIdSetPromise = null;
+      regionTileIdSetPromiseKey = "";
+    }
+    throw error;
+  });
+
+  regionTileIdSetPromise = promise;
+  return promise;
+};
+
 export const getNationColors = async () => {
   const cacheKey = JSON_URLS.colors;
 
@@ -1386,11 +1435,11 @@ export const primeCustomRegionCatalog = (
   const rawEntries = [];
   for (const feature of geojson?.features ?? []) {
     const props = feature?.properties ?? {};
-    const id = props.id != null
-      ? String(props.id)
-      : props.GID_1 != null
-        ? String(props.GID_1)
-        : "";
+    // The same id vocabulary the AI's Preview resolver reads from these features
+    // (resolveRegionTransfers in gameplay.js), so an id Preview accepted is never
+    // "missing" from the compact catalog when Apply revalidates it.
+    const rawId = props.id ?? props.GID_1 ?? props.gid_1 ?? props.HASC_1 ?? feature?.id;
+    const id = rawId != null ? String(rawId) : "";
     if (!id) continue;
     const centroid = props?.centroid?.coordinates;
     rawEntries.push({
@@ -1408,6 +1457,16 @@ export const primeCustomRegionCatalog = (
     });
   }
   return primeCustomRegionCatalogEntries(rawEntries, options);
+};
+
+export const getPrimedScenarioRegionCatalog = ({ url = JSON_URLS.regionsGeojson } = {}) => {
+  if (
+    primedCustomRegionCatalog
+    && primedCustomRegionCatalogKey === String(url || "")
+  ) {
+    return primedCustomRegionCatalog;
+  }
+  return null;
 };
 
 export const loadScenarioRegionCatalog = async ({ force = false } = {}) => {

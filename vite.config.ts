@@ -103,6 +103,13 @@ export default defineConfig(({ mode }) => ({
     // a plain truthiness check.
     'import.meta.env.VITE_OH_WEB': JSON.stringify(mode === 'web'),
   },
+  // PTR placement runs in a module worker whose dependency graph can be
+  // split into multiple chunks. Vite's default worker output is IIFE, which
+  // Rollup cannot use for code-splitting builds; emit workers as native ES
+  // modules so production builds match the module-worker runtime contract.
+  worker: {
+    format: 'es',
+  },
   plugins: [
     react({
       babel: {

@@ -7,6 +7,7 @@ const MAX_FLAG_WIDTH = 256;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml";
 
 const str = (value) => String(value ?? "").trim();
+const searchText = (...parts) => parts.map((part) => str(part)).filter(Boolean).join(" ").toLowerCase();
 
 const fileToScaledDataUrl = (file) => new Promise((resolve, reject) => {
     if (!file) { reject(new Error("Choose an image first.")); return; }
@@ -48,6 +49,18 @@ const buttonStyle = {
     fontSize: "0.8rem",
     fontWeight: 700,
     padding: "0.55rem 0.75rem",
+};
+
+const searchInputStyle = {
+    background: "rgba(0,0,0,0.3)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: 9,
+    color: "white",
+    fontFamily: "sans-serif",
+    fontSize: "0.8rem",
+    minWidth: "10rem",
+    padding: "0.55rem 0.7rem",
+    width: "12rem",
 };
 
 const FlagCard = ({ imageUrl, label, meta, onClick, selected = false }) => (
@@ -99,7 +112,7 @@ const PackCard = ({ post, onClick }) => {
                 textAlign: "left",
             }}
         >
-            <div style={{ position: "relative", width: "100%", aspectRatio: "3 / 2", borderRadius: 7, overflow: "hidden", background: "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(38,38,42,0.9))", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ position: "relative", width: "100%", aspectRatio: "3 / 2", borderRadius: 7, overflow: "hidden", background: "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(30,41,59,0.9))", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {post?.imageUrl ? (
                     <img src={post.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 0.78 }} />
                 ) : (
@@ -108,7 +121,7 @@ const PackCard = ({ post, onClick }) => {
                         <span style={{ fontSize: "0.62rem", fontWeight: 800, letterSpacing: "0.08em" }}>FLAG PACK</span>
                     </div>
                 )}
-                <span style={{ position: "absolute", top: 7, right: 7, padding: "0.2rem 0.38rem", borderRadius: 999, background: "rgba(20,20,23,0.9)", border: "1px solid rgba(196,181,253,0.45)", color: "#ddd6fe", fontSize: "0.58rem", fontWeight: 800, letterSpacing: "0.06em" }}>PACK</span>
+                <span style={{ position: "absolute", top: 7, right: 7, padding: "0.2rem 0.38rem", borderRadius: 999, background: "rgba(15,23,42,0.9)", border: "1px solid rgba(196,181,253,0.45)", color: "#ddd6fe", fontSize: "0.58rem", fontWeight: 800, letterSpacing: "0.06em" }}>PACK</span>
             </div>
             <div style={{ fontSize: "0.75rem", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{post?.title || "Scenario flag pack"}</div>
             <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.66rem", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -122,6 +135,7 @@ const communityPackKey = (post) => str(post?.id || post?.packUrl || post?.url ||
 
 const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
     const [tab, setTab] = useState("game");
+    const [query, setQuery] = useState("");
     const [flags, setFlags] = useState({});
     const [community, setCommunity] = useState([]);
     const [communityState, setCommunityState] = useState("idle");
@@ -152,6 +166,7 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
         setCommunityPackFlags([]);
         setCommunityPackState("idle");
         setCommunityPackError("");
+        setQuery("");
         setTab("game");
     }, [isOpen]);
 
@@ -186,6 +201,9 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
         setCommunityPackFlags([]);
         setCommunityPackState("idle");
         setCommunityPackError("");
+        // A root-view search often matches the pack title rather than any flag code.
+        // Start fresh when returning so the Community grid never appears mysteriously empty.
+        setQuery("");
     };
 
     const openCommunityPack = async (post) => {
@@ -196,6 +214,9 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
         packRequestRef.current = requestId;
         setCommunityPack(post);
         setCommunityPackError("");
+        // Root search terms (for example "Kaiserreich") should not hide every flag
+        // after entering the pack. The same search box then becomes a pack-local filter.
+        setQuery("");
 
         if (packCacheRef.current.has(key)) {
             setCommunityPackFlags(packCacheRef.current.get(key));
@@ -245,6 +266,24 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
             })
             .slice(0, 120);
     }, [flags]);
+
+    const q = query.trim().toLowerCase();
+    const filteredExisting = useMemo(
+        () => (q ? existing.filter(([name]) => searchText(name).includes(q)) : existing),
+        [existing, q],
+    );
+    const filteredCommunity = useMemo(
+        () => (q
+            ? community.filter((post) => searchText(post?.title, post?.author, post?.code).includes(q))
+            : community),
+        [community, q],
+    );
+    const filteredCommunityPackFlags = useMemo(
+        () => (q
+            ? communityPackFlags.filter((flag) => searchText(flag?.code).includes(q))
+            : communityPackFlags),
+        [communityPackFlags, q],
+    );
 
     const apply = async (dataUrl) => {
         if (busy) return;
@@ -301,9 +340,15 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
 
     if (!isOpen) return null;
 
+    const noMatches = (
+        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.8rem" }}>
+            No flags match “{query}”.
+        </div>
+    );
+
     return createPortal(
-        <div style={{ position: "fixed", inset: 0, zIndex: 12050, background: "rgba(8,8,10,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-            <div style={{ width: "min(56rem, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", background: "rgba(18,18,20,0.99)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", overflow: "hidden", color: "white", fontFamily: "sans-serif" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 12050, background: "rgba(2,6,23,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+            <div style={{ width: "min(56rem, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", background: "rgba(16,18,24,0.99)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", overflow: "hidden", color: "white", fontFamily: "sans-serif" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", padding: "1rem 1.1rem", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                     {current.imageUrl ? <img src={current.imageUrl} alt="" style={{ width: 46, height: 29, objectFit: "cover", borderRadius: 4, boxShadow: "0 0 0 1px rgba(255,255,255,0.18)" }} /> : <div style={{ width: 46, height: 29, borderRadius: 4, border: "1px solid rgba(255,255,255,0.18)" }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -313,12 +358,20 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
                     <button type="button" onClick={onClose} style={{ ...buttonStyle, padding: "0.35rem 0.55rem", fontSize: "1rem", background: "transparent" }}>✕</button>
                 </div>
 
-                <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem 1rem", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.75rem 1rem", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     {[{ id: "game", label: "In this game" }, { id: "community", label: "Community" }].map((entry) => (
-                        <button key={entry.id} type="button" onClick={() => setTab(entry.id)} style={{ ...buttonStyle, background: tab === entry.id ? "rgba(124,58,237,0.28)" : buttonStyle.background, borderColor: tab === entry.id ? "rgba(167,139,250,0.62)" : buttonStyle.border.split(" ").at(-1) }}>
+                        <button key={entry.id} type="button" onClick={() => { setTab(entry.id); setQuery(""); if (entry.id !== "community") closeCommunityPack(); }} style={{ ...buttonStyle, background: tab === entry.id ? "rgba(124,58,237,0.28)" : buttonStyle.background, borderColor: tab === entry.id ? "rgba(167,139,250,0.62)" : buttonStyle.border.split(" ").at(-1) }}>
                             {entry.label}
                         </button>
                     ))}
+                    <input
+                        type="search"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={communityPack ? "Search this pack…" : "Search flags…"}
+                        aria-label={communityPack ? "Search flags in this pack" : "Search flags"}
+                        style={searchInputStyle}
+                    />
                     <div style={{ flex: 1 }} />
                     <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} style={{ ...buttonStyle, opacity: busy ? 0.5 : 1 }}>Upload image</button>
                     <input ref={inputRef} type="file" accept={ACCEPT} onChange={upload} style={{ display: "none" }} />
@@ -335,9 +388,9 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
                             </div>
                             {existing.length === 0 ? (
                                 <div style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.8rem" }}>No custom flags are stored in this campaign yet.</div>
-                            ) : (
+                            ) : filteredExisting.length === 0 ? noMatches : (
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "0.75rem" }}>
-                                    {existing.map(([name, imageUrl]) => (
+                                    {filteredExisting.map(([name, imageUrl]) => (
                                         <FlagCard key={name} imageUrl={imageUrl} label={name} selected={current.imageUrl === imageUrl} onClick={() => apply(imageUrl)} />
                                     ))}
                                 </div>
@@ -369,9 +422,9 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
                                 </div>
                             ) : communityPackFlags.length === 0 ? (
                                 <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.8rem" }}>This scenario pack does not contain any custom flag images that can be selected individually.</div>
-                            ) : (
+                            ) : filteredCommunityPackFlags.length === 0 ? noMatches : (
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(145px, 1fr))", gap: "0.75rem" }}>
-                                    {communityPackFlags.map((flag, index) => (
+                                    {filteredCommunityPackFlags.map((flag, index) => (
                                         <FlagCard
                                             key={`${flag.code}:${index}`}
                                             imageUrl={flag.dataUrl}
@@ -390,13 +443,13 @@ const GameFlagPicker = ({ isOpen, polity, world, onClose, onApplied }) => {
                         <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.8rem" }}>Community flags could not be loaded.</div>
                     ) : community.length === 0 ? (
                         <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.8rem" }}>No community flags or scenario flag packs are available right now.</div>
-                    ) : (
+                    ) : filteredCommunity.length === 0 ? noMatches : (
                         <>
                             <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.76rem", marginBottom: "0.75rem" }}>
                                 Choose a shared flag directly, or open a scenario flag pack to pick one of its flags without importing the scenario.
                             </div>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(145px, 1fr))", gap: "0.75rem" }}>
-                                {community.map((post) => post?.fromScenario ? (
+                                {filteredCommunity.map((post) => post?.fromScenario ? (
                                     <PackCard
                                         key={post.id || post.packUrl || post.url || post.title}
                                         post={post}

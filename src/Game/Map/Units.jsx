@@ -204,27 +204,61 @@ const Units = () => {
   const polityFlagSignatureRef = useRef("");
 
   useEffect(() => {
-    getNationColors()
-      .then((next) => {
-        colorRef.current = next;
-        setColorMap(next);
-      })
-      .catch((error) => console.error("Failed to load colors for units:", error));
-  }, []);
-
-  // Author-set flags (the scenario's flags.json). Fetched once, then a resync so
-  // counters already on screen pick them up rather than waiting out the 5s poll.
-  useEffect(() => {
     let cancelled = false;
-    getNationFlags()
-      .then((flags) => {
-        if (cancelled) return;
-        flagSourcesRef.current = { ...flagSourcesRef.current, customFlags: flags || {} };
-        flagRefreshRef.current();
-      })
-      .catch((error) => console.error("Failed to load flags for units:", error));
+    let colorGeneration = 0;
+    const refreshColors = () => {
+      const generation = ++colorGeneration;
+      getNationColors()
+        .then((next) => {
+          if (cancelled || generation !== colorGeneration) return;
+          colorRef.current = next;
+          setColorMap(next);
+          if (!rafRef.current) flagRefreshRef.current();
+        })
+        .catch((error) => console.error("Failed to load colors for units:", error));
+    };
+
+    refreshColors();
+    // assets.js invalidates the palette promise before emitting colors-updated;
+    // active-game changes move JSON_URLS.colors to a new token/key.
+    const onColorsUpdated = () => refreshColors();
+    const onActiveGameChanged = () => refreshColors();
+    window.addEventListener("oh:colors-updated", onColorsUpdated);
+    window.addEventListener("oh:active-game-changed", onActiveGameChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener("oh:colors-updated", onColorsUpdated);
+      window.removeEventListener("oh:active-game-changed", onActiveGameChanged);
+    };
+  }, []);
+
+  // Author-set flags live in scenario/game flags.json. Runtime flag writes emit
+  // oh:flags-updated; scenario/game switches emit oh:active-game-changed. Listen
+  // to both so a regime flag replacement reaches counters immediately instead of
+  // waiting for a remount, and force-bypass the scenario-token memo after writes.
+  useEffect(() => {
+    let cancelled = false;
+    let flagGeneration = 0;
+    const refreshFlags = ({ force = false } = {}) => {
+      const generation = ++flagGeneration;
+      getNationFlags({ force })
+        .then((flags) => {
+          if (cancelled || generation !== flagGeneration) return;
+          flagSourcesRef.current = { ...flagSourcesRef.current, customFlags: flags || {} };
+          flagRefreshRef.current();
+        })
+        .catch((error) => console.error("Failed to load flags for units:", error));
+    };
+
+    refreshFlags();
+    const onFlagsUpdated = () => refreshFlags({ force: true });
+    const onActiveGameChanged = () => refreshFlags({ force: true });
+    window.addEventListener("oh:flags-updated", onFlagsUpdated);
+    window.addEventListener("oh:active-game-changed", onActiveGameChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("oh:flags-updated", onFlagsUpdated);
+      window.removeEventListener("oh:active-game-changed", onActiveGameChanged);
     };
   }, []);
 

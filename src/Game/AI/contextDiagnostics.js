@@ -206,6 +206,57 @@ const measureVariables = (variables) => Object.entries(
 
 const approximateTokens = (chars) => Math.ceil(Math.max(0, Number(chars) || 0) / 4);
 
+// ---------------------------------------------------------------------------
+// Prompt fingerprint
+// ---------------------------------------------------------------------------
+// What Detailed logging records about each AI attempt instead of the prompt. A
+// whole prompt is tens or hundreds of kilobytes of campaign and would fill the
+// Logging file on its own; most of it can be rebuilt from the player's save
+// anyway. What a rebuild cannot prove is that it matches what was actually sent,
+// so this records the size and a short hash of every part: rebuild, fingerprint,
+// compare, and a mismatch names the section that differed. No text at all, so it
+// cannot leak the campaign.
+
+// FNV-1a over UTF-16 code units, as 8 hex digits. Not cryptographic — it only has
+// to tell two versions of a section apart — and synchronous, which the request
+// path needs.
+const shortHash = (text) => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+const measurePart = (value) => {
+  const text = stringifyForMeasurement(value);
+  return { chars: text.length, hash: shortHash(text) };
+};
+
+export const buildPromptFingerprint = ({
+  history = [],
+  promptTemplate = "",
+  systemPrompt = "",
+  userMessage = "",
+  variables = {},
+} = {}) => ({
+  prompt: measurePart(systemPrompt),
+  template: measurePart(promptTemplate),
+  instruction: measurePart(userMessage),
+  history: {
+    messages: array(history).length,
+    ...measurePart(array(history).map((entry) => `${clean(entry?.role)}:${array(entry?.parts)
+      .map((part) => stringifyForMeasurement(part?.text ?? part)).join("")}`).join("\n")),
+  },
+  // Every filled-in section, by variable name, in a stable order. Keys starting
+  // "__" are build metadata riding along with the variables, not prompt text.
+  sections: Object.keys(variables && typeof variables === "object" ? variables : {})
+    .filter((key) => !key.startsWith("__"))
+    .sort()
+    .map((key) => ({ key, ...measurePart(variables[key]) })),
+});
+
 
 // ---------------------------------------------------------------------------
 // 9.5B actual task-variable demand contract

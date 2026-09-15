@@ -41,7 +41,6 @@ const TOOLS = [
     { id: "add-feature", title: "Add Map Feature", subtitle: "Place cities, HQs, landmarks, ports, and other world features", icon: "+" },
     { id: "clear-features", title: "Clear Map Features", subtitle: "Remove custom features or restore standard cities", icon: "⌫", badge: "Advanced" },
     { id: "events", title: "Event Editor", subtitle: "Search, create, and repair canonical timeline events", icon: "≡" },
-    { id: "logs", title: "Diagnostics Log", subtitle: "Errors, API failures and the context the AI was given", icon: "≣" },
 ];
 
 const TOOL_GROUPS = [
@@ -71,7 +70,7 @@ const TOOL_GROUPS = [
         title: "Simulation",
         subtitle: "Change player control and simulation challenge settings.",
         icon: "◈",
-        tools: ["difficulty", "your-country", "logs"],
+        tools: ["difficulty", "your-country"],
     },
     {
         id: "map",
@@ -1940,85 +1939,13 @@ const EventEditorView = ({ meta, header, busy, status, game, runBusy }) => {
     );
 };
 
-// Reads the shared diagnostics log. Newest first, because the thing that just
-// went wrong is what the reporter is looking at.
-const LEVEL_TONE = { error: "#ff6b6b", warn: "#ffc861", info: "rgba(255,255,255,0.72)", debug: "rgba(255,255,255,0.45)" };
-
-const LogsPanel = ({ header }) => {
-    const [entries, setEntries] = React.useState([]);
-    const [file, setFile] = React.useState("");
-    const [onlyProblems, setOnlyProblems] = React.useState(false);
-    const [expanded, setExpanded] = React.useState(null);
-    const [note, setNote] = React.useState("");
-
-    const load = React.useCallback(async () => {
-        try {
-            const response = await fetch("/api/log?limit=500", { cache: "no-store" });
-            const data = await response.json();
-            setEntries(Array.isArray(data.entries) ? data.entries.slice().reverse() : []);
-            setFile(String(data.file || ""));
-        } catch (error) {
-            setNote(`Could not read the log: ${error.message}`);
-        }
-    }, []);
-
-    React.useEffect(() => { load(); }, [load]);
-
-    const shown = onlyProblems ? entries.filter((e) => e.level === "error" || e.level === "warn") : entries;
-
-    const copyAll = async () => {
-        try {
-            await navigator.clipboard.writeText(shown.map((e) => JSON.stringify(e)).join("\n"));
-            setNote(`Copied ${shown.length} entr${shown.length === 1 ? "y" : "ies"}.`);
-        } catch {
-            setNote("Clipboard blocked — the file path is shown above.");
-        }
-    };
-
-    return (
-        <>
-        {header}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.6rem" }}>
-        <button type="button" style={buttonStyle} onClick={load}>Refresh</button>
-        <button type="button" style={buttonStyle} onClick={() => setOnlyProblems((v) => !v)}>
-        {onlyProblems ? "Showing problems" : "Showing everything"}
-        </button>
-        <button type="button" style={buttonStyle} onClick={copyAll}>Copy for a bug report</button>
-        </div>
-        {file && <div style={{ ...labelStyle, wordBreak: "break-all", marginBottom: "0.5rem" }}>{file}</div>}
-        {note && <div style={{ ...labelStyle, marginBottom: "0.5rem" }}>{note}</div>}
-        {shown.length === 0 && <div style={labelStyle}>Nothing logged yet.</div>}
-        {shown.map((entry, index) => (
-            <div key={index} style={{ borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "0.4rem 0" }}>
-            <div
-            onClick={() => setExpanded(expanded === index ? null : index)}
-            style={{ cursor: entry.data ? "pointer" : "default", display: "flex", gap: "0.5rem", fontSize: "0.78rem" }}
-            >
-            <span style={{ color: "rgba(255,255,255,0.4)", whiteSpace: "nowrap" }}>{String(entry.at || "").slice(11, 19)}</span>
-            <span style={{ color: LEVEL_TONE[entry.level] || LEVEL_TONE.info, fontWeight: 700, whiteSpace: "nowrap" }}>{entry.source}</span>
-            <span style={{ color: "rgba(255,255,255,0.55)", whiteSpace: "nowrap" }}>{entry.event}</span>
-            <span style={{ color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.message}</span>
-            {entry.data && <span style={{ color: "rgba(255,255,255,0.35)" }}>{expanded === index ? "▾" : "▸"}</span>}
-            </div>
-            {expanded === index && entry.data && (
-                <pre style={{
-                    background: "rgba(0,0,0,0.35)", borderRadius: 6, color: "rgba(255,255,255,0.8)",
-                    fontSize: "0.72rem", margin: "0.4rem 0 0", maxHeight: "18rem", overflow: "auto", padding: "0.5rem",
-                    whiteSpace: "pre-wrap", wordBreak: "break-word",
-                }}>{typeof entry.data === "string" ? entry.data : JSON.stringify(entry.data, null, 2)}</pre>
-            )}
-            </div>
-        ))}
-        </>
-    );
-};
-
 const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy, beginClickMode, endClickMode, setStatus, navigateTool }) => {
     const meta = TOOLS.find((entry) => entry.id === tool);
     const [text, setText] = useState("");
     const [gmMode, setGmMode] = useState("world-intervention");
     const [gmPreview, setGmPreview] = useState(null);
     const [gmApplyResult, setGmApplyResult] = useState(null);
+    const [gmExpandedSections, setGmExpandedSections] = useState({});
     const [target, setTarget] = useState("");
     const [fields, setFields] = useState({});
     const [items, setItems] = useState(null);
@@ -2074,6 +2001,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
         setEditingId(null);
         setGmPreview(null);
         setGmApplyResult(null);
+        setGmExpandedSections({});
         setSearch("");
         setFields({});
         setTarget("");
@@ -2098,10 +2026,6 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
     const nameOf = (code) => politiesByCode.get(code)?.name || code || "unclaimed land";
 
     // ----- individual tools -----
-
-    if (tool === "logs") {
-        return <LogsPanel header={header(meta.title, meta.subtitle)} />;
-    }
 
     if (tool === "events") {
         return (
@@ -2194,6 +2118,36 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
             </div>
         );
 
+        const GM_COLLAPSED_OPERATION_LIMIT = 4;
+        const visibleOperationRows = (sectionId, entries) => {
+            const expanded = Boolean(gmExpandedSections[sectionId]);
+            return expanded ? entries : entries.slice(0, GM_COLLAPSED_OPERATION_LIMIT);
+        };
+        const operationExpander = (sectionId, count) => {
+            if (count <= GM_COLLAPSED_OPERATION_LIMIT) return null;
+            const expanded = Boolean(gmExpandedSections[sectionId]);
+            const hidden = Math.max(0, count - GM_COLLAPSED_OPERATION_LIMIT);
+            return (
+                <button
+                    type="button"
+                    onClick={() => setGmExpandedSections((current) => ({ ...current, [sectionId]: !expanded }))}
+                    style={{
+                        background: "transparent",
+                        border: 0,
+                        color: "rgba(147,197,253,0.82)",
+                        cursor: "pointer",
+                        fontSize: "0.63rem",
+                        fontWeight: 650,
+                        marginTop: "0.28rem",
+                        padding: "0.15rem 0",
+                        textAlign: "left",
+                    }}
+                >
+                    {expanded ? "Show fewer" : `… ${hidden} more · click to show all`}
+                </button>
+            );
+        };
+
         const modeOptions = [
             {
                 id: "direct",
@@ -2254,7 +2208,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                 key={option.id}
                                 type="button"
                                 disabled={busy}
-                                onClick={() => { setGmMode(option.id); setGmPreview(null); setGmApplyResult(null); }}
+                                onClick={() => { setGmMode(option.id); setGmPreview(null); setGmApplyResult(null); setGmExpandedSections({}); }}
                                 style={{
                                     ...buttonStyle,
                                     alignItems: "flex-start",
@@ -2278,7 +2232,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                 <label style={labelStyle}>GM request</label>
                 <textarea
                     value={text}
-                    onChange={(event) => { setText(event.target.value); setGmPreview(null); setGmApplyResult(null); }}
+                    onChange={(event) => { setText(event.target.value); setGmPreview(null); setGmApplyResult(null); setGmExpandedSections({}); }}
                     placeholder={gmMode === "direct"
                         ? 'Example: "Germany should have a population of 72 million and GDP of €500 billion. Do not add a timeline event."'
                         : gmMode === "exact-event"
@@ -2294,6 +2248,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                         const result = await previewGameMasterCommand(text.trim(), { mode: gmMode });
                         setGmPreview(result);
                         setGmApplyResult(null);
+                        setGmExpandedSections({});
                         return result?.summary
                             ? `Preview ready — ${result.summary}`
                             : "GM transaction preview ready. Nothing has been applied.";
@@ -2393,7 +2348,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                         <div style={{ ...exactRowStyle, color: "rgba(134,239,172,0.72)" }}>
                                             NONE · legal sovereignty remains with the current sovereigns.
                                         </div>
-                                    ) : transferOps.map((entry, index) => (
+                                    ) : visibleOperationRows("territory-sovereignty", transferOps).map((entry, index) => (
                                         <div key={`transfer-${entry._eventIndex}-${entry._opIndex}-${index}`} style={exactRowStyle}>
                                             <strong style={{ color: "rgba(255,255,255,0.88)" }}>{entry.regionName || entry.regionId || "Unknown region"}</strong>
                                             {` · ${entry.fromCode || "unclaimed"} → ${entry.toCode || "unclaimed"}${entry.wholeCountry ? " · whole country" : ""}`}
@@ -2401,11 +2356,12 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                             {entry.note ? <div style={{ color: "rgba(255,255,255,0.42)", marginTop: "0.14rem" }}>{entry.note}</div> : null}
                                         </div>
                                     ))}
+                                    {operationExpander("territory-sovereignty", transferOps.length)}
 
                                     {subsectionTitle("Territory · de-facto control / contest", controlOps.length, "does not change legal sovereignty")}
                                     {controlOps.length === 0 ? (
                                         <div style={exactRowStyle}>NONE</div>
-                                    ) : controlOps.map((entry, index) => {
+                                    ) : visibleOperationRows("territory-control", controlOps).map((entry, index) => {
                                         const region = entry.regionName || entry.regionId || "Unknown region";
                                         let detail = entry.op || "operation";
                                         if (entry.op === "contest") detail = `CONTEST · current controller ${entry.fromCode || "unknown"} · challenger ${entry.actorCode || "unknown"}`;
@@ -2419,11 +2375,12 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                             </div>
                                         );
                                     })}
+                                    {operationExpander("territory-control", controlOps.length)}
 
                                     {subsectionTitle("Territory · claims", claimOps.length, "does not move the border")}
                                     {claimOps.length === 0 ? (
                                         <div style={exactRowStyle}>NONE</div>
-                                    ) : claimOps.map((entry, index) => (
+                                    ) : visibleOperationRows("territory-claims", claimOps).map((entry, index) => (
                                         <div key={`claim-${entry._eventIndex}-${entry._opIndex}-${index}`} style={exactRowStyle}>
                                             <strong style={{ color: "rgba(255,255,255,0.88)" }}>{entry.regionName || entry.regionId || "Unknown region"}</strong>
                                             {` · ${entry.drop ? "CLAIM WITHDRAWN" : "CLAIMED"} by ${entry.claimantCode || "unknown"}`}
@@ -2431,6 +2388,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                             {entry.note ? <div style={{ color: "rgba(255,255,255,0.42)", marginTop: "0.14rem" }}>{entry.note}</div> : null}
                                         </div>
                                     ))}
+                                    {operationExpander("territory-claims", claimOps.length)}
                                 </div>
                             )}
 
@@ -2605,7 +2563,17 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                             onClick={() => runBusy(async () => {
                                 const result = await applyGameMasterPreview(gmPreview);
                                 setGmApplyResult(result);
-                                await refresh();
+                                // world.json writes already emit the canonical update consumed by
+                                // the map. Do not make the first post-Apply frames compete with a
+                                // heavyweight admin-panel refresh; refresh this panel when idle.
+                                const refreshLater = () => Promise.resolve(refresh()).catch((error) => {
+                                    console.warn("[GM] deferred admin refresh failed:", error);
+                                });
+                                if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+                                    window.requestIdleCallback(refreshLater, { timeout: 1200 });
+                                } else {
+                                    setTimeout(refreshLater, 0);
+                                }
                                 return result?.summary
                                     ? `Applied — ${result.summary}`
                                     : `Applied GM transaction ${result?.transactionId || ""}.`;
@@ -2613,9 +2581,13 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                             style={{
                                 ...primaryButtonStyle,
                                 cursor: busy || gmApplied ? "not-allowed" : "pointer",
+                                bottom: "0.45rem",
+                                boxShadow: "0 -10px 24px rgba(8,12,20,0.88)",
                                 marginTop: "0.75rem",
                                 opacity: busy || gmApplied ? 0.52 : 1,
+                                position: "sticky",
                                 width: "100%",
+                                zIndex: 4,
                             }}
                         >
                             {busy ? "Applying canonical transaction…" : gmApplied ? "Applied ✓" : "Apply Transaction"}

@@ -4,74 +4,19 @@
 // builders, snapshot detection, asset-key sets). Web build only.
 
 import COUNTRY_NAME_REGISTRY from "./generated/countryNames.js";
+import {
+  BUILT_IN_SCENARIO_DEFAULT_DATE,
+  DEFAULT_GAME_META,
+  DEFAULT_SCENARIO_ID,
+  DEFAULT_SCENARIO_META,
+  SUPPORTED_IMAGE_CONTENT_TYPES,
+  TEMPLATE_WORLD_OVERRIDE_KEYS,
+} from "./storeConstants.js";
 import { cloneJson } from "./util.js";
 
-export const DEFAULT_SCENARIO_ID = "default";
-export const DEFAULT_GAME_ID = "default";
-export const BUILT_IN_SCENARIO_DEFAULT_DATE = "2016-01-01";
-// Mirrors server/libraryStore.js — see there for why the schema string moves with
-// the owner rename. In short: it is the ONLY compatibility gate on a file strangers
-// swap, and an old build would otherwise accept a name-keyed bundle and resolve its
-// names down to codes, leaving the player owning nothing.
-export const SCENARIO_BUNDLE_SCHEMA = "pax-historia-scenario-bundle/2";
-export const ACCEPTED_BUNDLE_SCHEMAS = new Set([SCENARIO_BUNDLE_SCHEMA, "pax-historia-scenario-bundle"]);
-export const SCENARIO_BUNDLE_VERSION = 2;
-export const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
-export const COVER_IMAGE_ASSET_KEY = "cover";
-
-// --- Asset-key sets (server/libraryStore.js:153-239) ---
-export const STORAGE_JSON_ASSET_KEYS = ["actions", "advisor", "chat", "events"];
-export const CORE_JSON_ASSET_KEYS = ["game", "prompts", "world"];
-export const JSON_ASSET_KEYS = [...STORAGE_JSON_ASSET_KEYS, ...CORE_JSON_ASSET_KEYS];
-export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags"];
-export const RUNTIME_ONLY_JSON_ASSET_KEYS = ["snapshots", "intercepts"];
-export const PMTILES_ASSET_KEYS = ["cities", "countries", "regions"];
-export const SCENARIO_GEOJSON_ASSET_KEYS = ["regionsGeojson", "citiesGeojson", "backgroundData"];
-// Order matters for assetStatus (Object.keys(UPLOADABLE_SCENARIO_ASSET_FILES)).
-export const UPLOADABLE_SCENARIO_ASSET_KEYS = [
-  COVER_IMAGE_ASSET_KEY,
-  ...OPTIONAL_JSON_ASSET_KEYS,
-  ...PMTILES_ASSET_KEYS,
-  ...SCENARIO_GEOJSON_ASSET_KEYS,
-];
-export const UPLOADABLE_GAME_ASSET_KEYS = [COVER_IMAGE_ASSET_KEY];
-
-export const JSON_ASSET_DEFAULTS = {
-  actions: [], advisor: [], chat: [], colors: {}, events: [],
-  game: {}, prompts: {}, world: {}, snapshots: [], intercepts: {},
-};
-
-export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
-  "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
-  "regionClaimants", "regionOwnershipOverrides", "regionSovereigntyOverrides",
-  "simulationRules", "startingTimelineText",
-];
-
-export const SUPPORTED_IMAGE_CONTENT_TYPES = new Set([
-  "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
-]);
-
-export const DEFAULT_SCENARIO_META = {
-  accentColor: "#7c3aed",
-  description: "Server-backed base scenario",
-  eyebrow: "Scenario",
-  heroSubtitle: "Editable server-backed scenario template.",
-  heroTitle: "Modern Day",
-  name: "Modern Day",
-  subtitle: "Base template",
-};
-
-export const DEFAULT_GAME_META = {
-  accentColor: "#7c3aed",
-  description: "Active playable game",
-  eyebrow: "Game",
-  heroSubtitle: "Playable campaign session",
-  heroTitle: "Modern Day",
-  name: "Modern Day Session",
-  scenarioId: DEFAULT_SCENARIO_ID,
-  subtitle: "Current campaign",
-};
+// The constants themselves live in storeConstants.js, which imports nothing, so
+// Node tests can load them without a web build; see there.
+export * from "./storeConstants.js";
 
 // --- Country reference resolution (mirrors server/libraryStore.js) ---
 // Migrated worlds use the polityOverrides KEY as stable lineage identity. The
@@ -305,6 +250,13 @@ export const readGameMeta = (gameId, raw = {}) => {
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     id: gameId,
+    // Server twin: server/libraryStore.js readGameMeta. What the sender called
+    // the scenario, and where they believed it could still be fetched — read
+    // when this browser opens a game whose map it does not hold.
+    importedScenarioName: String(raw?.importedScenarioName ?? "").trim() || null,
+    importedScenarioOrigin: normalizeHubOrigin(raw?.importedScenarioOrigin),
+    // Server twin: when this game arrived, used by the Last Played row.
+    importedAt: String(raw?.importedAt ?? "").trim() || null,
     lastPlayedAt: String(raw?.lastPlayedAt ?? "").trim() || null,
     name,
     playCount: normalizePlayCount(raw?.playCount),

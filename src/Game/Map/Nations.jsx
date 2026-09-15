@@ -22,6 +22,7 @@ import {
   PMTILES_PROTOCOL_URLS,
   ensurePmtilesProtocol,
   getNationColors,
+  loadRegionTileIdSet,
   primeCustomRegionCatalogEntries,
   readJson,
   reportPerfOperation,
@@ -30,17 +31,33 @@ import {
 import { resolveRegionName } from "../../runtime/regionNameFixes.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
 import {
-  buildPolityLabelCollections,
   loadCountryLabelCollections,
-  selectPolityPointFallbacks,
   summarizePolityLabelDiagnostics,
 } from "../../runtime/countryLabels.js";
 import { translateLabel } from "../../runtime/translator.js";
 import { MAP_SETTING_KEYS, useMapSetting, useMapSettingValue } from "../../runtime/mapSettings.js";
 import { useWorldState } from "./useWorldState.js";
 import { buildProvinceOutlinePaint, PROVINCE_OUTLINE_MIN_ZOOM } from "./provinceOutlineStyle.js";
+import { enforceMapLayerOrder } from "./mapLayerOrder.js";
 import { V_NEXT_MARKER_SHAPE_LAYER_IDS } from "./vnext/presentationPolicy.js";
-import { resolveContextualPolityLabels } from "./vnext/polityNaming.js";
+import PolityTextLayer, {
+  isPolityTextPtr0Enabled,
+  isPolityTextPtr1DebugEnabled,
+  isPolityTextPtr1Enabled,
+} from "./labels/PolityTextLayer.jsx";
+import { buildPolityTextPtr1Records } from "./labels/polityTextRecords.js";
+import {
+  buildOwnershipPresentationDelta,
+  createPoliticalCartographyScheduler,
+  diffPoliticalOwnership,
+} from "./vnext/politicalCartographyLifecycle.js";
+import { deriveLegacyAuthoritativeCountryCodes } from "./vnext/legacyScenarioGeometryAuthority.js";
+import { hasExactRegionTileIdentity } from "./vnext/regionTileAuthority.js";
+import {
+  createOwnershipFloodCustomLayer,
+  MAX_ACTIVE_OWNERSHIP_FLOOD_FIELDS,
+  OWNERSHIP_FLOOD_LAYER_ID,
+} from "./vnext/ownershipFloodCustomLayer.js";
 
 ensurePmtilesProtocol();
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
@@ -53,6 +70,39 @@ const EMPTY_CUSTOM_REGION_META = Object.freeze({
   editedStockIds: Object.freeze([]),
   records: Object.freeze([]),
 });
+const EMPTY_POLITY_LABEL_COLLECTIONS = Object.freeze({
+  labelData: EMPTY_FEATURE_COLLECTION,
+  ptrLabelData: EMPTY_FEATURE_COLLECTION,
+  pointLabelData: EMPTY_FEATURE_COLLECTION,
+  curvedLabelData: EMPTY_FEATURE_COLLECTION,
+  lineLabelData: EMPTY_FEATURE_COLLECTION,
+  glyphLabelData: EMPTY_FEATURE_COLLECTION,
+});
+const EMPTY_REGION_RENDER_REPAIR = Object.freeze({
+  geometryEpoch: "",
+  data: EMPTY_FEATURE_COLLECTION,
+  repairedIds: Object.freeze([]),
+});
+
+const ownershipTransitionVertexCount = (geometry) => {
+  if (geometry?.type === "Polygon") {
+    return (geometry.coordinates ?? []).reduce(
+      (sum, ring) => sum + (Array.isArray(ring) ? ring.length : 0),
+      0,
+    );
+  }
+  if (geometry?.type === "MultiPolygon") {
+    return (geometry.coordinates ?? []).reduce(
+      (sum, polygon) => sum + (Array.isArray(polygon)
+        ? polygon.reduce((inner, ring) => inner + (Array.isArray(ring) ? ring.length : 0), 0)
+        : 0),
+      0,
+    );
+  }
+  return 0;
+};
+const OWNERSHIP_FLOOD_MAX_VERTEX_COUNT = 24000;
+const OWNERSHIP_FLOOD_PREP_BUDGET_MS = 350;
 
 // Globe projection renders a label's own high-latitude countries oversized
 // relative to their outline — confirmed (issue #6) to be text-only (fills
@@ -327,9 +377,9 @@ const buildStripeImage = (rgbList) => {
 
 // Neutral tone for unowned custom regions (land with no owner code).
 const NEUTRAL_LAND_COLOR = "rgb(88, 98, 110)";
-// Constant GL expression: live ownership arrives through feature-state, the
-// dissolved polity surfaces carry their own _fillColor, and authored features
-// may carry an ownerColor; neutral land otherwise.
+// Constant GL expression: canonical live ownership arrives through feature-state.
+// Authored/disputed features may also carry an explicit ownerColor/_fillColor;
+// neutral land is the final fallback. No derived polity surface owns political fill.
 const CUSTOM_FILL_COLOR = [
   "coalesce",
   ["feature-state", "fillColor"],
@@ -349,42 +399,65 @@ const DETAIL_FILL_COLOR = [
 // show sliver gaps) and the stock vector tiles when zoomed IN (the z5 seed is
 // too coarse up close). Author-drawn geometry renders from the GeoJSON at every
 // zoom, on top — the tiles don't know those shapes.
-const CUSTOM_GEOMETRY_FILTER = ["==", ["index-of", ".", ["get", "id"]], -1];
-const GADM_GEOMETRY_FILTER = [">=", ["index-of", ".", ["get", "id"]], 0];
-// A feature whose geometry lives ONLY in the GeoJSON: author-drawn ("reg_...", no
-// dot) OR a GADM region the editor reshaped (dotted id, but `edited`). Both must
-// render from the GeoJSON at every zoom AND be kept out of the stock tiles, whose
-// geometry is the ORIGINAL shape — painting both stacks twice darkens
-// the reshaped area. A plain unedited GADM region carries no `edited`, so
-// ["==", ["get","edited"], true] is false for it and these fall back exactly to the
-// dot test — stock and author-only maps render identically to before.
-const AUTHORED_GEOMETRY_FILTER = ["any", CUSTOM_GEOMETRY_FILTER, ["==", ["get", "edited"], true]];
-const STOCK_GEOMETRY_FILTER = ["all", GADM_GEOMETRY_FILTER, ["!=", ["get", "edited"], true]];
+// Geometry provenance must be explicit. Historical stock catalogs can contain
+// dotless/numeric IDs, so punctuation is not a reliable stock-vs-authored test.
+// The editor contract marks drawn geometry with reg_* and reshaped stock geometry
+// with edited=true; newer imports may additionally carry authored/geometrySource.
+const AUTHORED_GEOMETRY_FILTER = [
+  "any",
+  ["==", ["get", "edited"], true],
+  ["==", ["get", "authored"], true],
+  ["==", ["get", "geometrySource"], "authored"],
+  ["==", ["slice", ["to-string", ["get", "id"]], 0, 4], "reg_"],
+];
+const STOCK_GEOMETRY_FILTER = ["!", AUTHORED_GEOMETRY_FILTER];
+const SCENARIO_GID0_EXPRESSION = ["upcase", ["coalesce", ["get", "gid0"], ["get", "GID_0"], ""]];
+const SCENARIO_REGION_ID_EXPRESSION = ["to-string", ["coalesce", ["get", "id"], ["get", "GID_1"], ""]];
 // Physical geography should be part of the political map rather than hidden
 // beneath it. Keep the far/continental wash translucent enough for relief and
 // bathymetry to read, then progressively strengthen ownership color as the
 // player zooms toward province/city detail.
-const PAX_POLITICAL_FILL_OPACITY = [
-  "interpolate", ["linear"], ["zoom"],
-
+const PAX_POLITICAL_FILL_OPACITY_STOPS = Object.freeze([
   // World view: terrain remains visible while political ownership is readable.
-  1.5, 0.46,
-  2.5, 0.50,
-  3.75, 0.56,
+  [1.5, 0.46],
+  [2.5, 0.50],
+  [3.75, 0.56],
 
   // Regional view: political colours become the primary map layer.
   // This avoids countries fading into the physical basemap during normal play.
-  5.0, 0.62,
-  6.5, 0.68,
-  8.0, 0.72,
+  [5.0, 0.62],
+  [6.5, 0.68],
+  [8.0, 0.72],
 
   // Close play: maintain strong polity identity while showing terrain detail.
-  10.0, 0.78,
-  12.0, 0.82,
-  14.0, 0.84,
+  [10.0, 0.78],
+  [12.0, 0.82],
+  [14.0, 0.84],
+]);
+
+// MapLibre requires camera expressions to keep ["zoom"] as the direct input
+// of the top-level step/interpolate expression. Data-driven visibility therefore
+// belongs in each stop output, never around the zoom ramp with a top-level case.
+const buildPaxPoliticalFillOpacity = (hiddenExpression = null) => [
+  "interpolate", ["linear"], ["zoom"],
+  ...PAX_POLITICAL_FILL_OPACITY_STOPS.flatMap(([zoom, opacity]) => [
+    zoom,
+    hiddenExpression ? ["case", hiddenExpression, 0, opacity] : opacity,
+  ]),
 ];
+
+const PAX_POLITICAL_FILL_OPACITY = buildPaxPoliticalFillOpacity();
 const DISPUTED_STRIPE_OPACITY = 0.22;
-const TILE_FILL_FADE = ["interpolate", ["linear"], ["zoom"], 5.5, 0, 6.5, 1];
+
+// Experiment F: stop drawing the stock GeoJSON fallback and the stock vector
+// tile fill at the same zoom. The previous z4->z5 alpha crossfade painted two
+// independently tiled versions of the same region geometry simultaneously; where
+// their triangulation/clipping differed, semi-transparent same-colour fills showed
+// up as bright/dark wedges. Use one canonical presentation source at a time:
+// GeoJSON below z4.5, vector tiles from z4.5 upward. Both use the same political
+// opacity policy so the handoff changes geometry source, not visual strength.
+const STOCK_REGION_HANDOFF_ZOOM = 4.5;
+const DISPUTED_TILE_FILL_OPACITY = PAX_POLITICAL_FILL_OPACITY;
 
 // GADM assigns disputed / undetermined boundary areas the codes Z01-Z09 (the
 // slivers around India — Kashmir, Aksai Chin, Arunachal Pradesh). The base map
@@ -397,14 +470,6 @@ const DISPUTED_TERRITORY_CLAIMANT = {
 };
 
 const PERF_MAP_WARN_MS = 40;
-const measureMapWork = (label, fn) => {
-  const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-  const value = fn();
-  const elapsed = (typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt;
-  reportPerfOperation(`map ${label}`, elapsed, { warnAt: PERF_MAP_WARN_MS });
-  recordMapWork(`Nations:${label}`, elapsed);
-  return value;
-};
 
 const WorldMap = ({ isGlobe = false }) => {
   const { current: map } = useMap();
@@ -427,34 +492,174 @@ const WorldMap = ({ isGlobe = false }) => {
   // A player's own choice from Settings > Map. Empty means "whatever the
   // scenario author set", so it changes nothing until it is filled in.
   const labelFontOverride = useMapSettingValue(MAP_SETTING_KEYS.labelFont);
+  // PTR-1.7 is the default flat-map polity-name renderer. The old MapLibre
+  // label stack remains mounted only as a last-resort fallback while PTR is
+  // waiting for canonical records, if PTR fails to mount, or when explicitly
+  // disabled via ?legacyPolityText=1 / localStorage value "0".
+  const ptr0PolityTextEnabled = useMemo(() => isPolityTextPtr0Enabled(), []);
+  const ptr1PolityTextEnabled = useMemo(() => isPolityTextPtr1Enabled(), []);
+  const ptr1PolityTextDebugEnabled = useMemo(() => isPolityTextPtr1DebugEnabled(), []);
+  const [ptrPolityTextStatus, setPtrPolityTextStatus] = useState({
+    requested: false,
+    mounted: false,
+    failed: false,
+    waitingForStyle: false,
+    recordCount: 0,
+    owners: [],
+    lastMountError: null,
+  });
+  // The region catalog becomes available before political cartography finishes.
+  // Keep that early metadata path, but remember whether the initial worker
+  // revision has actually produced the label records PTR needs for first paint.
+  const [initialCartographySettled, setInitialCartographySettled] = useState(false);
+  // Targeted malformed-region repair is part of the same initial cartography
+  // transaction from the player's perspective. Keep the existing scenario
+  // loading screen up until the worker either publishes the tiny repair source
+  // or explicitly fails open to canonical geometry; never reveal a known-bad
+  // tessellation for a few frames and then snap it away after scenario entry.
+  const [initialRegionRepairSettled, setInitialRegionRepairSettled] = useState(false);
   const [pointLabelData, setPointLabelData] = useState(EMPTY_FEATURE_COLLECTION);
   const [curvedLabelData, setCurvedLabelData] = useState(EMPTY_FEATURE_COLLECTION);
   const [customRegionMeta, setCustomRegionMeta] = useState(EMPTY_CUSTOM_REGION_META);
+  const [regionRenderRepair, setRegionRenderRepair] = useState(EMPTY_REGION_RENDER_REPAIR);
   const [disputedRegionData, setDisputedRegionData] = useState(EMPTY_FEATURE_COLLECTION);
-  const [polityBoundaryData, setPolityBoundaryData] = useState(EMPTY_FEATURE_COLLECTION);
-  const [politySurfaceData, setPolitySurfaceData] = useState(EMPTY_FEATURE_COLLECTION);
+  const [polityLabelCollections, setPolityLabelCollections] = useState(EMPTY_POLITY_LABEL_COLLECTIONS);
+  const [derivedSourceEpoch, setDerivedSourceEpoch] = useState(0);
+  const boundaryFeatureMapRef = useRef(new Map());
+  const ownershipTransitionQueueRef = useRef([]);
+  // Transition geometry can arrive before the heavier boundary/PTR result.
+  // Keep both halves keyed by cartography revision so the sweep can start
+  // immediately and the derived cartography can publish only after it finishes.
+  const ownershipTransitionByRevisionRef = useRef(new Map());
+  // Canonical ownership may advance immediately, but presentation stays on the
+  // last accepted visual revision until its sovereignty sweep completes.
+  // Counts (rather than a Set) keep overlapping rapid mutations of the same
+  // region ordered instead of releasing a later hold when an earlier sweep ends.
+  const ownershipPresentationHoldCountsRef = useRef(new Map());
+  const [ownershipPresentationHoldEpoch, setOwnershipPresentationHoldEpoch] = useState(0);
+  const appliedCustomFillStateRef = useRef(new Map());
+  const appliedTileFillStateRef = useRef(new Map());
+  const ownershipSweepRef = useRef({
+    active: false,
+    token: 0,
+    worker: null,
+    frame: 0,
+    waitFrame: 0,
+    timeout: 0,
+    regionIds: [],
+    floodLayer: null,
+  });
+  const [ownershipTransitionQueueEpoch, setOwnershipTransitionQueueEpoch] = useState(0);
+  const [ownershipTransitionSlices, setOwnershipTransitionSlices] = useState(EMPTY_FEATURE_COLLECTION);
+  const holdOwnershipPresentation = useCallback((regionIds = []) => {
+    let changed = false;
+    const counts = ownershipPresentationHoldCountsRef.current;
+    for (const rawId of regionIds) {
+      const id = String(rawId ?? "");
+      if (!id) continue;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+      changed = true;
+    }
+    if (changed) setOwnershipPresentationHoldEpoch((epoch) => epoch + 1);
+  }, []);
+  const releaseOwnershipPresentation = useCallback((regionIds = []) => {
+    let changed = false;
+    const counts = ownershipPresentationHoldCountsRef.current;
+    for (const rawId of regionIds) {
+      const id = String(rawId ?? "");
+      if (!id || !counts.has(id)) continue;
+      const next = (counts.get(id) ?? 1) - 1;
+      if (next > 0) counts.set(id, next);
+      else counts.delete(id);
+      changed = true;
+    }
+    if (changed) setOwnershipPresentationHoldEpoch((epoch) => epoch + 1);
+  }, []);
+  const releaseAllOwnershipPresentation = useCallback(() => {
+    if (!ownershipPresentationHoldCountsRef.current.size) return;
+    ownershipPresentationHoldCountsRef.current.clear();
+    setOwnershipPresentationHoldEpoch((epoch) => epoch + 1);
+  }, []);
   const [labelZoom, setLabelZoom] = useState(3.5);
   // R5.4.6: owners whose curved polity label MapLibre has actually confirmed
   // as rendered after the map settles. A curve-capable point fallback is never
   // hidden from theoretical zoom eligibility alone.
   const [renderConfirmedCurveOwners, setRenderConfirmedCurveOwners] = useState([]);
   const polityBoundaryWorkerRef = useRef(null);
+  const polityBoundarySchedulerRef = useRef(null);
+  // The runtime regions URL carries the active game/scenario generation token.
+  // Keep the last worker geometry epoch separately from React metadata so a
+  // custom-map switch can invalidate old derived borders/labels immediately.
+  const cartographyGeometryEpochRef = useRef("");
   const initialFramingAppliedRef = useRef(false);
-  const latestBoundaryRequestRef = useRef(0);
-  const initializedBoundaryOwnershipRef = useRef(null);
-  const initializedBoundaryClaimantsRef = useRef(null);
+  const enqueuedBoundaryOwnershipRef = useRef(null);
+  const enqueuedBoundaryClaimantsRef = useRef(null);
+  const enqueuedBoundaryLabelNamesRef = useRef(null);
+  const boundaryWorkerRestartCountRef = useRef(0);
   const regionOwnershipOverridesRef = useRef(regionOwnershipOverrides);
   regionOwnershipOverridesRef.current = regionOwnershipOverrides;
+  const regionClaimantsRef = useRef(regionClaimants);
+  regionClaimantsRef.current = regionClaimants;
+  const [acknowledgedBoundaryOwnership, setAcknowledgedBoundaryOwnership] = useState(null);
+  const [boundaryWorkerEpoch, setBoundaryWorkerEpoch] = useState(0);
   const countriesUrl = PMTILES_PROTOCOL_URLS.countries;
   const regionsUrl = PMTILES_PROTOCOL_URLS.regions;
   const regionsGeojsonUrl = JSON_URLS.regionsGeojson;
-  // The worker's compact metadata is all the geometry knowledge the UI thread
-  // holds; the authored regions file itself is never parsed here.
+  const activeGeometryEpoch = String(regionsGeojsonUrl || "custom-regions");
+  const activeRegionRenderRepair = regionRenderRepair.geometryEpoch === activeGeometryEpoch
+    ? regionRenderRepair
+    : EMPTY_REGION_RENDER_REPAIR;
+  const repairedRegionIds = activeRegionRenderRepair.repairedIds ?? [];
+  const repairedRegionIdSet = useMemo(() => new Set(repairedRegionIds), [repairedRegionIds]);
+
+  // The worker's compact metadata remains canonical. A tiny, presentation-only
+  // repair collection may replace only demonstrably malformed feature geometry;
+  // ownership, region identity and the saved scenario remain unchanged.
   const customActive = customFlag && customRegionMeta.ready;
-  const hasDrawnGeometry = customActive && customRegionMeta.hasDrawnGeometry;
   const fullyAuthoredGeometry = Boolean(customActive && customRegionMeta.fullyAuthoredGeometry);
-  const shouldMountStockRegions = !customFlag
-    || (customRegionMeta.ready && !customRegionMeta.fullyAuthoredGeometry);
+  const [regionTileIdentityState, setRegionTileIdentityState] = useState("unknown");
+
+  useEffect(() => {
+    if (!customFlag || !customRegionMeta.ready || fullyAuthoredGeometry) {
+      setRegionTileIdentityState(fullyAuthoredGeometry ? "incompatible" : "unknown");
+      return undefined;
+    }
+
+    let cancelled = false;
+    setRegionTileIdentityState("checking");
+    loadRegionTileIdSet()
+      .then((tileRegionIds) => {
+        if (cancelled) return;
+        setRegionTileIdentityState(
+          hasExactRegionTileIdentity(customRegionMeta.records, tileRegionIds)
+            ? "compatible"
+            : "incompatible",
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn(
+          "Could not prove close-zoom region-tile identity; keeping scenario geometry authoritative:",
+          error,
+        );
+        setRegionTileIdentityState("incompatible");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGeometryEpoch, customFlag, customRegionMeta.ready, customRegionMeta.records, fullyAuthoredGeometry]);
+
+  // Current PMTiles may be a different region catalog from the scenario's
+  // serialized geometry (legacy scenarios can carry numeric/UUID ids while the
+  // shipped archive uses a newer GADM vocabulary). A close-zoom handoff is legal
+  // only when every stock-like scenario record exists by EXACT id in the mounted
+  // region-tile archive. Punctuation, gid0 and polity identity are not evidence.
+  const regionTileHandoffSafe = Boolean(
+    customActive && regionTileIdentityState === "compatible"
+  );
+  const scenarioOwnsRegionGeometryAtAllZooms = Boolean(customActive && !regionTileHandoffSafe);
+  const shouldMountStockRegions = !customFlag || regionTileHandoffSafe;
   const ownedCountryCodes = useMemo(
     () => new Set(customRegionMeta.ownedCountryCodes ?? []),
     [customRegionMeta.ownedCountryCodes],
@@ -511,37 +716,54 @@ const WorldMap = ({ isGlobe = false }) => {
     return () => mapInstance.off("styleimagemissing", onMissing);
   }, [map]);
 
-  const contextualPolityLabels = useMemo(
-    () => resolveContextualPolityLabels(politySurfaceData, polityOverrides),
-    [polityOverrides, politySurfaceData],
-  );
-
-  const polityLabelCollections = useMemo(() => {
-    if (!politySurfaceData?.features?.length) {
-      return {
-        labelData: EMPTY_FEATURE_COLLECTION,
-        pointLabelData: EMPTY_FEATURE_COLLECTION,
-        curvedLabelData: EMPTY_FEATURE_COLLECTION,
-        lineLabelData: EMPTY_FEATURE_COLLECTION,
-        glyphLabelData: EMPTY_FEATURE_COLLECTION,
-      };
-    }
-    return measureMapWork("live polity labels", () => buildPolityLabelCollections(
-      politySurfaceData,
-      {
-        nameResolver: (owner) => {
-          const rawName = DISPUTED_TERRITORY_CLAIMANT[owner]
-            ? `Disputed (${DISPUTED_TERRITORY_CLAIMANT[owner]})`
-            : contextualPolityLabels.get(owner) || polityOverrides?.[owner]?.name || owner;
-          return translateLabel(resolveCountryDisplayName(rawName, owner));
-        },
-      },
-    ));
-    // labelEpoch: rebuild once new translations land.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextualPolityLabels, labelEpoch, polityOverrides, politySurfaceData]);
-
+  // Pipeline v2: live polity label geometry is worker-owned. The UI thread only
+  // receives compact ready-to-render point/line collections; no polygon fitting
+  // or territorial geometry work is allowed in React.
   const useLivePolityLabels = polityLabelCollections.labelData.features.length > 0;
+  const ptr1PolityTextRecords = useMemo(() => buildPolityTextPtr1Records({
+    ptrLabelData: polityLabelCollections.ptrLabelData,
+    labelData: polityLabelCollections.labelData,
+  }), [polityLabelCollections.ptrLabelData, polityLabelCollections.labelData]);
+  const ptr1PolityTextRequested = Boolean(
+    ptr1PolityTextEnabled
+    && worldKnown
+    && customFlag
+    && useLivePolityLabels
+    && !isGlobe
+    && !mapDisplaySettings.hideCountryLabels
+  );
+  const ptrBlocksInitialReadiness = Boolean(
+    ptr1PolityTextEnabled
+    && customFlag
+    && !isGlobe
+    && !mapDisplaySettings.hideCountryLabels
+  );
+  const ptr1PolityTextAuthoritative = Boolean(
+    ptr1PolityTextRequested
+    && ptrPolityTextStatus.mounted
+    && ptrPolityTextStatus.recordCount > 0
+  );
+  const ptrRenderedOwnerNames = useMemo(
+    () => ptr1PolityTextAuthoritative
+      ? (ptrPolityTextStatus.owners ?? []).filter(Boolean)
+      : [],
+    [ptr1PolityTextAuthoritative, ptrPolityTextStatus.owners],
+  );
+  const ptrRenderedOwnersLiteral = useMemo(
+    () => ["literal", ptrRenderedOwnerNames],
+    [ptrRenderedOwnerNames],
+  );
+  // The legacy MapLibre renderer is retained per-owner only. While PTR is
+  // unavailable it renders normally; once PTR owns a polity, the matching
+  // legacy label is filtered out. Any malformed/unsupported polity that PTR
+  // cannot prepare therefore keeps a genuine last-resort legacy label instead
+  // of disappearing with the rest of the old stack.
+  const legacyPtrOwnerFilter = useMemo(() => (
+    ptrRenderedOwnerNames.length
+      ? ["!", ["in", ["coalesce", ["get", "sourceOwner"], ["get", "owner"], ""], ptrRenderedOwnersLiteral]]
+      : ["all"]
+  ), [ptrRenderedOwnerNames.length, ptrRenderedOwnersLiteral]);
+
 
   // R5.4.6: renderer-confirmed polity label handoff.
   //
@@ -553,7 +775,7 @@ const WorldMap = ({ isGlobe = false }) => {
   // time renderer scan.
   useEffect(() => {
     const mapInstance = map?.getMap ? map.getMap() : map;
-    if (!customFlag || !useLivePolityLabels || mapDisplaySettings.disableCurvedCountryLabels || !mapInstance?.on) {
+    if (ptr1PolityTextAuthoritative || !customFlag || !useLivePolityLabels || mapDisplaySettings.disableCurvedCountryLabels || !mapInstance?.on) {
       setRenderConfirmedCurveOwners((current) => (current.length ? [] : current));
       return undefined;
     }
@@ -610,7 +832,7 @@ const WorldMap = ({ isGlobe = false }) => {
       mapInstance.off("movestart", clearRenderConfirmation);
       mapInstance.off("idle", confirmRenderedCurves);
     };
-  }, [customFlag, map, mapDisplaySettings.disableCurvedCountryLabels, useLivePolityLabels]);
+  }, [customFlag, map, mapDisplaySettings.disableCurvedCountryLabels, ptr1PolityTextAuthoritative, useLivePolityLabels]);
 
   // Development-time proof instead of screenshot guesswork. One authoritative
   // record per polity is exposed for inspection and the known regression set is
@@ -665,7 +887,7 @@ const WorldMap = ({ isGlobe = false }) => {
         return;
       }
 
-      const owner = politySurfaceData.features
+      const owner = polityLabelCollections.labelData.features
         .map((feature) => String(feature?.properties?.owner ?? "").trim())
         .find((candidate) => {
           const override = polityOverrides?.[candidate] ?? {};
@@ -696,13 +918,50 @@ const WorldMap = ({ isGlobe = false }) => {
     return () => {
       cancelled = true;
     };
-  }, [isGlobe, map, polityLabelCollections, polityOverrides, politySurfaceData]);
+  }, [isGlobe, map, polityLabelCollections, polityOverrides]);
 
   // On custom maps the stock modern-country labels are replaced wholesale by the
   // owner labels (no more "Russia"/"Ukraine" floating over the Soviet Union).
   // Keyed on the FLAG (not customActive): while a custom world's geometry is
   // still loading, and before the world is known at all, stock labels must
   // not flash in.
+  // Derived political artifacts are valid only for the last worker-acknowledged
+  // ownership revision. Canonical region fills never wait for them. While an
+  // owner is dirty, hide only borders/labels touching that owner; unrelated
+  // cartography remains stable.
+  const ownershipPresentationTarget = useMemo(() => (
+    ownershipPresentationHoldCountsRef.current.size > 0 && acknowledgedBoundaryOwnership != null
+      ? acknowledgedBoundaryOwnership
+      : regionOwnershipOverrides
+  ), [
+    acknowledgedBoundaryOwnership,
+    ownershipPresentationHoldEpoch,
+    regionOwnershipOverrides,
+  ]);
+  const ownershipPresentationDelta = useMemo(
+    () => buildOwnershipPresentationDelta(
+      customRegionMeta.records,
+      ownershipPresentationTarget,
+      acknowledgedBoundaryOwnership,
+    ),
+    [acknowledgedBoundaryOwnership, customRegionMeta.records, ownershipPresentationTarget],
+  );
+  const dirtyPoliticalOwners = useMemo(
+    () => [...new Set(ownershipPresentationDelta.flatMap((entry) => [
+      toCountryName(entry.fromOwner),
+      toCountryName(entry.toOwner),
+    ]).filter(Boolean))].sort(),
+    [ownershipPresentationDelta],
+  );
+  const dirtyOwnersLiteral = useMemo(() => ["literal", dirtyPoliticalOwners], [dirtyPoliticalOwners]);
+  const visibleDerivedOwnerFilter = useMemo(() => dirtyPoliticalOwners.length
+    ? ["!", ["in", ["coalesce", ["get", "sourceOwner"], ["get", "owner"], ""], dirtyOwnersLiteral]]
+    : ["all"], [dirtyOwnersLiteral, dirtyPoliticalOwners.length]);
+  const visibleBoundaryFilter = useMemo(() => dirtyPoliticalOwners.length
+    ? ["!", ["any", ...dirtyPoliticalOwners.map((owner) => ["in", owner, ["get", "ownerList"]])]]
+    : ["all"], [dirtyPoliticalOwners]);
+
+
   const rawLivePolityPointLabelData = worldKnown && customFlag && useLivePolityLabels
     ? polityLabelCollections.pointLabelData
     : EMPTY_FEATURE_COLLECTION;
@@ -722,14 +981,18 @@ const WorldMap = ({ isGlobe = false }) => {
 
   const livePointManagedFilter = useMemo(() => [
     "all",
+    visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["<=", ["coalesce", ["get", "minZoom"], 0], currentLabelZoom],
     ["==", ["coalesce", ["get", "curveBand"], "none"], "none"],
     ["!=", ["coalesce", ["get", "allowOverlap"], false], true],
     [">", ["coalesce", ["get", "forceOverlapZoom"], 99], currentLabelZoom],
-  ], [currentLabelZoom]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, visibleDerivedOwnerFilter]);
 
   const livePointOverlapFilter = useMemo(() => [
     "all",
+    visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["<=", ["coalesce", ["get", "minZoom"], 0], currentLabelZoom],
     [
       "any",
@@ -751,28 +1014,28 @@ const WorldMap = ({ isGlobe = false }) => {
         ],
       ],
     ],
-  ], [currentLabelZoom, renderedCurveOwnersLiteral]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, renderedCurveOwnersLiteral, visibleDerivedOwnerFilter]);
 
   const liveWorldLineFilter = useMemo(() => [
     "all",
+    visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["==", ["get", "safeWarp"], true],
     ["==", ["coalesce", ["get", "curveBand"], "detail"], "world"],
     ["<=", ["coalesce", ["get", "curveMinZoom"], 99], currentLabelZoom],
-  ], [currentLabelZoom]);
+  ], [currentLabelZoom, legacyPtrOwnerFilter, visibleDerivedOwnerFilter]);
 
   const liveDetailLineFilter = useMemo(() => [
     "all",
+    visibleDerivedOwnerFilter,
+    legacyPtrOwnerFilter,
     ["==", ["get", "safeWarp"], true],
     ["!=", ["coalesce", ["get", "curveBand"], "detail"], "world"],
-    // Do not ask MapLibre to place the non-world curve at the exact theoretical
-    // threshold. Give it a small camera-space buffer, while the point label
-    // remains guaranteed through the same interval.
-    [
-      "<=",
-      ["+", ["coalesce", ["get", "curveMinZoom"], 99], 0.45],
-      currentLabelZoom,
-    ],
-  ], [currentLabelZoom]);
+    // CP4.2: the territorial baseline is the normal map typography, not a late
+    // curve upgrade. The worker already gives it a small lead over minZoom; the
+    // renderer should not add another hidden half-zoom delay.
+    ["<=", ["coalesce", ["get", "curveMinZoom"], 99], currentLabelZoom],
+  ], [currentLabelZoom, legacyPtrOwnerFilter, visibleDerivedOwnerFilter]);
 
   // A custom map is named by the live polity layers alone; the stock
   // modern-country points belong to stock worlds.
@@ -792,17 +1055,21 @@ const WorldMap = ({ isGlobe = false }) => {
     // Resolve the province under this click using the existing region layer
     // stack. Fully authored worlds must never fall through to leftover GADM Earth.
     const resolveRegionHit = () => {
-      const candidateLayers = (hasDrawnGeometry
+      const candidateLayers = (scenarioOwnsRegionGeometryAtAllZooms
         ? [
+          "custom-regions-repair-fill",
           "custom-regions-fill",
           "custom-regions-disputed-vnext",
+          "custom-regions-repair-fill-far",
           "custom-regions-fill-far",
         ]
         : [
+          "custom-regions-repair-fill",
           "custom-regions-fill",
           "custom-regions-disputed-vnext",
           "regions-fill",
           "regions-disputed",
+          "custom-regions-repair-fill-far",
           "custom-regions-fill-far",
         ]
       ).filter((id) => map.getLayer(id));
@@ -956,7 +1223,7 @@ const WorldMap = ({ isGlobe = false }) => {
       isDisputed: Boolean(props._stripes || claimants.length > 0),
       lngLat: event.lngLat,
     });
-  }, [hasDrawnGeometry, map, regionClaimants]);
+  }, [map, regionClaimants, scenarioOwnsRegionGeometryAtAllZooms]);
 
   useEffect(() => {
     if (!map) return;
@@ -1036,194 +1303,756 @@ const WorldMap = ({ isGlobe = false }) => {
     [resolveOwnerRgb],
   );
 
-  const enrichedPolitySurfaceData = useMemo(() => ({
-    ...politySurfaceData,
-    features: (politySurfaceData?.features ?? []).map((feature) => {
-      const owner = feature.properties?.owner ?? "";
-      return {
-        ...feature,
-        properties: {
-          ...(feature.properties ?? {}),
-          _fillColor: ownerColorCss(owner),
-        },
+  const workerLabelNames = useMemo(() => {
+    // Worker geometry is keyed by canonical political owner, so label metadata
+    // must use that exact namespace too. Raw codes/aliases here would recreate
+    // the old USA-vs-United States class of stale-label mismatch.
+    const owners = new Set();
+    const canonicalOwner = (value) => toCountryName(String(value ?? "").trim());
+    for (const record of customRegionMeta.records ?? []) {
+      const owner = canonicalOwner(record?.owner);
+      if (owner) owners.add(owner);
+    }
+    for (const rawOwner of Object.values(regionOwnershipOverrides ?? {})) {
+      const owner = canonicalOwner(rawOwner);
+      if (owner) owners.add(owner);
+    }
+
+    const overrideByCanonical = new Map();
+    for (const [rawOwner, entry] of Object.entries(polityOverrides ?? {})) {
+      const owner = canonicalOwner(rawOwner);
+      if (!owner) continue;
+      owners.add(owner);
+      if (!overrideByCanonical.has(owner) || rawOwner === owner) overrideByCanonical.set(owner, entry ?? {});
+    }
+
+    const labels = new Map();
+    for (const owner of owners) {
+      const override = overrideByCanonical.get(owner) ?? {};
+      const raw = String(
+        override.mapLabel
+        || override.mapDistinctLabel
+        || override.name
+        || owner,
+      ).trim();
+      labels.set(owner, translateLabel(resolveCountryDisplayName(raw, owner)) || owner);
+    }
+
+    // Authored names are presentation, but duplicate display labels make two
+    // different political actors indistinguishable. Fall back to stable owner
+    // identity only for the colliding labels.
+    const counts = new Map();
+    for (const label of labels.values()) {
+      const key = ownerFoldKey(label);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    for (const [owner, label] of labels) {
+      if ((counts.get(ownerFoldKey(label)) ?? 0) > 1) labels.set(owner, owner);
+    }
+    return Object.fromEntries(labels);
+    // labelEpoch intentionally rebakes translated strings after i18n updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customRegionMeta.records, labelEpoch, polityOverrides, regionOwnershipOverrides]);
+  const workerLabelNamesRef = useRef(workerLabelNames);
+  workerLabelNamesRef.current = workerLabelNames;
+
+  const sourceObjectsRef = useRef({ boundary: null });
+  const updateBoundarySourceFromPatch = useCallback((patch) => {
+    if (!patch) return;
+    const cache = boundaryFeatureMapRef.current;
+    const removeIds = (patch.removeIds ?? []).map(String);
+    const existingIds = new Set(cache.keys());
+    const upserts = (patch.upsert ?? []).filter((feature) => feature?.id !== undefined && feature?.id !== null);
+
+    if (patch.removeAll) cache.clear();
+    for (const id of removeIds) cache.delete(id);
+    for (const feature of upserts) cache.set(String(feature.id), feature);
+
+    const mapInstance = map?.getMap ? map.getMap() : map;
+    const source = mapInstance?.getSource?.("polity-boundaries-source");
+    if (source) {
+      const fullSnapshot = () => ({ type: "FeatureCollection", features: [...cache.values()] });
+      const fallbackToSnapshot = (error) => {
+        console.warn("[map] polity-boundaries-source incremental update failed; restoring current snapshot:", error);
+        try {
+          source.setData?.(fullSnapshot());
+        } catch (fallbackError) {
+          console.warn("[map] polity-boundaries-source snapshot restore failed:", fallbackError);
+        }
       };
-    }),
-  }), [ownerColorCss, politySurfaceData]);
-  const hasPolitySurfaces = enrichedPolitySurfaceData.features.length > 0;
+      try {
+        if (typeof source.updateData === "function") {
+          let diff = null;
+          if (patch.removeAll) {
+            diff = { removeAll: true, add: upserts };
+          } else {
+            const add = [];
+            const update = [];
+            for (const feature of upserts) {
+              const id = String(feature.id);
+              if (existingIds.has(id)) {
+                update.push({
+                  id,
+                  newGeometry: feature.geometry,
+                  removeAllProperties: true,
+                  addOrUpdateProperties: Object.entries(feature.properties ?? {}).map(([key, value]) => ({ key, value })),
+                });
+              } else add.push(feature);
+            }
+            diff = {};
+            if (removeIds.length) diff.remove = removeIds;
+            if (add.length) diff.add = add;
+            if (update.length) diff.update = update;
+          }
+          if (diff && Object.keys(diff).length) {
+            const pending = source.updateData(diff);
+            pending?.catch?.(fallbackToSnapshot);
+          }
+        } else if (typeof source.setData === "function") {
+          source.setData(fullSnapshot());
+        }
+      } catch (error) {
+        fallbackToSnapshot(error);
+      }
+    }
+    setDerivedSourceEpoch((epoch) => epoch + 1);
+  }, [map]);
 
+  const publishOwnershipPresentation = useCallback((queued) => {
+    if (!queued) return;
+    const result = queued.cartographyResult ?? {};
+    if (result.boundaryPatch) updateBoundarySourceFromPatch(result.boundaryPatch);
+    if (result.disputedData?.features) setDisputedRegionData(result.disputedData);
+    if (result.labels?.labelData?.features) {
+      setPolityLabelCollections({
+        ...EMPTY_POLITY_LABEL_COLLECTIONS,
+        ...result.labels,
+        curvedLabelData: EMPTY_FEATURE_COLLECTION,
+        glyphLabelData: EMPTY_FEATURE_COLLECTION,
+      });
+    }
+    setInitialCartographySettled(true);
+    setAcknowledgedBoundaryOwnership(queued.ownershipOverrides ?? {});
+    releaseOwnershipPresentation(queued.changedRegionIds ?? []);
+  }, [releaseOwnershipPresentation, updateBoundarySourceFromPatch]);
 
-  // R5.0: the worker owns the giant authored-region fetch + JSON parse. The main
-  // thread receives only compact metadata plus dissolved polity surfaces/frontiers.
-  // MapLibre separately consumes the same URL in its worker pool, eliminating the
-  // old giant main-thread object and two structured clones of it.
+  const clearDerivedCartography = useCallback(({ resetMetadata = false } = {}) => {
+    boundaryFeatureMapRef.current.clear();
+    setPolityLabelCollections(EMPTY_POLITY_LABEL_COLLECTIONS);
+    setDisputedRegionData(EMPTY_FEATURE_COLLECTION);
+    setAcknowledgedBoundaryOwnership(null);
+    if (resetMetadata) setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
+    const mapInstance = map?.getMap ? map.getMap() : map;
+    const source = mapInstance?.getSource?.("polity-boundaries-source");
+    try {
+      if (typeof source?.updateData === "function") source.updateData({ removeAll: true });
+      else source?.setData?.(EMPTY_FEATURE_COLLECTION);
+    } catch {}
+  }, [map]);
+
+  // A style/projection remount recreates MapLibre source objects. Rehydrate the
+  // controller-owned boundary cache only when that source identity changes.
   useEffect(() => {
+    const mapInstance = map?.getMap ? map.getMap() : map;
+    if (!mapInstance?.on) return undefined;
+    let frame = 0;
+    const hydrate = () => {
+      frame = 0;
+      const source = mapInstance.getSource?.("polity-boundaries-source");
+      if (!source || sourceObjectsRef.current.boundary === source) return;
+      sourceObjectsRef.current.boundary = source;
+      const features = [...boundaryFeatureMapRef.current.values()];
+      const snapshot = { type: "FeatureCollection", features };
+      const fallback = (error) => {
+        console.warn("[map] Incremental boundary rehydrate failed; restoring snapshot:", error);
+        try { source.setData?.(snapshot); } catch {}
+      };
+      try {
+        if (typeof source.updateData === "function") source.updateData({ removeAll: true, add: features })?.catch?.(fallback);
+        else source.setData?.(snapshot);
+      } catch (error) {
+        fallback(error);
+      }
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(hydrate);
+    };
+    schedule();
+    mapInstance.on("styledata", schedule);
+    return () => {
+      mapInstance.off("styledata", schedule);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [map, derivedSourceEpoch]);
+
+  // Political Cartography Pipeline v2. Canonical per-region ownership remains
+  // the visual truth. The worker owns topology, political borders and polity
+  // label geometry; only a result for the newest desired political revision may
+  // be published. Catalog readiness is emitted before derived cartography.
+  useEffect(() => {
+    const geometryEpoch = activeGeometryEpoch;
+    const previousGeometryEpoch = cartographyGeometryEpochRef.current;
+    const geometryChanged = Boolean(
+      customFlag
+      && previousGeometryEpoch
+      && previousGeometryEpoch !== geometryEpoch
+    );
+
+    const previousScheduler = polityBoundarySchedulerRef.current;
+    previousScheduler?.stop?.();
+    polityBoundarySchedulerRef.current = null;
     const previous = polityBoundaryWorkerRef.current;
     if (previous) previous.terminate();
     polityBoundaryWorkerRef.current = null;
-    initializedBoundaryOwnershipRef.current = null;
-    initializedBoundaryClaimantsRef.current = null;
+    enqueuedBoundaryOwnershipRef.current = null;
+    enqueuedBoundaryClaimantsRef.current = null;
+    enqueuedBoundaryLabelNamesRef.current = null;
 
     if (!customFlag) {
+      releaseAllOwnershipPresentation();
+      setInitialCartographySettled(true);
+      setInitialRegionRepairSettled(true);
+      cartographyGeometryEpochRef.current = "";
+      setRegionRenderRepair(EMPTY_REGION_RENDER_REPAIR);
       setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
-      setDisputedRegionData(EMPTY_FEATURE_COLLECTION);
-      setPolityBoundaryData(EMPTY_FEATURE_COLLECTION);
-      setPolitySurfaceData(EMPTY_FEATURE_COLLECTION);
+      clearDerivedCartography();
       return undefined;
     }
+
+    setInitialCartographySettled(false);
+    setInitialRegionRepairSettled(false);
+    cartographyGeometryEpochRef.current = geometryEpoch;
+    if (geometryChanged) {
+      setRegionRenderRepair(EMPTY_REGION_RENDER_REPAIR);
+      ownershipTransitionQueueRef.current = [];
+      ownershipTransitionByRevisionRef.current.clear();
+      releaseAllOwnershipPresentation();
+      const sweep = ownershipSweepRef.current;
+      sweep.token += 1;
+      sweep.worker?.terminate?.();
+      if (sweep.frame) cancelAnimationFrame(sweep.frame);
+      if (sweep.waitFrame) cancelAnimationFrame(sweep.waitFrame);
+      if (sweep.timeout) clearTimeout(sweep.timeout);
+      sweep.active = false;
+      sweep.regionIds = [];
+      setOwnershipTransitionSlices(EMPTY_FEATURE_COLLECTION);
+      // A game/scenario switch can keep the same MapLibre instance alive. Old
+      // derived borders/labels therefore must be removed synchronously at the
+      // geometry authority boundary rather than surviving until the new worker
+      // finishes. Canonical per-region rendering remains the only truth while
+      // the replacement cartography is being derived.
+      boundaryWorkerRestartCountRef.current = 0;
+      clearDerivedCartography({ resetMetadata: true });
+    }
+
+    // Readiness belongs to THIS worker/geometry epoch. On an ordinary watchdog
+    // restart of the same geometry, already-published metadata remains valid; on
+    // a geometry switch, readiness must be re-established by catalog-ready.
+    let catalogReady = Boolean(customRegionMeta.ready && !geometryChanged);
 
     let worker;
     try {
-      worker = new Worker(
-        new URL("./vnext/polityBoundariesWorker.js", import.meta.url),
-        { type: "module" },
-      );
+      worker = new Worker(new URL("./vnext/polityBoundariesWorker.js", import.meta.url), { type: "module" });
     } catch (error) {
-      console.warn("Map vNext polity-boundary worker is unavailable:", error);
+      console.warn("Political cartography worker is unavailable:", error);
+      setInitialCartographySettled(true);
+      setInitialRegionRepairSettled(true);
       setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
+      clearDerivedCartography();
+      markPolitiesReady(regionsGeojsonUrl, { failed: true });
       return undefined;
     }
-
     polityBoundaryWorkerRef.current = worker;
-    const ownershipOverrides = regionOwnershipOverridesRef.current;
-    const claimants = regionClaimants;
-    initializedBoundaryOwnershipRef.current = ownershipOverrides;
-    initializedBoundaryClaimantsRef.current = claimants;
-    const requestId = latestBoundaryRequestRef.current + 1;
-    latestBoundaryRequestRef.current = requestId;
 
-    // A worker the browser kills for memory sends neither a message nor an
-    // error; the map would just stay on its per-region fallback fills with
-    // no borders and no polity labels. Two minutes of silence is reported so
-    // a bug report says what happened (the derivation itself takes well under
-    // a minute on the largest maps).
-    const WORKER_SILENCE_WARN_MS = 120000;
-    const silence = setTimeout(() => {
+    const restartWorker = ({ initialFailure = false } = {}) => {
       if (worker !== polityBoundaryWorkerRef.current) return;
-      console.warn("Map vNext polity-boundary worker has not answered in 120s; the map is on its fallback fills.");
-    }, WORKER_SILENCE_WARN_MS);
-    worker.onmessage = ({ data: result }) => {
-      clearTimeout(silence);
-      if (worker !== polityBoundaryWorkerRef.current) return;
-      if (result?.requestId !== latestBoundaryRequestRef.current) return;
-      if (result.error) {
-        console.warn("Map vNext polity-boundary derivation failed:", result.error);
-        setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
-        setDisputedRegionData(EMPTY_FEATURE_COLLECTION);
-        setPolityBoundaryData(EMPTY_FEATURE_COLLECTION);
-        setPolitySurfaceData(EMPTY_FEATURE_COLLECTION);
+      // The stalled revision's presentation holds die with its worker: the
+      // replacement only runs initialize, which never releases them, and a held
+      // region would otherwise keep its previous fill for the rest of the
+      // session while borders and labels already show the current owner.
+      releaseAllOwnershipPresentation();
+      polityBoundarySchedulerRef.current?.stop?.();
+      worker.terminate();
+      polityBoundaryWorkerRef.current = null;
+      polityBoundarySchedulerRef.current = null;
+      if (initialFailure) {
+        clearDerivedCartography({ resetMetadata: true });
         markPolitiesReady(regionsGeojsonUrl, { failed: true });
+      }
+      if (boundaryWorkerRestartCountRef.current < 1) {
+        boundaryWorkerRestartCountRef.current += 1;
+        setBoundaryWorkerEpoch((epoch) => epoch + 1);
+      } else {
+        // Two failed worker generations must degrade to canonical fills/legacy
+        // labels rather than holding the scenario-open screen until its ceiling.
+        setInitialCartographySettled(true);
+        setInitialRegionRepairSettled(true);
+        markPolitiesReady(regionsGeojsonUrl, { failed: true });
+      }
+    };
+
+    const scheduler = createPoliticalCartographyScheduler({
+      dispatch: ({ revision, payload }) => {
+        if (worker !== polityBoundaryWorkerRef.current) return;
+        recordMapTrace("nations:cartography-dispatch", {
+          revision,
+          type: payload?.type ?? "",
+        });
+        worker.postMessage({ ...payload, requestId: revision, geometryEpoch });
+      },
+      onTimeout: ({ stalled, latestDesired }) => {
+        if (worker !== polityBoundaryWorkerRef.current) return;
+        console.warn(
+          `Political cartography worker stalled on revision ${stalled.revision}; canonical region rendering remains authoritative.`,
+        );
+        logDebugEvent("warn", `[map] Political cartography worker stalled on revision ${stalled.revision}.`, {
+          stalledRevision: stalled.revision,
+          desiredRevision: latestDesired?.revision ?? stalled.revision,
+          regionsUrl: regionsGeojsonUrl,
+        });
+        // Preserve already-valid unrelated derived artifacts. Dirty owners stay
+        // hidden by canonical fallback while the replacement worker rebuilds.
+        restartWorker({ initialFailure: !catalogReady });
+      },
+    });
+    polityBoundarySchedulerRef.current = scheduler;
+
+    worker.onmessage = ({ data: result }) => {
+      if (worker !== polityBoundaryWorkerRef.current) return;
+
+      if (result?.messageType === "render-repair-ready") {
+        if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
+        const repairData = result.repairData?.type === "FeatureCollection"
+          ? result.repairData
+          : EMPTY_FEATURE_COLLECTION;
+        const repairedIds = Array.isArray(result.repairedIds)
+          ? result.repairedIds.map(String).filter(Boolean)
+          : [];
+        // A repaired feature lives in a second, tiny GeoJSON source. Force live
+        // ownership feature-state to replay so repaired and canonical sources are
+        // visually identical apart from geometry safety.
+        appliedCustomFillStateRef.current = new Map();
+        setRegionRenderRepair({ geometryEpoch, data: repairData, repairedIds });
+        setInitialRegionRepairSettled(true);
+        if (result.disputedData) setDisputedRegionData(result.disputedData);
+        if (Number.isFinite(result.stats?.elapsedMs)) {
+          reportPerfOperation("map targeted region render repair", result.stats.elapsedMs, {
+            warnAt: PERF_MAP_WARN_MS,
+          });
+        }
+        globalThis.__OH_MAP_SOURCE_PERF__ = {
+          ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
+          regionRenderRepairMs: Number(result.stats?.elapsedMs ?? 0),
+          regionRenderRepairScanned: Number(result.stats?.scannedFeatureCount ?? 0),
+          regionRenderRepairUnsafe: Number(result.stats?.unsafeFeatureCount ?? 0),
+          regionRenderRepairFeatures: Number(result.stats?.repairedFeatureCount ?? 0),
+          regionRenderRepairDetachedPolygons: Number(result.stats?.removedDetachedPolygonCount ?? 0),
+          regionRenderRepairPrecisionFeatures: Number(result.stats?.precisionHazardFeatureCount ?? 0),
+          regionRenderRepairPrecisionVertices: Number(result.stats?.removedPrecisionVertexCount ?? 0),
+          regionRenderRepairRejected: Number(
+            (result.stats?.rejectedAreaDriftCount ?? 0)
+            + (result.stats?.repairErrorCount ?? 0),
+          ),
+        };
         return;
       }
 
-      if (result.metadata) {
-        const metadata = {
-          ...EMPTY_CUSTOM_REGION_META,
-          ...result.metadata,
-          ready: true,
-        };
-        setCustomRegionMeta(metadata);
-        primeCustomRegionCatalogEntries(metadata.records, { url: regionsGeojsonUrl });
-      }
-      setDisputedRegionData(result.disputedData?.features ? result.disputedData : EMPTY_FEATURE_COLLECTION);
-      setPolityBoundaryData(result.data?.features ? result.data : EMPTY_FEATURE_COLLECTION);
-      setPolitySurfaceData(result.polityData?.features ? result.polityData : EMPTY_FEATURE_COLLECTION);
-      // The dissolve counts were computed and thrown away - a polity that fell
-      // back to raw pieces, or one dropped outright, left no trace anywhere. Put
-      // them in the debug log so a bug report carries them.
-      if (Number.isFinite(result.stats?.polityCount)) {
-        const { polityCount, dissolvedPolityCount, fallbackPolityCount, failedPartCount,
-          emptyUnionPolityCount, fallbackOwners } = result.stats;
-        const named = Array.isArray(fallbackOwners) && fallbackOwners.length
-          ? ` (${fallbackOwners.join(", ")})`
-          : "";
-        logDebugEvent(
-          fallbackPolityCount > 0 ? "warn" : "map",
-          `[map] Polity surfaces: ${dissolvedPolityCount ?? 0}/${polityCount} dissolved, `
-          + `${fallbackPolityCount ?? 0} on raw pieces${named}.`,
-          {
-            polityCount,
-            dissolvedPolityCount,
-            fallbackPolityCount,
-            failedPartCount,
-            emptyUnionPolityCount,
-            fallbackOwners,
-            regionsUrl: regionsGeojsonUrl,
-          },
-        );
+      if (result?.messageType === "render-repair-error") {
+        if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
+        // Repair is a presentation safety layer, never canonical authority. A
+        // failure must release startup to the canonical renderer rather than
+        // deadlocking the scenario loading screen.
+        setInitialRegionRepairSettled(true);
+        console.warn("Targeted region render repair failed; keeping canonical geometry:", result.error);
+        return;
       }
 
-      if (Number.isFinite(result.stats?.parseMs)) {
+      if (result?.messageType === "catalog-ready") {
+        if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
+        catalogReady = true;
+        const metadata = { ...EMPTY_CUSTOM_REGION_META, ...(result.metadata ?? {}), ready: true };
+        setCustomRegionMeta(metadata);
+        primeCustomRegionCatalogEntries(metadata.records, { url: regionsGeojsonUrl, invalidateCatalog: false });
+        if (Number.isFinite(result.stats?.parseMs)) {
+          globalThis.__OH_MAP_SOURCE_PERF__ = {
+            ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
+            authoredRegionsWorkerFetchMs: Number(result.stats.fetchMs ?? 0),
+            authoredRegionsWorkerParseMs: Number(result.stats.parseMs ?? 0),
+            authoredRegionsBytes: Number(result.stats.bytes ?? 0),
+          };
+        }
+        return;
+      }
+
+      if (result?.messageType === "ownership-transition-ready") {
+        if (result.geometryEpoch && result.geometryEpoch !== geometryEpoch) return;
+        const revision = Number(result.requestId);
+        const snapshot = scheduler.snapshot();
+        const request = snapshot.inFlight;
+        // Early transition geometry belongs only to the exact still-desired
+        // ownership revision. If a newer canonical mutation already superseded
+        // it, do not animate an obsolete intermediate political state.
+        if (
+          !request
+          || Number(request.revision) !== revision
+          || request?.payload?.type !== "update-ownership"
+          || Number(snapshot.latestDesired?.revision) !== revision
+        ) return;
+
+        const transitionData = result.ownershipTransitionData?.features?.length
+          ? result.ownershipTransitionData
+          : EMPTY_FEATURE_COLLECTION;
+        if (!transitionData.features.length) return;
+
+        if (!ownershipTransitionByRevisionRef.current.has(revision)) {
+          const queued = {
+            transitionData,
+            cartographyResult: null,
+            cartographyAccepted: false,
+            animationDone: false,
+            ownershipOverrides: request?.payload?.ownershipOverrides ?? {},
+            changedRegionIds: result.changedRegionIds ?? request?.payload?.changedRegionIds ?? [],
+            revision,
+          };
+          ownershipTransitionByRevisionRef.current.set(revision, queued);
+          ownershipTransitionQueueRef.current.push(queued);
+          setOwnershipTransitionQueueEpoch((epoch) => epoch + 1);
+        }
+        return;
+      }
+
+      if (result?.geometryEpoch && result.geometryEpoch !== geometryEpoch) {
+        return;
+      }
+
+      const completion = scheduler.complete(result?.requestId);
+      if (!completion.accepted) {
+        const discardedTransition = ownershipTransitionByRevisionRef.current.get(Number(result?.requestId));
+        if (discardedTransition) {
+          discardedTransition.cartographyDiscarded = true;
+          if (discardedTransition.animationDone) {
+            ownershipTransitionByRevisionRef.current.delete(Number(result?.requestId));
+          }
+        }
+        if (
+          completion.superseded
+          && completion.supersededBy?.payload?.type === "update-ownership"
+        ) {
+          // The scheduler coalesces unpublished political revisions. Keep one
+          // hold for the surviving desired revision PLUS any early sweep that
+          // is still visually consuming its own hold. Otherwise A->B->C can
+          // reveal C underneath the still-running A->B animation.
+          const counts = ownershipPresentationHoldCountsRef.current;
+          const visuallyPendingIds = new Set(
+            discardedTransition && !discardedTransition.animationDone
+              ? (discardedTransition.changedRegionIds ?? []).map(String)
+              : [],
+          );
+          for (const rawId of completion.supersededBy.payload.changedRegionIds ?? []) {
+            const id = String(rawId ?? "");
+            if (!id || !counts.has(id)) continue;
+            counts.set(id, visuallyPendingIds.has(id) ? Math.max(2, counts.get(id) ?? 0) : 1);
+          }
+        }
+        return;
+      }
+      const request = completion.request;
+
+      if (result.error) {
+        if (request?.payload?.type === "initialize") {
+          setInitialCartographySettled(true);
+          setInitialRegionRepairSettled(true);
+        }
+        if (request?.payload?.type === "update-ownership") {
+          const pendingTransition = ownershipTransitionByRevisionRef.current.get(Number(request?.revision));
+          if (pendingTransition) {
+            pendingTransition.cartographyFailed = true;
+            if (pendingTransition.animationDone) {
+              ownershipTransitionByRevisionRef.current.delete(Number(request?.revision));
+            }
+          } else {
+            releaseOwnershipPresentation(request?.payload?.changedRegionIds ?? []);
+          }
+        }
+        console.warn("Political cartography derivation failed:", result.error);
+        logDebugEvent("warn", `[map] Political cartography revision ${request?.revision ?? "?"} failed.`, {
+          error: result.error,
+          type: request?.payload?.type ?? "",
+        });
+        // Local updates fail toward canonical per-region rendering. Only an
+        // initialization failure lacks enough derived state to justify clearing.
+        restartWorker({ initialFailure: request?.payload?.type === "initialize" && !catalogReady });
+        return;
+      }
+
+      boundaryWorkerRestartCountRef.current = 0;
+      const isOwnershipUpdate = request?.payload?.type === "update-ownership";
+      const hasOwnershipSweep = Boolean(
+        isOwnershipUpdate
+        && result.ownershipTransitionData?.features?.length,
+      );
+
+      if (hasOwnershipSweep) {
+        // Transition geometry is normally emitted BEFORE the expensive
+        // boundary/PTR result, so the sweep can already be running while this
+        // result is derived. Attach the accepted cartography to that same
+        // revision instead of starting a second/delayed animation.
+        const revision = Number(request?.revision ?? result?.requestId ?? 0);
+        let queued = ownershipTransitionByRevisionRef.current.get(revision);
+        if (!queued) {
+          // Fail-soft for browsers/workers that somehow missed the early
+          // transition-ready message: preserve the animation, just without the
+          // latency advantage.
+          queued = {
+            transitionData: result.ownershipTransitionData,
+            cartographyResult: null,
+            cartographyAccepted: false,
+            animationDone: false,
+            ownershipOverrides: request?.payload?.ownershipOverrides ?? {},
+            changedRegionIds: request?.payload?.changedRegionIds ?? [],
+            revision,
+          };
+          ownershipTransitionByRevisionRef.current.set(revision, queued);
+          ownershipTransitionQueueRef.current.push(queued);
+          setOwnershipTransitionQueueEpoch((epoch) => epoch + 1);
+        }
+
+        queued.cartographyResult = {
+          boundaryPatch: result.boundaryPatch,
+          disputedData: result.disputedData,
+          labels: result.labels,
+        };
+        queued.cartographyAccepted = true;
+        queued.ownershipOverrides = request?.payload?.ownershipOverrides ?? queued.ownershipOverrides ?? {};
+        queued.changedRegionIds = request?.payload?.changedRegionIds ?? queued.changedRegionIds ?? [];
+
+        // If the ~680 ms sweep already finished while cartography was still
+        // deriving, publish the new borders/PTR now. Otherwise finish() will
+        // commit them exactly when the sweep reaches 100%.
+        if (queued.animationDone) {
+          publishOwnershipPresentation(queued);
+          ownershipTransitionByRevisionRef.current.delete(revision);
+        }
+      } else {
+        if (result.boundaryPatch) updateBoundarySourceFromPatch(result.boundaryPatch);
+        if (result.disputedData?.features) setDisputedRegionData(result.disputedData);
+        if (result.labels?.labelData?.features) {
+          setPolityLabelCollections({
+            ...EMPTY_POLITY_LABEL_COLLECTIONS,
+            ...result.labels,
+            curvedLabelData: EMPTY_FEATURE_COLLECTION,
+            glyphLabelData: EMPTY_FEATURE_COLLECTION,
+          });
+        }
+        if (!["update-claims", "update-labels"].includes(request?.payload?.type)) {
+          setInitialCartographySettled(true);
+          setAcknowledgedBoundaryOwnership(request?.payload?.ownershipOverrides ?? {});
+        }
+        if (isOwnershipUpdate) {
+          releaseOwnershipPresentation(request?.payload?.changedRegionIds ?? []);
+        }
+      }
+
+      recordMapTrace("nations:cartography-ack", {
+        revision: request?.revision ?? result?.requestId ?? 0,
+        type: request?.payload?.type ?? "",
+      });
+      if (request?.payload?.type === "update-ownership") {
         globalThis.__OH_MAP_SOURCE_PERF__ = {
           ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
-          authoredRegionsWorkerFetchMs: Number(result.stats.fetchMs ?? 0),
-          authoredRegionsWorkerParseMs: Number(result.stats.parseMs ?? 0),
-          authoredRegionsBytes: Number(result.stats.bytes ?? 0),
-          polityDeriveMs: Number(result.stats.elapsedMs ?? 0),
+          ownershipCartographyMs: Number(result.stats?.elapsedMs ?? 0),
+          ownershipBoundaryMs: Number(result.stats?.boundaryMs ?? 0),
+          ownershipLabelGeometryMs: Number(result.stats?.labelGeometryMs ?? 0),
+          ownershipLabelBuildMs: Number(result.stats?.labelMs ?? 0),
+          ownershipChangedRegionCount: Number(result.stats?.changedRegionCount ?? 0),
+          ownershipAffectedOwnerCount: Number(result.stats?.affectedOwnerCount ?? 0),
+          ownershipRefreshedLabelOwnerCount: Number(result.stats?.refreshedLabelOwnerCount ?? 0),
+          ownershipDeferredLabelOwnerCount: Number(result.stats?.deferredLabelOwnerCount ?? 0),
+          ownershipDeferredLabelOwners: Array.isArray(result.stats?.deferredLabelOwners)
+            ? [...result.stats.deferredLabelOwners]
+            : [],
         };
       }
       if (Number.isFinite(result.stats?.elapsedMs)) {
-        reportPerfOperation("map polity boundary derivation", result.stats.elapsedMs, {
-          warnAt: PERF_MAP_WARN_MS,
-        });
+        reportPerfOperation("map political cartography worker", result.stats.elapsedMs, { warnAt: PERF_MAP_WARN_MS });
       }
     };
+
     worker.onerror = (error) => {
-      clearTimeout(silence);
       if (worker !== polityBoundaryWorkerRef.current) return;
-      console.warn("Map vNext polity-boundary worker failed:", error);
-      setCustomRegionMeta(EMPTY_CUSTOM_REGION_META);
-      setDisputedRegionData(EMPTY_FEATURE_COLLECTION);
-      setPolityBoundaryData(EMPTY_FEATURE_COLLECTION);
-      setPolitySurfaceData(EMPTY_FEATURE_COLLECTION);
-      markPolitiesReady(regionsGeojsonUrl, { failed: true });
+      releaseAllOwnershipPresentation();
+      console.warn("Political cartography worker failed:", error);
+      restartWorker({ initialFailure: !catalogReady });
     };
-    worker.postMessage({
+
+    const ownershipOverrides = regionOwnershipOverridesRef.current;
+    const claimants = regionClaimantsRef.current;
+    const labelNames = workerLabelNamesRef.current;
+    enqueuedBoundaryOwnershipRef.current = ownershipOverrides;
+    enqueuedBoundaryClaimantsRef.current = claimants;
+    enqueuedBoundaryLabelNamesRef.current = labelNames;
+    scheduler.enqueue({
       type: "initialize",
-      requestId,
       regionsUrl: regionsGeojsonUrl,
       ownershipOverrides,
       regionClaimants: claimants,
-    });
+      labelNames,
+    }, { timeoutMs: 120000 });
 
     return () => {
-      clearTimeout(silence);
+      scheduler.stop();
       worker.terminate();
+      if (polityBoundarySchedulerRef.current === scheduler) polityBoundarySchedulerRef.current = null;
       if (polityBoundaryWorkerRef.current === worker) polityBoundaryWorkerRef.current = null;
     };
-  }, [customFlag, regionsGeojsonUrl]);
+  // Metadata is emitted by this effect; do not restart the worker merely because
+  // catalog-ready updated customRegionMeta.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeGeometryEpoch,
+    boundaryWorkerEpoch,
+    clearDerivedCartography,
+    customFlag,
+    regionsGeojsonUrl,
+    releaseAllOwnershipPresentation,
+    releaseOwnershipPresentation,
+    updateBoundarySourceFromPatch,
+  ]);
 
-  // The loading screen a game opens under waits for this (mapReadiness.js).
-  // Marked after the derived layers' data has been committed, so the idle
-  // that follows is the drawn map; a stock map has no derivation to wait
-  // for, so it is ready as soon as the world store has told us it IS a stock
-  // map (before that the flag reads false for every map, custom ones too).
+  // Opening-screen readiness now includes the authoritative PTR first paint
+  // AND targeted geometry-safety settlement. Catalog metadata still publishes
+  // early for gameplay/GM consumers, but a custom flat map keeps the existing
+  // scenario loading screen up until the initial worker revision has produced
+  // polity records, malformed-region presentation repair has settled, and PTR
+  // has mounted.
+  // Mid-campaign ownership/name updates remain incremental and never reopen the
+  // screen. If PTR genuinely fails or there are no renderable records, the
+  // legacy MapLibre fallback is allowed through instead of deadlocking startup.
   useEffect(() => {
     if (!worldKnown) return;
-    if (customFlag && !politySurfaceData.features.length && !polityBoundaryData.features.length) return;
+    if (customFlag && !customRegionMeta.ready) return;
+    if (customFlag && !initialCartographySettled) return;
+    if (customFlag && !initialRegionRepairSettled) return;
+    if (
+      ptrBlocksInitialReadiness
+      && ptr1PolityTextRecords.length > 0
+      && !ptrPolityTextStatus.mounted
+      && !ptrPolityTextStatus.failed
+    ) return;
     markPolitiesReady(regionsGeojsonUrl);
-  }, [customFlag, polityBoundaryData, politySurfaceData, regionsGeojsonUrl, worldKnown]);
+  }, [
+    customFlag,
+    customRegionMeta.ready,
+    initialCartographySettled,
+    initialRegionRepairSettled,
+    ptr1PolityTextRecords.length,
+    ptrBlocksInitialReadiness,
+    ptrPolityTextStatus.failed,
+    ptrPolityTextStatus.mounted,
+    regionsGeojsonUrl,
+    worldKnown,
+  ]);
 
   useEffect(() => {
-    const worker = polityBoundaryWorkerRef.current;
-    if (!customFlag || !worker || !customRegionMeta.ready) return;
-    if (
-      initializedBoundaryOwnershipRef.current === regionOwnershipOverrides
-      && initializedBoundaryClaimantsRef.current === regionClaimants
-    ) return;
-    initializedBoundaryOwnershipRef.current = regionOwnershipOverrides;
-    initializedBoundaryClaimantsRef.current = regionClaimants;
-    const requestId = latestBoundaryRequestRef.current + 1;
-    latestBoundaryRequestRef.current = requestId;
-    worker.postMessage({
-      type: "update-ownership",
-      requestId,
+    const scheduler = polityBoundarySchedulerRef.current;
+    if (!customFlag || !scheduler) return;
+
+    const previousOwnership = enqueuedBoundaryOwnershipRef.current;
+    const previousClaimants = enqueuedBoundaryClaimantsRef.current;
+    const previousLabels = enqueuedBoundaryLabelNamesRef.current ?? {};
+    const ownershipChanged = previousOwnership !== regionOwnershipOverrides;
+    const claimantsChanged = previousClaimants !== regionClaimants;
+    const labelOwners = new Set([...Object.keys(previousLabels), ...Object.keys(workerLabelNames)]);
+    const changedLabelOwners = [...labelOwners].filter((owner) => previousLabels?.[owner] !== workerLabelNames?.[owner]);
+
+    if (!ownershipChanged && !claimantsChanged && !changedLabelOwners.length) return;
+    enqueuedBoundaryOwnershipRef.current = regionOwnershipOverrides;
+    enqueuedBoundaryClaimantsRef.current = regionClaimants;
+    enqueuedBoundaryLabelNamesRef.current = workerLabelNames;
+
+    if (ownershipChanged) {
+      const diff = diffPoliticalOwnership(
+        customRegionMeta.records,
+        previousOwnership ?? {},
+        regionOwnershipOverrides,
+      );
+      // Before catalog-ready, base owners are unavailable. Exact changed override
+      // ids are still known; the worker resolves old/new owners from its own
+      // geometry topology once initialization has parsed the authored map.
+      if (!diff.affectedOwners.length && diff.changedRegionIds.length) {
+        for (const owner of Object.values(previousOwnership ?? {})) if (owner) diff.affectedOwners.push(String(owner));
+        for (const owner of Object.values(regionOwnershipOverrides ?? {})) if (owner && !diff.affectedOwners.includes(String(owner))) diff.affectedOwners.push(String(owner));
+      }
+      if (diff.changedRegionIds.length) {
+        // Freeze the visible political revision BEFORE the later fill-sync
+        // effect runs. Canonical state still advances immediately, while the
+        // map keeps the prior colour/border/label revision until the sweep has
+        // actually played and can hand off atomically to the worker result.
+        holdOwnershipPresentation(diff.changedRegionIds);
+        scheduler.enqueue({
+          type: "update-ownership",
+          ownershipOverrides: regionOwnershipOverrides,
+          regionClaimants,
+          labelNames: workerLabelNames,
+          // A political ownership change and a translated/display-name change can
+          // land in the same React pass. Preserve both invalidation domains in
+          // one worker revision so advancing the label ref cannot swallow a
+          // label update unrelated to the changed territorial owners.
+          affectedOwners: [...new Set([...diff.affectedOwners, ...changedLabelOwners])],
+          changedRegionIds: diff.changedRegionIds,
+          forceFullSnapshot: acknowledgedBoundaryOwnership == null,
+        }, { timeoutMs: 60000 });
+        return;
+      }
+      // A fresh object with identical canonical ownership is not a political
+      // revision. Fall through so a simultaneous claims/name update takes the
+      // cheapest dedicated route instead of rebuilding ownership artifacts.
+    }
+
+    if (claimantsChanged) {
+      scheduler.enqueue({
+        type: "update-claims",
+        ownershipOverrides: regionOwnershipOverrides,
+        regionClaimants,
+        labelNames: workerLabelNames,
+        // Claim and label changes may be observed together. Carry the label
+        // invalidation in this same revision rather than marking it enqueued and
+        // then returning a claims-only result that never republishes the label.
+        affectedOwners: changedLabelOwners,
+      }, { timeoutMs: 60000 });
+      return;
+    }
+
+    scheduler.enqueue({
+      type: "update-labels",
       ownershipOverrides: regionOwnershipOverrides,
       regionClaimants,
-    });
-  }, [customFlag, customRegionMeta.ready, regionClaimants, regionOwnershipOverrides]);
+      labelNames: workerLabelNames,
+      affectedOwners: changedLabelOwners,
+    }, { timeoutMs: 60000 });
+  }, [
+    acknowledgedBoundaryOwnership,
+    customFlag,
+    customRegionMeta.records,
+    holdOwnershipPresentation,
+    regionClaimants,
+    regionOwnershipOverrides,
+    workerLabelNames,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
+
+    // Custom/scenario maps are labelled exclusively by the political worker.
+    // Do not spend main-thread/cache work generating the modern stock-country
+    // label atlas that can never render in that mode.
+    if (customFlag) {
+      setPointLabelData(EMPTY_FEATURE_COLLECTION);
+      setCurvedLabelData(EMPTY_FEATURE_COLLECTION);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     // labelEpoch > 0 means translations arrived after the first build: force
     // a rebuild so baked-in label names pick them up.
@@ -1242,7 +2071,7 @@ const WorldMap = ({ isGlobe = false }) => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownedCodesKey, labelEpoch]);
+  }, [customFlag, ownedCodesKey, labelEpoch]);
 
   // DEAD as it stands, and deliberately left alone rather than half-fixed. It is
   // the only expression in the game that matches a country CODE — ["get", "GID_0"]
@@ -1287,8 +2116,18 @@ const WorldMap = ({ isGlobe = false }) => {
       ...disputedRegionData,
       features: disputedRegionData.features.map((feature) => {
         const props = feature?.properties ?? {};
-        const liveOwner = String(props._liveOwner ?? props.owner ?? "");
-        const claimants = Array.isArray(props._liveClaimants) ? props._liveClaimants : [];
+        const id = String(props.id ?? props.GID_1 ?? "");
+        const liveOwner = String(
+          (id ? regionOwnershipOverrides?.[id] : undefined)
+          ?? props._liveOwner
+          ?? props.owner
+          ?? "",
+        );
+        const claimants = id && Array.isArray(regionClaimants?.[id])
+          ? regionClaimants[id]
+          : Array.isArray(props._liveClaimants)
+            ? props._liveClaimants
+            : [];
         const seen = new Set();
         const stripeRgbs = [];
         for (const name of (liveOwner ? [liveOwner, ...claimants] : claimants)) {
@@ -1308,7 +2147,7 @@ const WorldMap = ({ isGlobe = false }) => {
         };
       }),
     };
-  }, [disputedRegionData, ownerColorCss, resolveOwnerRgb]);
+  }, [disputedRegionData, ownerColorCss, regionClaimants, regionOwnershipOverrides, resolveOwnerRgb]);
 
   // GADM disputed regions also paint the stock tiles (the crisp close-detail
   // twin), read from the worker's compact metadata rather than a parsed
@@ -1318,7 +2157,7 @@ const WorldMap = ({ isGlobe = false }) => {
     const stops = [];
     for (const record of customRegionMeta.records ?? []) {
       const id = String(record?.id ?? "");
-      if (!id.includes(".")) continue;
+      if (!id || record?.authored === true) continue;
       const claimants = regionClaimants[id]?.length ? regionClaimants[id] : record?.claimants;
       if (!Array.isArray(claimants) || !claimants.length) continue;
       const liveOwner = regionOwnershipOverrides[id] ?? record?.owner ?? "";
@@ -1337,11 +2176,21 @@ const WorldMap = ({ isGlobe = false }) => {
 
   const ownerByRegionId = useMemo(() => {
     const lookup = new Map();
+
+    // Live exact-region ownership is canonical even when a hybrid scenario's
+    // regions.geojson omits the stock geometry for that id. PR #647-era maps
+    // preserved this by keeping the PMTiles region underneath; PCPv2 accidentally
+    // rebuilt the lookup only from worker metadata and silently dropped such ids.
+    for (const [regionId, owner] of Object.entries(regionOwnershipOverrides ?? {})) {
+      const id = String(regionId ?? "");
+      if (id) lookup.set(id, owner ?? "");
+    }
+
     if (!customActive) return lookup;
     for (const record of customRegionMeta.records ?? []) {
       const id = String(record?.id ?? "");
-      if (!id) continue;
-      lookup.set(id, regionOwnershipOverrides[id] ?? record?.owner ?? "");
+      if (!id || lookup.has(id)) continue;
+      lookup.set(id, record?.owner ?? "");
     }
     return lookup;
   }, [customActive, customRegionMeta.records, regionOwnershipOverrides]);
@@ -1356,54 +2205,626 @@ const WorldMap = ({ isGlobe = false }) => {
     [customActive, customRegionMeta.editedStockIds],
   );
 
+  // Backward compatibility for tier-2 scenarios authored before `edited:true`
+  // became a complete per-feature invariant. If a scenario explicitly reshaped
+  // any stock region in a country, its serialized GeoJSON becomes the geometry
+  // authority for that whole stock-country cohort. This prevents an unmarked
+  // sibling replacement from disappearing at the PMTiles handoff and exposing
+  // the underlying modern stock province (wrong shape/owner or "Unclaimed").
+  //
+  // This is intentionally keyed by stable stock geography (gid0), never polity
+  // names: Russian Empire / Russia / fictional owners all get identical behavior.
+  const legacyAuthoritativeCountryCodes = useMemo(
+    () => customActive
+      ? deriveLegacyAuthoritativeCountryCodes(customRegionMeta.records)
+      : [],
+    [customActive, customRegionMeta.records],
+  );
+
+  const customAuthoritativeGeometryFilter = useMemo(() => (
+    legacyAuthoritativeCountryCodes.length
+      ? [
+        "any",
+        AUTHORED_GEOMETRY_FILTER,
+        ["in", SCENARIO_GID0_EXPRESSION, ["literal", legacyAuthoritativeCountryCodes]],
+      ]
+      : AUTHORED_GEOMETRY_FILTER
+  ), [legacyAuthoritativeCountryCodes]);
+
+  const customFarStockGeometryFilter = useMemo(() => (
+    legacyAuthoritativeCountryCodes.length
+      ? [
+        "all",
+        STOCK_GEOMETRY_FILTER,
+        ["!", ["in", SCENARIO_GID0_EXPRESSION, ["literal", legacyAuthoritativeCountryCodes]]],
+      ]
+      : STOCK_GEOMETRY_FILTER
+  ), [legacyAuthoritativeCountryCodes]);
+
+  const repairedRegionIdsLiteral = useMemo(
+    () => ["literal", repairedRegionIds],
+    [repairedRegionIds],
+  );
+  const unrepairedRegionFilter = useMemo(() => (
+    repairedRegionIds.length
+      ? ["!", ["in", SCENARIO_REGION_ID_EXPRESSION, repairedRegionIdsLiteral]]
+      : ["all"]
+  ), [repairedRegionIds.length, repairedRegionIdsLiteral]);
+  const canonicalCustomAuthoritativeGeometryFilter = useMemo(() => (
+    repairedRegionIds.length
+      ? ["all", customAuthoritativeGeometryFilter, unrepairedRegionFilter]
+      : customAuthoritativeGeometryFilter
+  ), [customAuthoritativeGeometryFilter, repairedRegionIds.length, unrepairedRegionFilter]);
+  const canonicalCustomFarStockGeometryFilter = useMemo(() => (
+    repairedRegionIds.length
+      ? ["all", customFarStockGeometryFilter, unrepairedRegionFilter]
+      : customFarStockGeometryFilter
+  ), [customFarStockGeometryFilter, repairedRegionIds.length, unrepairedRegionFilter]);
+
+  const stockRegionsVisibilityFilter = useMemo(() => {
+    const clauses = [];
+    if (editedStockIds.length) {
+      clauses.push(["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]]);
+    }
+    if (legacyAuthoritativeCountryCodes.length) {
+      clauses.push(["!", ["in", ["upcase", ["get", "GID_0"]], ["literal", legacyAuthoritativeCountryCodes]]]);
+    }
+    return clauses.length ? ["all", ...clauses] : ["all"];
+  }, [editedStockIds, legacyAuthoritativeCountryCodes]);
+
   // Only live ownership overrides touch the URL-backed authored source. Seed
   // colours remain properties of the scenario file; conquests are a tiny state
   // diff rather than a full GeoJSON replacement.
-  const appliedCustomFillStateRef = useRef(new Map());
   useEffect(() => {
     if (!customFlag) return undefined;
     const mapInstance = map?.getMap ? map.getMap() : map;
     if (!mapInstance?.setFeatureState) return undefined;
     let cancelled = false;
-    let frame = 0;
+    let retryFrame = 0;
+    let workFrame = 0;
 
-    const apply = () => {
+    const begin = () => {
       if (cancelled) return;
-      if (!mapInstance.getSource?.("custom-regions-source")) {
-        frame = requestAnimationFrame(apply);
+      if (
+        !mapInstance.getSource?.("custom-regions-source")
+        || (repairedRegionIds.length && !mapInstance.getSource?.("custom-regions-repair-source"))
+      ) {
+        retryFrame = requestAnimationFrame(begin);
         return;
       }
+
+      const syncStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
       const next = new Map();
       for (const [regionId, owner] of Object.entries(regionOwnershipOverrides)) {
         next.set(String(regionId), ownerColorCss(owner));
       }
       const applied = appliedCustomFillStateRef.current;
+      const held = ownershipPresentationHoldCountsRef.current;
+      const operations = [];
       for (const [regionId, fillColor] of next) {
-        if (applied.get(regionId) === fillColor) continue;
-        mapInstance.setFeatureState(
-          { source: "custom-regions-source", id: regionId },
-          { fillColor },
-        );
+        if (held.has(regionId) || applied.get(regionId) === fillColor) continue;
+        operations.push({ kind: "set", regionId, fillColor });
       }
       for (const regionId of applied.keys()) {
-        if (next.has(regionId)) continue;
-        mapInstance.removeFeatureState?.({ source: "custom-regions-source", id: regionId }, "fillColor");
+        if (held.has(regionId) || next.has(regionId)) continue;
+        operations.push({ kind: "remove", regionId });
       }
-      appliedCustomFillStateRef.current = next;
+
+      // Track only feature-state writes that actually reached MapLibre. Held
+      // regions intentionally stay on their previous visual revision.
+      const appliedAfterSync = new Map(applied);
+      let cursor = 0;
+      let setCount = 0;
+      let removeCount = 0;
+      const applySlice = () => {
+        if (cancelled) return;
+        const sliceStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+        let processed = 0;
+        while (cursor < operations.length) {
+          const op = operations[cursor++];
+          const sourceIds = repairedRegionIdSet.has(op.regionId)
+            ? ["custom-regions-source", "custom-regions-repair-source"]
+            : ["custom-regions-source"];
+          if (op.kind === "set") {
+            for (const source of sourceIds) {
+              mapInstance.setFeatureState(
+                { source, id: op.regionId },
+                { fillColor: op.fillColor },
+              );
+            }
+            appliedAfterSync.set(op.regionId, op.fillColor);
+            setCount += 1;
+          } else {
+            for (const source of sourceIds) {
+              mapInstance.removeFeatureState?.(
+                { source, id: op.regionId },
+                "fillColor",
+              );
+            }
+            appliedAfterSync.delete(op.regionId);
+            removeCount += 1;
+          }
+          processed += 1;
+          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+          if (processed >= 160 || now - sliceStartedAt >= 4) break;
+        }
+
+        if (cursor < operations.length) {
+          workFrame = requestAnimationFrame(applySlice);
+          return;
+        }
+
+        appliedCustomFillStateRef.current = appliedAfterSync;
+        const syncElapsed = (typeof performance !== "undefined" ? performance.now() : Date.now()) - syncStartedAt;
+      };
+
+      // Normal political changes are small enough to remain same-frame. Huge
+      // scenario/bootstrap batches are sliced so they never monopolize input.
+      if (operations.length <= 256) applySlice();
+      else workFrame = requestAnimationFrame(applySlice);
     };
 
-    apply();
+    begin();
     return () => {
       cancelled = true;
-      if (frame) cancelAnimationFrame(frame);
+      if (retryFrame) cancelAnimationFrame(retryFrame);
+      if (workFrame) cancelAnimationFrame(workFrame);
     };
-  }, [customFlag, map, ownerColorCss, regionOwnershipOverrides]);
+  }, [
+    customFlag,
+    map,
+    ownerColorCss,
+    ownershipPresentationHoldEpoch,
+    regionOwnershipOverrides,
+    repairedRegionIdSet,
+    repairedRegionIds,
+  ]);
+
+  // Presentation-only legal sovereignty transition. Canonical ownership advances
+  // immediately in world state, but the MAP intentionally keeps the previous
+  // accepted colour visible until transition geometry is ready. Transition
+  // geometry arrives early, before expensive boundary/PTR derivation, so the
+  // frontier-distance flood starts promptly. New borders/labels may finish during the transition or
+  // shortly after it, but they never publish before the ownership animation. The
+  // previous directional strip sweep remains mounted as a fail-soft fallback.
+  useEffect(() => {
+    const sweep = ownershipSweepRef.current;
+    if (sweep.active) return;
+    const queued = ownershipTransitionQueueRef.current.shift();
+    if (!queued) return;
+
+    const transitionData = queued.transitionData ?? EMPTY_FEATURE_COLLECTION;
+    const mapInstance = map?.getMap ? map.getMap() : map;
+
+    // If presentation animation is unavailable, fail soft to the canonical
+    // target colour immediately, but do NOT pretend the slower border/PTR
+    // derivation is already ready. It will publish when its accepted result
+    // actually arrives.
+    if (!transitionData?.features?.length || !customActive || !mapInstance?.setFeatureState) {
+      queued.animationDone = true;
+      if (queued.cartographyAccepted && queued.cartographyResult) {
+        publishOwnershipPresentation(queued);
+        ownershipTransitionByRevisionRef.current.delete(Number(queued.revision));
+      } else {
+        releaseOwnershipPresentation(queued.changedRegionIds ?? []);
+      }
+      setOwnershipTransitionQueueEpoch((epoch) => epoch + 1);
+      return;
+    }
+
+    const reducedMotion = typeof window !== "undefined"
+      && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (reducedMotion) {
+      queued.animationDone = true;
+      if (queued.cartographyAccepted && queued.cartographyResult) {
+        publishOwnershipPresentation(queued);
+        ownershipTransitionByRevisionRef.current.delete(Number(queued.revision));
+      } else {
+        releaseOwnershipPresentation(queued.changedRegionIds ?? []);
+      }
+      setOwnershipTransitionQueueEpoch((epoch) => epoch + 1);
+      return;
+    }
+
+    sweep.active = true;
+    sweep.token += 1;
+    const token = sweep.token;
+    let committed = false;
+    const enrichedFeatures = transitionData.features.map((feature) => ({
+      ...feature,
+      properties: {
+        ...(feature.properties ?? {}),
+        fromColor: ownerColorCss(feature?.properties?.fromOwner),
+        toColor: ownerColorCss(feature?.properties?.toOwner),
+      },
+    }));
+    sweep.regionIds = [...new Set(enrichedFeatures
+      .map((feature) => String(feature?.properties?.id ?? feature?.id ?? ""))
+      .filter(Boolean))];
+
+    const sourceIdsForRegion = (regionId) => (
+      repairedRegionIdSet.has(String(regionId))
+        ? ["custom-regions-source", "custom-regions-repair-source"]
+        : ["custom-regions-source"]
+    );
+
+    const setBaseHidden = (hidden) => {
+      for (const regionId of sweep.regionIds) {
+        for (const source of sourceIdsForRegion(regionId)) {
+          if (!mapInstance.getSource?.(source)) continue;
+          try {
+            mapInstance.setFeatureState(
+              { source, id: regionId },
+              { ownershipTransitionHidden: Boolean(hidden) },
+            );
+          } catch {}
+        }
+      }
+    };
+
+    const applyTargetBaseFill = () => {
+      // The overlay is already showing 100% target colour when this runs.
+      // Prime every underlying source with the same target colour BEFORE the
+      // overlay is removed, making the hand-off visually atomic.
+      for (const feature of enrichedFeatures) {
+        const regionId = String(feature?.properties?.id ?? feature?.id ?? "");
+        const toColor = String(feature?.properties?.toColor ?? "");
+        if (!regionId || !toColor) continue;
+
+        for (const source of sourceIdsForRegion(regionId)) {
+          if (!mapInstance.getSource?.(source)) continue;
+          try {
+            mapInstance.setFeatureState(
+              { source, id: regionId },
+              { fillColor: toColor },
+            );
+          } catch {}
+        }
+        appliedCustomFillStateRef.current.set(regionId, toColor);
+
+        if (mapInstance.getSource?.("regions-source")) {
+          try {
+            mapInstance.setFeatureState(
+              { source: "regions-source", sourceLayer: "regions", id: regionId },
+              { fillColor: toColor },
+            );
+            appliedTileFillStateRef.current.set(regionId, toColor);
+          } catch {}
+        }
+      }
+    };
+
+    const finish = () => {
+      if (token !== ownershipSweepRef.current.token || committed) return;
+      committed = true;
+      if (sweep.frame) cancelAnimationFrame(sweep.frame);
+      if (sweep.waitFrame) cancelAnimationFrame(sweep.waitFrame);
+      if (sweep.timeout) clearTimeout(sweep.timeout);
+      sweep.worker?.terminate?.();
+      sweep.worker = null;
+      sweep.frame = 0;
+      sweep.waitFrame = 0;
+      sweep.timeout = 0;
+
+      // Commit the colour transition immediately at 100%. The expensive
+      // border/PTR result is allowed to still be deriving in parallel; if it is
+      // ready, publish it under the full target-colour overlay before reveal.
+      // If not, reveal the target base fill now and let the accepted derived
+      // cartography catch up as soon as its worker result arrives.
+      applyTargetBaseFill();
+      queued.animationDone = true;
+      if (queued.cartographyAccepted && queued.cartographyResult) {
+        publishOwnershipPresentation(queued);
+        ownershipTransitionByRevisionRef.current.delete(Number(queued.revision));
+      } else {
+        releaseOwnershipPresentation(queued.changedRegionIds ?? []);
+        if (queued.cartographyDiscarded || queued.cartographyFailed) {
+          ownershipTransitionByRevisionRef.current.delete(Number(queued.revision));
+        }
+      }
+      setBaseHidden(false);
+      try {
+        if (mapInstance.getLayer?.("ownership-transition-sweep-fill")) {
+          mapInstance.setPaintProperty("ownership-transition-sweep-fill", "fill-opacity", 0);
+        }
+      } catch {}
+      try { sweep.floodLayer?.clearTransition?.(); } catch {}
+
+      sweep.regionIds = [];
+      sweep.active = false;
+      setOwnershipTransitionSlices(EMPTY_FEATURE_COLLECTION);
+      setOwnershipTransitionQueueEpoch((epoch) => epoch + 1);
+      mapInstance.triggerRepaint?.();
+    };
+
+    let worker;
+    try {
+      worker = new Worker(new URL("./vnext/ownershipTransitionWorker.js", import.meta.url), { type: "module" });
+    } catch (error) {
+      console.warn("Ownership transition worker unavailable; applying canonical presentation immediately:", error);
+      finish();
+      return;
+    }
+    sweep.worker = worker;
+    const requestId = `${Date.now()}:${token}`;
+    sweep.timeout = setTimeout(() => {
+      if (token !== ownershipSweepRef.current.token) return;
+      console.warn(
+        `Ownership flood preparation exceeded ${OWNERSHIP_FLOOD_PREP_BUDGET_MS} ms; applying canonical presentation immediately.`,
+      );
+      finish();
+    }, OWNERSHIP_FLOOD_PREP_BUDGET_MS);
+
+    let fallbackSweepRequested = false;
+    const requestLegacySweep = (reason = "") => {
+      if (fallbackSweepRequested || token !== ownershipSweepRef.current.token) return;
+      fallbackSweepRequested = true;
+      if (sweep.timeout) clearTimeout(sweep.timeout);
+      sweep.timeout = setTimeout(() => {
+        if (token !== ownershipSweepRef.current.token) return;
+        console.warn("Ownership sweep fallback timed out; applying canonical presentation immediately.");
+        finish();
+      }, 900);
+      if (reason) console.warn("Ownership flood unavailable; using directional sweep fallback:", reason);
+      worker.postMessage({
+        type: "slice-ownership-transition",
+        requestId,
+        features: enrichedFeatures,
+      });
+    };
+
+    worker.onmessage = ({ data }) => {
+      if (token !== ownershipSweepRef.current.token || data?.requestId !== requestId) return;
+      if (data?.type === "ownership-transition-error") {
+        if (!fallbackSweepRequested) {
+          requestLegacySweep(data.error);
+          return;
+        }
+        console.warn("Ownership transition geometry failed; applying canonical presentation immediately:", data.error);
+        finish();
+        return;
+      }
+
+      if (data?.type === "ownership-transition-flood") {
+        const fields = Array.isArray(data.fields) ? data.fields : [];
+        if (!fields.length) {
+          requestLegacySweep("flood worker produced no fields");
+          return;
+        }
+        if (fields.length > MAX_ACTIVE_OWNERSHIP_FLOOD_FIELDS) {
+          requestLegacySweep(`flood field budget exceeded (${fields.length} > ${MAX_ACTIVE_OWNERSHIP_FLOOD_FIELDS})`);
+          return;
+        }
+
+        let floodLayer = sweep.floodLayer;
+        try {
+          if (!mapInstance.getLayer?.(OWNERSHIP_FLOOD_LAYER_ID)) {
+            floodLayer = createOwnershipFloodCustomLayer({
+              onError: (error) => console.warn("Ownership flood custom layer failed:", error),
+            });
+            const beforeId = mapInstance.getLayer?.("polity-boundaries-shadow")
+              ? "polity-boundaries-shadow"
+              : undefined;
+            mapInstance.addLayer(floodLayer, beforeId);
+            sweep.floodLayer = floodLayer;
+          }
+          enforceMapLayerOrder(mapInstance);
+        } catch (error) {
+          requestLegacySweep(error);
+          return;
+        }
+
+        if (!floodLayer?._program || typeof floodLayer.startTransition !== "function") {
+          requestLegacySweep("custom WebGL flood layer did not initialize");
+          return;
+        }
+
+        if (sweep.timeout) clearTimeout(sweep.timeout);
+        sweep.timeout = 0;
+        globalThis.__OH_MAP_SOURCE_PERF__ = {
+          ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
+          ownershipTransitionFloodMs: Number(data.elapsedMs ?? 0),
+          ownershipTransitionRegionCount: sweep.regionIds.length,
+          ownershipTransitionFloodFieldCount: fields.length,
+          ownershipTransitionDirectionBasis: enrichedFeatures.map(
+            (feature) => feature?.properties?.sweepBasis ?? "",
+          ),
+        };
+
+        floodLayer.startTransition({ fields }, {
+          onReady: () => {
+            if (token !== ownershipSweepRef.current.token) return;
+            // Keep the worker alive until the first flood texture has actually
+            // reached the GPU. If texture/materialization fails before this
+            // point, the same worker can still build the known-good strip sweep.
+            worker.terminate();
+            if (sweep.worker === worker) sweep.worker = null;
+            // The custom layer now contains a complete OLD-colour mask. Only
+            // after that first GPU draw do we hide the base political region,
+            // so canonical state can never flash through ahead of the flood.
+            setBaseHidden(true);
+            mapInstance.triggerRepaint?.();
+          },
+          onComplete: () => {
+            if (token !== ownershipSweepRef.current.token) return;
+            finish();
+          },
+          onError: (error) => {
+            if (token !== ownershipSweepRef.current.token) return;
+            try { floodLayer.clearTransition?.(); } catch {}
+            if (sweep.worker === worker && !fallbackSweepRequested) {
+              requestLegacySweep(error);
+              return;
+            }
+            console.warn("Ownership flood render failed after start; applying canonical presentation immediately:", error);
+            finish();
+          },
+        });
+        mapInstance.triggerRepaint?.();
+        return;
+      }
+
+      if (data?.type !== "ownership-transition-slices") return;
+      if (sweep.timeout) clearTimeout(sweep.timeout);
+      sweep.timeout = 0;
+      worker.terminate();
+      sweep.worker = null;
+      const sliceData = data.data?.features?.length ? data.data : EMPTY_FEATURE_COLLECTION;
+      if (!sliceData.features.length) {
+        finish();
+        return;
+      }
+      setOwnershipTransitionSlices(sliceData);
+      globalThis.__OH_MAP_SOURCE_PERF__ = {
+        ...(globalThis.__OH_MAP_SOURCE_PERF__ ?? {}),
+        ownershipTransitionSliceMs: Number(data.elapsedMs ?? 0),
+        ownershipTransitionRegionCount: sweep.regionIds.length,
+        ownershipTransitionSliceCount: sliceData.features.length,
+        ownershipTransitionDirectionBasis: enrichedFeatures.map(
+          (feature) => feature?.properties?.sweepBasis ?? "",
+        ),
+      };
+
+      const waitForLayer = () => {
+        if (token !== ownershipSweepRef.current.token) return;
+        const sourceReady = mapInstance.getSource?.("ownership-transition-sweep-source");
+        const layerReady = mapInstance.getLayer?.("ownership-transition-sweep-fill");
+        if (!sourceReady || !layerReady) {
+          sweep.waitFrame = requestAnimationFrame(waitForLayer);
+          return;
+        }
+
+        try {
+          // React owns the resting empty source, but the animation is imperative.
+          // Push this exact slice payload BEFORE hiding the previous base colour,
+          // so worker/source scheduling can never expose the target state early.
+          sourceReady.setData?.(sliceData);
+          enforceMapLayerOrder(mapInstance);
+          mapInstance.setPaintProperty("ownership-transition-sweep-fill", "fill-opacity", PAX_POLITICAL_FILL_OPACITY);
+          mapInstance.setPaintProperty(
+            "ownership-transition-sweep-fill",
+            "fill-color",
+            ["get", "fromColor"],
+          );
+        } catch {
+          finish();
+          return;
+        }
+
+        // Only now that an exact old-colour overlay exists do we hide the base.
+        // Until this line the player has continued to see the untouched OLD
+        // political presentation even though canonical state already advanced.
+        setBaseHidden(true);
+        mapInstance.triggerRepaint?.();
+
+        const startedAt = performance.now();
+        const durationMs = 680;
+        let lastStep = -1;
+        const animate = (now) => {
+          if (token !== ownershipSweepRef.current.token) return;
+          const progress = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
+          const step = Math.min(24, Math.floor(progress * 24));
+          if (step !== lastStep) {
+            lastStep = step;
+            const threshold = step / 24;
+            try {
+              mapInstance.setPaintProperty(
+                "ownership-transition-sweep-fill",
+                "fill-color",
+                [
+                  "case",
+                  ["<=", ["get", "transitionT"], threshold],
+                  ["get", "toColor"],
+                  ["get", "fromColor"],
+                ],
+              );
+            } catch {
+              finish();
+              return;
+            }
+          }
+          if (progress >= 1) {
+            finish();
+            return;
+          }
+          sweep.frame = requestAnimationFrame(animate);
+        };
+        sweep.frame = requestAnimationFrame(animate);
+      };
+      sweep.waitFrame = requestAnimationFrame(waitForLayer);
+    };
+    worker.onerror = (error) => {
+      if (token !== ownershipSweepRef.current.token) return;
+      console.warn("Ownership transition worker failed; applying canonical presentation immediately:", error);
+      finish();
+    };
+    const requestedMode = typeof window !== "undefined"
+      ? String(window.localStorage?.getItem?.("openhistoria:ownershipTransitionMode") ?? "").trim().toLowerCase()
+      : "";
+    const floodVertexCount = enrichedFeatures.reduce(
+      (sum, feature) => sum + ownershipTransitionVertexCount(feature?.geometry),
+      0,
+    );
+    const floodEligible = requestedMode !== "sweep"
+      && enrichedFeatures.length <= MAX_ACTIVE_OWNERSHIP_FLOOD_FIELDS
+      && floodVertexCount <= OWNERSHIP_FLOOD_MAX_VERTEX_COUNT;
+
+    if (!floodEligible && requestedMode !== "sweep") {
+      // Do not spend hundreds of milliseconds proving that a cosmetic flood is
+      // too large. The already-live directional sweep is our bounded fallback.
+      requestLegacySweep(
+        enrichedFeatures.length > MAX_ACTIVE_OWNERSHIP_FLOOD_FIELDS
+          ? `region budget exceeded (${enrichedFeatures.length} > ${MAX_ACTIVE_OWNERSHIP_FLOOD_FIELDS})`
+          : `geometry budget exceeded (${floodVertexCount} > ${OWNERSHIP_FLOOD_MAX_VERTEX_COUNT} vertices)`,
+      );
+    } else {
+      worker.postMessage({
+        type: requestedMode === "sweep" ? "slice-ownership-transition" : "build-ownership-flood",
+        requestId,
+        features: enrichedFeatures,
+      });
+    }
+  }, [
+    customActive,
+    map,
+    ownerColorCss,
+    ownershipTransitionQueueEpoch,
+    publishOwnershipPresentation,
+    repairedRegionIdSet,
+  ]);
+
+  useEffect(() => () => {
+    const sweep = ownershipSweepRef.current;
+    sweep.token += 1;
+    sweep.worker?.terminate?.();
+    if (sweep.frame) cancelAnimationFrame(sweep.frame);
+    if (sweep.waitFrame) cancelAnimationFrame(sweep.waitFrame);
+    if (sweep.timeout) clearTimeout(sweep.timeout);
+    try { sweep.floodLayer?.clearTransition?.(); } catch {}
+    const mapInstance = map?.getMap ? map.getMap() : map;
+    try {
+      if (mapInstance?.getLayer?.(OWNERSHIP_FLOOD_LAYER_ID)) mapInstance.removeLayer(OWNERSHIP_FLOOD_LAYER_ID);
+    } catch {}
+    sweep.floodLayer = null;
+    sweep.active = false;
+    ownershipTransitionQueueRef.current = [];
+    ownershipTransitionByRevisionRef.current.clear();
+  }, [map]);
+
 
   // Detailed PMTiles previously evaluated a region-id match table containing
   // thousands of entries on every rendered frame. Store the resolved colour on
   // each promoted GID_1 feature instead, and only touch feature-state when the
   // canonical ownership colour actually changes.
-  const appliedTileFillStateRef = useRef(new Map());
+  const authoredRegionIds = useMemo(
+    () => new Set(
+      (customRegionMeta.records ?? [])
+        .filter((record) => record?.authored === true)
+        .map((record) => String(record?.id ?? ""))
+        .filter(Boolean),
+    ),
+    [customRegionMeta.records],
+  );
   useEffect(() => {
     const mapInstance = map?.getMap ? map.getMap() : map;
     if (!shouldMountStockRegions || !mapInstance?.setFeatureState) return undefined;
@@ -1424,26 +2845,32 @@ const WorldMap = ({ isGlobe = false }) => {
       const next = new Map();
 
       for (const [regionId, owner] of ownerByRegionId) {
-        if (!regionId.includes(".") || edited.has(regionId)) continue;
+        // Unknown-to-the-seed override ids are intentionally attempted here: in
+        // a hybrid world they may be legitimate stock PMTiles regions omitted
+        // from regions.geojson. Setting feature-state for a non-existent tile id
+        // is harmless; dropping a real stock id recreates the historical hole.
+        if (authoredRegionIds.has(regionId) || edited.has(regionId)) continue;
         next.set(regionId, owner ? ownerColorCss(owner) : NEUTRAL_LAND_COLOR);
       }
 
       const applied = appliedTileFillStateRef.current;
+      const held = ownershipPresentationHoldCountsRef.current;
       const operations = [];
 
       for (const [regionId, fillColor] of next) {
-        if (applied.get(regionId) === fillColor) continue;
+        if (held.has(regionId) || applied.get(regionId) === fillColor) continue;
         operations.push({ kind: "set", regionId, fillColor });
       }
 
       for (const regionId of applied.keys()) {
-        if (next.has(regionId)) continue;
+        if (held.has(regionId) || next.has(regionId)) continue;
         operations.push({ kind: "remove", regionId });
       }
 
       // Small ownership changes should remain immediate. Initial scenario load can
       // involve several thousand feature-state writes; split that work into tiny
       // frame-budgeted slices so it cannot monopolize pointer input for seconds.
+      const appliedAfterSync = new Map(applied);
       let cursor = 0;
       const applySlice = () => {
         if (cancelled) return;
@@ -1457,11 +2884,13 @@ const WorldMap = ({ isGlobe = false }) => {
               { source: "regions-source", sourceLayer: "regions", id: op.regionId },
               { fillColor: op.fillColor },
             );
+            appliedAfterSync.set(op.regionId, op.fillColor);
           } else {
             mapInstance.removeFeatureState?.(
               { source: "regions-source", sourceLayer: "regions", id: op.regionId },
               "fillColor",
             );
+            appliedAfterSync.delete(op.regionId);
           }
 
           processed += 1;
@@ -1474,7 +2903,7 @@ const WorldMap = ({ isGlobe = false }) => {
           return;
         }
 
-        appliedTileFillStateRef.current = next;
+        appliedTileFillStateRef.current = appliedAfterSync;
         const applyElapsed = (typeof performance !== "undefined" ? performance.now() : Date.now()) - applyStartedAt;
         reportPerfOperation("map feature-state ownership sync", applyElapsed, { warnAt: PERF_MAP_WARN_MS });
         recordMapWork("Nations:feature-state-sync", applyElapsed, { operations: operations.length });
@@ -1494,26 +2923,28 @@ const WorldMap = ({ isGlobe = false }) => {
       if (retryFrame) cancelAnimationFrame(retryFrame);
       if (workFrame) cancelAnimationFrame(workFrame);
     };
-  }, [map, ownerByRegionId, editedStockIds, ownerColorCss, shouldMountStockRegions]);
+  }, [authoredRegionIds, map, ownerByRegionId, editedStockIds, ownerColorCss, ownershipPresentationHoldEpoch, shouldMountStockRegions]);
 
   const stockRegionsFillPaint = useMemo(
     () => customActive
       ? {
           "fill-color": DETAIL_FILL_COLOR,
-          "fill-opacity": hasPolitySurfaces ? 0 : TILE_FILL_FADE,
-          // Adjacent same-owner regions must read as one continuous polity.
-          // Their shared administrative edge is drawn separately at local zoom;
-          // antialiasing every polygon edge creates the hairline "pixel gaps"
-          // visible at continental scale even when the geometry is watertight.
-          "fill-antialias": true,
+          "fill-opacity": PAX_POLITICAL_FILL_OPACITY,
+          "fill-antialias": false,
           "fill-outline-color": DETAIL_FILL_COLOR,
         }
       : { "fill-opacity": 0 },
-    [customActive, hasPolitySurfaces],
+    [customActive],
   );
-  const customRegionFillOpacity = customFlag
-    ? hasPolitySurfaces ? 0 : PAX_POLITICAL_FILL_OPACITY
-    : 0;
+  const transitionAwareFillOpacity = useMemo(() => (customFlag
+    ? buildPaxPoliticalFillOpacity([
+        "boolean",
+        ["feature-state", "ownershipTransitionHidden"],
+        false,
+      ])
+    : 0), [customFlag]);
+  const customFarFillOpacity = transitionAwareFillOpacity;
+  const customAuthoredFillOpacity = transitionAwareFillOpacity;
 
   // Stock country fills/borders render ONLY once the world is known to be a
   // stock world. Gating on the customRegions FLAG (not customActive, which
@@ -1545,6 +2976,11 @@ const WorldMap = ({ isGlobe = false }) => {
     () => [labelFontOverride || labelFont || "Georgia", "Georgia", "Times New Roman", "Palatino Linotype", "serif"],
     [labelFont, labelFontOverride],
   );
+
+  // PTR-1.7 consumes every canonical worker polity record regardless of the
+  // scenario's naming scheme. It becomes authoritative only after its custom
+  // layer has mounted successfully; until then the legacy MapLibre labels are
+  // allowed to act as a last-resort initialization/failure fallback.
 
   const pointLabelLayerLayout = useMemo(() => ({
     "text-field": ["get", "name"],
@@ -1674,20 +3110,6 @@ const WorldMap = ({ isGlobe = false }) => {
       </Source>
       )}
 
-      <Source id="polity-surfaces-source" type="geojson" data={enrichedPolitySurfaceData} tolerance={0.25}>
-        <Layer
-          id="polity-surfaces-fill"
-          type="fill"
-          paint={{
-            "fill-color": CUSTOM_FILL_COLOR,
-            "fill-opacity": customActive && worldKnown
-              ? PAX_POLITICAL_FILL_OPACITY
-              : 0,
-            "fill-antialias": true,
-          }}
-        />
-      </Source>
-
       {/* Deliberately NOT gated on customFlag, unlike countries-source above —
           this source is not decoration on a custom map, it is the close-detail
           political layer for re-ownership scenarios. The seed GeoJSON now stays
@@ -1699,8 +3121,10 @@ const WorldMap = ({ isGlobe = false }) => {
         <Layer
           id="regions-fill"
           type="fill"
+          minzoom={STOCK_REGION_HANDOFF_ZOOM}
           source-layer="regions"
-          filter={editedStockIds.length ? ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]] : ["all"]}
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          filter={stockRegionsVisibilityFilter}
           paint={stockRegionsFillPaint}
         />
         {/* Striped fill for disputed GADM regions on the crisp tile geometry —
@@ -1709,16 +3133,17 @@ const WorldMap = ({ isGlobe = false }) => {
           <Layer
             id="regions-disputed"
             type="fill"
+            minzoom={STOCK_REGION_HANDOFF_ZOOM}
             source-layer="regions"
             beforeId={map?.getLayer?.("regions-outline") ? "regions-outline" : undefined}
-            filter={editedStockIds.length
-              ? ["all",
-                ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]],
-                ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]]]
-              : ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]]}
+            filter={[
+              "all",
+              ["in", ["get", "GID_1"], ["literal", disputedTileStops.filter((_, i) => i % 2 === 0)]],
+              stockRegionsVisibilityFilter,
+            ]}
             paint={{
               "fill-pattern": ["match", ["get", "GID_1"], ...disputedTileStops, disputedTileStops[1]],
-              "fill-opacity": customActive && worldKnown ? ["*", TILE_FILL_FADE, DISPUTED_STRIPE_OPACITY] : 0,
+              "fill-opacity": customActive && worldKnown ? DISPUTED_TILE_FILL_OPACITY : 0,
             }}
           />
         )}
@@ -1727,49 +3152,55 @@ const WorldMap = ({ isGlobe = false }) => {
           type="line"
           minzoom={PROVINCE_OUTLINE_MIN_ZOOM}
           source-layer="regions"
-          filter={editedStockIds.length ? ["!", ["in", ["get", "GID_1"], ["literal", editedStockIds]]] : ["all"]}
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          filter={stockRegionsVisibilityFilter}
           paint={regionsOutlinePaint}
         />
       </Source>
       )}
 
-      {/* Author-DRAWN geometry only (splits/new regions) — GADM regions paint the
-          stock tiles above for crisp borders at every zoom. Empty (and inert)
-          unless world.customRegions is set. */}
-      {/* tolerance 0: GeoJSON sources simplify geometry per zoom by default,
-          and each region simplifies independently — shared borders drift
-          apart at low zoom. Full resolution keeps them connected everywhere;
-          the seed geometry is coarse enough that this stays cheap. */}
+      {/* Canonical region ids/ownership remain authoritative. The worker may
+          publish a SMALL repair collection for only demonstrably malformed
+          features; those exact ids are filtered out here and drawn from the
+          repaired presentation source below. Clean scenario geometry is never
+          rebuilt or replaced. */}
       {customFlag && (
       <Source
         id="custom-regions-source"
         type="geojson"
         data={regionsGeojsonUrl}
         promoteId="id"
-        tolerance={0.6}
+        tolerance={0.001}
       >
-        {/* coarse seed geometry sits underneath the tile layer as a safety net.
-            black holes are a worse fallback than slightly soft borders. */}
+        {/* Clean canonical features render directly from the scenario source.
+            Only ids present in the targeted repair collection are filtered out
+            here; their presentation geometry is drawn by the tiny source below. */}
         <Layer
           id="custom-regions-fill-far"
           type="fill"
-          beforeId={shouldMountStockRegions ? "regions-fill" : undefined}
-          filter={STOCK_GEOMETRY_FILTER}
+          maxzoom={!regionTileHandoffSafe ? undefined : STOCK_REGION_HANDOFF_ZOOM}
+          beforeId={shouldMountStockRegions
+            ? "regions-fill"
+            : map?.getLayer?.("polity-boundaries-shadow")
+              ? "polity-boundaries-shadow"
+              : undefined}
+          filter={canonicalCustomFarStockGeometryFilter}
           paint={{
             "fill-color": CUSTOM_FILL_COLOR,
-            "fill-opacity": customRegionFillOpacity,
-            "fill-antialias": true,
+            "fill-opacity": customFarFillOpacity,
+            "fill-antialias": false,
             "fill-outline-color": CUSTOM_FILL_COLOR,
           }}
         />
         <Layer
           id="custom-regions-fill"
           type="fill"
-          filter={AUTHORED_GEOMETRY_FILTER}
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          filter={canonicalCustomAuthoritativeGeometryFilter}
           paint={{
             "fill-color": CUSTOM_FILL_COLOR,
-            "fill-opacity": customRegionFillOpacity,
-            "fill-antialias": true,
+            "fill-opacity": customAuthoredFillOpacity,
+            "fill-antialias": false,
             "fill-outline-color": CUSTOM_FILL_COLOR,
           }}
         />
@@ -1779,8 +3210,79 @@ const WorldMap = ({ isGlobe = false }) => {
           id="custom-regions-local-outline"
           type="line"
           minzoom={PROVINCE_OUTLINE_MIN_ZOOM}
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          filter={unrepairedRegionFilter}
           layout={{ "line-cap": "round", "line-join": "round" }}
           paint={buildProvinceOutlinePaint(customActive && worldKnown)}
+        />
+      </Source>
+      )}
+
+      {customFlag && activeRegionRenderRepair.data.features.length > 0 && (
+      <Source
+        id="custom-regions-repair-source"
+        type="geojson"
+        data={activeRegionRenderRepair.data}
+        promoteId="id"
+        tolerance={0.001}
+      >
+        <Layer
+          id="custom-regions-repair-fill-far"
+          type="fill"
+          maxzoom={!regionTileHandoffSafe ? undefined : STOCK_REGION_HANDOFF_ZOOM}
+          beforeId={shouldMountStockRegions
+            ? "regions-fill"
+            : map?.getLayer?.("polity-boundaries-shadow")
+              ? "polity-boundaries-shadow"
+              : undefined}
+          filter={customFarStockGeometryFilter}
+          paint={{
+            "fill-color": CUSTOM_FILL_COLOR,
+            "fill-opacity": customFarFillOpacity,
+            "fill-antialias": false,
+            "fill-outline-color": CUSTOM_FILL_COLOR,
+          }}
+        />
+        <Layer
+          id="custom-regions-repair-fill"
+          type="fill"
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          filter={customAuthoritativeGeometryFilter}
+          paint={{
+            "fill-color": CUSTOM_FILL_COLOR,
+            "fill-opacity": customAuthoredFillOpacity,
+            "fill-antialias": false,
+            "fill-outline-color": CUSTOM_FILL_COLOR,
+          }}
+        />
+        <Layer
+          id="custom-regions-repair-local-outline"
+          type="line"
+          minzoom={PROVINCE_OUTLINE_MIN_ZOOM}
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          layout={{ "line-cap": "round", "line-join": "round" }}
+          paint={buildProvinceOutlinePaint(customActive && worldKnown)}
+        />
+      </Source>
+      )}
+
+      {customFlag && (
+      <Source
+        id="ownership-transition-sweep-source"
+        type="geojson"
+        data={ownershipTransitionSlices}
+        promoteId="id"
+        tolerance={0.001}
+      >
+        <Layer
+          id="ownership-transition-sweep-fill"
+          type="fill"
+          beforeId={map?.getLayer?.("polity-boundaries-shadow") ? "polity-boundaries-shadow" : undefined}
+          paint={{
+            "fill-color": ["get", "fromColor"],
+            "fill-opacity": 0,
+            "fill-antialias": false,
+          }}
         />
       </Source>
       )}
@@ -1800,10 +3302,11 @@ const WorldMap = ({ isGlobe = false }) => {
         </Source>
       )}
 
-      <Source id="polity-boundaries-source" type="geojson" data={polityBoundaryData} tolerance={0.25}>
+      <Source id="polity-boundaries-source" type="geojson" data={EMPTY_FEATURE_COLLECTION} tolerance={0.25}>
         <Layer
           id="polity-boundaries-shadow"
           type="line"
+          filter={visibleBoundaryFilter}
           layout={{ "line-cap": "round", "line-join": "round" }}
           paint={{
             "line-color": "rgba(1, 4, 8, 0.72)",
@@ -1815,6 +3318,7 @@ const WorldMap = ({ isGlobe = false }) => {
         <Layer
           id="polity-boundaries"
           type="line"
+          filter={visibleBoundaryFilter}
           layout={{ "line-cap": "round", "line-join": "round" }}
           paint={{
             "line-color": "rgba(5, 8, 13, 0.96)",
@@ -1830,6 +3334,26 @@ const WorldMap = ({ isGlobe = false }) => {
           }}
         />
       </Source>
+
+      <PolityTextLayer
+        map={map}
+        enabled={Boolean(
+          ptr1PolityTextRequested
+          || (
+            ptr0PolityTextEnabled
+            && !ptr1PolityTextEnabled
+            && !isGlobe
+            && !mapDisplaySettings.hideCountryLabels
+          )
+        )}
+        mode={ptr1PolityTextEnabled ? "ptr1" : "ptr0"}
+        records={ptr1PolityTextEnabled ? ptr1PolityTextRecords : []}
+        fontFamilies={labelFontStack}
+        textColor={labelTextColor || "rgba(250, 249, 244, 0.995)"}
+        haloColor={labelHaloColor || "rgba(4, 6, 9, 0.96)"}
+        debugBaseline={ptr1PolityTextEnabled ? ptr1PolityTextDebugEnabled : true}
+        onStatusChange={setPtrPolityTextStatus}
+      />
 
       <Source id="country-curved-label-source" type="geojson" data={activeCurvedLabelData}>
         <Layer
