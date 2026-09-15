@@ -4,9 +4,8 @@
 // and 2.6M+ vertices, a hand-drawn one can be as large. Anything that only ever
 // shows the map zoomed OUT — the country picker, a preview card — must not
 // download or parse that. This is the Douglas-Peucker coarsening the map's far
-// tier uses (the legacy renderer's regionSeedCore.js carries the same code as
-// part of its frozen snapshot); here it also serves the desktop server and the
-// web store, which build a coarse copy of a scenario's regions on demand.
+// tier uses; here it also serves the desktop server and the web store, which
+// build a coarse copy of a scenario's regions on demand.
 // Dependency-free on purpose: it runs in Node, in a worker and in the page.
 //
 // It lives under server/ because that is what the desktop app packages: the

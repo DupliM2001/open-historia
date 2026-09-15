@@ -17,7 +17,7 @@ import {
   isBuiltinBasemapId,
   resolveBasemapId,
 } from "../../runtime/assets.js";
-import { MAP_SETTING_KEYS, useMapSetting, useMapSettingValue } from "../../runtime/mapSettings.js";
+import { MAP_SETTING_KEYS, useMapSettingValue } from "../../runtime/mapSettings.js";
 import { markMapIdle } from "../../runtime/mapReadiness.js";
 
 // The high-res source goes through the ohbase protocol so ESRI's "Map Data
@@ -493,12 +493,6 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
   // reversible. Empty — the default — leaves the scenario author's background
   // and basemap authoritative; only a real built-in id replaces them, so a
   // stray value left in localStorage by an older build changes nothing.
-  // Which renderer MapScene will mount. World needs it only to key the map
-  // instance: the two renderers register different sources and layers under
-  // the same ids, so a switch is a remount rather than a style diff under a
-  // mid-swap component tree. Settings announces the redraw (announceMapRerender)
-  // so the game loading screen covers it, as it does for the globe switch.
-  const legacyRenderer = useMapSetting(MAP_SETTING_KEYS.legacyMapRenderer);
   const basemapOverride = useMapSettingValue(MAP_SETTING_KEYS.basemapStyle);
   const validBasemapOverride = isBuiltinBasemapId(basemapOverride) ? basemapOverride : "";
   const useScenarioBackground = !validBasemapOverride;
@@ -638,7 +632,6 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
     projection,
     basemapId: effectiveBasemap,
     backgroundKind: effectiveBgDeclared ? effectiveCustomBg?.kind || "declared" : "builtin",
-    renderer: legacyRenderer ? "legacy" : "vnext",
   });
   // Remount once the remote vector style becomes ready. MapLibre style swaps
   // otherwise destroy/recreate style-owned layers under a live React Source

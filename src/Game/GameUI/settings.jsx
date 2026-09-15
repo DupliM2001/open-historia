@@ -57,7 +57,6 @@ import {
 } from "../../runtime/i18n.js";
 import { LABEL_FONT_SUGGESTIONS, MAP_SETTING_KEYS, applySaveBetaUnits, getMapSetting, isBetaUnits, resolveBetaUnits, setMapSetting, setMapSettingValue, useMapSettingValue } from "../../runtime/mapSettings.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { announceMapRerender } from "../../runtime/mapReadiness.js";
 import { readGameData, writeGameData } from "../../runtime/gameState.js";
 import { copyToClipboard } from "../../runtime/clipboard.js";
 import {
@@ -1789,17 +1788,6 @@ const SettingsWorkspace = ({
                     </div>
                     <Toggle label="Hide country labels" enabled={mapSettings.hideCountryLabels} onToggle={() => updateMapSetting("hideCountryLabels", MAP_SETTING_KEYS.hideCountryLabels, !mapSettings.hideCountryLabels)} />
                 </SettingsSection>
-                <SettingsSection title="Renderer" description="Which renderer draws the map. A rendering choice only: no world state, save data or geometry differs between them.">
-                    <ExperimentalPill />
-                    {/* Announced BEFORE the setting changes: World.jsx keys the map
-                        instance on the renderer, so the flip replaces the map and
-                        the game loading screen covers the redraw — the globe switch
-                        does the same (App.jsx). */}
-                    <Toggle label="Legacy map renderer" enabled={mapSettings.legacyMapRenderer} onToggle={() => { announceMapRerender(); updateMapSetting("legacyMapRenderer", MAP_SETTING_KEYS.legacyMapRenderer, !mapSettings.legacyMapRenderer); }} />
-                    <div style={settingsHelper}>
-                    Off (default): Map vNext — dissolved polity surfaces, stitched frontiers and curved polity labels. On: the renderer used before it, with per-region fills and its own country labels. Switching redraws the map.
-                    </div>
-                </SettingsSection>
                 <SettingsSection title="3D map" description="Globe and terrain rendering are presentation features; they do not change world state.">
                     <ExperimentalPill />
                     <Toggle label="3D Globe" enabled={isGlobeEnabled} onToggle={onToggleGlobe} />
@@ -2061,7 +2049,6 @@ const SettingsMenu = ({
 
     const [mapSettings, setMapSettingsState] = useState(() => ({
         hideCountryLabels: getMapSetting(MAP_SETTING_KEYS.hideCountryLabels),
-        legacyMapRenderer: getMapSetting(MAP_SETTING_KEYS.legacyMapRenderer),
         disableIdleRotation: getMapSetting(MAP_SETTING_KEYS.disableIdleRotation),
         disableEventCamera: getMapSetting(MAP_SETTING_KEYS.disableEventCamera),
         // Not getMapSetting: this one ships ON, and an absent key must read as

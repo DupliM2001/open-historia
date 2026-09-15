@@ -544,8 +544,8 @@ const settingsLines = (settings) => {
 // — so a Game that reaches a maintainer without a log still says what it was
 // played with. It is a RECORD, never applied: importing a game changes nobody's
 // settings, because these are device-wide and a stranger's are either
-// meaningless here or actively wrong (the legacy renderer is a workaround for
-// that player's GPU). The settings that should follow a game already do — they
+// meaningless here or actively wrong (a basemap chosen for that player's GPU,
+// say). The settings that should follow a game already do — they
 // live in its game.json.
 export const buildSettingsReport = async () => {
     const lines = settingsLines(await readSettingsSnapshot());

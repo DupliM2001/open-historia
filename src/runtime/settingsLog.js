@@ -63,7 +63,6 @@ registerSettingsSnapshot("Map", () => [
     ["3D Globe", onOff(storedBoolean("Globe", false))],
     ["3D Terrain", onOff(storedBoolean("Terrain", true))],
     ["Hide country labels", onOff(getMapSetting(MAP_SETTING_KEYS.hideCountryLabels))],
-    ["Legacy map renderer", onOff(getMapSetting(MAP_SETTING_KEYS.legacyMapRenderer))],
     ["Disable idle globe rotation", onOff(getMapSetting(MAP_SETTING_KEYS.disableIdleRotation))],
     ["Disable camera movement during events", onOff(getMapSetting(MAP_SETTING_KEYS.disableEventCamera))],
 ]);
