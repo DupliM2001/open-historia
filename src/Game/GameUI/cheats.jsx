@@ -20,7 +20,8 @@ import {
 } from "../../runtime/gameState.js";
 import COUNTRY_NAMES from "../../runtime/generated/countryNames.js";
 import { DIFFICULTY_LEVELS, normalizeDifficulty } from "../../runtime/difficulty.js";
-import { applyGameMasterPreview, previewGameMasterCommand } from "../AI/gameplay.js";
+import { applyGameMasterPreview, consolidateHistoryNow, previewGameMasterCommand } from "../AI/gameplay.js";
+import { HISTORY_CONSOLIDATION, countWords, describeHistoryConsolidation, planHistoryConsolidation } from "../AI/historyConsolidation.js";
 import { setRegionClickInterceptor } from "../Selection/Regions.jsx";
 import { compareGameDates, isGameDate } from "../../runtime/gameDates.js";
 
@@ -41,6 +42,7 @@ const TOOLS = [
     { id: "add-feature", title: "Add Map Feature", subtitle: "Place cities, HQs, landmarks, ports, and other world features", icon: "+" },
     { id: "clear-features", title: "Clear Map Features", subtitle: "Remove custom features or restore standard cities", icon: "⌫", badge: "Advanced" },
     { id: "events", title: "Event Editor", subtitle: "Search, create, and repair canonical timeline events", icon: "≡" },
+    { id: "history-document", title: "History Document", subtitle: "Read and edit the living history the AI is given in place of older events; the timeline keeps every event", icon: "≣" },
 ];
 
 const TOOL_GROUPS = [
@@ -49,7 +51,7 @@ const TOOL_GROUPS = [
         title: "GM & History",
         subtitle: "Intervene in the world, repair canon, or restore an earlier state.",
         icon: "✦",
-        tools: ["master-ai", "events", "roll-back-turn"],
+        tools: ["master-ai", "events", "history-document", "roll-back-turn"],
     },
     {
         id: "countries-territory",
@@ -348,7 +350,7 @@ const CheatsPanel = ({ open, onClose, onOpenForces }) => {
             position: "fixed",
             right: "0.65rem",
             top: PANEL_TOP,
-            width: ["edit-country", "events", "edit-feature", "add-feature"].includes(tool) ? "min(31rem, calc(100vw - 1rem))" : "min(25.5rem, calc(100vw - 1rem))",
+            width: ["edit-country", "events", "history-document", "edit-feature", "add-feature"].includes(tool) ? "min(31rem, calc(100vw - 1rem))" : "min(25.5rem, calc(100vw - 1rem))",
             zIndex: 10045,
         }}
         >
@@ -1966,6 +1968,28 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
         return data;
     };
 
+    // History Document: the living document, the ledger of passes behind it, and
+    // where the next pass stands. Every read is forced: this tool exists to show
+    // what the save says right now.
+    const loadHistoryDocument = async () => {
+        const [world, events, chats, actions] = await Promise.all([
+            readWorldState({ force: true }),
+            readEventsState({ force: true }),
+            readJson(JSON_URLS.chat, { defaultValue: [], force: true }).catch(() => []),
+            readJson(JSON_URLS.actions, { defaultValue: [], force: true }).catch(() => []),
+        ]);
+        const bundle = { world, events, chats, actions, game };
+        const data = {
+            document: world?.historyDocument ?? null,
+            passes: Array.isArray(world?.consolidatedHistory) ? world.consolidatedHistory : [],
+            status: { ...describeHistoryConsolidation(bundle), canFoldNow: planHistoryConsolidation(bundle, { force: true }).due },
+            totalEvents: Array.isArray(events) ? events.length : 0,
+        };
+        setItems(data);
+        setFields({ document: data.document?.text ?? "" });
+        return data;
+    };
+
     const saveScenarioCities = async (features) => {
         await writeJson(JSON_URLS.citiesGeojson, { type: "FeatureCollection", features }, { pretty: true });
         notifyCitiesUpdated();
@@ -2012,6 +2036,9 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
         }
         if (tool === "edit-feature" || tool === "add-feature" || tool === "clear-features") {
             loadMapFeatureData().catch(() => setItems({ customCities: false, markers: [], cities: [] }));
+        }
+        if (tool === "history-document") {
+            loadHistoryDocument().catch((error) => setItems({ document: null, passes: [], status: { text: `Could not read the campaign: ${error.message}`, canFoldNow: false }, totalEvents: 0 }));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tool]);
@@ -2600,6 +2627,146 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                     </div>
                 )}
                 {statusLine}
+            </div>
+            </>
+        );
+    }
+
+    if (tool === "history-document") {
+        const data = items;
+        const doc = data?.document ?? null;
+        const passes = data?.passes ?? [];
+        const savedText = doc?.text ?? "";
+        const draft = typeof fields.document === "string" ? fields.document : savedText;
+        const dirty = draft !== savedText;
+        const draftWords = countWords(draft);
+        const confirmingReset = editingId === "reset-history";
+        // Reads the save again before writing, so a hand edit never clobbers a
+        // document a turn rewrote while the panel was open.
+        const saveDocument = async () => {
+            const world = await readWorldState({ force: true });
+            const current = world?.historyDocument ?? null;
+            const text = draft.trim();
+            const next = text
+                ? {
+                    text,
+                    revision: (current?.revision ?? 0) + 1,
+                    updatedAt: new Date().toISOString(),
+                    source: "manual",
+                    throughDate: current?.throughDate ?? "",
+                    throughEventId: current?.throughEventId ?? "",
+                    throughRound: current?.throughRound ?? 0,
+                }
+                : null;
+            await writeWorldState({ ...world, historyDocument: next });
+            await loadHistoryDocument();
+            return next
+                ? `History document saved (revision ${next.revision}, ${countWords(text)} words). The AI reads it from its next call.`
+                : "History document cleared. The AI is shown the pass summaries below until the next pass writes a new document.";
+        };
+        const resetCompression = async () => {
+            const world = await readWorldState({ force: true });
+            await writeWorldState({ ...world, historyDocument: null, consolidatedHistory: [] });
+            setEditingId(null);
+            await loadHistoryDocument();
+            return "Compression reset: the document and its pass ledger are gone. Every event is still in the timeline, and the AI is shown all of them in full until the next pass.";
+        };
+        return (
+            <>
+            {header(meta.title, meta.subtitle)}
+            <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.76rem", marginBottom: "0.5rem" }}>
+            Every event stays in the timeline in full. When enough have piled up, a pass folds the older ones into this document — the first pass writes it, every later one rewrites it with the new period added and unimportant older material condensed to stay near {HISTORY_CONSOLIDATION.documentWordBudget} words — and the AI is shown the document in their place, plus the newest {HISTORY_CONSOLIDATION.retainEvents} events one by one.
+            </div>
+            {data === null && (
+                <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.76rem" }}>Reading the campaign…</div>
+            )}
+            {data !== null && (
+                <div style={{ ...editorFieldStyle, color: "rgba(255,255,255,0.72)", fontSize: "0.74rem", lineHeight: 1.45, marginBottom: "0.5rem" }}>
+                <div>{data.totalEvents} events in the timeline. {data.status.text}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginTop: "0.45rem" }}>
+                <button
+                type="button"
+                disabled={busy || !data.status.canFoldNow}
+                title={data.status.canFoldNow ? "Runs the AI consolidator on the older events now" : "Only the retained tail is waiting; there is nothing older to fold"}
+                style={{ ...primaryButtonStyle, opacity: busy || !data.status.canFoldNow ? 0.55 : 1, padding: "0.3rem 0.6rem" }}
+                onClick={() => runBusy(async () => {
+                    const result = await consolidateHistoryNow();
+                    await loadHistoryDocument();
+                    return result.consolidated
+                        ? `Folded ${result.events} event${result.events === 1 ? "" : "s"} and ${result.chats} chat${result.chats === 1 ? "" : "s"}; the document is now revision ${result.documentRevision}, ${result.documentWords} words. The newest ${result.retained} events stay in full.`
+                        : "Nothing was folded: only the retained tail is waiting, or the consolidator came back empty.";
+                })}
+                >
+                Fold the older events now
+                </button>
+                {confirmingReset ? (
+                    <>
+                    <button type="button" disabled={busy} style={{ ...primaryButtonStyle, padding: "0.3rem 0.6rem" }} onClick={() => runBusy(resetCompression)}>Confirm reset</button>
+                    <button type="button" disabled={busy} style={{ ...buttonStyle, padding: "0.3rem 0.6rem" }} onClick={() => setEditingId(null)}>Keep</button>
+                    </>
+                ) : (
+                    <button
+                    type="button"
+                    disabled={busy || (!doc && passes.length === 0)}
+                    title="Deletes the document and the pass ledger; every event is shown to the AI in full again until the next pass"
+                    style={{ ...buttonStyle, opacity: busy || (!doc && passes.length === 0) ? 0.55 : 1, padding: "0.3rem 0.6rem" }}
+                    onClick={() => setEditingId("reset-history")}
+                    >
+                    Reset compression
+                    </button>
+                )}
+                </div>
+                </div>
+            )}
+            {data !== null && (
+                <>
+                <div style={editorSectionLabelStyle}>The document{doc || draft ? ` · ${draftWords} words${dirty ? " · unsaved changes" : ""}` : ""}</div>
+                <textarea
+                value={draft}
+                onChange={(event) => setFields({ document: event.target.value })}
+                rows={16}
+                placeholder="No history document yet. The first pass writes it — or type one here and save it."
+                style={{ ...inputStyle, fontFamily: "inherit", lineHeight: 1.45, resize: "vertical", width: "100%" }}
+                />
+                <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.4rem" }}>
+                <button
+                type="button"
+                disabled={busy || !dirty}
+                style={{ ...primaryButtonStyle, opacity: busy || !dirty ? 0.55 : 1, padding: "0.3rem 0.6rem" }}
+                onClick={() => runBusy(saveDocument)}
+                >
+                Save document
+                </button>
+                <button type="button" disabled={busy || !dirty} style={{ ...buttonStyle, opacity: busy || !dirty ? 0.55 : 1, padding: "0.3rem 0.6rem" }} onClick={() => setFields({ document: savedText })}>Revert</button>
+                </div>
+                </>
+            )}
+            {passes.length > 0 && (
+                <details style={{ marginTop: "0.6rem" }}>
+                <summary style={{ cursor: "pointer", color: "rgba(255,255,255,0.6)", fontSize: "0.74rem" }}>{passes.length} pass{passes.length === 1 ? "" : "es"} so far — what each one folded</summary>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginTop: "0.4rem", maxHeight: "18rem", overflowY: "auto" }}>
+                {passes.map((entry, index) => {
+                    const summary = String(entry?.summary ?? "");
+                    const metaLine = [
+                        `Pass ${index + 1}`,
+                        entry?.throughRound ? `through round ${entry.throughRound}` : "",
+                        entry?.throughDate ? `to ${entry.throughDate}` : "",
+                        entry?.chatIds?.length ? `${entry.chatIds.length} chat${entry.chatIds.length === 1 ? "" : "s"}` : "",
+                        entry?.actionIds?.length ? `${entry.actionIds.length} order${entry.actionIds.length === 1 ? "" : "s"}` : "",
+                        entry?.source === "fallback" ? "written without the AI" : "",
+                    ].filter(Boolean).join(" · ");
+                    return (
+                        <div key={`${entry?.throughEventId || "pass"}-${index}`} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "0.5rem 0.6rem" }}>
+                        <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.68rem", marginBottom: "0.3rem" }}>{metaLine}</div>
+                        <div style={{ color: "rgba(255,255,255,0.78)", fontSize: "0.74rem", lineHeight: 1.45, maxHeight: "8rem", overflowY: "auto", whiteSpace: "pre-wrap" }}>{summary}</div>
+                        </div>
+                    );
+                })}
+                </div>
+                </details>
+            )}
+            {statusLine}
             </div>
             </>
         );

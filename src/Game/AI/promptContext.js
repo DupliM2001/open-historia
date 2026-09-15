@@ -18,7 +18,7 @@ import { filterChatsVisibleTo } from "./chatVisibility.js";
 import { buildForcePostureText } from "./forcePosture.js";
 import { STALE_ROUNDS, describeTimeline, deriveProjectFlags, isPlayerProject } from "../../runtime/projects.js";
 import { buildTerritoryIndex } from "./territoryOutlines.js";
-import { formatGameDateReadable } from "../../runtime/gameDates.js";
+import { compareGameDates, formatGameDateReadable } from "../../runtime/gameDates.js";
 
 const normalizeString = (value) => String(value ?? "").trim();
 const normalizeArray = (value) => (Array.isArray(value) ? value : []);
@@ -110,14 +110,23 @@ export const resolveHelperValues = (
   return resolved;
 };
 
+// The events a task is shown one by one: everything after the last summary's
+// boundary event. The log itself is never trimmed by consolidation — a summary
+// only moves this line.
 export const getUnconsolidatedEvents = (events, world) => {
   const normalizedEvents = normalizeEvents(events);
-  const history = normalizeWorldState(world).consolidatedHistory;
-  const throughEventId = history.at(-1)?.throughEventId;
+  const last = normalizeWorldState(world).consolidatedHistory.at(-1);
+  const throughEventId = last?.throughEventId;
   if (!throughEventId) return normalizedEvents;
 
   const boundaryIndex = normalizedEvents.findIndex((event) => event.id === throughEventId);
-  return boundaryIndex >= 0 ? normalizedEvents.slice(boundaryIndex + 1) : normalizedEvents;
+  if (boundaryIndex >= 0) return normalizedEvents.slice(boundaryIndex + 1);
+  // The boundary event is gone (deleted in the Event Editor). Showing the whole
+  // log again would put the summarised past back in every prompt and have the
+  // next pass fold it a second time; the summary's own date is the next best line.
+  const throughDate = normalizeString(last?.throughDate);
+  if (!throughDate) return normalizedEvents;
+  return normalizedEvents.filter((event) => !event.date || compareGameDates(event.date, throughDate) > 0);
 };
 
 // --- Context ranking (ported from the abdulrahman-2005 fork) ------------------
@@ -363,6 +372,34 @@ const joinConsolidatedCoverageWithinCharBudget = (rows, { maxChars = 0 } = {}) =
   return joinCoverageSelectedHistory(normalizedRows, selected);
 };
 
+// The living history document (historyConsolidation.js) is one text, so a task
+// whose budget is smaller than the document loses the document's OLDEST
+// paragraphs — never the whole thing, never a paragraph cut mid-sentence.
+const fitHistoryDocumentWithinCharBudget = (document, { maxChars = 0 } = {}) => {
+  const heading = `History document (maintained across consolidations${document.throughDate ? `, through ${document.throughDate}` : ""}):`;
+  const paragraphs = String(document.text ?? "")
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const budget = Math.max(0, Math.trunc(Number(maxChars) || 0));
+  const full = [heading, ...paragraphs].join("\n\n");
+  if (!budget || full.length <= budget) return full;
+
+  const kept = [];
+  let used = heading.length;
+  for (const paragraph of [...paragraphs].reverse()) {
+    const next = paragraph.length + 2;
+    if (kept.length > 0 && used + next > budget) break;
+    kept.unshift(paragraph);
+    used += next;
+  }
+  const omitted = paragraphs.length - kept.length;
+  const marker = omitted > 0
+    ? [`[${omitted} older paragraph(s) of the history document omitted from this task context; the full document remains in the save.]`]
+    : [];
+  return [heading, ...marker, ...kept].join("\n\n");
+};
+
 export const buildConsolidatedHistoryText = (
   world,
   {
@@ -370,7 +407,13 @@ export const buildConsolidatedHistoryText = (
     selection = "tail",
   } = {},
 ) => {
-  const entries = normalizeWorldState(world).consolidatedHistory;
+  const normalizedWorld = normalizeWorldState(world);
+  // Once the document exists it IS the older history; the pass ledger behind
+  // it is bookkeeping, and rendering both would tell the story twice.
+  if (normalizedWorld.historyDocument?.text) {
+    return fitHistoryDocumentWithinCharBudget(normalizedWorld.historyDocument, { maxChars });
+  }
+  const entries = normalizedWorld.consolidatedHistory;
   if (entries.length === 0) return "No earlier campaign history has been consolidated yet.";
 
   const rendered = entries.map(renderConsolidatedHistoryEntry);

@@ -31,6 +31,9 @@ export const WORLD_DEFAULTS = {
   actionSuggestions: [],
   activeCatalyst: null,
   consolidatedHistory: [],
+  // The living history document the AI is shown in place of the folded events
+  // (AI/historyConsolidation.js); null until the first consolidation pass.
+  historyDocument: null,
   // Per-polity international reputation (0-100), evolved by the AI each turn via
   // polityChanges and fed back into prompts. Authoritative, unlike the on-demand
   // stat sheet it was first read from.
@@ -2886,6 +2889,24 @@ const normalizeActionSuggestions = (value) =>
     };
   }).filter(Boolean);
 
+// The living history document (AI/historyConsolidation.js). The text is the
+// point; the rest records which pass wrote it and how far it reaches.
+const normalizeHistoryDocument = (value) => {
+  if (!value || typeof value !== "object") return null;
+  const text = normalizeTextLike(value.text);
+  if (!text) return null;
+  const throughRound = Math.trunc(Number(value.throughRound) || 0);
+  return {
+    text,
+    revision: Math.max(1, Math.trunc(Number(value.revision) || 1)),
+    updatedAt: normalizeOptionalString(value.updatedAt) || new Date().toISOString(),
+    source: normalizeOptionalString(value.source) || "ai",
+    throughDate: normalizeOptionalString(value.throughDate),
+    throughEventId: normalizeOptionalString(value.throughEventId),
+    throughRound: throughRound > 0 ? throughRound : 0,
+  };
+};
+
 const normalizeConsolidatedHistory = (value) => normalizeArray(value)
   .map((entry) => {
     if (!entry || typeof entry !== "object") return null;
@@ -3289,6 +3310,7 @@ export const normalizeWorldState = (world) => {
     actionSuggestions: normalizeActionSuggestions(nextWorld.actionSuggestions),
     activeCatalyst: normalizeCatalyst(nextWorld.activeCatalyst),
     consolidatedHistory: normalizeConsolidatedHistory(nextWorld.consolidatedHistory),
+    historyDocument: normalizeHistoryDocument(nextWorld.historyDocument),
     internationalReputation,
     intelligence,
     spies,

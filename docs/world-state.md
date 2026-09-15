@@ -278,7 +278,8 @@ Espionage resolves once per turn in `applySimulationResult`, **after** the stand
 | `activeCatalyst` | `Catalyst \| null` | `null` | A running branching scenario prompt: `{title,premise,opening,choices[],history[]}` (`normalizeCatalyst` `:264`). Advanced by `advanceActiveCatalyst` (`gameplay.js:1701`). |
 | `actionSuggestions` | `Topic[]` | `[]` | AI-proposed action topics `{id,title,description,actions[]}` (`:777`); cleared each jump (`gameplay.js:1339`). |
 | `simulationHistory` | `Turn[]` | `[]` | Last ≤12 turns: `{catalyst,date,eventIds[],fallbackReason,fromDate,mode,plannedActions[],round,summary,source,toDate}` (built `gameplay.js:1343`, normalized `:875`). |
-| `consolidatedHistory` | `Summary[]` | `[]` | Compacted older-turn summaries `{summary,chatIds[],throughDate,throughEventId,throughRound,source,createdAt}` (`normalizeConsolidatedHistory` `:796`) — produced by `compactHistoryIfNeeded`. |
+| `consolidatedHistory` | `Summary[]` | `[]` | The ledger of consolidation passes `{summary,chatIds[],actionIds[],throughDate,throughEventId,throughRound,source,createdAt}` (`normalizeConsolidatedHistory`) — appended by `compactHistoryIfNeeded`; the last entry's `throughEventId` is the boundary the prompt reads events from (`getUnconsolidatedEvents`, or its `throughDate` if that event was deleted). Consolidation never trims the event log. Rendered as the older history only while no `historyDocument` exists. |
+| `historyDocument` | `{text,revision,updatedAt,source,throughDate,throughEventId,throughRound}` \| `null` | `null` | The living history the AI is shown in place of the folded events: the first pass writes it, every later pass rewrites it with the new period folded in and unimportant older material condensed past ~1,500 words (`applyHistoryDocumentUpdate`, `historyConsolidation.js`; a pass that returns no document appends its summary instead). Editable in Cheats → History Document (`source: "manual"`). |
 | `lastJumpMode` | `string` | `""` | Mode of the most recent jump (`jump`/`auto`/…) (`:867`). |
 | `lastJumpSummary` | `string` | `""` | One-line summary of the last jump. |
 | `lastJumpTargetDate` | `string` | `""` | Target date the last jump advanced to. |
@@ -293,7 +294,7 @@ Espionage resolves once per turn in `applySimulationResult`, **after** the stand
 
 1. Spread defaults then the raw doc: `{ ...WORLD_DEFAULTS, ...nextWorld, … }` (`:856`). Unknown fields (scenario extras) survive; known fields are then overwritten by their normalized versions.
 2. Rebuild the maps with blank-key/blank-value filtering: `regionOwnershipOverrides`, `polityOverrides`, `regionClaimants` (≤4), `internationalReputation` (clamped ints), `countryTags` (via `normalizeTagList`).
-3. Normalize the arrays: `units`, `pendingUnitOrders` (pruned against the just-normalized `units`), `markers`, `actionSuggestions`, `simulationHistory`, `consolidatedHistory`, and singletons `activeCatalyst`, label config, `notes`, `language`, `simulationRules`, `startingTimelineText`.
+3. Normalize the arrays: `units`, `pendingUnitOrders` (pruned against the just-normalized `units`), `markers`, `actionSuggestions`, `simulationHistory`, `consolidatedHistory`, and singletons `activeCatalyst`, `historyDocument`, label config, `notes`, `language`, `simulationRules`, `startingTimelineText`.
 
 `writeWorldState` (`:988`) normalizes, calls `enqueueContentStrings(polityOverrides)` to translate edited names on write, then `writeJson(JSON_URLS.world, …, { pretty:true })`.
 

@@ -1448,9 +1448,10 @@ export const NEXT_SPEAKER_SCHEMA = {
 
 export const EVENT_CONSOLIDATOR_SCHEMA = {
   type: "object",
-  description: "A continuity-safe summary of the supplied events and diplomatic chats.",
+  description: "A continuity-safe summary of the supplied events and diplomatic chats, and the campaign's living history document revised to include them.",
   properties: {
-    summary: textSchema("Concise campaign history preserving major events, map changes, and diplomatic commitments."),
+    summary: textSchema("Concise history of the supplied period preserving major events, map changes, and diplomatic commitments."),
+    document: textSchema("The WHOLE history document as it should read from now on: the current document with this period folded in, condensed or pruned of unimportant older material where needed to stay within the stated word budget."),
   },
   required: ["summary"],
   additionalProperties: false,
@@ -2563,7 +2564,7 @@ export const NEXT_SPEAKER_TOOL = makeTool(
 
 export const EVENT_CONSOLIDATOR_TOOL = makeTool(
   "submit_event_consolidation",
-  "Submit a concise continuity summary of the supplied campaign events and chats.",
+  "Submit a concise continuity summary of the supplied campaign events and chats, and the campaign's history document revised to include them.",
   EVENT_CONSOLIDATOR_SCHEMA,
 );
 

@@ -301,7 +301,7 @@ Anthropic's `cache_read_input_tokens` and `cache_creation_input_tokens` are adde
 | `actions` | `submit_actions` | `generateActionSuggestions` | Strategic suggestion topics for the player. |
 | `descriptionToAction` | `submit_description_to_action` | `refinePlayerAction` | Freeform intent → structured action/chat. |
 | `nextSpeaker` | `submit_next_speaker` | `chooseNextDiplomaticSpeaker` | Pick next chat participant. |
-| `eventConsolidator` | `submit_event_consolidation` | `consolidateRecentHistory` / auto `compactHistoryIfNeeded` | Compress old events/chats into a continuity summary. |
+| `eventConsolidator` | `submit_event_consolidation` | auto `compactHistoryIfNeeded` (a turn), `consolidateHistoryNow` (Cheats → History Document), `consolidateRecentHistory` | Fold old events/chats/orders into the campaign's living history document (`world.historyDocument`): the first pass writes it, later passes rewrite it, condensing unimportant older material to stay near 1,500 words; the events themselves stay in the log. |
 | `catalystCreation` | `submit_catalyst_creation` | `createCatalyst` | Open an interactive decision scene. |
 | `catalystExecutor` | `submit_catalyst_execution` | `advanceActiveCatalyst` | Resolve a catalyst choice. |
 | `catalystSummary` | `submit_catalyst_summary` | (within catalyst resolution) | Final event from a resolved catalyst. |

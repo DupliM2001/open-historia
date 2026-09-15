@@ -316,7 +316,7 @@ const LIVE_RUNTIME_VARIABLE_KEYS = Object.freeze({
     "statsScenarioCalibrationCanon",
     "worldBeforeRoundOne",
   ]),
-  eventConsolidator: Object.freeze(["actionsToConsolidate"]),
+  eventConsolidator: Object.freeze(["actionsToConsolidate", "historyDocumentContext"]),
   geographyResolver: Object.freeze(["geographyResolverItems"]),
   gameMaster: Object.freeze(["gameMasterMode", "territorialControlContext"]),
   idleDiplomacy: Object.freeze([

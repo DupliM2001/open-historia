@@ -85,6 +85,12 @@ import {
   getUnconsolidatedEvents,
   resolveHelperValues,
 } from "./promptContext.js";
+import {
+  applyHistoryDocumentUpdate,
+  buildHistoryDocumentDirective,
+  countWords,
+  planHistoryConsolidation,
+} from "./historyConsolidation.js";
 import { renderTemplateCached, staticPrefixEndOf } from "./promptLayout.js";
 import { attachAttemptOutcome, finishAiRecord, normalizeParsedSummary } from "./telemetry.js";
 import {
@@ -1577,11 +1583,16 @@ const runJsonTask = async (taskKey, {
     }
   }
 
-  // The consolidator's summary REPLACES what it covers, so anything it leaves out
-  // is gone from the campaign for good. Existing games carry frozen prompts, so
-  // both the instruction and the order list have to arrive at call time.
+  // The consolidator maintains the campaign's living history document
+  // (historyConsolidation.js). Existing games carry frozen prompts, so the
+  // document, the rules for revising it and the order list all arrive at call
+  // time.
   if (taskKey === "eventConsolidator") {
-    systemPrompt = `${systemPrompt}\n\n[Durable Canon]\nThis summary REPLACES the material it covers: once consolidated, those events, conversations and player orders are never sent to the simulation again, so whatever you omit is lost permanently. Carry forward explicitly, as standing facts rather than narration:\n1. How this world has DIVERGED from real history — states that never formed, wars that never happened, rulers who never fell, borders that never moved. Name them. A later model that sees only a gap fills it from real history and invents powers this campaign does not contain.\n2. The lasting CONSEQUENCES of the player's own orders, not the orders themselves.\n3. Commitments still in force: treaties, alliances, occupations, debts, standing grievances.\nBrevity matters, but never at the cost of a divergence or a commitment that is still true.`;
+    systemPrompt = `${systemPrompt}\n\n[Durable Canon]\nThe history document REPLACES the material it covers: once consolidated, those events, conversations and player orders are never sent to the simulation again, so whatever the document omits is lost permanently. Carry forward explicitly, as standing facts rather than narration:\n1. How this world has DIVERGED from real history — states that never formed, wars that never happened, rulers who never fell, borders that never moved. Name them. A later model that sees only a gap fills it from real history and invents powers this campaign does not contain.\n2. The lasting CONSEQUENCES of the player's own orders, not the orders themselves.\n3. Commitments still in force: treaties, alliances, occupations, debts, standing grievances.\nBrevity matters, but never at the cost of a divergence or a commitment that is still true.`;
+    const documentDirective = normalizeString(variables?.historyDocumentContext);
+    if (documentDirective) {
+      systemPrompt = `${systemPrompt}\n\n${documentDirective}\n\nOutput both fields, always: {"summary": "<this period's compressed history>", "document": "<the whole revised history document>"}.`;
+    }
     const resolvedOrders = normalizeString(variables?.actionsToConsolidate);
     if (resolvedOrders && !resolvedOrders.startsWith("No ")) {
       systemPrompt = `${systemPrompt}\n\n[Player Orders Being Consolidated]\nThese are the player's own resolved orders for the period covered by this summary. Record what they CHANGED about the world; the order text itself is being discarded.\n${resolvedOrders}`;
@@ -2563,10 +2574,8 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   };
 };
 
-const CONSOLIDATION_INTERVAL_ROUNDS = 5;
-const CONSOLIDATION_RETAIN_EVENTS = 24;
-const CONSOLIDATION_SIZE_THRESHOLD = 48;
-const CONSOLIDATION_BATCH_SIZE = 60;
+// When a pass is due, what it folds and what stays in full: HISTORY_CONSOLIDATION
+// and planHistoryConsolidation in historyConsolidation.js.
 
 // The Projects & Operations board, in its own call.
 //
@@ -2741,6 +2750,11 @@ const attachProjectOpsToEvents = (events, ops) => {
 };
 
 const consolidateHistoryBatch = async (bundle, events, chats, actions = [], { onBatchResult } = {}) => {
+  // The document this pass revises, and the revision it was read at: a pass
+  // that lands against a different revision (a hand edit in the meantime)
+  // appends rather than overwrites (applyHistoryDocumentUpdate).
+  const baseRevision = normalizeWorldState(bundle.world).historyDocument?.revision ?? 0;
+  const historyDocumentContext = buildHistoryDocumentDirective(bundle.world);
   const variables = await buildTemplateVariables(bundle, {
     // Resolved orders are consolidated alongside the events they caused. Capping
     // the history that gets SENT each turn is not enough on its own: drop the old
@@ -2756,7 +2770,10 @@ const consolidateHistoryBatch = async (bundle, events, chats, actions = [], { on
     eventsToConsolidate: buildEventHistoryText(events, { limit: events.length || 1 }),
   });
   const { generation, payload, deferred } = await runJsonTask("eventConsolidator", {
+    // The deterministic digest cannot judge importance, so it carries no
+    // document: the pass appends it to the document instead of rewriting.
     fallback: () => ({
+      document: "",
       summary: [
         events.map((event) => `${event.date || "undated"} ${event.title}: ${event.description}`).join("; "),
         buildChatSummaryText(chats, { limit: chats.length || 1 }),
@@ -2764,41 +2781,33 @@ const consolidateHistoryBatch = async (bundle, events, chats, actions = [], { on
       ].filter(Boolean).join("\n"),
     }),
     userMessage: "Consolidate the supplied campaign history with the required tool.",
-    variables,
+    variables: { ...variables, historyDocumentContext },
     // Off the critical path when the caller supplies an applier: the summary
     // may land later through the batch poller.
     sync: typeof onBatchResult !== "function",
     onBatchResult,
   });
-  if (deferred) return { deferred: true, generation, summary: "" };
-  return { generation, summary: normalizeString(payload?.summary) };
+  if (deferred) return { deferred: true, generation, summary: "", document: "", baseRevision };
+  return {
+    generation,
+    summary: normalizeString(payload?.summary),
+    document: normalizeString(payload?.document),
+    baseRevision,
+  };
 };
 
-const compactHistoryIfNeeded = async (bundle) => {
+// Consolidation never edits the event log: a pass appends its record to
+// world.consolidatedHistory (whose throughEventId is the boundary the prompt
+// reads from, getUnconsolidatedEvents) and rewrites the living history document
+// the AI is shown in place of the folded events. Every event stays in the save.
+const compactHistoryIfNeeded = async (bundle, { force = false } = {}) => {
   const world = normalizeWorldState(bundle.world);
-  const unconsolidatedEvents = getUnconsolidatedEvents(bundle.events, world);
-  const shouldCompactEvents =
-    unconsolidatedEvents.length > CONSOLIDATION_SIZE_THRESHOLD ||
-    (bundle.game.round % CONSOLIDATION_INTERVAL_ROUNDS === 0 &&
-      unconsolidatedEvents.length > CONSOLIDATION_RETAIN_EVENTS);
-  const priorChatIds = new Set(world.consolidatedHistory.flatMap((entry) => entry.chatIds));
-  const closedChats = normalizeChats(bundle.chats)
-    .filter((chat) => chat.status === "closed" && !priorChatIds.has(chat.id));
-  const eventsToConsolidate = shouldCompactEvents
-    ? unconsolidatedEvents.slice(0, -CONSOLIDATION_RETAIN_EVENTS).slice(0, CONSOLIDATION_BATCH_SIZE)
-    : [];
+  // What to fold — the thresholds, the retained tail, the closed chats and the
+  // resolved orders riding along — is the planner's call, shared with the
+  // Cheats tool and the tests.
+  const { eventsToConsolidate, closedChats, actionsToConsolidate, throughEvent } = planHistoryConsolidation(bundle, { force });
 
   if (eventsToConsolidate.length === 0 && closedChats.length === 0) return world;
-
-  // Ride along with a consolidation that is happening anyway — no extra AI call,
-  // which matters when the point of the exercise is to shrink cost. Orders already
-  // folded into an earlier summary are skipped.
-  const priorActionIds = new Set(world.consolidatedHistory.flatMap((entry) => entry.actionIds));
-  const actionsToConsolidate = normalizeActions(bundle.actions)
-    .filter((action) => action.status !== "planned" && action.id && !priorActionIds.has(action.id))
-    .slice(0, CONSOLIDATION_BATCH_SIZE);
-
-  const throughEvent = eventsToConsolidate.at(-1);
   // One shape for both writers — the synchronous return below and the
   // deferred applier — so a batch-consolidated entry reads exactly like a
   // live one.
@@ -2812,7 +2821,7 @@ const compactHistoryIfNeeded = async (bundle) => {
     throughEventId: throughEvent?.id || priorHistory.at(-1)?.throughEventId || "",
     throughRound: bundle.game.round,
   });
-  const { generation, summary } = await consolidateHistoryBatch(
+  const { generation, summary, document, baseRevision } = await consolidateHistoryBatch(
     bundle,
     eventsToConsolidate,
     closedChats,
@@ -2834,23 +2843,43 @@ const compactHistoryIfNeeded = async (bundle) => {
           ? getUnconsolidatedEvents(current.events, currentWorld).some((event) => event.id === throughEvent.id)
           : true;
         if (!stillOpen) return true;
+        const entry = entryFor(summaryText, source, currentWorld.consolidatedHistory);
+        const documentUpdate = applyHistoryDocumentUpdate(currentWorld, {
+          document: resultPayload?.document,
+          summary: summaryText,
+          source,
+          throughDate: entry.throughDate,
+          throughEventId: entry.throughEventId,
+          throughRound: entry.throughRound,
+          baseRevision,
+        });
         await writeWorldState(normalizeWorldState({
           ...currentWorld,
-          consolidatedHistory: [...currentWorld.consolidatedHistory, entryFor(summaryText, source, currentWorld.consolidatedHistory)],
+          consolidatedHistory: [...currentWorld.consolidatedHistory, entry],
+          historyDocument: documentUpdate.historyDocument,
         }));
-        logDebugEvent("ai", `Deferred consolidation applied (${source}): ${eventsToConsolidate.length} events, ${closedChats.length} chats.`);
+        logDebugEvent("ai", `Deferred consolidation applied (${source}): ${eventsToConsolidate.length} events, ${closedChats.length} chats; history document ${documentUpdate.mode}.`);
         return true;
       },
     },
   );
   if (!summary) return world;
 
+  const entry = entryFor(summary, generation.source, world.consolidatedHistory);
+  const documentUpdate = applyHistoryDocumentUpdate(world, {
+    document,
+    summary,
+    source: generation.source,
+    throughDate: entry.throughDate,
+    throughEventId: entry.throughEventId,
+    throughRound: entry.throughRound,
+    baseRevision,
+  });
+  logDebugEvent("ai", `History consolidated (${generation.source}): ${eventsToConsolidate.length} events, ${closedChats.length} chats folded; history document ${documentUpdate.mode}.`);
   return normalizeWorldState({
     ...world,
-    consolidatedHistory: [
-      ...world.consolidatedHistory,
-      entryFor(summary, generation.source, world.consolidatedHistory),
-    ],
+    consolidatedHistory: [...world.consolidatedHistory, entry],
+    historyDocument: documentUpdate.historyDocument,
   });
 };
 
@@ -9353,6 +9382,37 @@ export const consolidateRecentHistory = async ({ limit = 12 } = {}) => {
   const chats = normalizeChats(bundle.chats).filter((chat) => chat.status === "closed").slice(0, limit);
   const { summary } = await consolidateHistoryBatch(bundle, events, chats);
   return summary;
+};
+
+// Cheats → History Document: fold the older unconsolidated history now —
+// everything but the retained tail, one batch — regardless of the round and
+// size thresholds, and write the pass and the revised document. Refused while
+// a turn is in flight: that turn's own pass would fold the same events again.
+export const consolidateHistoryNow = async () => {
+  if (isSimulationBusy()) {
+    throw new Error("A turn is being generated; wait for it to finish before folding history.");
+  }
+  beginSimulation();
+  try {
+    const bundle = await readGameStateBundle({ force: true });
+    const plan = planHistoryConsolidation(bundle, { force: true });
+    const retained = plan.unconsolidatedEvents.length - plan.eventsToConsolidate.length;
+    if (!plan.due) return { consolidated: false, events: 0, chats: 0, retained };
+    const before = normalizeWorldState(bundle.world).consolidatedHistory.length;
+    const nextWorld = await compactHistoryIfNeeded(bundle, { force: true });
+    const consolidated = nextWorld.consolidatedHistory.length > before;
+    if (consolidated) await writeWorldState(nextWorld);
+    return {
+      consolidated,
+      events: plan.eventsToConsolidate.length,
+      chats: plan.closedChats.length,
+      retained,
+      documentWords: countWords(nextWorld.historyDocument?.text),
+      documentRevision: nextWorld.historyDocument?.revision ?? 0,
+    };
+  } finally {
+    endSimulation();
+  }
 };
 
 export const createCatalyst = async ({ force = true } = {}) => {
