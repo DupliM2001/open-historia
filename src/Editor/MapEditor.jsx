@@ -18,6 +18,8 @@ import TypeManager from "./TypeManager.jsx";
 import RegionsPanel from "./RegionsPanel.jsx";
 import PolitiesPanel from "./PolitiesPanel.jsx";
 import TopologyPanel from "./TopologyPanel.jsx";
+import BorderCleanupOverlay, { BorderCleanupNote } from "./BorderCleanupOverlay.jsx";
+import { BORDER_CLEANUP, describeCleanupResult, yieldToBrowser } from "./topologySweep.js";
 import ProvinceImportPanel from "./ProvinceImportPanel.jsx";
 import LayersPanel from "./LayersPanel.jsx";
 import ReferencePanel from "./ReferencePanel.jsx";
@@ -81,6 +83,16 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
   const [regionEpoch, setRegionEpoch] = useState(0);
   const [scenarioAction, setScenarioAction] = useState(""); // "save" | "save-exit" | "play" while writing scenario
   const [scenarioDirty, setScenarioDirty] = useState(false);
+  // The "Cleaning up the borders" screen: progress from repairTopologyEverywhere
+  // while a scenario save runs, null otherwise; and the one-line result left
+  // beside the buttons for a few seconds after a plain Save.
+  const [borderCleanup, setBorderCleanup] = useState(null);
+  const [cleanupNote, setCleanupNote] = useState("");
+  useEffect(() => {
+    if (!cleanupNote) return undefined;
+    const timer = setTimeout(() => setCleanupNote(""), 9000);
+    return () => clearTimeout(timer);
+  }, [cleanupNote]);
   // Whether the scenario's own map has arrived and been loaded. The Workshop
   // opens EMPTY in scenario mode (no default world underneath) and the map
   // streams in afterwards — its geometry can be hundreds of MB — so until then
@@ -249,6 +261,23 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     }
     const action = play ? "play" : closeAfter ? "save-exit" : "save";
     setScenarioAction(action);
+    // Every save first runs the Topology panel's conservative repair over the
+    // WHOLE map at 500 m — enclosed cracks filled, thin overlaps trimmed, one
+    // undo step — behind the "Cleaning up the borders" screen, which is painted
+    // before the work starts and updated between its chunks. A failure there
+    // never blocks the save: the map is then written as it is.
+    let cleanup = null;
+    let cleanupError = "";
+    setBorderCleanup({ phase: "gaps", regionCount: 0, chunkIndex: 0, chunkCount: 0 });
+    await yieldToBrowser();
+    try {
+      cleanup = (await api.repairTopologyEverywhere?.({ maxWidth: BORDER_CLEANUP.maxWidth, onProgress: setBorderCleanup })) ?? null;
+    } catch (e) {
+      console.warn("[editor] border cleanup before saving failed; saving the map as it is:", e);
+      cleanupError = e?.message || String(e);
+    }
+    setBorderCleanup((current) => ({ ...(current || {}), phase: "save", result: cleanup, error: cleanupError }));
+    await yieldToBrowser();
     try {
       const seed = buildGameSeed(
         d.doc,
@@ -257,6 +286,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
       );
       await onApplyToScenario(seed, { play });
       setScenarioDirty(false);
+      setCleanupNote(describeCleanupResult(cleanup, cleanupError));
       if (!play && closeAfter) onClose?.();
       return true;
     } catch (e) {
@@ -267,6 +297,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
       // Apply & Play normally unmounts us before this matters; keeping the reset
       // makes failed/alternate hosts recover cleanly.
       setScenarioAction("");
+      setBorderCleanup(null);
     }
   };
 
@@ -998,6 +1029,9 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
         onSelectCustom={selectLibraryBasemap}
         onUpload={uploadBasemap}
       />
+
+      <BorderCleanupNote text={cleanupNote} top={isMobile ? 200 : 56} />
+      <BorderCleanupOverlay state={borderCleanup} />
 
       <FmgPanel
         open={fmgOpen}

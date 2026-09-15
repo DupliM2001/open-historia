@@ -34,6 +34,7 @@ import Snap from "ol/interaction/Snap";
 import PointerInteraction from "ol/interaction/Pointer";
 import { fromExtent as polygonFromExtent } from "ol/geom/Polygon";
 import Feature from "ol/Feature";
+import { BORDER_CLEANUP, bucketRegions, planTopologyChunks, yieldToBrowser } from "./topologySweep.js";
 import Collection from "ol/Collection";
 import GeoJSON from "ol/format/GeoJSON";
 import ImageLayer from "ol/layer/Image";
@@ -51,7 +52,9 @@ import {
   overlaps,
   planarGeometryArea,
   enclosedGapGeoms,
+  enclosedGapsOfUnion,
   overlapGeoms,
+  unionAllGeoms,
 } from "./geometry.js";
 
 const BASEMAP_BG = {
@@ -898,24 +901,10 @@ const OlMap = ({
       topologyAnalysisRef.current = null;
     };
 
-    const analyzeTopology = (ids, { maxWidth = 500 } = {}) => {
-      const width = Math.max(1, Number(maxWidth) || 500);
-      const feats = (ids || []).map((id) => regionSource.getFeatureById(id)).filter(Boolean);
-      topologySource.clear();
-      if (feats.length < 2) {
-        const empty = { maxWidth: width, gaps: [], overlaps: [], selectionCount: feats.length };
-        topologyAnalysisRef.current = empty;
-        return empty;
-      }
-
-      const gaps = [];
-      const overlapsFound = [];
-      let serial = 0;
-
-      // R2.4 large-area acceleration. OpenLayers VectorSource already maintains
-      // a spatial index, so do not compare every selected region with every other
-      // selected region. This keeps the SAME conservative topology rules while
-      // allowing much larger country / empire / continental selections.
+    // The two conservative defect classes, shared by the Topology panel's
+    // selection pass (analyzeTopology) and the save-time sweep over every
+    // region (repairTopologyEverywhere): same rules, same order, same undo.
+    const topologyContext = (feats) => {
       const selectedSet = new Set(feats);
       const featureOrder = new globalThis.Map(feats.map((feature, index) => [feature, index]));
       const areaCache = new globalThis.Map();
@@ -924,11 +913,18 @@ const OlMap = ({
         if (!areaCache.has(feature)) areaCache.set(feature, planarGeometryArea(feature.getGeometry()));
         return areaCache.get(feature);
       };
-      let spatialPairs = 0;
+      let serial = 0;
+      return { selectedSet, featureOrder, areaOf, nextId: () => ++serial };
+    };
 
-      // Fully enclosed holes in the selection union are the only gap class R2
-      // auto-fills. Open coastline defects are preview/manual territory for now.
-      for (const row of enclosedGapGeoms(feats.map((f) => f.getGeometry()), { maxWidth: width })) {
+    // Each enclosed hole becomes a gap filled into the neighbour whose boundary
+    // it touches most (the larger region on ties); a hole touching nothing is
+    // dropped. Neighbours come from the spatial index, limited to the pass's
+    // regions and sorted by their order so proposals are deterministic.
+    const assignGapTargets = (holes, width, { selectedSet, featureOrder, areaOf, nextId }) => {
+      const items = [];
+      const epsilon = Math.max(4, width * 0.08);
+      for (const row of holes) {
         const ext = expandExtent(row.geom.getExtent(), Math.max(4, width * 1.5));
         const neighbors = regionSource
           .getFeaturesInExtent(ext)
@@ -936,7 +932,6 @@ const OlMap = ({
           .sort((a, b) => featureOrder.get(a) - featureOrder.get(b));
         let target = null;
         let bestScore = -1;
-        const epsilon = Math.max(4, width * 0.08);
         for (const f of neighbors) {
           const score = boundaryTouchScore(row.geom, f.getGeometry(), epsilon);
           if (score > bestScore || (score === bestScore && areaOf(f) > areaOf(target))) {
@@ -945,26 +940,25 @@ const OlMap = ({
           }
         }
         if (!target || bestScore <= 0) continue;
-        const id = `gap-${++serial}`;
-        const item = {
-          id,
+        items.push({
+          id: `gap-${nextId()}`,
           kind: "gap",
           geom: row.geom.clone(),
           area: row.area,
           width: row.width,
           targetId: target.getId(),
           targetName: nameOf(target),
-        };
-        gaps.push(item);
-        const overlay = new Feature({ geometry: row.geom.clone(), kind: "gap" });
-        overlay.setId(`topology-${id}`);
-        topologySource.addFeature(overlay);
+        });
       }
+      return items;
+    };
 
-      // Pairwise narrow overlaps. R2.4 asks the VectorSource spatial index only
-      // for selected features whose extents can actually meet A. Sorting by the
-      // original selection order keeps repair proposals deterministic.
-      for (let i = 0; i < feats.length; i += 1) {
+    // Narrow overlaps between feats[from, to) and their later-ordered extent
+    // neighbours. R2.4: the VectorSource spatial index is asked only for the
+    // regions whose extents can actually meet A, never every pair.
+    const findNarrowOverlaps = (feats, width, { featureOrder, areaOf, nextId }, { from = 0, to = feats.length, onPair, minWidth = 0 } = {}) => {
+      const items = [];
+      for (let i = from; i < to; i += 1) {
         const a = feats[i];
         const aExtent = a.getGeometry().getExtent();
         const nearby = regionSource
@@ -974,10 +968,10 @@ const OlMap = ({
           .sort((x, y) => x.index - y.index);
 
         for (const { feature: b } of nearby) {
-          spatialPairs += 1;
+          onPair?.();
           let pieces = [];
           try {
-            pieces = overlapGeoms(a.getGeometry(), b.getGeometry(), { maxWidth: width });
+            pieces = overlapGeoms(a.getGeometry(), b.getGeometry(), { maxWidth: width, minWidth });
           } catch (e) {
             console.warn("[editor] topology overlap analysis failed:", e);
             continue;
@@ -991,9 +985,8 @@ const OlMap = ({
           const winner = aArea >= bArea ? a : b;
           const loser = winner === a ? b : a;
           for (const row of pieces) {
-            const id = `overlap-${++serial}`;
-            const item = {
-              id,
+            items.push({
+              id: `overlap-${nextId()}`,
               kind: "overlap",
               geom: row.geom.clone(),
               area: row.area,
@@ -1004,13 +997,33 @@ const OlMap = ({
               bName: nameOf(b),
               winnerId: winner.getId(),
               loserId: loser.getId(),
-            };
-            overlapsFound.push(item);
-            const overlay = new Feature({ geometry: row.geom.clone(), kind: "overlap" });
-            overlay.setId(`topology-${id}`);
-            topologySource.addFeature(overlay);
+            });
           }
         }
+      }
+      return items;
+    };
+
+    const analyzeTopology = (ids, { maxWidth = 500 } = {}) => {
+      const width = Math.max(1, Number(maxWidth) || 500);
+      const feats = (ids || []).map((id) => regionSource.getFeatureById(id)).filter(Boolean);
+      topologySource.clear();
+      if (feats.length < 2) {
+        const empty = { maxWidth: width, gaps: [], overlaps: [], selectionCount: feats.length };
+        topologyAnalysisRef.current = empty;
+        return empty;
+      }
+
+      const context = topologyContext(feats);
+      let spatialPairs = 0;
+      // Fully enclosed holes in the selection union are the only gap class R2
+      // auto-fills. Open coastline defects are preview/manual territory for now.
+      const gaps = assignGapTargets(enclosedGapGeoms(feats.map((f) => f.getGeometry()), { maxWidth: width }), width, context);
+      const overlapsFound = findNarrowOverlaps(feats, width, context, { onPair: () => { spatialPairs += 1; } });
+      for (const item of [...gaps, ...overlapsFound]) {
+        const overlay = new Feature({ geometry: item.geom.clone(), kind: item.kind });
+        overlay.setId(`topology-${item.id}`);
+        topologySource.addFeature(overlay);
       }
 
       const report = {
@@ -1032,64 +1045,56 @@ const OlMap = ({
 
     analyzeTopologyRef.current = analyzeTopology;
 
-    const repairTopology = (ids, { maxWidth = 500 } = {}) => {
-      // Re-analyze at apply-time. The user may have edited a vertex after preview;
-      // stale geometry must never be committed blindly.
-      analyzeTopology(ids, { maxWidth });
-      const report = topologyAnalysisRef.current;
-      if (!report) return { changed: false, gaps: 0, overlaps: 0 };
-
+    // Committing repairs — overlaps first (the loser trimmed to the winner's
+    // boundary), then gaps (filled into their target) — as ONE undo step.
+    const beginTopologyEdit = () => {
       const before = new globalThis.Map();
       const remember = (f) => {
         if (!f || before.has(f.getId())) return;
         before.set(f.getId(), { feature: f, geometry: f.getGeometry().clone(), edited: f.get("edited") });
       };
-
-      let overlapRepairs = 0;
-      for (const item of report.overlaps || []) {
-        const winner = regionSource.getFeatureById(item.winnerId);
-        const loser = regionSource.getFeatureById(item.loserId);
-        if (!winner || !loser) continue;
-        remember(loser);
-        let after;
-        try {
-          after = subtractFrom(loser.getGeometry(), winner.getGeometry());
-        } catch (e) {
-          console.warn("[editor] topology overlap repair failed:", e);
-          continue;
-        }
-        if (!after) continue;
-        loser.setGeometry(after);
-        loser.set("edited", true);
-        overlapRepairs += 1;
+      return { before, remember };
+    };
+    const trimOverlap = (item, remember) => {
+      const winner = regionSource.getFeatureById(item.winnerId);
+      const loser = regionSource.getFeatureById(item.loserId);
+      if (!winner || !loser) return false;
+      remember(loser);
+      let after;
+      try {
+        after = subtractFrom(loser.getGeometry(), winner.getGeometry());
+      } catch (e) {
+        console.warn("[editor] topology overlap repair failed:", e);
+        return false;
       }
-
-      let gapRepairs = 0;
-      for (const item of report.gaps || []) {
-        const target = regionSource.getFeatureById(item.targetId);
-        if (!target) continue;
-        remember(target);
-        try {
-          const merged = unionGeoms([target.getGeometry(), item.geom]);
-          target.setGeometry(merged);
-          target.set("edited", true);
-          gapRepairs += 1;
-        } catch (e) {
-          console.warn("[editor] topology gap repair failed:", e);
-        }
+      if (!after) return false;
+      loser.setGeometry(after);
+      loser.set("edited", true);
+      return true;
+    };
+    const fillGap = (item, remember) => {
+      const target = regionSource.getFeatureById(item.targetId);
+      if (!target) return false;
+      remember(target);
+      try {
+        target.setGeometry(unionGeoms([target.getGeometry(), item.geom]));
+        target.set("edited", true);
+        return true;
+      } catch (e) {
+        console.warn("[editor] topology gap repair failed:", e);
+        return false;
       }
-
+    };
+    const finishTopologyEdit = ({ before }) => {
       if (!before.size) {
         clearTopologyDiagnostics();
-        return { changed: false, gaps: 0, overlaps: 0 };
+        return 0;
       }
-
       const after = new globalThis.Map();
       for (const [id, row] of before.entries()) {
         const f = regionSource.getFeatureById(id);
         if (f) after.set(id, { feature: f, geometry: f.getGeometry().clone(), edited: f.get("edited") });
       }
-
       const restore = (snapshot) => {
         for (const row of snapshot.values()) {
           row.feature.setGeometry(row.geometry.clone());
@@ -1099,7 +1104,6 @@ const OlMap = ({
         regionLayer.changed();
         labelLayer.changed();
       };
-
       pushCmd({
         undo: () => restore(before),
         redo: () => restore(after),
@@ -1108,7 +1112,142 @@ const OlMap = ({
       regionLayer.changed();
       labelLayer.changed();
       notifyRegions();
-      return { changed: true, gaps: gapRepairs, overlaps: overlapRepairs, affectedRegions: before.size };
+      return before.size;
+    };
+
+    const repairTopology = (ids, { maxWidth = 500 } = {}) => {
+      // Re-analyze at apply-time. The user may have edited a vertex after preview;
+      // stale geometry must never be committed blindly.
+      analyzeTopology(ids, { maxWidth });
+      const report = topologyAnalysisRef.current;
+      if (!report) return { changed: false, gaps: 0, overlaps: 0 };
+
+      const edit = beginTopologyEdit();
+      let overlapRepairs = 0;
+      for (const item of report.overlaps || []) {
+        if (trimOverlap(item, edit.remember)) overlapRepairs += 1;
+      }
+      let gapRepairs = 0;
+      for (const item of report.gaps || []) {
+        if (fillGap(item, edit.remember)) gapRepairs += 1;
+      }
+      const affectedRegions = finishTopologyEdit(edit);
+      if (!affectedRegions) return { changed: false, gaps: 0, overlaps: 0 };
+      return { changed: true, gaps: gapRepairs, overlaps: overlapRepairs, affectedRegions };
+    };
+
+    // Save-time border cleanup (MapEditor.jsx persistScenario): the panel's
+    // pass over EVERY region, repeated until a pass finds nothing (at most
+    // BORDER_CLEANUP.maxPasses — trimming a sliver can expose a hairline
+    // between the winner and a third region), all as ONE undo step. The gap
+    // search reads the holes of the union of the whole map — built as the
+    // union of chunk unions, the same polygon set as one call
+    // (topologySweep.js explains why a per-chunk search was rejected) with
+    // bounded memory and a repaint between chunks; overlaps go through the
+    // spatial index in batches. Defects narrower than minWidth are ignored:
+    // the save rounds coordinates to five decimals, about a metre, which
+    // leaves centimetre slivers along every repaired border that would be
+    // "repaired" again on every save. Repairs are applied in one go — a
+    // repaint between them redraws the whole world each time — and a thrown
+    // error leaves the caller to save the map as it is.
+    const repairTopologyEverywhere = async ({ maxWidth = BORDER_CLEANUP.maxWidth, onProgress } = {}) => {
+      const width = Math.max(1, Number(maxWidth) || BORDER_CLEANUP.maxWidth);
+      const floor = Math.min(width, BORDER_CLEANUP.minWidth);
+      const feats = regionSource.getFeatures().filter((f) => f.getGeometry?.());
+      const regionCount = feats.length;
+      const progress = {
+        phase: "gaps",
+        pass: 1,
+        maxPasses: BORDER_CLEANUP.maxPasses,
+        regionCount,
+        chunkIndex: 0,
+        chunkCount: 0,
+        gapsFound: 0,
+        regionsChecked: 0,
+        overlapsFound: 0,
+        repairsDone: 0,
+        repairCount: 0,
+        gapsFilled: 0,
+        overlapsTrimmed: 0,
+      };
+      const report = (patch) => {
+        Object.assign(progress, patch);
+        onProgress?.({ ...progress });
+      };
+      clearTopologyDiagnostics();
+      const totals = { gaps: 0, overlaps: 0, gapsFound: 0, overlapsFound: 0 };
+      let passes = 0;
+      if (regionCount < 2) {
+        report({ phase: "done" });
+        return { changed: false, gaps: 0, overlaps: 0, affectedRegions: 0, regionCount, gapsFound: 0, overlapsFound: 0, passes };
+      }
+      const edit = beginTopologyEdit();
+      const plan = planTopologyChunks(regionSource.getExtent(), regionCount);
+      while (passes < BORDER_CLEANUP.maxPasses) {
+        passes += 1;
+        report({ pass: passes, phase: "gaps", chunkIndex: 0, chunkCount: 0, gapsFound: 0, regionsChecked: 0, overlapsFound: 0, repairsDone: 0, repairCount: 0 });
+        // Areas change as regions are trimmed, so the context is rebuilt per pass.
+        const context = topologyContext(feats);
+
+        const buckets = bucketRegions(plan, feats, (f) => f.getGeometry().getExtent());
+        report({ chunkCount: buckets.length });
+        const partials = [];
+        for (let index = 0; index < buckets.length; index += 1) {
+          const unioned = unionAllGeoms(buckets[index].map((f) => f.getGeometry()));
+          if (unioned) partials.push(unioned);
+          report({ chunkIndex: index + 1 });
+          await yieldToBrowser();
+        }
+        const holes = enclosedGapsOfUnion(unionAllGeoms(partials), { maxWidth: width, minWidth: floor });
+        const gaps = assignGapTargets(holes, width, context);
+        report({ gapsFound: gaps.length });
+        await yieldToBrowser();
+
+        const overlapsFound = [];
+        report({ phase: "overlaps", regionsChecked: 0 });
+        for (let from = 0; from < regionCount; from += BORDER_CLEANUP.overlapBatch) {
+          const to = Math.min(regionCount, from + BORDER_CLEANUP.overlapBatch);
+          overlapsFound.push(...findNarrowOverlaps(feats, width, context, { from, to, minWidth: floor }));
+          report({ regionsChecked: to, overlapsFound: overlapsFound.length });
+          await yieldToBrowser();
+        }
+        totals.gapsFound += gaps.length;
+        totals.overlapsFound += overlapsFound.length;
+
+        const repairs = [
+          ...overlapsFound.map((item) => ({ kind: "overlap", item })),
+          ...gaps.map((item) => ({ kind: "gap", item })),
+        ];
+        report({ phase: "apply", repairCount: repairs.length, repairsDone: 0 });
+        if (!repairs.length) break;
+        await yieldToBrowser();
+        let gapsFilled = 0;
+        let overlapsTrimmed = 0;
+        for (const { kind, item } of repairs) {
+          if (kind === "overlap") {
+            if (trimOverlap(item, edit.remember)) overlapsTrimmed += 1;
+          } else if (fillGap(item, edit.remember)) {
+            gapsFilled += 1;
+          }
+        }
+        totals.gaps += gapsFilled;
+        totals.overlaps += overlapsTrimmed;
+        report({ repairsDone: repairs.length, gapsFilled: totals.gaps, overlapsTrimmed: totals.overlaps });
+        await yieldToBrowser();
+        if (!gapsFilled && !overlapsTrimmed) break;
+      }
+      const affectedRegions = finishTopologyEdit(edit);
+      report({ phase: "done" });
+      return {
+        changed: affectedRegions > 0,
+        gaps: totals.gaps,
+        overlaps: totals.overlaps,
+        affectedRegions,
+        regionCount,
+        gapsFound: totals.gapsFound,
+        overlapsFound: totals.overlapsFound,
+        passes,
+      };
     };
 
     const summarize = (f) => ({
@@ -1334,6 +1473,7 @@ const OlMap = ({
       },
       analyzeTopology,
       repairTopology,
+      repairTopologyEverywhere,
       clearTopologyDiagnostics,
 
       // Province Map Importer preview. Bounds arrive as WGS84 lon/lat and are

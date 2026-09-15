@@ -10,8 +10,8 @@
 // [[ring...]...]).
 
 import polygonClipping from "polygon-clipping";
-import Polygon from "ol/geom/Polygon";
-import MultiPolygon from "ol/geom/MultiPolygon";
+import Polygon from "ol/geom/Polygon.js";
+import MultiPolygon from "ol/geom/MultiPolygon.js";
 
 const ringArea = (ring) => {
   let a = 0;
@@ -218,8 +218,11 @@ export const unionAllGeoms = (geoms) => {
 // land, filling it cannot accidentally pave over an open coastline/ocean inlet.
 // `width` is a conservative narrowness proxy (2A/P); long hairline cracks remain
 // eligible even when their total area is not tiny.
-export const enclosedGapGeoms = (geoms, { maxWidth = 500 } = {}) => {
-  const unioned = unionAllGeoms(geoms);
+export const enclosedGapGeoms = (geoms, options) => enclosedGapsOfUnion(unionAllGeoms(geoms), options);
+
+// The same for a union already computed: the save-time sweep builds the whole
+// map's union in stages (topologySweep.js) and reads its holes once.
+export const enclosedGapsOfUnion = (unioned, { maxWidth = 500, minWidth = 0 } = {}) => {
   if (!unioned) return [];
   const out = [];
   for (const poly of asMultiPolygonCoords(unioned)) {
@@ -227,7 +230,7 @@ export const enclosedGapGeoms = (geoms, { maxWidth = 500 } = {}) => {
       const area = ringArea(ring);
       const perimeter = ringPerimeter(ring);
       const width = perimeter > 0 ? (2 * area) / perimeter : Infinity;
-      if (!Number.isFinite(width) || width > maxWidth) continue;
+      if (!Number.isFinite(width) || width > maxWidth || width < minWidth) continue;
       out.push({ geom: new Polygon([ring.map((pt) => pt.slice())]), area, width });
     }
   }
@@ -237,7 +240,9 @@ export const enclosedGapGeoms = (geoms, { maxWidth = 500 } = {}) => {
 // Split a pairwise overlap into individual polygon candidates so diagnostics can
 // highlight them. The caller decides which region wins; repair is deliberately
 // deterministic and selection-scoped rather than guessing campaign semantics.
-export const overlapGeoms = (a, b, { maxWidth = 500 } = {}) => {
+// `minWidth` (the save-time sweep) drops defects too narrow to be anything
+// but coordinate-rounding noise; the panel's default of 0 keeps everything.
+export const overlapGeoms = (a, b, { maxWidth = 500, minWidth = 0 } = {}) => {
   const hit = intersectionGeom(a, b);
   if (!hit) return [];
   const out = [];
@@ -245,7 +250,7 @@ export const overlapGeoms = (a, b, { maxWidth = 500 } = {}) => {
     const area = Math.max(0, polyArea(poly));
     const perimeter = ringPerimeter(poly[0]);
     const width = perimeter > 0 ? (2 * area) / perimeter : Infinity;
-    if (!Number.isFinite(width) || width > maxWidth) continue;
+    if (!Number.isFinite(width) || width > maxWidth || width < minWidth) continue;
     out.push({ geom: new Polygon(poly.map((ring) => ring.map((pt) => pt.slice()))), area, width });
   }
   return out.sort((a, b) => a.width - b.width || a.area - b.area);
