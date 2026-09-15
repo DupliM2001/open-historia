@@ -255,7 +255,7 @@ Both label sources feed `type:"symbol"` layers (`country-labels`, `country-curve
 | `text-font` | `labelFontStack` = `[world.labelFont || "Georgia", "Georgia", "Times New Roman", "Palatino Linotype", "serif"]` (drawn locally as a CSS font-family — MapLibre v5 has no glyphs endpoint here) |
 | `text-size` | `buildCountryTextSize(mult, isGlobe, prop)` — exponential-in-zoom with a stop at every integer zoom, each the uncapped size, so the two sizes MapLibre mixes per tile are exactly 2× apart and a label doubles with the map. MapLibre itself clamps glyphs at 255 px, so `buildCountryTextOpacity` keys each layer's `text-opacity` to the same size expression and fades a label out between 140 and 230 px, on top of the layer's zoom ramp (z5.8–z7.1) |
 | `text-color` / `text-halo-color` | `world.labelTextColor || "#FFFFFF"` / `world.labelHaloColor || "rgba(0,0,0,0.5)"` |
-| `text-opacity` | interp zoom `5→0.75, 8→0` (labels fade out as you zoom in and cities take over) |
+| `text-opacity` | the layer's ramp (`STOCK_LABEL_RAMP`, `LIVE_LABEL_RAMP`…) fading to 0 at `LABEL_MAX_ZOOM` z7.5, times the pixel-size fade (labels fade out as you zoom in and cities take over) |
 | `visibility` | `none` when `hideCountryLabels` map setting is on |
 | `text-pitch/rotation-alignment` | `"map"`, `text-keep-upright:false` |
 
@@ -343,6 +343,7 @@ Sun/star/lighting math is in `globeSunMath.js`, `globeCanvasLighting.js`, `globe
 | `maxBounds` lat `-80…85` | `<Map>` | Keep the camera in the usable latitude band |
 | PMTiles `maxzoom 8` | `countries-source`, `regions-source` | **Not the archive's z10.** `extract-regions.mjs` can't stitch a z10 seed (dies in `JSON.stringify` past V8's 512 MB max string); z9's 4.1 M vertices OOM'd the editor renderer; z8's 2.6 M is stable — and rendering finer than the editor can author only draws detail no map can be built against. MapLibre overzooms past z8. |
 | `custom-regions-fill-far maxzoom 7` | seed-GeoJSON far layer | Stops just past the z5.5–6.5 crossfade; the stock tiles own the crisp zoom |
+| Polity names end at z7.5 | `LABEL_MAX_ZOOM` (every label layer's `maxzoom` and ramp, `Nations.jsx`), `POLITY_TEXT_MAX_ZOOM` (`labels/polityTextLayout.js`) | Names fade over the last half zoom and stop at 7.5; past that the map is provinces and cities |
 | Crossfade band z5.5–6.5 | `FAR_FILL_FADE`/`TILE_FILL_FADE` | Seed extracted at tile-zoom 5; hand off just past it |
 | Pixel-ratio switch z4.5 / z5 | `applyDynamicPixelRatio` | Soften the whole-world view; hysteresis prevents flapping |
 | Cities `minzoom 3.4`, city thresholds step by zoom | `Cities.jsx` | Thin out symbols as you zoom out |

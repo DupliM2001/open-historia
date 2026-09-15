@@ -1817,7 +1817,7 @@ const buildLandmassLabelRecords = ({
       },
     },
     // Guaranteed overview renderer. For line-capable polities Nations.jsx shows
-    // this only below curveMinZoom; point-only polities keep it through z7.1.
+    // this only below curveMinZoom; point-only polities keep it through z7.5 (LABEL_MAX_ZOOM).
     point: {
       type: "Feature",
       id: `${featureId}-point`,

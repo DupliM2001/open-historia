@@ -99,17 +99,23 @@ export const planTerritorialTextSupport = ({
   };
 };
 
+// Where polity text stops as the player zooms in — the same ceiling the
+// MapLibre label layers use (LABEL_MAX_ZOOM in Nations.jsx) — and where the
+// fade toward it begins. Past the ceiling the map is provinces and cities.
+export const POLITY_TEXT_MAX_ZOOM = 7.5;
+export const POLITY_TEXT_FADE_OUT_START_ZOOM = 6.75;
+
 export const polityTextOpacityAtZoom = ({
   zoom,
   minZoom = 0,
-  maxZoom = 7.1,
+  maxZoom = POLITY_TEXT_MAX_ZOOM,
   fadeInZoomSpan = 0.18,
-  fadeOutStartZoom = 6.35,
+  fadeOutStartZoom = POLITY_TEXT_FADE_OUT_START_ZOOM,
 } = {}) => {
   const z = Number(zoom);
   if (!Number.isFinite(z)) return 0;
   const min = Number.isFinite(Number(minZoom)) ? Number(minZoom) : 0;
-  const max = Number.isFinite(Number(maxZoom)) ? Number(maxZoom) : 7.1;
+  const max = Number.isFinite(Number(maxZoom)) ? Number(maxZoom) : POLITY_TEXT_MAX_ZOOM;
   if (z < min || z > max) return 0;
 
   const smooth = (value) => {

@@ -42,6 +42,7 @@ import PolityTextLayer, {
   isPolityTextPtr1Enabled,
 } from "./labels/PolityTextLayer.jsx";
 import { buildPolityTextPtr1Records } from "./labels/polityTextRecords.js";
+import { POLITY_TEXT_MAX_ZOOM } from "./labels/polityTextLayout.js";
 import {
   buildOwnershipPresentationDelta,
   createPoliticalCartographyScheduler,
@@ -198,12 +199,17 @@ const buildCountryTextOpacity = (
   ];
 };
 
+// Where polity names stop: every label layer below ends at this zoom and its
+// ramp fades toward it over the last half zoom, so a zoomed-in map is
+// provinces and cities rather than a country name across the viewport. The
+// polity text renderer shares the ceiling (POLITY_TEXT_MAX_ZOOM).
+const LABEL_MAX_ZOOM = POLITY_TEXT_MAX_ZOOM;
 // Each label layer's own zoom ramp (see buildCountryTextOpacity).
-const STOCK_LABEL_RAMP = Object.freeze([4, 0.98, 5.8, 0.90, 6.6, 0.52, 7.1, 0]);
+const STOCK_LABEL_RAMP = Object.freeze([4, 0.98, 5.8, 0.90, 7.0, 0.52, LABEL_MAX_ZOOM, 0]);
 // The curved glyph layer on a custom map hands off from the live point labels
 // at z3.85–4.15.
-const CUSTOM_CURVED_LABEL_RAMP = Object.freeze([3.85, 0, 4.15, 0.98, 5.8, 0.90, 6.6, 0.52, 7.1, 0]);
-const LIVE_LABEL_RAMP = Object.freeze([2.0, 0.90, 3.2, 0.985, 5.8, 0.96, 6.55, 0.72, 7.1, 0]);
+const CUSTOM_CURVED_LABEL_RAMP = Object.freeze([3.85, 0, 4.15, 0.98, 5.8, 0.90, 7.0, 0.52, LABEL_MAX_ZOOM, 0]);
+const LIVE_LABEL_RAMP = Object.freeze([2.0, 0.90, 3.2, 0.985, 5.8, 0.96, 6.95, 0.72, LABEL_MAX_ZOOM, 0]);
 
 const buildFallbackColorExpression = () => ([
   "rgb",
@@ -3322,7 +3328,7 @@ const WorldMap = ({ isGlobe = false }) => {
           id="country-curved-labels"
           type="symbol"
           minzoom={customFlag && useLivePolityLabels ? 3.85 : undefined}
-          maxzoom={7.1}
+          maxzoom={LABEL_MAX_ZOOM}
           layout={curvedLabelLayerLayout}
           paint={customFlag && useLivePolityLabels ? curvedLabelLayerPaint : curvedStockLabelLayerPaint}
         />
@@ -3351,7 +3357,7 @@ const WorldMap = ({ isGlobe = false }) => {
             id="country-line-labels-live-world"
             source="country-live-polity-line-label-source"
             type="symbol"
-            maxzoom={7.1}
+            maxzoom={LABEL_MAX_ZOOM}
             filter={liveWorldLineFilter}
             layout={{
               ...liveLineLabelLayerLayout,
@@ -3366,7 +3372,7 @@ const WorldMap = ({ isGlobe = false }) => {
             id="country-line-labels-live-detail"
             source="country-live-polity-line-label-source"
             type="symbol"
-            maxzoom={7.1}
+            maxzoom={LABEL_MAX_ZOOM}
             filter={liveDetailLineFilter}
             layout={{
               ...liveLineLabelLayerLayout,
@@ -3392,7 +3398,7 @@ const WorldMap = ({ isGlobe = false }) => {
             id="country-labels-live-managed"
             source="country-live-polity-point-label-source"
             type="symbol"
-            maxzoom={7.1}
+            maxzoom={LABEL_MAX_ZOOM}
             filter={livePointManagedFilter}
             layout={{
               ...livePointLabelLayerLayout,
@@ -3406,7 +3412,7 @@ const WorldMap = ({ isGlobe = false }) => {
             id="country-labels-live-overlap"
             source="country-live-polity-point-label-source"
             type="symbol"
-            maxzoom={7.1}
+            maxzoom={LABEL_MAX_ZOOM}
             filter={livePointOverlapFilter}
             layout={{
               ...livePointLabelLayerLayout,
@@ -3424,7 +3430,7 @@ const WorldMap = ({ isGlobe = false }) => {
         <Layer
           id="country-labels"
           type="symbol"
-          maxzoom={7.1}
+          maxzoom={LABEL_MAX_ZOOM}
           layout={pointLabelLayerLayout}
           paint={pointLabelLayerPaint}
         />

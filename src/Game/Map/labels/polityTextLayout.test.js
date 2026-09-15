@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  POLITY_TEXT_FADE_OUT_START_ZOOM,
+  POLITY_TEXT_MAX_ZOOM,
+  PTR_WORLD_PIXELS_AT_REFERENCE_ZOOM,
   planMetricTextSupport,
   polityTextOpacityAtZoom,
-  PTR_WORLD_PIXELS_AT_REFERENCE_ZOOM,
 } from "./polityTextLayout.js";
 
 test("PTR-1 metric support uses one uniform scale derived from real raster metrics", () => {
@@ -101,4 +103,14 @@ test("PTR-1.8 fades smoothly before the close-zoom cutoff instead of disappearin
   assert.ok(polityTextOpacityAtZoom({ ...base, zoom: 7.0 }) < mid);
   assert.equal(polityTextOpacityAtZoom({ ...base, zoom: 7.1 }), 0);
   assert.equal(polityTextOpacityAtZoom({ ...base, zoom: 7.2 }), 0);
+});
+
+test("polity text is drawn until z7.5 by default, fading over the last three-quarters of a zoom", () => {
+  assert.equal(POLITY_TEXT_MAX_ZOOM, 7.5);
+  assert.equal(POLITY_TEXT_FADE_OUT_START_ZOOM, 6.75);
+  assert.equal(polityTextOpacityAtZoom({ zoom: 6.7 }), 1);
+  const late = polityTextOpacityAtZoom({ zoom: 7.4 });
+  assert.ok(late > 0 && late < 1, `expected partial opacity at z7.4, got ${late}`);
+  assert.equal(polityTextOpacityAtZoom({ zoom: 7.5 }), 0);
+  assert.equal(polityTextOpacityAtZoom({ zoom: 7.6 }), 0);
 });

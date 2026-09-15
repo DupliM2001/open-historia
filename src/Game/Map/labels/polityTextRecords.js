@@ -6,6 +6,8 @@
 // allowlist or identity gate. An optional owners filter remains only for tests
 // and targeted diagnostics.
 
+import { POLITY_TEXT_FADE_OUT_START_ZOOM, POLITY_TEXT_MAX_ZOOM } from "./polityTextLayout.js";
+
 const stableNumber = (value, fallback = 0) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -124,9 +126,9 @@ export const buildPolityTextPtr1Records = ({
       text,
       baseline,
       minZoom: Math.max(0, stableNumber(properties.minZoom, 0)),
-      maxZoom: 7.1,
+      maxZoom: POLITY_TEXT_MAX_ZOOM,
       fadeInZoomSpan: 0.18,
-      fadeOutStartZoom: 6.35,
+      fadeOutStartZoom: POLITY_TEXT_FADE_OUT_START_ZOOM,
       forceOverlapZoom: Math.max(0, stableNumber(properties.forceOverlapZoom, 99)),
       priorityScale: Math.max(0, stableNumber(properties.priorityScale, properties.areaScale)),
       visibilityScale: Math.max(0, stableNumber(properties.visibilityScale, properties.priorityScale)),
