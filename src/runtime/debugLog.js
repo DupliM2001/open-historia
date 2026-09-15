@@ -1018,7 +1018,6 @@ const composeLoggingFile = ({ incident, desktop, settings } = {}) => {
         // the key that reaches it is, and never appears here.
         contextLine("AI provider", context.provider),
         contextLine("AI model", context.model),
-        contextLine("Unit system", context.unitSystem),
         // Stated rather than left to be inferred: a reader who does not know
         // which mode produced a log cannot tell "the game never logged that"
         // from "detailed mode was off", and those lead to opposite conclusions.

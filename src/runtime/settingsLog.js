@@ -21,7 +21,7 @@
 // parameters (they can carry headers — only their size), and an endpoint only by
 // its host. Everything is redacted again as the file is built.
 import { isDebugLogEnabled, isDebugLogVerbose, registerSettingsSnapshot } from "./debugLog.js";
-import { MAP_SETTING_KEYS, getMapSetting, getMapSettingValue, resolveBetaUnits } from "./mapSettings.js";
+import { MAP_SETTING_KEYS, getMapSetting, getMapSettingValue } from "./mapSettings.js";
 import { getStoredChatLanguage, getStoredLanguage, languageDisplayName } from "./i18n.js";
 import {
     AI_TASK_ROUTING,
@@ -114,13 +114,6 @@ registerSettingsSnapshot("AI", () => {
     );
     return items;
 });
-
-// The save's own settings. Difficulty and the unit system the session is running
-// are in the file's header already; this is what the save itself says, which a
-// toggle flipped mid-session can make differ from the running one until reload.
-registerSettingsSnapshot("This save", () => [
-    ["Beta unit system", onOff(resolveBetaUnits())],
-]);
 
 // The server's LAN sharing, which is what lets a phone in. A request away, and
 // absent on the web and Android builds (their in-browser API answers 404), where

@@ -174,7 +174,7 @@ import {
 } from "../../runtime/countryStats.js";
 import { beginTurnPerfStage, endTurnPerfStage, measureTurnPerfStage, recordTurnPerfAiAttempt } from "../../runtime/turnPerf.js";
 import { difficultyDirective } from "../../runtime/difficulty.js";
-import { MAP_SETTING_KEYS, getMapSetting, isBetaUnits } from "../../runtime/mapSettings.js";
+import { MAP_SETTING_KEYS, getMapSetting } from "../../runtime/mapSettings.js";
 import { AI_FIRST_BYTE_TIMEOUT_MS, AI_IDLE_TIMEOUT_MS, createIdleDeadline } from "./idleDeadline.js";
 import { REPAIR_STOP_TIME_BUDGET, runBoundedRepairCall } from "./repairCall.js";
 import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
@@ -1613,9 +1613,8 @@ const runJsonTask = async (taskKey, {
   // Skipped when the rendered template ALREADY says it: the bundled template's
   // units section is a near-verbatim copy of this block, so a new game would pay
   // for both, and a rule repeated in two slightly different wordings invites the
-  // model to look for a distinction that is not there. Beta only — it describes a
-  // map the player cannot move units on, which is not the classic system's map.
-  if (["jumpForward", "autoJumpForward"].includes(taskKey) && isBetaUnits() && !templateAlreadySays(systemPrompt, UNIT_CONTRACT_MARKER)) {
+  // model to look for a distinction that is not there.
+  if (["jumpForward", "autoJumpForward"].includes(taskKey) && !templateAlreadySays(systemPrompt, UNIT_CONTRACT_MARKER)) {
     const playerName = normalizeString(variables.playerPolity) || "the player's polity";
     systemPrompt = `${systemPrompt}\n\n[Units on the Map]\nUnits are EVIDENCE OF YOUR OWN EVENTS. The player cannot move or fight their own formations - the map is there to show them what is happening - so every unit you spawn or move must be something one of this jump's events actually describes. Reach for them readily: a mobilization, a build-up on a border, a fleet sailing, an offensive, a withdrawal all deserve to be visible. But keep the map legible - only formations that matter to the story. A great power at war might show five or six; a country at peace shows one or two, or none.\nstrength is a PERCENTAGE of established strength (100 = fresh and full, 60 = worn down, 20 = a shell), and composition says what the formation actually is ("1 aircraft carrier, 2 frigates", "3 tank regiments"). Write both, plus a one-sentence note on what it is doing and where. A counter that does not say what it is tells the player nothing.\nDo not teleport. A move may only cover what that unit could really travel between the previous event's date and this one's. The engine enforces this: an over-long move becomes a partial advance that continues automatically on later turns, so ordering the full distance is safe and correct.\nThe map is what ${playerName} KNOWS, not omniscience. A force may legitimately appear far from its own territory when it is being DETECTED rather than arriving - a submarine that has shadowed a fleet for weeks, infiltrators already in country, a deployment only now confirmed. Such a unit is drawn as unconfirmed, which is correct and not a penalty. The one thing you cannot conjure is a fixed installation: use markerOps build for a base, and never spawn a far-flung garrison.\nSet posture whenever you place or move a unit - holding, massing, patrol, transit, exercise, blockade, withdrawing, assaulting. It is how the player reads intent off the map. "patrol" is special: the engine keeps a patrolling unit working its station on its own, turn after turn, so state it once and leave it.\n"assaulting" is the other special one: a formation that ARRIVES under it is marked engaged, in contact at the objective, instead of idle. Use it when an event has a force actually storming a province rather than massing near it — including when the player has ordered an assault in words ("Attack Provence"), which is how they commit troops to a province, since they cannot move their own formations. You still own the OUTCOME: resolve the fighting on a later turn with casualties, and a regionTransfer only if the province genuinely falls. An order you judge infeasible is refused in an event that says why, never silently dropped.`;
   }
@@ -5374,9 +5373,6 @@ const applySimulationResult = async ({
   // than putting the stale snapshot back. See the re-read before writeChatsState.
   const generatedChats = [];
 
-  // Which unit system this session is running, pinned at startup.
-  const betaUnits = isBetaUnits();
-
   const { colors: nextColors, world: impactedWorld } = applyEventImpactsToWorld({
     colors: baseColors,
     events: freshEvents,
@@ -5385,11 +5381,7 @@ const applySimulationResult = async ({
     // have got rather than teleporting it. An over-long move becomes a partial
     // advance plus a standing order the engine keeps working on later turns.
     //
-    // Both of these are the beta unit system. In the classic system a unit op
-    // lands where the model put it and no standing order is minted, which is
-    // what motion: null plus betaEngine: false mean.
-    motion: betaUnits ? { originDate: baseGame.gameDate, round: nextGame.round, tick: 0 } : null,
-    betaEngine: betaUnits,
+    motion: { originDate: baseGame.gameDate, round: nextGame.round, tick: 0 },
     world: {
       ...baseWorld,
       activeCatalyst: result.catalyst ?? null,
@@ -5427,32 +5419,26 @@ const applySimulationResult = async ({
   // having to come back from the model. Units the model DID move are skipped:
   // they already stepped once per event against that event's own budget, and
   // advancing them again here would move them twice for the same elapsed time.
-  //
-  // Both this and the unit-volume cap are beta-only: the classic system has no
-  // standing orders to advance and no cap on how many formations the world may
-  // hold, so it leaves the impacted world exactly as the events left it.
   const movedThisTurn = freshEvents.flatMap((event) =>
     normalizeArray(event.impacts?.unitOps).map((op) => op.unitId || op.unit?.id).filter(Boolean));
-  let worldWithImpacts = betaUnits
-    ? enforceUnitVolume(
-      advanceStandingOrders(
-        // Rounds may have passed under the classic system since these orders were
-        // issued, which would leave every dormant patrol already expired. Give
-        // them the rest of their life from here before advancing anything.
-        resumeStandingOrders(impactedWorld, {
-          round: nextGame.round,
-          previousSystem: normalizeWorldState(baseWorld).unitSystem,
-        }),
-        {
-          fromDate: baseGame.gameDate,
-          toDate: nextGame.gameDate,
-          round: nextGame.round,
-          skipUnitIds: movedThisTurn,
-        },
-      ),
-      { playerCode: baseGame.country },
-    )
-    : impactedWorld;
+  let worldWithImpacts = enforceUnitVolume(
+    advanceStandingOrders(
+      // Rounds may have passed under the old classic system since these orders
+      // were issued, which would leave every dormant patrol already expired.
+      // Give them the rest of their life from here before advancing anything.
+      resumeStandingOrders(impactedWorld, {
+        round: nextGame.round,
+        previousSystem: normalizeWorldState(baseWorld).unitSystem,
+      }),
+      {
+        fromDate: baseGame.gameDate,
+        toDate: nextGame.gameDate,
+        round: nextGame.round,
+        skipUnitIds: movedThisTurn,
+      },
+    ),
+    { playerCode: baseGame.country },
+  );
 
   // The war ledger merges BEFORE espionage, so a war declared this turn already
   // counts when the world's services decide whom to spy on; the diplomatic
@@ -5743,7 +5729,6 @@ const applySimulationResult = async ({
         events: [{ id: event.id, date: event.date || nextGame.gameDate, title: event.title, description: "", impacts: { projectOps: carrier.ops } }],
         world,
         motion: null,
-        betaEngine: betaUnits,
         round: nextGame.round,
         boardOnlyEventIds: stamped ? [] : [event.id],
       }).world;
@@ -12095,18 +12080,13 @@ const applyIdlePulseUnitOps = async (bundle, unitOps) => {
   const tick = (Number(freshWorld.idlePulseTick) || 0) + 1;
   const gameDate = normalizeString(bundle.game?.gameDate);
   const round = Number(bundle.game?.round) || 0;
-  const betaUnits = isBetaUnits();
 
   const { world: impacted } = applyEventImpactsToWorld({
     colors: {},
     events: [{ date: gameDate, title: "", description: "", impacts: { unitOps } }],
     world: freshWorld,
-    motion: betaUnits ? { originDate: gameDate, round, tick } : null,
-    betaEngine: betaUnits,
+    motion: { originDate: gameDate, round, tick },
   });
-  // The classic system has nothing to drift and no cap to enforce — the pulse's
-  // ops are the whole of its effect.
-  if (!betaUnits) return { ...impacted, idlePulseTick: tick };
   // fromDate === toDate, so no unit travels: the pulse only re-posts standing
   // orders and drifts patrols, which is right when no game time has passed.
   const drifted = advanceStandingOrders(impacted, {

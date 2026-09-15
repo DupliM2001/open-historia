@@ -301,22 +301,19 @@ Status drives styling — **pending** (player-requested, not yet AI-confirmed) u
 
 ### Controller — `unitsController.js`
 
-A module-level store, separate from `useWorldState` but with the same 5s cadence (`startUnitsSync`). It holds `units`, `playerCode`, `round`, `gameDate`, `allowedUnitTypes`, and an `interactionMode` (`idle | deploy | move | attack`), plus a `subscribeUnits` pub/sub the map/popups/Forces panel listen to.
+A module-level store, separate from `useWorldState` but with the same 5s cadence (`startUnitsSync`). It holds `units`, `playerCode`, `round`, `gameDate`, `allowedUnitTypes`, and an `interactionMode` (`idle | deploy | admin-place`), plus a `subscribeUnits` pub/sub the map/popups/Forces panel listen to.
 
 | Function | Effect | Instant feedback | AI hand-off |
 |---|---|---|---|
 | `deployUnit` | Add a `pending` unit (translucent) | placed locally | queues a "Deploy request" order; revert = remove |
-| `moveUnitTo` | Within era/type leash → move + `moving`; beyond `moveLeashKm` → stay put, `moving` | snaps or holds | queues Move / Long-range order |
-| `attackWith` | In `engagementRangeKm` → `resolveClash` (seeded, instant); out of range → approach order | strength/positions update, losers filtered out | queues Attack order (`regionTransfer` hint) |
-| `attackFeature` | Attack a city/marker; no local clash — positional only | closes on objective, reads `engaged` | queues assault order (`markerOps`/`regionTransfer` hints) |
 
-Player deploy is purely local; move/attack write to `world.units` immediately **and** queue a machine-readable `action` (via `queueOrder`) so the AI honours/contests them on the next time-jump. `queueOrder` records a `unitRevert` so deleting the queued action before the jump undoes the on-map change (#368). Combat maths (`resolveClash`, `distanceKm`, `engagementRangeKm`, `moveLeashKm`) live in `unitCombat.js`. `busy` suppresses the poll from clobbering an in-flight commit.
+Player deploy is purely local **and** queues a machine-readable `action` (via `queueOrder`) so the AI confirms, repositions or rejects it on the next jump. The player never moves or fights a formation by hand: they state intent (`requestUnitOrders`, also an `action`), and the engine (`runtime/unitMotion.js`) and the AI carry it out.
 
 ### Interaction dispatch — `Nations.jsx` `handleRegionClick`
 
 The map's single `click` handler (`Nations.jsx:564`) routes by `getInteractionMode()`:
 
-- **deploy/move/attack modes** intercept the click as a *target* (`deployUnit` / `moveUnitTo` / `attackWith` or `attackFeature`), then `clearInteractionMode()`.
+- **deploy mode** intercepts the click as a *target* (`deployUnit`), then `clearInteractionMode()`; the admin placement tool (`placeUnitAdmin`) rides the same dispatcher.
 - **normal click** priority: unit (`units-fill`) → feature (`markers-shapes` > `cities-shapes`/`cities-labels`) → region. Region query uses `["custom-regions-fill","custom-regions-fill-far"]` on drawn-geometry maps but `["custom-regions-fill","regions-fill"]` on re-ownership maps (so a click on fantasy ocean resolves to nothing, not the leftover real country underneath — `hasDrawnGeometry`). The resolved region is handed to `onRegionSelected` with the **owner name** resolved (via `ownerLookupRef`), the underlying GADM `gid0` kept as a flag fallback.
 
 The staged-reveal system (`setUnitsOverride` / `setWorldStateOverride`) lets the map show units/world as of the last revealed event during a turn's event playback, snapping back to live state when cleared (see [World state](world-state.md) and the turn/time system).

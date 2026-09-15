@@ -8,7 +8,6 @@ import {
   setRuntimeAssetEndpoints,
 } from "./assets.js";
 import { logDebugEvent, setDebugLogContext } from "./debugLog.js";
-import { applySaveBetaUnits } from "./mapSettings.js";
 import { enqueueContentStrings } from "./translator.js";
 
 const LIBRARY_API_ROOT = "/api/library";
@@ -202,9 +201,6 @@ const applyLibraryCatalog = (catalog) => {
   // After setLibraryState, never before: syncLibraryRuntime() inside it is what
   // repoints JSON_URLS.game at the newly active save.
   if (activeGameChanged) {
-    loadActiveSaveBetaUnits().catch((error) => {
-      console.warn("Failed to read the save's unit-system setting:", error);
-    });
     // The map's world store (Map/useWorldState.js) bootstraps once and then
     // follows same-tab writes; a switch to another save is neither, so without
     // this it kept rendering the previous save's basemap, background and
@@ -220,37 +216,6 @@ const applyLibraryCatalog = (catalog) => {
   return libraryState;
 };
 
-// The beta unit system is stored per save, in game.json — see the block above
-// MAP_SETTING_KEYS.betaUnits in mapSettings.js for why. That file cannot read it
-// itself (the value arrives over fetch, and mapSettings.js is imported by modules
-// that must load without a save), so the load lives here, next to the only place
-// that knows when the active save changed.
-//
-// Guarded by the id it was started for: activating two saves in quick succession
-// leaves two reads in flight, and the slower one must not land its answer on the
-// campaign that is now open.
-let betaUnitsRequest = null;
-export const loadActiveSaveBetaUnits = async () => {
-  const gameId = libraryState.activeGameId;
-  if (!gameId) {
-    applySaveBetaUnits("", null);
-    return null;
-  }
-
-  betaUnitsRequest = (async () => {
-    // Not forced: the startup preload and every catalog refresh warm this URL,
-    // and the URL itself carries the runtime token, so switching saves is
-    // already a different key rather than a stale hit.
-    const game = await readJson(JSON_URLS.game, { defaultValue: {} }).catch(() => ({}));
-    return game?.betaUnits;
-  })();
-
-  const request = betaUnitsRequest;
-  const value = await request;
-  if (request !== betaUnitsRequest || libraryState.activeGameId !== gameId) return null;
-  applySaveBetaUnits(gameId, value);
-  return value ?? null;
-};
 
 export const getLibraryState = () => libraryState;
 

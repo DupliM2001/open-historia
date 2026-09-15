@@ -17,14 +17,12 @@ import {
   getPlayerCode,
   removeUnit,
   requestUnitOrders,
-  setInteractionMode,
 } from "../Map/unitsController.js";
 import { readEventsState } from "../../runtime/gameState.js";
 // One posture vocabulary and one set of strength bands for the popup and the
 // Forces panel — duplicates of either would drift and describe the same formation
 // two different ways on two screens.
 import { POSTURE_LABEL, strengthColor } from "../GameUI/forces.jsx";
-import { isBetaUnits } from "../../runtime/mapSettings.js";
 import { haversineKm } from "../../runtime/unitMotion.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
 
@@ -298,23 +296,9 @@ const UnitPopup = () => {
   const strengthPct = Math.max(2, Math.min(100, unit.strength));
   const orderText = describeOrder(unit, order);
   const postureText = POSTURE_LABEL[unit.posture] || "";
-  // Pinned for the session, so the popup can never show one system's controls
-  // while the controller is running the other's.
-  const betaUnits = isBetaUnits();
 
   const disband = () => {
     removeUnit(unit.id);
-    _dismiss?.();
-  };
-
-  // Classic only. Arms a map-click mode; the click dispatcher in Nations.jsx
-  // turns the next click into moveUnitTo / attackWith / attackFeature.
-  const beginMove = () => {
-    setInteractionMode({ kind: "move", unitId: unit.id });
-    _dismiss?.();
-  };
-  const beginAttack = () => {
-    setInteractionMode({ kind: "attack", unitId: unit.id });
     _dismiss?.();
   };
 
@@ -433,11 +417,9 @@ const UnitPopup = () => {
             />
           </div>
 
-          {/* Posture and standing orders exist only in the beta system; classic
-              shows the plain lifecycle status it has always shown. */}
-          {betaUnits && postureText && <InfoRow label="Posture">{postureText}</InfoRow>}
-          {betaUnits && orderText && <InfoRow label="Orders">{orderText}</InfoRow>}
-          {(!betaUnits || !postureText) && <InfoRow label="Status">{unit.status}</InfoRow>}
+          {postureText && <InfoRow label="Posture">{postureText}</InfoRow>}
+          {orderText && <InfoRow label="Orders">{orderText}</InfoRow>}
+          {!postureText && <InfoRow label="Status">{unit.status}</InfoRow>}
           <InfoRow label="Location">
             {unit.lat.toFixed(1)}, {unit.lng.toFixed(1)}
           </InfoRow>
@@ -448,17 +430,7 @@ const UnitPopup = () => {
             </InfoRow>
           )}
 
-          {/* Classic: the player moves and fights their own units. Both buttons
-              arm a map-click mode the dispatcher in Nations.jsx consumes. */}
-          {isOwn && !betaUnits && (
-            <div style={{ display: "flex", gap: "5px", marginTop: "10px" }}>
-              <ActionButton label="Move" tone="primary" onClick={beginMove} />
-              <ActionButton label="Attack" tone="danger" onClick={beginAttack} />
-              <ActionButton label="Disband" onClick={disband} />
-            </div>
-          )}
-
-          {isOwn && betaUnits && (
+          {isOwn && (
             <>
               {/* Intent, not control: this queues an action for the AI to weigh on
                   the next jump. Nothing on the map moves now. */}
@@ -501,16 +473,6 @@ const UnitPopup = () => {
             </>
           )}
 
-          {/* Classic: the only thing telling a player how attacking works. The
-              two branches above are both `isOwn && …`, so replacing the old
-              `isOwn ? buttons : hint` pair with them left a foreign unit's popup
-              rendering nothing at all. Beta needs no hint — nobody attacks by
-              hand there, and the card is an intelligence readout on its own. */}
-          {!isOwn && !betaUnits && (
-            <div style={{ marginTop: "9px", fontSize: "10px", color: "rgba(255,255,255,0.4)", textAlign: "center" }}>
-              Enemy unit — select one of your own units to attack it.
-            </div>
-          )}
         </div>
       </div>
     </div>,
