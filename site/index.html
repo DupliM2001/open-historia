@@ -11,21 +11,22 @@
 
   gtag('config', 'G-H9EQ4JFZXZ');
 </script>
+
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Open Historia — Play AI-driven alternate history</title>
 <meta name="description" content="Open Historia is a free, open-source AI turn-based history strategy game. Download once, run it, and reshape history. A community-built alternative to Pax Historia." />
-<meta name="theme-color" content="#e9dcc0" />
+<meta name="theme-color" content="#111113" />
 <link rel="icon" type="image/png" href="/favicon.png" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="Open Historia — Play AI-driven alternate history" />
 <meta property="og:description" content="A free, open-source AI turn-based history strategy game. Download, run, reshape history." />
-<meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/screenshot.png" />
+<meta property="og:image" content="https://openhistoria.com/play/screenshot.png" />
 <meta property="og:url" content="https://openhistoria.com/" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Open Historia — Play AI-driven alternate history" />
 <meta name="twitter:description" content="A free, open-source AI turn-based history strategy game. Download, run, reshape history." />
-<meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/screenshot.png" />
+<meta name="twitter:image" content="https://openhistoria.com/play/screenshot.png" />
 <link rel="canonical" href="https://openhistoria.com/" />
 <!-- Structured Data -->
 <script type="application/ld+json">
@@ -77,26 +78,28 @@
   }
 }
 </script>
+<link rel="preload" as="image" href="/play/screenshots/screenshot.png" fetchpriority="high" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" /></noscript>
 <style>
   :root{
-    --parch:#e9dcc0; --parch2:#e2d2b1; --marble:#f6efdc; --marble2:#fbf6e9;
-    --ink:#2c2216; --sepia:#6c5a3c; --sepia2:#87754f;
-    --line:rgba(74,54,24,.18); --line2:rgba(74,54,24,.30);
-    --bronze:#9a6b2f; --bronze-d:#7c531d; --gold:#b8860b; --gold-l:#caa53f;
-    --red:#8a2331; --red-d:#6d1a25; --green:#4c7a3d;
-    --grad-gold:linear-gradient(100deg,#7c4f18 0%,#b8860b 52%,#8f6a22 100%);
-    --shadow:0 1.125rem 2.625rem -1.375rem rgba(60,40,14,.55);
+    --parch:#111113; --parch2:#17171a; --marble:#1a1a1f; --marble2:#212128;
+    --ink:#ece4d2; --sepia:#a4987f; --sepia2:#877c66;
+    --line:rgba(233,220,192,.14); --line2:rgba(233,220,192,.26);
+    --bronze:#c9932f; --bronze-d:#a57a22; --gold:#c9932f; --gold-l:#dcb954;
+    --red:#a8394a; --red-d:#7a1e2b; --green:#5d9149;
+    --grad-gold:linear-gradient(100deg,#a7761f 0%,#e0b44a 52%,#b98f2e 100%);
+    --shadow:0 1.125rem 2.625rem -1.375rem rgba(0,0,0,.8);
     --radius:0.875rem;
     --serif:'EB Garamond',Georgia,'Times New Roman',serif;
     --display:'Cinzel',Georgia,'Times New Roman',serif;
   }
   *{box-sizing:border-box}
+  @media(prefers-reduced-motion: no-preference){html{scroll-behavior:smooth}}
   html{
-    scroll-behavior:smooth;
+    scroll-padding-top:5.5rem;
     /* Fluid root size: everything below is rem, so this scales the page as one.
        Clamped to 1rem at/below ~90rem, so nothing changes on a laptop. */
     font-size:clamp(1rem, 0.536vw + 0.51812rem, 1.5rem);
@@ -105,9 +108,9 @@
     margin:0; color:var(--ink); font-family:var(--serif); font-size:1.125rem; line-height:1.62;
     -webkit-font-smoothing:antialiased; position:relative;
     background:
-      radial-gradient(75rem 33.75rem at 50% -12%, rgba(184,134,11,.12), transparent 60%),
-      radial-gradient(62.5rem 35rem at 100% 2%, rgba(138,35,49,.06), transparent 55%),
-      repeating-linear-gradient(112deg, rgba(120,90,40,.028) 0 0.125rem, transparent 0.125rem 0.4375rem),
+      radial-gradient(75rem 33.75rem at 50% -12%, rgba(201,147,47,.14), transparent 60%),
+      radial-gradient(62.5rem 35rem at 100% 2%, rgba(168,57,74,.08), transparent 55%),
+      repeating-linear-gradient(112deg, rgba(233,220,192,.02) 0 0.125rem, transparent 0.125rem 0.4375rem),
       var(--parch);
     overflow-x:hidden;
   }
@@ -116,68 +119,78 @@
   h1,h2,h3,.brand,.eyebrow,.tab,.btn,.step .n,.tag{font-family:var(--display)}
   .muted{color:var(--sepia)}
 
-  /* ---------- Roman colonnade down both sides ---------- */
-  .colonnade{display:none}
-  @media(min-width:1180px){.colonnade{display:block}}
-  .col{position:absolute;top:0;bottom:0;width:5rem;z-index:1;pointer-events:none;display:flex;flex-direction:column;
-    box-shadow:0 0 1.875rem rgba(52,36,12,.14)}
-  .col.l{left:0}.col.r{right:0}
-  .col .cap{position:relative;height:3.75rem;flex:none}
-  .col .abacus{position:absolute;top:0;left:-0.5rem;right:-0.5rem;height:0.9375rem;border-radius:0.125rem;border:1px solid var(--line2);
-    background:linear-gradient(90deg,#b3a37e,#f7f0d8 50%,#b3a37e);box-shadow:0 0.1875rem 0.4375rem rgba(52,36,12,.28)}
-  .col .echinus{position:absolute;left:0.125rem;right:0.125rem;top:0.9375rem;bottom:0;border-bottom:1px solid var(--line2);
-    background:linear-gradient(90deg,#a2926c,#f2ead0 50%,#a2926c);clip-path:polygon(0 0,100% 0,83% 100%,17% 100%)}
-  .col .shaft{flex:1;margin:0 0.5625rem;position:relative;border-left:1px solid var(--line);border-right:1px solid var(--line);
-    background:
-      linear-gradient(90deg, rgba(58,40,16,.34) 0%, rgba(255,250,235,.14) 24%, rgba(255,253,244,.60) 50%, rgba(255,250,235,.12) 76%, rgba(58,40,16,.38) 100%),
-      repeating-linear-gradient(90deg, #c8bb96 0 0.125rem, #efe7cd 0.125rem 0.5625rem, #c8bb96 0.5625rem 0.6875rem);
-    background-blend-mode:normal;}
-  .col .necking{position:absolute;top:0;left:-0.125rem;right:-0.125rem;height:0.5rem;border-radius:0.125rem;
-    background:linear-gradient(90deg,#a2926c,#efe6cc 50%,#a2926c);border:1px solid var(--line)}
-  .col .base{position:relative;height:3.5rem;flex:none}
-  .col .torus{position:absolute;left:0.125rem;right:0.125rem;top:0;bottom:0.9375rem;border-top:1px solid rgba(255,255,255,.35);
-    background:linear-gradient(90deg,#a2926c,#f2ead0 50%,#a2926c);clip-path:polygon(17% 0,83% 0,100% 100%,0 100%)}
-  .col .plinth{position:absolute;bottom:0;left:-0.5rem;right:-0.5rem;height:0.9375rem;border-radius:0.125rem;border:1px solid var(--line2);
-    background:linear-gradient(90deg,#b3a37e,#f7f0d8 50%,#b3a37e);box-shadow:0 -0.125rem 0.375rem rgba(52,36,12,.22)}
-
-  /* ---------- community bar ---------- */
-  /* Above the sticky header, so it scrolls away once someone is reading and the
-     nav keeps the top of the screen. Dark bronze against the parchment: the page
-     is otherwise all light, so a strip that matched it would not be seen. */
-  .community{position:relative;z-index:60;color:#f2e4c4;font-size:.95rem;
-    background:linear-gradient(100deg,#4a3316 0%,#6d4a1c 52%,#4a3316 100%);
-    border-bottom:1px solid rgba(255,225,160,.22)}
-  .community-in{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
-    gap:0.5rem 1rem;min-height:2.875rem;padding:0.5rem 1.5rem;text-align:center}
-  .community-in b{color:#fff3d6;font-weight:600}
-  .community-links{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.5625rem}
-  .community-btn{display:inline-flex;align-items:center;gap:0.4375rem;padding:0.375rem 0.9375rem;border-radius:999px;
-    font-family:var(--display);font-size:.76rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;
-    white-space:nowrap;color:#f7eccf;border:1px solid rgba(255,225,160,.34);background:rgba(255,235,190,.10);
-    transition:background .15s,border-color .15s,transform .12s}
-  .community-btn:hover{background:rgba(255,235,190,.2);border-color:rgba(255,225,160,.62);transform:translateY(-1px)}
-  /* On a narrow screen the two buttons ARE the message — the sentence is what goes. */
-  @media(max-width:560px){.community-in{gap:0.5rem;padding:0.4375rem 0.75rem;min-height:2.625rem}.community-say{display:none}
-    .community-btn{font-size:.7rem;letter-spacing:.05em;padding:0.375rem 0.75rem}}
-
-  /* ---------- header ---------- */
+/* ---------- header ---------- */
   header{position:sticky;top:0;z-index:50;backdrop-filter:blur(0.5rem);
     background:color-mix(in srgb,var(--parch) 82%,transparent);border-bottom:1px solid var(--line)}
   .nav{display:flex;align-items:center;justify-content:space-between;height:4rem}
   .brand{display:flex;align-items:center;gap:0.625rem;font-weight:700;font-size:1.12rem;letter-spacing:.04em;color:var(--ink)}
-  .brand .globe{font-size:1.3rem}
+  /* Icon instead of an emoji: same glyph cross-platform, stays in palette. */
+  .mark{width:1.75rem;height:1.75rem;display:block;border-radius:0.375rem;object-fit:contain;flex:none}
+  .mark-sm{width:1.1rem;height:1.1rem;border-radius:0.25rem;display:inline-block;vertical-align:-0.18em;margin-right:0.125rem}
+  .foot .mark{width:1.35rem;height:1.35rem;display:inline-block;vertical-align:-0.3em;margin-right:0.25rem}
   .nav-links{display:flex;align-items:center;gap:1.75rem;font-size:1.02rem}
   .nav-links a{color:var(--sepia);transition:color .15s}
   .nav-links a:hover{color:var(--ink)}
+  /* Matches the hero's primary button so both play entry points read as one action. */
   .nav-cta{font-family:var(--display);font-size:.86rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;
-    padding:0.5625rem 1.125rem;border-radius:0.5rem;background:var(--grad-gold);color:#fbf3dc;border:1px solid rgba(255,225,160,.35)}
+    padding:0.5625rem 1.125rem;border-radius:0.5rem;
+    background:linear-gradient(180deg,#98283a,var(--red-d));color:#f7eccf;
+    border:1px solid rgba(255,222,160,.4);
+    box-shadow:0 0.375rem 0.875rem -0.375rem rgba(0,0,0,.8);
+    transition:background .2s,box-shadow .2s}
+  .nav-cta:hover{background:linear-gradient(180deg,#a12b3e,#7a1e2b)}
   @media(max-width:720px){.nav-links a:not(.nav-cta){display:none}}
 
   /* ---------- hero ---------- */
-  .hero{padding:4.625rem 0 1.875rem;text-align:center}
+  .hero{padding:0 0 1.875rem;text-align:center}
+  /* Full-bleed screenshot behind the badge and headline only. */
+  .hero-banner{position:relative;padding:4.25rem 1.5rem 3.75rem;margin-bottom:0.25rem}
+  .hero-banner h1{text-shadow:0 0.125rem 1.25rem rgba(0,0,0,.85),0 0.0625rem 0.25rem rgba(0,0,0,.7)}
+  /* Pale gold ramp; the page-wide gold runs too dark against the screenshot.
+     drop-shadow rather than text-shadow because the glyphs are transparent. */
+  .hero-banner .grad{
+    background:linear-gradient(100deg,#e5c684 0%,#fff4d4 46%,#f3dba4 74%,#e0be72 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0.125rem 0.5rem rgba(0,0,0,.85)) drop-shadow(0 0 1.5rem rgba(0,0,0,.6));
+  }
+  .hero-banner .badge{background:rgba(17,17,19,.72);backdrop-filter:blur(0.375rem);color:var(--ink)}
+  .hero-banner .sub{color:#cfc4ad;text-shadow:0 0.0625rem 0.75rem rgba(0,0,0,.9),0 0.0625rem 0.1875rem rgba(0,0,0,.8)}
+  .hero-banner .cta-row{margin-bottom:0}
+  /* Opaque panel: the ghost button sits on the image here. */
+  .hero-banner .btn-ghost{background:rgba(26,26,31,.82);backdrop-filter:blur(0.375rem)}
+  .hero-banner .btn-ghost:hover{background:rgba(33,33,40,.92)}
+  /* Two layers so the blur lands on the screenshot and not on the tint:
+     ::before is the blurred image, ::after the gradient wash over it. */
+  .hero-banner::before,
+  .hero-banner::after{
+    content:"";position:absolute;pointer-events:none;
+  }
+  /* Grown 1rem past the banner then clipped back: blur() paints outside the
+     box and samples transparency at the edges. clip-path runs after the
+     filter, so it cuts off both the spill and the faded rim. */
+  .hero-banner::before{
+    top:-1rem;bottom:-1rem;left:calc(50% - 50vw - 1rem);width:calc(100vw + 2rem);
+    z-index:-2;
+    background:url("/play/screenshots/screenshot.png") center/cover no-repeat;
+    filter:blur(0.1875rem);
+    clip-path:inset(1rem);
+  }
+  .hero-banner::after{
+    top:0;bottom:0;left:calc(50% - 50vw);width:100vw;
+    z-index:-1;
+    /* 2px oversized and centred so the tint always overhangs; otherwise a
+       fractional viewport width leaves a hairline of un-tinted screenshot. */
+    background-image:
+      linear-gradient(180deg, rgba(17,17,19,1) 0%, rgba(17,17,19,.6) 10%, rgba(17,17,19,.14) 38%, rgba(17,17,19,.28) 70%, rgba(17,17,19,.88) 92%, rgba(17,17,19,1) 100%),
+      linear-gradient(90deg, rgba(17,17,19,1) 0%, rgba(17,17,19,.3) 22%, rgba(17,17,19,.18) 50%, rgba(17,17,19,.3) 78%, rgba(17,17,19,1) 100%);
+    background-size:calc(100% + 4px) calc(100% + 4px);
+    background-position:center;
+    background-repeat:no-repeat;
+  }
+  @media(max-width:720px){.hero-banner{padding:3rem 1rem 2.5rem}}
   .badge{display:inline-flex;align-items:center;gap:0.5rem;padding:0.4375rem 1rem;border:1px solid var(--line2);
     border-radius:999px;font-size:.92rem;color:var(--sepia);background:var(--marble)}
-  .badge b{color:var(--red);font-weight:600}
+  .badge b{color:#d4677a;font-weight:600}
   h1{font-size:clamp(2.6rem,6.4vw,4.6rem);line-height:1.04;letter-spacing:.01em;margin:1.5rem 0 0;font-weight:800;color:var(--ink)}
   .grad{background:var(--grad-gold);-webkit-background-clip:text;background-clip:text;color:transparent}
   .sub{font-size:clamp(1.15rem,2.3vw,1.4rem);color:var(--sepia);max-width:40rem;margin:1.375rem auto 0}
@@ -187,18 +200,96 @@
     transition:transform .12s ease,box-shadow .2s,background .2s;cursor:pointer}
   .btn:hover{transform:translateY(-0.125rem)}
   .btn-primary{background:linear-gradient(180deg,#98283a,var(--red-d));color:#f7eccf;
-    border-color:rgba(255,222,160,.4);box-shadow:0 0.75rem 1.875rem -0.75rem rgba(110,26,37,.7)}
+    border-color:rgba(255,222,160,.4);box-shadow:0 0.75rem 1.875rem -0.75rem rgba(0,0,0,.8)}
   .btn-primary:hover{background:linear-gradient(180deg,#a12b3e,#7a1e2b)}
   .btn-ghost{background:var(--marble);border-color:var(--line2);color:var(--ink)}
   .btn-ghost:hover{background:var(--marble2)}
   .hero-note{font-size:.96rem;color:var(--sepia2);margin-top:0.5rem;font-style:italic}
   #heroNote{max-width:40rem;margin-left:auto;margin-right:auto}
-  .hero-note a{color:var(--bronze);border-bottom:1px solid rgba(154,107,47,.4)}
+  .hero-note a{color:var(--bronze);border-bottom:1px solid rgba(201,147,47,.45)}
 
-  .shot{margin:3.125rem auto 0;max-width:58.75rem;position:relative}
-  .shot::before{content:"";position:absolute;inset:-0.625rem;border-radius:calc(var(--radius) + 0.5rem);
-    background:var(--grad-gold);opacity:.5;filter:blur(0.125rem);z-index:-1}
-  .shot img{width:100%;display:block;border-radius:var(--radius);border:0.1875rem solid #cdb87e;box-shadow:var(--shadow)}
+  /* Screenshot gallery. It drifts on its own when idle, scrollable and infinite */
+  .gallery{position:relative;margin:3.125rem 0 0;
+    width:100vw;margin-left:calc(50% - 50vw);
+    /* Fade both ends into the page instead of cutting the strip off. Deep, and
+       eased rather than linear: a straight ramp gives back most of its opacity
+       in the first few px, which reads as an edge rather than a dissolve. */
+    -webkit-mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.15) 6rem,rgba(0,0,0,.6) 12rem,#000 20rem,#000 calc(100% - 20rem),rgba(0,0,0,.6) calc(100% - 12rem),rgba(0,0,0,.15) calc(100% - 6rem),transparent 100%);
+    mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.15) 6rem,rgba(0,0,0,.6) 12rem,#000 20rem,#000 calc(100% - 20rem),rgba(0,0,0,.6) calc(100% - 12rem),rgba(0,0,0,.15) calc(100% - 6rem),transparent 100%)}
+  /* A narrow viewport has no room for a 20rem ramp at each end. */
+  @media(max-width:900px){
+    .gallery{
+      -webkit-mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.5) 3rem,#000 8rem,#000 calc(100% - 8rem),rgba(0,0,0,.5) calc(100% - 3rem),transparent 100%);
+      mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.5) 3rem,#000 8rem,#000 calc(100% - 8rem),rgba(0,0,0,.5) calc(100% - 3rem),transparent 100%)}
+  }
+  .gtrack{display:flex;gap:1rem;overflow-x:auto;padding:0.25rem 1rem 0.5rem;
+    -webkit-overflow-scrolling:touch;
+    /* The bar would sit under a strip that moves by itself, which looks broken.
+       Scrolling still works; only the indicator is hidden. */
+    scrollbar-width:none;-ms-overflow-style:none}
+  .gtrack::-webkit-scrollbar{display:none}
+  .gcard{flex:0 0 auto;height:min(23.75rem,48.75vw);max-width:88vw;position:relative;
+    border:1px solid var(--line2);border-radius:var(--radius);overflow:hidden;
+    background:var(--marble);box-shadow:var(--shadow)}
+  .gcard img{height:100%;width:auto;max-width:88vw;display:block;object-fit:cover;
+    aspect-ratio:16/10;background:var(--parch2);
+    -webkit-user-drag:none;user-select:none}
+  .gcard img.loaded{aspect-ratio:auto}
+  .gcard .shot-tag{position:absolute;right:0.625rem;bottom:0.625rem;z-index:1;pointer-events:none;
+    font-family:var(--display);font-size:.62rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sepia);background:rgba(17,17,19,.78);backdrop-filter:blur(0.25rem);
+    border:1px solid var(--line2);border-radius:999px;padding:0.25rem 0.625rem}
+  /* The cards are click targets now. */
+  .gcard:focus-visible{outline:2px solid var(--gold-l);outline-offset:3px}
+  .gtrack:focus-visible{outline:2px solid var(--gold-l);outline-offset:2px}
+  /* Desktop drag-to-scroll: the cursor is the affordance, so it has to say the
+     strip is grabbable before anyone tries. */
+  .gtrack{cursor:grab}
+  .gtrack.dragging{cursor:grabbing;user-select:none}
+
+  /* ---------- screenshot viewer ---------- */
+  .lb{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+    padding:clamp(1rem,4vw,3.5rem);
+    background:rgba(9,9,11,.88);backdrop-filter:blur(0.5rem);
+    opacity:0;transition:opacity .18s ease}
+  .lb.on{opacity:1}
+  /* After the display:flex, or [hidden] does nothing. */
+  .lb[hidden]{display:none}
+  .lb-figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:0.875rem;
+    max-width:100%;max-height:100%;
+    transform:scale(.99);transition:transform .18s ease}
+  .lb.on .lb-figure{transform:none}
+  .lb-figure img{display:block;max-width:100%;max-height:82vh;width:auto;height:auto;
+    border:1px solid var(--line2);border-radius:var(--radius);background:var(--parch2);
+    box-shadow:0 1.75rem 4rem -1.5rem rgba(0,0,0,.9);
+    -webkit-user-drag:none;user-select:none}
+  .lb-cap{font-family:var(--display);font-size:.68rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sepia)}
+  /* Glyph only; the shadow carries it over a pale screenshot. */
+  .lb-close,.lb-nav{position:absolute;display:grid;place-items:center;cursor:pointer;
+    font-family:var(--display);line-height:1;color:var(--ink);
+    background:none;border:0;border-radius:999px;padding:0;
+    text-shadow:0 0.0625rem 0.5rem rgba(0,0,0,.9),0 0 1.25rem rgba(0,0,0,.7);
+    transition:color .15s,opacity .15s;opacity:.8}
+  .lb-close:hover,.lb-nav:hover{color:var(--gold-l);opacity:1}
+  .lb-close:focus-visible,.lb-nav:focus-visible{outline:2px solid var(--gold-l);outline-offset:2px}
+  /* Focus lands here on open, so: no ring. */
+  .lb:focus,.lb:focus-visible{outline:none}
+  .lb-close{top:1rem;right:1rem;width:2.75rem;height:2.75rem;font-size:1.5rem;padding-bottom:.16em}
+  .lb-nav{top:50%;transform:translateY(-50%);width:3rem;height:3rem;font-size:1.9rem;padding-bottom:.14em}
+  .lb-prev{left:1rem}
+  .lb-next{right:1rem}
+  .lb-nav[hidden]{display:none}
+  @media(max-width:720px){
+    .lb-nav{width:2.5rem;height:2.5rem;font-size:1.5rem}
+    .lb-prev{left:0.5rem}
+    .lb-next{right:0.5rem}
+    .lb-close{top:0.5rem;right:0.5rem;width:2.5rem;height:2.5rem}
+    .lb-figure img{max-height:70vh}
+  }
+  @media(prefers-reduced-motion: reduce){
+    .lb,.lb-figure{transition:none}
+  }
 
   /* ---------- sections ---------- */
   section{padding:3.875rem 0}
@@ -231,17 +322,25 @@
     font-family:ui-monospace,Consolas,monospace;font-size:.82em;color:var(--ink);white-space:nowrap}
 
   /* download cards */
-  .dl{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:1.125rem;margin-top:2.625rem}
+  #download{
+    position:relative;
+    width:min(84rem, 100vw - 3rem);
+    left:50%;
+    transform:translateX(-50%);
+  }
+  .dl{display:grid;grid-template-columns:repeat(4,1fr);gap:1.125rem;margin-top:2.625rem;align-items:stretch}
   .card{position:relative;background:var(--marble);border:1px solid var(--line);border-radius:var(--radius);padding:1.625rem 1.5rem;display:flex;flex-direction:column;box-shadow:var(--shadow)}
-  .card.feature{border-color:var(--bronze);box-shadow:0 0 0 1px rgba(154,107,47,.25) inset,var(--shadow)}
+  .card.feature{border-color:var(--bronze);box-shadow:0 0 0 1px rgba(201,147,47,.3) inset,var(--shadow)}
   .card .ic{font-size:1.8rem}
   .card h3{margin:0.875rem 0 0.125rem;font-size:1.3rem;letter-spacing:.02em;color:var(--ink);font-weight:600}
   .card .meta{color:var(--sepia2);font-size:.92rem;font-style:italic}
   .card p{color:var(--sepia);font-size:1.02rem;margin:0.75rem 0 1.25rem;flex:1}
   .card .btn{width:100%;justify-content:center;padding:0.8125rem}
+  .card .btn + .btn{margin-top:0.625rem}
   .tag{position:absolute;top:1rem;right:1rem;font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-    color:#5b3d0c;background:linear-gradient(180deg,#e6c469,#c99a2e);padding:0.3125rem 0.6875rem;border-radius:999px;border:1px solid rgba(120,80,15,.4)}
-  @media(max-width:820px){.dl{grid-template-columns:1fr}}
+    color:#3b2707;background:linear-gradient(180deg,#e6c469,#c99a2e);padding:0.3125rem 0.6875rem;border-radius:999px;border:1px solid rgba(120,80,15,.4)}
+  @media(max-width:1100px){.dl{grid-template-columns:1fr 1fr}}
+  @media(max-width:640px){.dl{grid-template-columns:1fr}}
 
   /* features */
   .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:2.625rem}
@@ -261,11 +360,11 @@
   summary::after{content:"+";color:var(--bronze);font-size:1.4rem;transition:transform .2s}
   details[open] summary::after{transform:rotate(45deg)}
   details p{margin:0 0 1.125rem;color:var(--sepia);font-size:1.04rem}
-  details a{color:var(--bronze);border-bottom:1px solid rgba(154,107,47,.4)}
+  details a{color:var(--bronze);border-bottom:1px solid rgba(201,147,47,.45)}
 
   /* cta band + footer */
   .band{background:var(--marble);border:1px solid var(--line2);border-radius:1.25rem;padding:3.25rem 1.875rem;text-align:center;margin-top:1.25rem;
-    background-image:radial-gradient(45rem 18.75rem at 50% -40%,rgba(184,134,11,.16),transparent),linear-gradient(var(--marble),var(--marble));box-shadow:var(--shadow)}
+    background-image:radial-gradient(45rem 18.75rem at 50% -40%,rgba(201,147,47,.18),transparent),linear-gradient(var(--marble),var(--marble));box-shadow:var(--shadow)}
   footer{border-top:1px solid var(--line);margin-top:4.375rem;padding:2.125rem 0 3.75rem;color:var(--sepia);font-size:.98rem}
   .foot{display:flex;flex-wrap:wrap;gap:1rem;justify-content:space-between;align-items:center}
   .foot a{color:var(--sepia)}.foot a:hover{color:var(--ink)}
@@ -274,24 +373,9 @@
 </head>
 <body>
 
-<div class="colonnade" aria-hidden="true">
-  <div class="col l"><div class="cap"><span class="abacus"></span><span class="echinus"></span></div><div class="shaft"><span class="necking"></span></div><div class="base"><span class="torus"></span><span class="plinth"></span></div></div>
-  <div class="col r"><div class="cap"><span class="abacus"></span><span class="echinus"></span></div><div class="shaft"><span class="necking"></span></div><div class="base"><span class="torus"></span><span class="plinth"></span></div></div>
-</div>
-
-<div class="community">
-  <div class="community-in">
-    <span class="community-say">Ask questions, share scenarios, and hear about updates &mdash; <b>come say hello.</b></span>
-    <span class="community-links">
-      <a class="community-btn" href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">Join the Discord</a>
-      <a class="community-btn" href="https://www.reddit.com/r/OpenHistoria" target="_blank" rel="noopener">r/OpenHistoria</a>
-    </span>
-  </div>
-</div>
-
 <header>
   <div class="wrap nav">
-    <a class="brand" href="#top"><span class="globe">🏛️</span> Open Historia</a>
+    <a class="brand" href="#top"><img class="mark" src="/play/icon-192.png" alt="" width="28" height="28" fetchpriority="high" /> Open Historia</a>
     <nav class="nav-links">
       <a href="#play">How it works</a>
       <a href="#features">Features</a>
@@ -307,18 +391,37 @@
 <main class="wrap">
 
   <section class="hero">
-    <span class="badge">🏛️ Free &amp; open source · a community alternative to <b>Pax Historia</b></span>
-    <h1>Rewrite history,<br><span class="grad">one decision at a time.</span></h1>
-    <p class="sub">Open Historia is an AI-driven turn-based strategy game. Lead any nation on a living world map, act in plain language, and watch an AI simulate the consequences — wars, diplomacy, and borders that actually shift.</p>
-    <div class="cta-row">
-      <a class="btn btn-primary" href="/play/"><span>▶</span> Demo in your browser</a>
-      <a id="primaryDownload" class="btn btn-ghost" href="#download">
-        <span>⬇</span> <span id="primaryLabel">Download for Desktop</span>
-      </a>
+    <div class="hero-banner">
+      <span class="badge"><img class="mark mark-sm" src="/play/icon-192.png" alt="" width="18" height="18" /> Free &amp; open source · a community alternative to <b>Pax Historia</b></span>
+      <h1>Rewrite history,<br><span class="grad">one decision at a time.</span></h1>
+      <p class="sub">Open Historia is an AI-driven turn-based strategy game. Lead any nation on a living world map, act in plain language, and watch an AI simulate the consequences — wars, diplomacy, and borders that actually shift.</p>
+      <div class="cta-row">
+        <a id="primaryDownload" class="btn btn-primary" href="#download">
+          <span>⬇</span> <span id="primaryLabel">Download for Desktop</span>
+        </a>
+        <a class="btn btn-ghost" href="/play/"><span>▶</span> Demo in your browser</a>
+      </div>
     </div>
     <p class="hero-note" id="heroNote">The browser version is a demo — it streams the world map over the network, so expect lag. The <a href="#download">desktop app</a> runs locally and is how the game is meant to be played.</p>
-    <div class="shot">
-      <img src="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/screenshot.png" alt="Open Historia gameplay — a strategic world map with events and nations" loading="lazy" />
+    <div class="gallery">
+      <div class="gtrack" id="gtrack" tabindex="0" role="group" aria-label="Screenshots">
+        <div class="gcard">
+          <img src="/play/screenshots/screenshot.png" alt="Open Historia gameplay — a strategic world map with events and nations" decoding="async" />
+            <span class="shot-tag">Beta</span>
+        </div>
+        <div class="gcard">
+          <img src="/play/screenshots/screenshot2.png" alt="" loading="lazy" decoding="async" />
+            <span class="shot-tag">Beta</span>
+        </div>
+        <div class="gcard">
+          <img src="/play/screenshots/scenarios.png" alt="" loading="lazy" decoding="async" />
+            <span class="shot-tag">Beta</span>
+        </div>
+        <div class="gcard">
+          <img src="/play/screenshots/economics.png" alt="" loading="lazy" decoding="async" />
+            <span class="shot-tag">Beta</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -363,34 +466,37 @@
     <div class="rule"></div>
     <p class="lead">Desktop is the full experience. The Android app plays on its own — nothing to run alongside it.</p>
     <div class="dl">
-      <div class="card feature">
+      <!-- data-os-card drives the "Recommended" badge and the primary button:
+           the script below moves both onto the visitor's own platform. The
+           markup ships with Windows marked so a no-JS visitor still sees one. -->
+      <div class="card feature" data-os-card="windows">
         <span class="tag">Recommended</span>
         <div class="ic">🪟</div>
         <h3>Windows</h3>
-        <div class="meta">Windows 10 &amp; 11 · 124 MB</div>
+        <div class="meta">Windows 10 &amp; 11 · <span data-size="Open-Historia-Setup.exe">~260 MB</span></div>
         <p>An ordinary installer. Run it and Open Historia lands in your Start Menu like any other app — no Node.js, no setup script, no terminal window. The world map downloads itself the first time you open it.</p>
         <a class="btn btn-primary" href="https://github.com/Open-Historia/open-historia/releases/download/desktop-stable/Open-Historia-Setup.exe">⬇ Download Installer</a>
       </div>
-      <div class="card">
+      <div class="card" data-os-card="mac">
         <div class="ic">🍎</div>
         <h3>macOS</h3>
-        <div class="meta">Apple Silicon or Intel · ~150 MB</div>
+        <div class="meta">Apple Silicon or Intel · <span data-size="Open-Historia-mac-arm64.zip|Open-Historia-mac-x64.zip">~280 MB</span></div>
         <p>Unzip and drag Open Historia to your Applications folder. First launch: right-click it and choose <b>Open</b> — the app isn't code-signed yet, so macOS asks once.</p>
         <a class="btn btn-ghost" href="https://github.com/Open-Historia/open-historia/releases/download/desktop-stable/Open-Historia-mac-arm64.zip">⬇ Apple Silicon</a>
         <a class="btn btn-ghost" href="https://github.com/Open-Historia/open-historia/releases/download/desktop-stable/Open-Historia-mac-x64.zip">⬇ Intel</a>
       </div>
-      <div class="card">
+      <div class="card" data-os-card="linux">
         <div class="ic">🐧</div>
         <h3>Linux</h3>
-        <div class="meta">.deb for Debian &amp; Ubuntu · x86_64 · AppImage for other distros</div>
+        <div class="meta">.deb for Debian &amp; Ubuntu · x86_64 · AppImage for other distros · <span data-size="Open-Historia-amd64.deb|Open-Historia-x86_64.AppImage">~250 MB</span></div>
         <p>One portable file that runs on essentially any distribution. Make it executable and launch it — nothing to install, no packages to add.</p>
         <a class="btn btn-ghost" href="https://github.com/Open-Historia/open-historia/releases/download/desktop-stable/Open-Historia-amd64.deb">⬇ Download .deb</a>
-        <a class="hero-note" style="display:block;margin-top:0.6rem;font-size:0.85rem" href="https://github.com/Open-Historia/open-historia/releases/download/desktop-stable/Open-Historia-x86_64.AppImage">Not on Debian or Ubuntu? Get the AppImage instead.</a>
+        <a class="btn btn-ghost" href="https://github.com/Open-Historia/open-historia/releases/download/desktop-stable/Open-Historia-x86_64.AppImage">⬇ Download .AppImage</a>
       </div>
-      <div class="card">
+      <div class="card" data-os-card="android">
         <div class="ic">📱</div>
         <h3>Android app</h3>
-        <div class="meta">Thin client · ~6 MB</div>
+        <div class="meta">Thin client · <span data-size="open-historia.apk">~21 MB</span></div>
         <p>Install it and play. Your games are saved on the phone and the world map is stored there after the first download — no server to run, nothing to set up.</p>
         <a class="btn btn-ghost" href="https://github.com/Open-Historia/open-historia/releases/download/android/open-historia.apk">⬇ Download APK</a>
       </div>
@@ -472,7 +578,7 @@
 
 <footer>
   <div class="wrap foot">
-    <div><span class="globe">🏛️</span> <b>Open Historia</b> · AGPL-3.0 licensed · built by <a href="https://github.com/Open-Historia/open-historia/graphs/contributors" target="_blank" rel="noopener">contributors</a></div>
+    <div><img class="mark" src="/play/icon-192.png" alt="" width="22" height="22" loading="lazy" /> <b>Open Historia</b> · AGPL-3.0 licensed · built by <a href="https://github.com/Open-Historia/open-historia/graphs/contributors" target="_blank" rel="noopener">contributors</a></div>
     <div class="fnav">
       <a href="#download">Download</a>
       <a href="https://github.com/Open-Historia/open-historia-node" target="_blank" rel="noopener">Host a node</a>
@@ -483,6 +589,17 @@
     </div>
   </div>
 </footer>
+
+<!-- Screenshot viewer. Filled in and opened by the gallery script below. -->
+<div class="lb" id="lightbox" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="Screenshot viewer">
+  <button class="lb-close" id="lbClose" type="button" aria-label="Close screenshot">✕</button>
+  <button class="lb-nav lb-prev" id="lbPrev" type="button" aria-label="Previous screenshot">‹</button>
+  <figure class="lb-figure" id="lbFigure">
+    <img id="lbImg" src="" alt="" />
+    <figcaption class="lb-cap" id="lbCap"></figcaption>
+  </figure>
+  <button class="lb-nav lb-next" id="lbNext" type="button" aria-label="Next screenshot">›</button>
+</div>
 
 <script>
 (function(){
@@ -519,6 +636,400 @@
     var n = document.getElementById("heroNote");
     if (n) n.innerHTML = "On iPhone &amp; iPad, tap <b>Demo</b> to try it in Safari — expect lag, and add it to your Home Screen for fullscreen.";
   }
+
+  // ---------- recommend the visitor's own platform ----------
+  // Change recommended platform install based on visitor's own platform
+  (function recommendPlatform(){
+    var want = ["windows","mac","linux","android"].indexOf(os) >= 0 ? os : "windows";
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".dl .card[data-os-card]"));
+    if (!cards.length) return;
+
+    cards.forEach(function(card){
+      var isTarget = card.getAttribute("data-os-card") === want;
+      card.classList.toggle("feature", isTarget);
+
+      var tag = card.querySelector(".tag");
+      if (isTarget && !tag){
+        tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "Recommended";
+        card.insertBefore(tag, card.firstChild);
+      } else if (!isTarget && tag){
+        tag.parentNode.removeChild(tag);
+      }
+
+      var btns = card.querySelectorAll(".btn");
+      Array.prototype.forEach.call(btns, function(b, i){
+        var primary = isTarget && i === 0;
+        b.classList.toggle("btn-primary", primary);
+        b.classList.toggle("btn-ghost", !primary);
+      });
+    });
+  })();
+
+  // ---------- download sizes, read from the GitHub releases API ----------
+  // auto update file sizes with github API
+  var GH_REPO = "Open-Historia/open-historia";
+  var GH_TAGS = ["desktop-stable", "android"];   // the rolling tags the cards link to
+  var SIZE_KEY = "oh:asset-sizes:v1";            // bump v1 to invalidate early
+  var SIZE_TTL = 6 * 60 * 60 * 1000;
+
+  function fmtSize(bytes){
+    var mb = bytes / 1048576;
+    if (mb >= 1024) return (Math.round(mb / 102.4) / 10) + " GB";
+    // A tenth of a MB is noise on a 260 MB installer but not on a 21 MB APK.
+    return (mb >= 100 ? Math.round(mb) : Math.round(mb * 10) / 10) + " MB";
+  }
+
+  function sizeLabel(spec, sizes){
+    var vals = [];
+    spec.split("|").forEach(function(name){
+      var v = sizes[name.trim()];
+      if (typeof v === "number") vals.push(v);
+    });
+    if (!vals.length) return null;
+    var lo = fmtSize(Math.min.apply(null, vals));
+    var hi = fmtSize(Math.max.apply(null, vals));
+    if (lo === hi) return lo;
+    // Drop the repeated unit ("270–285 MB"), keep both when they differ.
+    var loU = lo.split(" ")[1], hiU = hi.split(" ")[1];
+    return (loU === hiU ? lo.split(" ")[0] : lo) + "–" + hi;
+  }
+
+  function applySizes(sizes){
+    var nodes = document.querySelectorAll("[data-size]");
+    Array.prototype.forEach.call(nodes, function(el){
+      var text = sizeLabel(el.getAttribute("data-size") || "", sizes);
+      if (text) el.textContent = text;   // missing asset: the fallback stands
+    });
+  }
+
+  function readSizes(){
+    try {
+      var c = JSON.parse(localStorage.getItem(SIZE_KEY) || "null");
+      if (!c || !c.t || (Date.now() - c.t) > SIZE_TTL) return null;
+      return c.s;
+    } catch(e){ return null; }
+  }
+  function writeSizes(sizes){
+    try { localStorage.setItem(SIZE_KEY, JSON.stringify({ t: Date.now(), s: sizes })); } catch(e){}
+  }
+
+  // Unauthenticated GitHub allows 60 requests per hour per IP and this costs two,
+  // so the result is cached; repeat visits inside the TTL hit no network at all.
+  (function loadSizes(){
+    if (!document.querySelector("[data-size]")) return;
+    var cached = readSizes();
+    if (cached){ applySizes(cached); return; }
+    if (!window.fetch || !window.Promise) return;
+
+    Promise.all(GH_TAGS.map(function(tag){
+      return fetch("https://api.github.com/repos/" + GH_REPO + "/releases/tags/" + tag,
+                   { headers: { "Accept": "application/vnd.github+json" } })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .catch(function(){ return null; });   // one dead tag must not sink the rest
+    })).then(function(releases){
+      var sizes = {};
+      releases.forEach(function(rel){
+        if (!rel || !rel.assets) return;
+        rel.assets.forEach(function(a){ sizes[a.name] = a.size; });
+      });
+      if (Object.keys(sizes).length){ writeSizes(sizes); applySizes(sizes); }
+    });
+  })();
+
+// Gallery drift. The set is tripled and the scroll position kept in the middle
+  // copy so that a full set sits to either side and the seam never shows-aka it's infinite.
+  var track = document.getElementById("gtrack");
+  if (track){
+    var setSize = track.children.length;
+    var originals = Array.prototype.slice.call(track.children);
+
+    // Read before the strip is tripled, and data-shot set here so the clones
+    // carry it: a click on copy three opens the same image as copy one.
+    var shots = originals.map(function(card, i){
+      var img = card.querySelector("img");
+      var tag = card.querySelector(".shot-tag");
+      card.setAttribute("data-shot", i);
+      return {
+        src: img ? img.getAttribute("src") : "",
+        alt: img ? (img.getAttribute("alt") || "") : "",
+        tag: tag ? tag.textContent.trim() : ""
+      };
+    });
+
+    for (var copy = 0; copy < 2; copy++){
+      originals.forEach(function(c){
+        var clone = c.cloneNode(true);
+        clone.setAttribute("aria-hidden", "true");
+        // A clone must never compete with the real first image for priority.
+        var img = clone.querySelector("img");
+        if (img){ img.setAttribute("alt",""); img.setAttribute("loading","lazy"); img.removeAttribute("fetchpriority"); }
+        track.appendChild(clone);
+      });
+    }
+
+    // Originals only: twelve tab stops for four images would be a trap.
+    originals.forEach(function(card, i){
+      card.setAttribute("tabindex", "0");
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", "View screenshot " + (i + 1) + " full size");
+    });
+
+    var SPEED = 22;        // px per second
+    var RESUME = 2500;     // ms of idleness before the drift picks up again
+    var SEG = 0;           // width of one copy of the set, in px
+    var pos = 0, last = 0, idle = 0, held = false, dragging = false, off = false, raf = 0, lbOpen = false;
+
+    // Measured from the DOM, not scrollWidth/3: the track's padding and one
+    // fewer gap put that a few px off. The first-card-to-first-clone offset is
+    // exact by construction.
+    function measure(){
+      var a = track.children[0], b = track.children[setSize];
+      if (!a || !b) return;
+      var w = b.offsetLeft - a.offsetLeft;
+      if (w > 0 && Math.abs(w - SEG) > 0.5){
+        SEG = w;
+        pos = SEG;
+        track.scrollLeft = SEG;
+      }
+    }
+
+    // Pull the position back into the middle copy. The 1px slack is load-bearing:
+    // scrollLeft rounds to device pixels, so a bare `< SEG` test can read back a
+    // hair under and fire every frame, adding a copy each time - which looks like
+    // a strip standing perfectly still.
+    function wrap(){
+      if (SEG <= 0) return;
+      var sl = track.scrollLeft;
+      if (sl >= SEG * 2){ track.scrollLeft = sl - SEG; pos -= SEG; }
+      else if (sl < SEG - 1){ track.scrollLeft = sl + SEG; pos += SEG; }
+    }
+
+    function pause(){
+      held = true;
+      clearTimeout(idle);
+      idle = setTimeout(function(){ held = false; pos = track.scrollLeft; }, RESUME);
+    }
+
+    function tick(now){
+      raf = requestAnimationFrame(tick);
+      if (!SEG){ measure(); return; }
+      if (!last) last = now;
+      var dt = Math.min((now - last) / 1000, 0.1);   // clamp: a backgrounded tab
+      last = now;                                    // must not lurch on return
+      // Deliberately ignores prefers-reduced-motion: slow and non-essential, and
+      // touching the strip stops it. Re-add `calm.matches` here to respect it.
+      if (off || held || dragging || lbOpen) return; // lbOpen: viewer is up
+      pos += SPEED * dt;
+      // Wrap the tracked float, never a value read back out of the DOM, so
+      // rounding cannot feed back into the position.
+      if (pos >= SEG * 2) pos -= SEG;
+      track.scrollLeft = pos;
+    }
+
+    // A vertical wheel is the page scrolling past a full-width band, not
+    // interaction with the strip; treating it as such would pause near-permanently.
+    ["touchstart","keydown"].forEach(function(evt){
+      track.addEventListener(evt, pause, { passive:true });
+    });
+
+    track.addEventListener("wheel", function(e){
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) pause();
+    }, { passive:true });
+
+    // ---------- click a screenshot to open it full size ----------
+    // A press counts as a click only while the pointer stays put, past CLICK_SLOP px it is a drag
+    var CLICK_SLOP = 6;
+    var press = null;
+
+    var lb = document.getElementById("lightbox");
+    var lbImg = document.getElementById("lbImg");
+    var lbCap = document.getElementById("lbCap");
+    var lbFigure = document.getElementById("lbFigure");
+    var lbCloseBtn = document.getElementById("lbClose");
+    var lbPrevBtn = document.getElementById("lbPrev");
+    var lbNextBtn = document.getElementById("lbNext");
+    var lbIndex = 0, lbFade = 0, lbReturn = null, lbOverflow = "", lbPad = "";
+
+    // closest(), stopping at the track so it can't return a card outside it.
+    function cardFrom(node){
+      while (node && node !== track){
+        if (node.classList && node.classList.contains("gcard")) return node;
+        node = node.parentNode;
+      }
+      return null;
+    }
+    function shotIndex(card){
+      var i = card ? parseInt(card.getAttribute("data-shot"), 10) : NaN;
+      return isNaN(i) ? -1 : i;
+    }
+
+    function lbRender(i){
+      if (!lb || !shots.length) return;
+      lbIndex = ((i % shots.length) + shots.length) % shots.length;
+      var s = shots[lbIndex];
+      if (lbImg.getAttribute("src") !== s.src) lbImg.src = s.src;   // the strip's file: cached
+      lbImg.alt = s.alt || ("Open Historia screenshot " + (lbIndex + 1));
+      lbCap.textContent = (s.tag ? s.tag + " · " : "") + (lbIndex + 1) + " / " + shots.length;
+      var many = shots.length > 1;
+      lbPrevBtn.hidden = !many;
+      lbNextBtn.hidden = !many;
+    }
+
+    function lbOpenAt(i){
+      if (!lb || lbOpen || i < 0) return;
+      lbReturn = document.activeElement;
+      lbRender(i);
+      clearTimeout(lbFade);
+      lb.hidden = false;
+      // Two frames: it must be laid out before the class can animate.
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){ lb.classList.add("on"); });
+      });
+      lbOpen = true;        // tick() reads this every frame: the drift stops
+      clearTimeout(idle);   // and no pending timer may restart it
+      // Hold the page still; pad for the scrollbar so nothing shifts.
+      var bar = window.innerWidth - document.documentElement.clientWidth;
+      lbOverflow = document.body.style.overflow;
+      lbPad = document.body.style.paddingRight;
+      document.body.style.overflow = "hidden";
+      if (bar > 0) document.body.style.paddingRight = bar + "px";
+      document.addEventListener("keydown", lbKey, true);
+      lb.focus();
+    }
+
+    function lbClose(){
+      if (!lbOpen) return;
+      lbOpen = false;
+      lb.classList.remove("on");
+      clearTimeout(lbFade);
+      lbFade = setTimeout(function(){ lb.hidden = true; }, 220);   // after the fade
+      document.removeEventListener("keydown", lbKey, true);
+      document.body.style.overflow = lbOverflow;
+      document.body.style.paddingRight = lbPad;
+      // Resume from wherever the strip sits, after the usual idle delay.
+      last = 0;
+      pos = track.scrollLeft;
+      pause();
+      if (lbReturn && lbReturn.focus) lbReturn.focus();
+      lbReturn = null;
+    }
+
+    function lbKey(e){
+      if (!lbOpen) return;
+      var k = e.key;
+      if (k === "Escape" || k === "Esc"){ e.preventDefault(); lbClose(); }
+      else if (k === "ArrowRight"){ e.preventDefault(); lbRender(lbIndex + 1); }
+      else if (k === "ArrowLeft"){ e.preventDefault(); lbRender(lbIndex - 1); }
+      else if (k === "Tab"){
+        // Keep tab inside the dialog.
+        var stops = [lbPrevBtn, lbNextBtn, lbCloseBtn].filter(function(b){ return b && !b.hidden; });
+        if (!stops.length) return;
+        var at = stops.indexOf(document.activeElement);
+        var next = at === -1 ? (e.shiftKey ? stops.length - 1 : 0) : (e.shiftKey ? at - 1 : at + 1);
+        e.preventDefault();
+        stops[(next + stops.length) % stops.length].focus();
+      }
+    }
+
+    if (lb){
+      lbCloseBtn.addEventListener("click", lbClose);
+      lbPrevBtn.addEventListener("click", function(){ lbRender(lbIndex - 1); });
+      lbNextBtn.addEventListener("click", function(){ lbRender(lbIndex + 1); });
+      // Anywhere off the image closes it.
+      lb.addEventListener("click", function(e){
+        if (e.target === lb || e.target === lbFigure || e.target === lbCap) lbClose();
+      });
+    }
+
+    // Enter and Space do what a click does.
+    track.addEventListener("keydown", function(e){
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      var card = cardFrom(e.target);
+      if (!card) return;
+      e.preventDefault();        // Space would page the document down
+      lbOpenAt(shotIndex(card));
+    });
+
+    // Drag to scroll for mice. Touch is left alone - the browser's own panning
+    // has momentum and rubber banding a reimplementation would not match.
+    var startX = 0, startLeft = 0;
+    track.addEventListener("pointerdown", function(e){
+      // Every pointer type: a tap opens the viewer on a phone too, where the drag path below never runs.
+      var card = cardFrom(e.target);
+      press = card ? { id:e.pointerId, x:e.clientX, y:e.clientY, card:card } : null;
+
+      if (e.pointerType === "touch" || e.button !== 0) return;
+      dragging = true;
+      startX = e.clientX;
+      startLeft = track.scrollLeft;
+      clearTimeout(idle);
+      track.classList.add("dragging");
+      track.setPointerCapture(e.pointerId);
+      e.preventDefault();          // otherwise the browser starts an image drag
+    });
+    track.addEventListener("pointermove", function(e){
+      if (press && e.pointerId === press.id &&
+          (Math.abs(e.clientX - press.x) > CLICK_SLOP || Math.abs(e.clientY - press.y) > CLICK_SLOP)){
+        press = null;              // too far: a drag, not a click
+      }
+      if (!dragging) return;
+      track.scrollLeft = startLeft - (e.clientX - startX);
+      wrap();
+      // wrap() may have shifted a whole copy; re-anchor so the card stays under
+      // the cursor.
+      startLeft = track.scrollLeft + (e.clientX - startX);
+      pos = track.scrollLeft;
+    });
+    function endDrag(e){
+      if (!dragging) return;
+      dragging = false;
+      track.classList.remove("dragging");
+      if (e && e.pointerId != null && track.hasPointerCapture(e.pointerId)) track.releasePointerCapture(e.pointerId);
+      pos = track.scrollLeft;
+      pause();                     // drift picks up again after the idle delay
+    }
+    track.addEventListener("pointerup", function(e){
+      var card = (press && press.id === e.pointerId) ? press.card : null;
+      press = null;
+      endDrag(e);
+      if (card) lbOpenAt(shotIndex(card));
+    });
+    // A touch that became a scroll lands here, not at pointerup - which is how
+    // a swipe is told apart from a tap.
+    track.addEventListener("pointercancel", function(e){
+      press = null;
+      endDrag(e);
+    });
+
+    track.addEventListener("scroll", function(){
+      if (held || dragging){ wrap(); pos = track.scrollLeft; }
+    }, { passive:true });
+
+    // Card width is viewport-relative, so a resize changes the copy width.
+    window.addEventListener("resize", function(){ SEG = 0; measure(); });
+    window.addEventListener("load", measure);
+
+    // Idle off screen rather than cancelling the loop: one missed callback left
+    // the strip stuck for good.
+    if ("IntersectionObserver" in window){
+      new IntersectionObserver(function(entries){
+        entries.forEach(function(e){ off = !e.isIntersecting; if (!off) last = 0; });
+      }, { threshold:0 }).observe(track);
+    }
+
+    measure();
+    raf = requestAnimationFrame(tick);
+  }
+  Array.prototype.forEach.call(track.querySelectorAll("img"), function(img){
+  if (img.complete && img.naturalWidth){ img.classList.add("loaded"); return; }
+    img.addEventListener("load", function(){
+      img.classList.add("loaded");
+      SEG = 0; measure();
+    }, { once:true });
+  });
+  SEG = 0; measure();
 
   var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
   var bodies = Array.prototype.slice.call(document.querySelectorAll(".tab-body"));
