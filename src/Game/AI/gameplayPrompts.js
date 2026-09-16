@@ -1,6 +1,12 @@
 /*! Open Historia — portions (troop & era prompt additions) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import DEFAULT_PROMPTS from "./defaultPrompts.json";
-const normalizeString = (value) => String(value ?? "").trim();
+import {
+  PROMPT_MODEL_VERSION,
+  buildGuidanceDefaults,
+  composePrompt,
+  hasGuidance,
+  normalizePackGuidance,
+} from "./promptGuidance.js";
 
 const PROMPT_ADVISOR_DEFAULT = DEFAULT_PROMPTS.advisor;
 
@@ -375,37 +381,42 @@ export const PROMPT_SECTION_BY_KEY = Object.fromEntries(
 
 export const PROMPT_TASK_KEYS = Object.keys(PROMPT_TASK_DEFAULTS);
 
+// The sections the Prompts tab shows: only the prompts with editable guidance.
+// The rest (the curator, the directors, the resolver, the stat sheet, the spy
+// desks, the board, the next-speaker pick) are technical from end to end.
+export const PROMPT_EDITOR_SECTIONS = PROMPT_SECTION_DEFINITIONS.filter((section) => hasGuidance(section.key));
+
+// A stored prompt pack is { promptModel: 2, guidance }: nothing but the
+// author's edits to the guidance passages, keyed by section and segment (see
+// promptGuidance.js). The technical text is never stored — every scenario and
+// game composes its prompts from the current defaults when it loads, so a
+// change to the defaults (a new feature, a new rule, a new placeholder)
+// reaches all of them. A pack in the old shape, whole prompt strings that
+// froze the technical text at the time of the save, is ignored: the defaults
+// are used.
+export const PROMPT_GUIDANCE_DEFAULTS = Object.freeze(buildGuidanceDefaults(DEFAULT_PROMPTS));
+
+export const normalizePromptGuidance = (rawPack) => normalizePackGuidance(rawPack, PROMPT_GUIDANCE_DEFAULTS);
+
+// The runtime pack: the composed prompts the game renders, plus the guidance
+// they were composed from (what the Prompts tab edits). The helpers are always
+// the defaults; they are the technical placeholder map.
 export const normalizePromptPack = (rawPrompts) => {
-  const prompts = rawPrompts && typeof rawPrompts === "object" ? rawPrompts : {};
-  const tasks = prompts.tasks && typeof prompts.tasks === "object" ? prompts.tasks : {};
-  const helpers = prompts.helpers && typeof prompts.helpers === "object" ? prompts.helpers : {};
-
+  const guidance = normalizePromptGuidance(rawPrompts);
   return {
-    advisor: normalizeString(prompts.advisor) || PROMPT_ADVISOR_DEFAULT,
-    helpers: Object.fromEntries(
-      Object.entries(PROMPT_HELPER_DEFAULTS).map(([key, fallback]) => [
-        key,
-        normalizeString(helpers[key]) || fallback,
-      ]),
-    ),
-    leader: normalizeString(prompts.leader) || PROMPT_LEADER_DEFAULT,
+    promptModel: PROMPT_MODEL_VERSION,
+    guidance,
+    advisor: composePrompt("advisor", PROMPT_ADVISOR_DEFAULT, guidance.advisor),
+    helpers: { ...PROMPT_HELPER_DEFAULTS },
+    leader: composePrompt("leader", PROMPT_LEADER_DEFAULT, guidance.leader),
     tasks: Object.fromEntries(
-      PROMPT_TASK_KEYS.map((key) => [
-        key,
-        normalizeString(prompts[key] ?? tasks[key]) || PROMPT_TASK_DEFAULTS[key],
-      ]),
+      PROMPT_TASK_KEYS.map((key) => [key, composePrompt(key, PROMPT_TASK_DEFAULTS[key], guidance.tasks[key])]),
     ),
   };
 };
 
-export const serializePromptPack = (rawPack) => {
-  const pack = normalizePromptPack(rawPack);
-
-  return {
-    advisor: pack.advisor,
-    helpers: pack.helpers,
-    leader: pack.leader,
-    tasks: pack.tasks,
-    ...pack.tasks,
-  };
-};
+// What a scenario or game stores: the edits alone.
+export const serializePromptPack = (rawPack) => ({
+  promptModel: PROMPT_MODEL_VERSION,
+  guidance: normalizePromptGuidance(rawPack),
+});

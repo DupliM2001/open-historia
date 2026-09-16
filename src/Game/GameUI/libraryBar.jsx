@@ -2,10 +2,12 @@
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Presence } from "./presence.jsx";
 import {
-  PROMPT_SECTION_DEFINITIONS,
+  PROMPT_EDITOR_SECTIONS,
+  PROMPT_GUIDANCE_DEFAULTS,
   normalizePromptPack,
   serializePromptPack,
 } from "../AI/gameplayPrompts.js";
+import { guidanceSegmentsFor } from "../AI/promptGuidance.js";
 import {
   activateGame,
   clearGameAsset,
@@ -311,20 +313,33 @@ const AssetBadgeRow = ({ badges }) =>
     </div>
   ) : null;
 
+// The Prompts tab. Each prompt is a fixed technical template with a few
+// passages of guidance inside it (promptGuidance.js); only those passages are
+// shown and edited, one textarea each, and a blank or default-identical
+// passage stores nothing. The technical text never reaches the author, so it
+// cannot be broken here and it stays current as the game changes.
 const PromptSectionEditor = ({
-  onChangeHelper,
   onChangePrompt,
   promptPack,
   promptSectionKey,
   setPromptSectionKey,
 }) => {
   const currentSection =
-    PROMPT_SECTION_DEFINITIONS.find((section) => section.key === promptSectionKey) ??
-    PROMPT_SECTION_DEFINITIONS[0];
-  const currentValue =
+    PROMPT_EDITOR_SECTIONS.find((section) => section.key === promptSectionKey) ??
+    PROMPT_EDITOR_SECTIONS[0];
+  const segments = guidanceSegmentsFor(currentSection.key);
+  const defaults =
     currentSection.type === "root"
-      ? promptPack[currentSection.key]
-      : promptPack.tasks[currentSection.key];
+      ? PROMPT_GUIDANCE_DEFAULTS[currentSection.key] ?? {}
+      : PROMPT_GUIDANCE_DEFAULTS.tasks[currentSection.key] ?? {};
+  const edits =
+    currentSection.type === "root"
+      ? promptPack.guidance?.[currentSection.key] ?? {}
+      : promptPack.guidance?.tasks?.[currentSection.key] ?? {};
+  const isEdited = (segment) =>
+    typeof edits[segment.id] === "string" && edits[segment.id].trim() !== (defaults[segment.id] ?? "").trim();
+  const editedCount = segments.filter(isEdited).length;
+  const smallButtonStyle = { ...actionButtonStyle, fontSize: "0.72rem", minHeight: "1.7rem", padding: "0 0.6rem" };
 
   return (
     <div
@@ -336,7 +351,7 @@ const PromptSectionEditor = ({
       }}
     >
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", marginBottom: "0.85rem" }}>
-        {PROMPT_SECTION_DEFINITIONS.map((section) => (
+        {PROMPT_EDITOR_SECTIONS.map((section) => (
           <button
             key={section.key}
             onClick={() => setPromptSectionKey(section.key)}
@@ -356,31 +371,71 @@ const PromptSectionEditor = ({
         ))}
       </div>
 
-      <div style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>
+      <div style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.82rem", marginBottom: "0.5rem" }}>
         {currentSection.description}
       </div>
-
-      <div style={{ marginBottom: "0.9rem" }}>
-        <label style={fieldLabelStyle}>{currentSection.label} Prompt</label>
-        <textarea
-          style={{ ...textareaStyle, minHeight: "16rem" }}
-          value={currentValue}
-          onChange={(event) => onChangePrompt(currentSection, event.target.value)}
-        />
+      <div
+        style={{
+          background: "rgba(124,58,237,0.08)",
+          border: "1px solid rgba(124,58,237,0.22)",
+          borderRadius: "12px",
+          color: "rgba(255,255,255,0.62)",
+          fontSize: "0.76rem",
+          lineHeight: 1.45,
+          marginBottom: "0.9rem",
+          padding: "0.55rem 0.7rem",
+        }}
+      >
+        Only the guidance is editable: the role, the tone, what to simulate and what makes a good result.
+        The technical parts of every prompt (the placeholders that inject the world, the output contracts,
+        the map rules) are fixed in the app, so every scenario and game keeps up with the game as it changes.
+        A placeholder such as {"${PLAYER_POLITY}"} inside a passage is filled in by the game.
       </div>
 
-      <div style={{ display: "grid", gap: "0.8rem" }}>
-        {currentSection.helpers.map((helperKey) => (
-          <div key={helperKey}>
-            <label style={fieldLabelStyle}>{helperKey}</label>
-            <textarea
-              style={{ ...textareaStyle, minHeight: "5.5rem", fontFamily: "Consolas, monospace" }}
-              value={promptPack.helpers[helperKey] ?? ""}
-              onChange={(event) => onChangeHelper(helperKey, event.target.value)}
-            />
-          </div>
-        ))}
+      <div style={{ display: "grid", gap: "0.9rem" }}>
+        {segments.map((segment) => {
+          const value = typeof edits[segment.id] === "string" ? edits[segment.id] : defaults[segment.id] ?? "";
+          const edited = isEdited(segment);
+          return (
+            <div key={segment.id}>
+              <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+                <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>
+                  {segment.label}
+                  {edited ? <span style={{ color: "#c4b5fd", marginLeft: "0.4rem" }}>· edited</span> : null}
+                </label>
+                {edited ? (
+                  <button
+                    onClick={() => onChangePrompt(currentSection, segment.id, null)}
+                    style={smallButtonStyle}
+                    type="button"
+                  >
+                    Reset to default
+                  </button>
+                ) : null}
+              </div>
+              {segment.hint ? (
+                <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.76rem", margin: "0.25rem 0 0.35rem" }}>
+                  {segment.hint}
+                </div>
+              ) : null}
+              <textarea
+                aria-label={`${currentSection.label}: ${segment.label}`}
+                style={{ ...textareaStyle, minHeight: "7rem" }}
+                value={value}
+                onChange={(event) => onChangePrompt(currentSection, segment.id, event.target.value)}
+              />
+            </div>
+          );
+        })}
       </div>
+
+      {editedCount > 0 ? (
+        <div style={{ marginTop: "0.9rem" }}>
+          <button onClick={() => onChangePrompt(currentSection, null, null)} style={smallButtonStyle} type="button">
+            Reset every passage in this section
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -896,7 +951,6 @@ const EditorDrawer = ({
   isBusy,
   kind,
   onChange,
-  onChangeHelper,
   onChangePrompt,
   onClearAsset,
   onClose,
@@ -1111,7 +1165,6 @@ const EditorDrawer = ({
 
       {editorSection === "prompts" && (
         <PromptSectionEditor
-          onChangeHelper={onChangeHelper}
           onChangePrompt={onChangePrompt}
           promptPack={formState.prompts}
           promptSectionKey={promptSectionKey}
@@ -1786,36 +1839,25 @@ const LibraryTopBar = () => {
     }));
   };
 
-  const handlePromptChange = (section, value) => {
-    setEditorState((current) => ({
-      ...current,
-      prompts:
+  // A guidance edit: the new text of one passage, null to drop that passage's
+  // edit (back to the default), or a null passage to reset the whole section.
+  const handlePromptChange = (section, segmentId, value) => {
+    setEditorState((current) => {
+      const guidance = current.prompts?.guidance ?? { advisor: {}, leader: {}, tasks: {} };
+      const bucket =
+        section.type === "root" ? guidance[section.key] ?? {} : guidance.tasks?.[section.key] ?? {};
+      let nextBucket = {};
+      if (segmentId !== null) {
+        nextBucket = { ...bucket };
+        if (value === null) delete nextBucket[segmentId];
+        else nextBucket[segmentId] = value;
+      }
+      const nextGuidance =
         section.type === "root"
-          ? {
-              ...current.prompts,
-              [section.key]: value,
-            }
-          : {
-              ...current.prompts,
-              tasks: {
-                ...current.prompts.tasks,
-                [section.key]: value,
-              },
-            },
-    }));
-  };
-
-  const handleHelperChange = (helperKey, value) => {
-    setEditorState((current) => ({
-      ...current,
-      prompts: {
-        ...current.prompts,
-        helpers: {
-          ...current.prompts.helpers,
-          [helperKey]: value,
-        },
-      },
-    }));
+          ? { ...guidance, [section.key]: nextBucket }
+          : { ...guidance, tasks: { ...(guidance.tasks ?? {}), [section.key]: nextBucket } };
+      return { ...current, prompts: { ...current.prompts, guidance: nextGuidance } };
+    });
   };
 
   const handleSave = async () => {
@@ -2144,6 +2186,8 @@ const LibraryTopBar = () => {
         background: seed.world?.background ?? null,
         // The chosen built-in basemap so the game renders it (not always ocean).
         basemap: seed.world?.basemap ?? null,
+        // The starting units placed in the Workshop (world.units, source "scenario").
+        units: seed.world?.units ?? [],
       },
       game: {
         ...currentGame,
@@ -2957,7 +3001,6 @@ const LibraryTopBar = () => {
         isBusy={isBusy || loading}
         kind={editorKind}
         onChange={handleEditorChange}
-        onChangeHelper={handleHelperChange}
         onChangePrompt={handlePromptChange}
         onClearAsset={handleEditorAssetClear}
         onClose={resetEditor}
@@ -3007,6 +3050,8 @@ const LibraryTopBar = () => {
                   : {},
                 background,
                 basemap: world.basemap || null,
+                // The scenario's starting units, so the Units panel edits what the game starts with.
+                units: Array.isArray(world.units) ? world.units : [],
               });
             });
           }

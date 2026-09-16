@@ -465,6 +465,7 @@ const TEMPLATE_WORLD_OVERRIDE_KEYS = [
 "notes",
 "ownerCodes",
 "polityOverrides",
+"units",
 "regionClaimants",
 "regionOwnershipOverrides",
 "regionSovereigntyOverrides",

@@ -214,7 +214,7 @@ Also used for `autoJumpForward`. This is the largest task.
 
 #### Ledger transports (`warUpdates`, `relationUpdates`, `agreementUpdates`)
 
-Three optional strings, one record per line, fields separated by `~`. They deliberately stay text: the nested object form is what Gemini function calling and strict tool modes choke on, and the formats are taught in the live prompt (`buildWarLedgerDirective` / `buildDiplomaticLedgerDirective` in gameplay.js), so frozen prompt packs get them too.
+Three optional strings, one record per line, fields separated by `~`. They deliberately stay text: the nested object form is what Gemini function calling and strict tool modes choke on, and the formats are taught in the live prompt (`buildWarLedgerDirective` / `buildDiplomaticLedgerDirective` in gameplay.js), so every campaign carries them whatever guidance it edited (ai-prompts.md §2).
 
 | Transport | Line | Ops |
 |---|---|---|
@@ -390,9 +390,9 @@ Every AI gameplay call goes through this one function. It owns prompt assembly, 
 
 ### 8.2 Prompt assembly (before the loop)
 
-1. `loadPromptCatalog` + `renderTemplate` build the system prompt from the campaign's frozen prompt pack (`:390`).
+1. `loadPromptCatalog` + `renderTemplate` build the system prompt from the current templates plus the campaign's guidance edits (ai-prompts.md §2).
 2. Append the **difficulty directive** from `readGameData().difficulty` (`:400`).
-3. For `jumpForward`/`autoJumpForward`: append **[Player Agency]** and **[Map Truth]** blocks at call time (`:411-421`) — done here, not in `defaultPrompts.json`, because existing campaigns carry frozen prompt copies, so a call-time append is the only way the rule reaches them.
+3. For `jumpForward`/`autoJumpForward`: append **[Player Agency]** and **[Map Truth]** blocks at call time (`:411-421`) — a leftover of the frozen-prompt era; the templates now reach every campaign (ai-prompts.md §2), and `promptDedupe.js` skips a directive the template already carries.
 4. For `actions`/jumps/catalysts: append **[International Reputation]** context (`:425`).
 
 ### 8.3 The two-attempt loop (`:447-502`)

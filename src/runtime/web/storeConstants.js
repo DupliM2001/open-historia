@@ -61,6 +61,7 @@ export const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENA
 export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
   "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
   "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
+  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "units",
   "regionClaimants", "regionOwnershipOverrides", "regionSovereigntyOverrides",
   "simulationRules", "startingTimelineText",
 ];

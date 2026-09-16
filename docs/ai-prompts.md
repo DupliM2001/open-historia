@@ -1,6 +1,6 @@
 # Prompt-Making Guide
 
-Every LLM call the game makes is a template in `src/Game/AI/defaultPrompts.json` filled with runtime game state, then hardened by call-time directives, then validated against a JSON Schema tool. This page is the single reference for anyone editing prompts: it enumerates every `${PLACEHOLDER}`, every template variable and where it is computed, every AI task and its output schema, exactly how a final prompt is assembled, how prompts are overridden per scenario, and how to add a new variable or task. When in doubt, the code paths are all in `src/Game/AI/` and `src/runtime/`.
+Every LLM call the game makes is a template in `src/Game/AI/defaultPrompts.json` filled with runtime game state, then hardened by call-time directives, then validated against a JSON Schema tool. This page is the single reference for anyone editing prompts: it enumerates every `${PLACEHOLDER}`, every template variable and where it is computed, every AI task and its output schema, exactly how a final prompt is assembled, how a scenario or game edits the guidance inside them, and how to add a new variable or task. When in doubt, the code paths are all in `src/Game/AI/` and `src/runtime/`.
 
 ---
 
@@ -9,7 +9,8 @@ Every LLM call the game makes is a template in `src/Game/AI/defaultPrompts.json`
 | Concern | File | Notes |
 |---|---|---|
 | Task + root prompt text; `${PLACEHOLDER}`→`${var}` helper map | `src/Game/AI/defaultPrompts.json` | Built-in defaults, bundled with the app |
-| Prompt-pack normalization, editor section list, task-key list | `src/Game/AI/gameplayPrompts.js` | `normalizePromptPack`, `serializePromptPack`, `PROMPT_SECTION_DEFINITIONS` |
+| Prompt-pack composition, editor section list, task-key list | `src/Game/AI/gameplayPrompts.js` | `normalizePromptPack`, `serializePromptPack`, `PROMPT_SECTION_DEFINITIONS`, `PROMPT_EDITOR_SECTIONS`, `PROMPT_GUIDANCE_DEFAULTS` |
+| The editable guidance passages inside each prompt: anchors, composition, pack normalisation | `src/Game/AI/promptGuidance.js` | `PROMPT_GUIDANCE`, `composePrompt`, `normalizePackGuidance`; pinned by `promptGuidance.test.js` |
 | Context builders (world summary, histories, units, cities) | `src/Game/AI/promptContext.js` | `buildPromptContext`, `buildWorldSummary`, `renderTemplate`, `resolveHelperValues` |
 | Task runner, call-time directives, validators, fallbacks, task entry points | `src/Game/AI/gameplay.js` | `runJsonTask`, `buildTemplateVariables`, `simulateTimelineJump`, etc. |
 | JSON Schemas + tools + payload validator | `src/Game/AI/gameplaySchemas.js` | `GAMEPLAY_SCHEMAS`, `GAMEPLAY_TOOLS`, `validateGameplayPayload` |
@@ -17,7 +18,7 @@ Every LLM call the game makes is a template in `src/Game/AI/defaultPrompts.json`
 | Language directive (appended to *every* call) | `src/runtime/i18n.js` | `languageDirective` at line 137 |
 | Difficulty directive (appended to task + leader prompts) | `src/runtime/difficulty.js` | `difficultyDirective` at line 73 |
 | Where the active game's prompt overrides are read from | `src/runtime/assets.js:268` | `JSON_URLS.prompts = /api/runtime/json/prompts` |
-| Per-scenario prompt editor UI ("Prompts" tab) | `src/Game/GameUI/libraryBar.jsx` | `handlePromptChange`, `serializePromptPack` on save |
+| Per-scenario / per-game prompt editor UI ("Prompts" tab) | `src/Game/GameUI/libraryBar.jsx` | `PromptSectionEditor`, `handlePromptChange`, `serializePromptPack` on save |
 
 See [World state](world-state.md) for the `world.json` shapes (`regionOwnershipOverrides`, `polityOverrides`, `units`, `markers`, `activeCatalyst`, `consolidatedHistory`, `simulationHistory`) that the context builders read.
 
@@ -34,16 +35,19 @@ See [World state](world-state.md) for the `world.json` shapes (`regionOwnershipO
 | **tasks** | `tasks.<key>` (strings) | 13 structured JSON tasks (below) | `runJsonTask` (`gameplay.js:382`) |
 | Helper map | `helpers` (object) | `${PLACEHOLDER}` → `${templateVar}` indirection | `resolveHelperValues` (`promptContext.js:23`) |
 
-### Override / storage model
+### Storage model: guidance only (since 2026-09-16)
 
-- The bundled `defaultPrompts.json` is the fallback. The **active game** may ship its own `prompts` asset, served at `JSON_URLS.prompts` (`/api/runtime/json/prompts`). Both `runJsonTask` (via `loadPromptCatalog`, `gameplay.js:310`) and the advisor/leader path (via `ensurePromptsLoaded`, `main.jsx:969`) read it.
-- `normalizePromptPack` (`gameplayPrompts.js:232`) merges **per key with fallback**: for every task key in `PROMPT_TASK_KEYS`, an override is used only if it is a non-blank string, else the default. Same for `advisor`, `leader`, and each `helpers` entry. A partial override (one task) leaves all others at default.
-- Scenarios persist overrides under `details.data.prompts`. The library "Prompts" editor writes them: root sections write `prompts[key]`, task sections write `prompts.tasks[key]`, helpers write `prompts.helpers[key]` (`libraryBar.jsx:1426`), and `serializePromptPack` flattens on save (`gameplayPrompts.js:255`).
-- `PROMPT_SECTION_DEFINITIONS` (`gameplayPrompts.js:15`) drives the editor UI: one entry per editable section with a `label`, `type` (`root` | `task`), and a **declared** `helpers` list. Note one mismatch with the runtime: the declared helper lists are hints — some listed placeholders (e.g. `CONSOLIDATED_HISTORY`, `PLAYER_POLITY_REPUTATION_CONTEXT`) are **not** referenced by the current default text.
+Every prompt is a fixed **technical template** — the placeholders that inject the world, the output contracts, the map rules — with a few passages of **guidance** inside it: the role, the tone, what to simulate and how much, what makes a good event. Only the guidance is stored and editable.
 
-### ⚠️ Frozen-prompt caveat (read this before adding a rule to defaultPrompts.json)
+- `src/Game/AI/promptGuidance.js` declares the passages: per section (`advisor`, `leader`, or a task key) an ordered list of segments `{ id, label, start, end, hint }`, each located in the default text by a `start` and an `end` anchor copied verbatim from `defaultPrompts.json`. Anchors must be unique and in order (`promptGuidance.test.js` checks every one, that no passage carries a code block or a JSON contract, and that an unedited pack renders the shipped text byte for byte). A prompt with no entry has no guidance and never appears in the editor — the curator, the directors, the resolver, the stat sheet, the spy desks, the board and the next-speaker pick are technical end to end.
+- A stored pack (`details.data.prompts`, served to the active game at `JSON_URLS.prompts` = `/api/runtime/json/prompts` and read by `loadPromptCatalog` in `gameplay.js` and `ensurePromptsLoaded` in `main.jsx`) is `{ "promptModel": 2, "guidance": { "advisor": { segmentId: text }, "leader": {…}, "tasks": { "jumpForward": {…}, … } } }` — the author's edits alone, trimmed, with blank and default-identical passages dropped (`normalizePackGuidance`). Nothing else is ever written.
+- `normalizePromptPack` (`gameplayPrompts.js`) composes the runtime pack at load time: for every section it takes the **current** default text and replaces each edited segment's default passage with the author's text (`composePrompt`), then hands back the same `{ advisor, leader, helpers, tasks }` the renderers always used, plus `promptModel` and `guidance` for the editor. Helpers are always the defaults. Composition happens before rendering, so a `${PLAYER_POLITY}` inside an author's passage fills in like any other.
+- **A pack in the old shape — whole prompt strings — is ignored.** Those packs froze the technical text at the time of the save; every scenario and game that has one now runs the current defaults (with no guidance edits, since the old model kept none apart). The built-in seed ships `{ "promptModel": 2, "guidance": {} }`, and `scripts/presets/build-preset.mjs` writes the same for a preset.
+- `PROMPT_SECTION_DEFINITIONS` still lists every section with its `label`, `type` (`root` | `task`) and description (its `helpers` lists are documentation of what a section may render, nothing more); `PROMPT_EDITOR_SECTIONS` is the subset with guidance, and it is what the Prompts tab shows — one textarea per passage, "Reset to default" per passage and per section.
 
-**Existing campaigns carry a frozen copy of the task prompts.** A game created before your edit keeps whatever prompt text it was seeded with; editing `defaultPrompts.json` only affects games that read the default (no override) or new scenarios. This is *the* reason several critical rules are **appended at call time in `runJsonTask`** instead of living in the JSON (see §6): Player Agency, Map Truth, and International Reputation reach old games only because they are concatenated onto the system prompt every call. If a rule must apply retroactively to all campaigns, append it in code, not in `defaultPrompts.json`.
+### The frozen-prompt era, and the call-time directives it left behind
+
+Before the guidance model a save carried a **frozen copy** of every prompt, so an edit to `defaultPrompts.json` never reached an existing campaign. That is why several rules are **appended at call time in `runJsonTask`** (§6): Player Agency, Map Truth, International Reputation, the unit contract, the board directive. They still run on every call (`promptDedupe.js` skips a directive the template already carries), but the reason for them is gone: a rule written into `defaultPrompts.json` now reaches every scenario and game the next time it loads its prompts. New rules belong in the template; a call-time directive is only for text that depends on runtime state.
 
 ---
 
@@ -53,7 +57,7 @@ See [World state](world-state.md) for the `world.json` shapes (`regionOwnershipO
 
 Order of concatenation onto the system prompt:
 
-1. **Load pack** — `loadPromptCatalog()` → `normalizePromptPack(readJson(JSON_URLS.prompts))` (per-key override or default).
+1. **Load pack** — `loadPromptCatalog()` → `normalizePromptPack(readJson(JSON_URLS.prompts))` (the current defaults with the pack's guidance edits composed in, §2).
 2. **Resolve helpers** — `helperValues = resolveHelperValues(prompts.helpers, variables)` (`promptContext.js:23`). Two passes so a helper that references another helper resolves.
 3. **Render task text** — `systemPrompt = renderTemplate(prompts.tasks[taskKey], { ...variables, ...helperValues })` (`gameplay.js:392`). `renderTemplate` (`promptContext.js:17`) replaces `${key}` with `variables[key]` (missing/`null` → empty string). Both uppercase `${PLACEHOLDER}` keys (from `helperValues`) and lowercase `${var}` keys (from `variables`) are in scope.
 4. **+ Difficulty directive** — `\n\n${difficultyDirective(game.difficulty)}` for every task (`gameplay.js:400`).
@@ -211,7 +215,7 @@ The save remembers everything; a task is shown a bounded, deterministic slice of
 
 ## 6. Call-time appended directives
 
-Concatenated onto the system prompt in `runJsonTask` / `callAI` **after** the template renders. They exist in code (not `defaultPrompts.json`) so they reach frozen-prompt campaigns (§2).
+Concatenated onto the system prompt in `runJsonTask` / `callAI` **after** the template renders. They date from the frozen-prompt era (§2); they still apply to every call, and `promptDedupe.js` skips one the template already carries.
 
 | Directive | Applies to | Source |
 |---|---|---|
@@ -350,7 +354,7 @@ Each subsection: purpose · default prompt location · entry point · key inputs
 - **Provisional major events.** A strategically major event whose only consequence is a Board entry passes the world director's consequence check provisionally (§7.12c). The turn judges it on the Board itself, before and after that event's own ops (`materiallyChangedEntryIds`): an entry opened, a status or progress change, or a checkpoint reached or missed. A `lastUpdate` alone and a restated figure do not count, and neither does an op with no usable `eventIndex`. An unbacked event leaves the timeline before the write, and its ops are applied without stamping it. An event that gained a consequence of its own after the segment check (unit or control ops from the directors, spy orders, resolved player orders) stands on that instead. The `[OH board]` console line reports how many Hidden events were read and how many of them moved how many Board entries, the provisional events and how many were unbacked, and any HIGH PRIORITY entry the pass left unassessed.
 - **No fallback.** An empty board is what a failed call should leave behind, and `runJsonTask` throwing is what lets the caller hold the turn and offer a retry rather than pretending the board moved. The segments' Hidden events ride in the held turn's `result`, so a Retry reads the same ones. A Retry re-runs the curator, though, so its Hidden events follow that run's own timeline.
 
-Its rules live in the template, with one exception injected at call time: `buildBoardPassDirective` (`projectsDirective.js`) restates the HIGH PRIORITY rule, which means an explicit assessment every jump where "no material change this period, because…" is valid, never forced movement. It says it supersedes the old wording, because campaigns keep a frozen copy of the template (§2). The game master's inline board block and the jump's board directive share the same sentence (`HIGH_PRIORITY_ASSESSMENT_RULE`).
+Its rules live in the template, with one exception injected at call time: `buildBoardPassDirective` (`projectsDirective.js`) restates the HIGH PRIORITY rule, which means an explicit assessment every jump where "no material change this period, because…" is valid, never forced movement. It says it supersedes the old wording, a leftover of the frozen-prompt era (§2). The game master's inline board block and the jump's board directive share the same sentence (`HIGH_PRIORITY_ASSESSMENT_RULE`).
 
 ### 7.14 Root prompt: `leader` — AI diplomacy
 - **Purpose:** Roleplay a single non-player polity replying in an ongoing chat; hard rule to **match the player's average message length** and tone; simulate a polity leaving.
@@ -388,24 +392,24 @@ Jump payloads also carry a top-level `diplomaticOutreach[]` (same shape as `crea
 1. **Compute it** in `buildPromptContext`'s return object (`promptContext.js:413`) — e.g. `myThing: buildMyThing(bundle.world)`. Add a builder next to the others if non-trivial. (If it needs reputation/feasibility-style augmentation only for tasks, add it in `buildTemplateVariables` `gameplay.js:367` instead — but remember advisor/leader won't see those.)
 2. **Expose a placeholder** in `defaultPrompts.json` `helpers`: `"MY_THING": "${myThing}"`.
 3. **Reference it** in the task/root text as `${MY_THING}` (or the lowercase `${myThing}` directly).
-4. **(Optional) editor:** add `MY_THING` to the relevant section's `helpers` list in `PROMPT_SECTION_DEFINITIONS` (`gameplayPrompts.js:15`) so it shows in the Prompts editor hints.
+4. **Editor:** nothing — helpers are technical and never shown. If the sentence that uses the variable is guidance an author should be able to reword, keep it inside a segment declared in `promptGuidance.js` (or declare one, with unique `start`/`end` anchors) and keep the placeholder inside the passage.
 5. Nothing else — `renderTemplate` picks up any key present in the merged `{...variables, ...helperValues}` map.
 
 ### Add a new task
 1. **Schema + tool:** define `MY_TASK_SCHEMA` and `MY_TASK_TOOL = makeTool("submit_my_task", …)` in `gameplaySchemas.js`; register both in `GAMEPLAY_SCHEMAS` (`621`) and `GAMEPLAY_TOOLS` (`717`) under the new key; add any task-specific checks to `validateGameplayPayload` (`852`).
 2. **Prompt text:** add `tasks.myTask` to `defaultPrompts.json` ending with the JSON output contract. It is auto-picked-up: `PROMPT_TASK_KEYS = Object.keys(tasks)` and `normalizePromptPack` iterate it (`gameplayPrompts.js:230`, `246`).
 3. **Entry point:** in `gameplay.js`, build variables (`buildTemplateVariables(bundle, {…})`) and call `runJsonTask("myTask", { userMessage, variables, fallback?, validatePayload?, timeoutMs? })`. Wrap state-writing tasks in `beginSimulation()/endSimulation()`.
-4. **Call-time directives:** if the rule must apply to existing games, add the task key to the relevant `if ([...].includes(taskKey))` blocks in `runJsonTask` (`gameplay.js:411`/`425`) rather than only in the JSON (frozen-prompt caveat, §2).
-5. **(Optional) editor:** add a `PROMPT_SECTION_DEFINITIONS` entry (`type:"task"`) so it is user-editable per scenario.
+4. **Call-time directives:** only for text that depends on runtime state; a rule in the template reaches every campaign (§2).
+5. **(Optional) editor:** add a `PROMPT_SECTION_DEFINITIONS` entry (`type:"task"`) **and** at least one guidance segment in `promptGuidance.js`; a section without segments stays hidden, and only the segments are editable.
 
 ---
 
 ## 10. Gotchas
 
 - **`worldSummary` and `worldSummaryNoCity` are the same string** — the "no city" name is historical; city coordinates are a separate `citiesSummary`/`${CITY_COORDINATES}`.
-- **`worldSummary` embeds the briefing and the simulation rules**, so a prompt that also renders `${WORLD_BEFORE_ROUND_ONE_TEXT}` or `${HISTORICAL_PRESET_SIMULATION_RULES}` would send them twice. `collapseRepeatedWorldContext` (`promptDedupe.js`) keeps the first copy of each and swaps later copies for a pointer; `runJsonTask` applies it to every task and `main.jsx` to the advisor and leader prompts. Values under 400 characters are left alone. Don't strip them from the summary instead: `actions` and `idleDiplomacy` see the rules only there, and saves carry frozen prompts.
+- **`worldSummary` embeds the briefing and the simulation rules**, so a prompt that also renders `${WORLD_BEFORE_ROUND_ONE_TEXT}` or `${HISTORICAL_PRESET_SIMULATION_RULES}` would send them twice. `collapseRepeatedWorldContext` (`promptDedupe.js`) keeps the first copy of each and swaps later copies for a pointer; `runJsonTask` applies it to every task and `main.jsx` to the advisor and leader prompts. Values under 400 characters are left alone. Don't strip them from the summary instead: `actions` and `idleDiplomacy` see the rules only there.
 - **Two output attempts per task**, then a deterministic fallback (or throw). `finalAttempt` comes from `runJsonTask`, never from counting validator calls — attempt-1 schema failures skip `validatePayload` entirely (`gameplay.js:464` comment).
 - **Reputation and military-feasibility reach only the task path** (`buildTemplateVariables`). Advisor/leader use `buildPromptContext` directly and never see them.
 - **`catalystSummary` contains stray embedded "Game Master" text** (§7.9) — the actual GM task is `gameMaster`.
-- **`idleDiplomacy` and the intel `generateCountryStats` briefing are invisible to the Prompts editor** — the former has no `PROMPT_SECTION_DEFINITIONS` entry; the latter is an inline prompt not in `defaultPrompts.json`.
-- **Editing `defaultPrompts.json` does not retroactively change existing campaigns** — they carry frozen prompt copies; use call-time appends for universal rules.
+- **The intel `generateCountryStats` briefing is invisible to the Prompts editor** — it is an inline prompt not in `defaultPrompts.json`. (`idleDiplomacy` has had a section, with one guidance passage, since 2026-09-16.)
+- **Editing `defaultPrompts.json` reaches every campaign** (the guidance model, §2) — but an edit that moves or rewrites a guidance passage must keep, or update, that passage's anchors in `promptGuidance.js`; `promptGuidance.test.js` fails otherwise, and a passage whose anchors are gone silently drops out of the editor.

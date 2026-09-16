@@ -327,8 +327,9 @@ for (const key of ["actions", "advisor", "chat", "events"]) {
   writeJson(path.join(scenarioDir, "storage", `${key}.json`), []);
 }
 
-// prompts.json copied verbatim from default (already templates ${startDate}).
-copyFileSync(path.join(DEFAULT_SCENARIO_DIR, "prompts.json"), path.join(scenarioDir, "prompts.json"));
+// prompts.json holds only guidance edits (src/Game/AI/promptGuidance.js); a
+// preset starts from the current defaults with none.
+writeJson(path.join(scenarioDir, "prompts.json"), { promptModel: 2, guidance: {} });
 
 // ── 5. Register in manifest (idempotent) ──────────────────────────────────────
 const manifest = existsSync(MANIFEST_PATH)

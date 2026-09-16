@@ -75,6 +75,9 @@ export const createDocument = ({ name = "Untitled Map", kind = "import-world" } 
     },
     types: structuredClone(DEFAULT_TYPES),
     features: [],
+    // Starting units (world.units, source "scenario"): what stands on the map at
+    // round one. Placed with the Unit tool; the game moves them from there.
+    units: [],
     // The map-maker's own choices, and the only colour/flag state that belongs to
     // the document. The base palette (293 countries) and any scenario palette are
     // fetched at mount and merged for display only — saving those into every doc
@@ -393,6 +396,10 @@ export const useMapDocument = (initial) => {
     setDoc((d) => ({ ...d, features: typeof updater === "function" ? updater(d.features) : updater }));
     setSaveStatus("dirty");
   }, []);
+  const setUnits = useCallback((updater) => {
+    setDoc((d) => ({ ...d, units: typeof updater === "function" ? updater(d.units || []) : (updater || []) }));
+    setSaveStatus("dirty");
+  }, []);
 
   return {
     doc,
@@ -422,6 +429,8 @@ export const useMapDocument = (initial) => {
     setTypes,
     features: doc.features,
     setFeatures,
+    units: doc.units || [],
+    setUnits,
     metadata: doc.metadata,
     basemap: doc.metadata.basemap,
     setBasemap,
@@ -441,6 +450,7 @@ export const useMapDocument = (initial) => {
     counts: {
       regions: regionCount,
       features: doc.features.length,
+      units: (doc.units || []).length,
       types: doc.types.length,
     },
   };
