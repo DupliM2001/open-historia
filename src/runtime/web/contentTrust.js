@@ -9,6 +9,7 @@
 // assets.js), so none of this ships in the local download.
 
 import { fetchSignedJson } from "./trust.js";
+import { hasScenarioPmtilesOverride } from "./libraryStore.js";
 
 // The signed node directory is served live by the registry Worker (it changes as
 // the admin accepts/pauses/bans nodes), so point at it via VITE_OH_DIRECTORY_URL
@@ -77,6 +78,20 @@ const assetIdFromUrl = (url) => {
   return null;
 };
 
+// A scenario can carry its own archive under the runtime URL — bytes the
+// manifest cannot speak for, since the id still maps to the stock asset. Such
+// an archive is neither fetched from the swarm nor checked against the manifest.
+const runtimeKeyFromUrl = (url) => /\/api\/runtime\/pmtiles\/([a-z0-9-]+)/i.exec(url)?.[1] ?? null;
+const scenarioServesArchive = async (url) => {
+  const key = runtimeKeyFromUrl(url);
+  if (!key) return false;
+  try {
+    return await hasScenarioPmtilesOverride(key);
+  } catch {
+    return false;
+  }
+};
+
 // The home page connects the player to one chosen node (best latency + free
 // capacity); content fetches prefer it, falling back to the rest of the swarm.
 let preferredNodeUrl = null;
@@ -122,6 +137,7 @@ const orderedContentNodes = (nodes, assetId) => {
 export const fetchVerifiedBuffer = async (url, { signal } = {}) => {
   const assetId = assetIdFromUrl(url);
   if (!assetId) return null;
+  if (await scenarioServesArchive(url)) return null; // its own bytes, not the swarm's
 
   const [manifest, dirNodes] = await Promise.all([loadManifest(), loadDirectoryNodes()]);
   const expected = manifest?.assets?.[assetId];
@@ -148,4 +164,24 @@ export const fetchVerifiedBuffer = async (url, { signal } = {}) => {
     }
   }
   return null;
+};
+
+// The canonical-origin fallback is held to the same manifest as the nodes.
+// `checked` is false whenever the manifest cannot speak for these bytes — no
+// valid signed manifest, an asset it does not list, a scenario's own archive —
+// and the caller keeps trusting the origin as it always did. Only a signed hash
+// that contradicts the bytes fails the archive.
+export const verifyOriginBuffer = async (url, buffer) => {
+  const unchecked = { checked: false, ok: true };
+  const assetId = assetIdFromUrl(url);
+  if (!assetId || !buffer?.byteLength) return unchecked;
+  if (await scenarioServesArchive(url)) return unchecked;
+  const manifest = await loadManifest();
+  const expected = manifest?.assets?.[assetId];
+  if (!expected?.sha256) return unchecked;
+  if (expected.bytes && buffer.byteLength !== expected.bytes) {
+    return { checked: true, ok: false, assetId, reason: "size" };
+  }
+  const ok = (await sha256Hex(buffer)) === expected.sha256;
+  return { checked: true, ok, assetId, reason: ok ? "" : "hash" };
 };

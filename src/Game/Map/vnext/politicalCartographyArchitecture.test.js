@@ -66,6 +66,11 @@ test("catalog metadata stays early while scenario readiness waits for safe geome
   assert.match(nations, /ptrBlocksInitialReadiness/);
   assert.match(nations, /!ptrPolityTextStatus\.mounted[\s\S]*!ptrPolityTextStatus\.failed/);
   assert.match(nations, /markPolitiesReady\(regionsGeojsonUrl\)/);
+  // The source and the worker fetch through the worker-fetchable URL (a blob:
+  // copy on the website); the runtime URL stays the identity above.
+  assert.match(nations, /useWorkerFetchableUrl\(regionsGeojsonUrl\)/);
+  assert.match(nations, /data=\{regionsGeojsonFetchUrl \|\| EMPTY_FEATURE_COLLECTION\}/);
+  assert.match(nations, /regionsUrl: regionsGeojsonFetchUrl,/);
 });
 
 test("production PTR placement search runs in a dedicated worker before custom-layer mount", () => {
