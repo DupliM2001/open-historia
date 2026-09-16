@@ -1221,6 +1221,16 @@ export const getScenarioPmtilesOverride = async (key, rangeHeader) => {
   return binaryResponse(bytes, "application/octet-stream", rangeHeader);
 };
 
+// Whether the active scenario serves its own archive under
+// /api/runtime/pmtiles/<key> — bytes the signed content manifest cannot vouch
+// for, so contentTrust.js neither fetches them from the swarm nor holds them
+// to the manifest.
+export const hasScenarioPmtilesOverride = async (key) => {
+  if (!PMTILES_ASSET_KEYS.includes(key)) return false;
+  const scenario = await getActiveRuntimeScenarioRecord();
+  return scenario?.pmtiles?.[key] !== undefined;
+};
+
 // --- Seeding --------------------------------------------------------------
 // The 871 KB default-scenario seed is only needed on a first-ever boot (ensureSeeded)
 // or when creating from a missing default. Load it on demand so returning users never
