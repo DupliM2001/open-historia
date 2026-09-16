@@ -75,10 +75,11 @@ const BottomBar = ({
     >
       {search}
       <Chip icon="list" label={`Regions: ${counts.regions}`} active={openPanel === "regions"} onClick={() => onOpenPanel("regions")} />
-      <Chip icon="list" label={`Polities: ${polityCount}`} active={openPanel === "polities"} onClick={() => onOpenPanel("polities")} />
+      <Chip icon="list" label={`Countries: ${polityCount}`} active={openPanel === "polities"} onClick={() => onOpenPanel("polities")} />
       <Chip icon="layers" label="Topology" active={openPanel === "topology"} onClick={() => onOpenPanel("topology")} />
       <Chip icon="image" label="Import Map" active={openPanel === "province-import"} onClick={() => onOpenPanel("province-import")} />
       <Chip icon="pin" label={`Features: ${counts.features}`} active={openPanel === "features"} onClick={() => onOpenPanel("features")} />
+      <Chip icon="unit" label={`Units: ${counts.units ?? 0}`} active={openPanel === "units"} onClick={() => onOpenPanel("units")} />
       <Chip icon="types" label={`Types: ${counts.types}`} active={openPanel === "types"} onClick={() => onOpenPanel("types")} />
       <Chip icon="layers" label="Layers" active={openPanel === "layers"} onClick={() => onOpenPanel("layers")} />
       <Chip icon="image" label="Reference" active={openPanel === "reference"} onClick={() => onOpenPanel("reference")} />

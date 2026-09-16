@@ -8,6 +8,7 @@ import {
   setRuntimeAssetEndpoints,
 } from "./assets.js";
 import { logDebugEvent, setDebugLogContext } from "./debugLog.js";
+import { setActiveFeatures } from "./gameFeatures.js";
 import { enqueueContentStrings } from "./translator.js";
 
 const LIBRARY_API_ROOT = "/api/library";
@@ -75,6 +76,10 @@ const syncLibraryRuntime = () => {
   // Before the UI re-renders for the new save, so the map's readiness marks
   // (mapReadiness.js) are stamped with the game they belong to.
   setReadinessGame(libraryState.activeGameId);
+  // The features this save plays with — its scenario's configuration under its
+  // own overrides — for the UI (useActiveFeatures) and the simulation
+  // (isActiveFeatureEnabled), without a library round trip.
+  setActiveFeatures(libraryState.runtimeScenario?.features, libraryState.activeGame?.features);
   setCountryNameResolver((name, code) =>
     resolveCountryNameOverride(libraryState.runtimeScenario?.countryNameOverrides, name, code),
   );

@@ -4,6 +4,7 @@
 // builders, snapshot detection, asset-key sets). Web build only.
 
 import COUNTRY_NAME_REGISTRY from "./generated/countryNames.js";
+import { normalizeFeatureOverrides, normalizeFeatureSettings } from "../../../server/gameFeatures.js";
 import {
   BUILT_IN_SCENARIO_DEFAULT_DATE,
   DEFAULT_GAME_META,
@@ -226,6 +227,7 @@ export const readScenarioMeta = (scenarioId, raw = {}) => {
     createdAt: raw?.createdAt ?? nowIso(),
     description,
     eyebrow: String(raw?.eyebrow ?? "").trim() || DEFAULT_SCENARIO_META.eyebrow,
+    features: normalizeFeatureSettings(raw?.features),
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     hubOrigin: normalizeHubOrigin(raw?.hubOrigin),
@@ -247,6 +249,7 @@ export const readGameMeta = (gameId, raw = {}) => {
     createdAt: raw?.createdAt ?? nowIso(),
     description,
     eyebrow: String(raw?.eyebrow ?? "").trim() || DEFAULT_GAME_META.eyebrow,
+    features: normalizeFeatureOverrides(raw?.features),
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     id: gameId,

@@ -9,6 +9,7 @@ import {
     recallSpy, redactExchange, setCoverStory, signalClarity, turnSpy,
 } from "../../runtime/spycraft.js";
 import { isSeal, newSeal, openExchange } from "../../runtime/spySeal.js";
+import { useActiveFeatures } from "../../runtime/gameFeatures.js";
 import { Actions } from "./actions";
 import { Projects } from "./projects";
 import { Presence } from "./presence.jsx";
@@ -1715,6 +1716,10 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
 const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onConsumeRequest, requestedChatId = "", onConsumeRequestedChat, isGenerating = false }) => {
     // "chats" is the diplomacy the player is party to; "spy" is everyone else's.
     const [view, setView] = useState("chats");
+    // The Spy tab exists only where espionage does (the scenario's Features tab,
+    // or this game's own override); a view left on it shows the diplomacy list.
+    const espionageOn = useActiveFeatures().espionage?.enabled !== false;
+    const currentView = espionageOn ? view : "chats";
     const [countries, setCountries]               = useState([]);
     const [loadingCountries, setLoadingCountries] = useState(true);
     const [playerCountry, setPlayerCountry]       = useState("your nation");
@@ -2085,9 +2090,9 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
                 <>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1rem 1.25rem 0.75rem", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
                 <div style={{ display: "flex", gap: "0.35rem" }}>
-                {[["chats", "Diplomacy"], ["spy", "Spy"]].map(([key, label]) => (
+                {[["chats", "Diplomacy"], ...(espionageOn ? [["spy", "Spy"]] : [])].map(([key, label]) => (
                     <button key={key} onClick={() => setView(key)} style={{ padding: "0.3rem 0.7rem", borderRadius: "8px", fontSize: "0.85rem", fontWeight: 700, cursor: "pointer", fontFamily: "sans-serif",
-                        border: "1px solid " + (view === key ? "rgba(167,139,250,0.45)" : "transparent"), background: view === key ? "rgba(139,92,246,0.22)" : "transparent", color: view === key ? "white" : "rgba(255,255,255,0.5)" }}>
+                        border: "1px solid " + (currentView === key ? "rgba(167,139,250,0.45)" : "transparent"), background: currentView === key ? "rgba(139,92,246,0.22)" : "transparent", color: currentView === key ? "white" : "rgba(255,255,255,0.5)" }}>
                     {label}
                     </button>
                 ))}
@@ -2096,7 +2101,7 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
                 onMouseEnter={e => { e.currentTarget.style.color = "white"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
                 onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "none"; }}>✕</button>
                 </div>
-                {view === "spy" ? (
+                {currentView === "spy" ? (
                     <SpyView playerCountry={playerCountry} gameDate={gameDate} countries={countries} loadingCountries={loadingCountries} />
                 ) : (
                 <>

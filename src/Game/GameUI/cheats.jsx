@@ -1605,7 +1605,7 @@ const EventEditorView = ({ meta, header, busy, status, game, runBusy }) => {
     return (
         <>
         {header(meta.title, meta.subtitle)}
-        <div style={{ display: "flex", flex: 1, flexDirection: "column", minHeight: 0 }}>
+        <div style={{ display: "flex", flex: 1, flexDirection: "column", minHeight: 0, overflowY: "auto", paddingRight: "0.12rem" }}>
             <div style={{
                 background: "linear-gradient(135deg, rgba(59,130,246,0.09), rgba(124,58,237,0.08))",
                 border: "1px solid rgba(96,165,250,0.2)",
@@ -1734,7 +1734,7 @@ const EventEditorView = ({ meta, header, busy, status, game, runBusy }) => {
                 </span>
             </div>
 
-            <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: "0.4rem", marginTop: "0.5rem", minHeight: 0, overflowY: "auto", paddingRight: "0.12rem" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginTop: "0.5rem" }}>
                 {events === null && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.74rem", padding: "0.5rem" }}>Loading canonical timeline…</div>}
                 {events !== null && filtered.length === 0 && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.74rem", padding: "0.5rem" }}>No matching events.</div>}
 

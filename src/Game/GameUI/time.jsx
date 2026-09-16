@@ -33,7 +33,7 @@ import {
     tileGeometryParts,
 } from "./eventFocus.js";
 import { setWorldStateOverride } from "../Map/useWorldState.js";
-import { setUnitsOverride } from "../Map/unitsController.js";
+import { getUnitById, setUnitsOverride } from "../Map/unitsController.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
 import { formatGameDateReadable, isGameDate, normalizeGameDate } from "../../runtime/gameDates.js";
@@ -254,8 +254,56 @@ const resolveRegionName = (transfer, regionLookup) => {
     return transfer.regionName || regionLookup.get(transfer.regionId)?.name || transfer.regionId || "";
 };
 
-const getEventMapChangeCount = (event) =>
-(event?.impacts?.regionTransfers?.length || 0) + (event?.impacts?.polityChanges?.length || 0);
+// Every change an event made to the map, in words — what the "N map changes"
+// pill opens into. Transfers and control moves name the region and both sides,
+// polity changes say what happened to the country, unit and structure ops say
+// what was raised, moved or built: the impacts' own vocabulary, read out.
+const describeEventMapChanges = (event, { polityLookup = new Map(), regionLookup = new Map() } = {}) => {
+    const impacts = event?.impacts ?? {};
+    const polity = (code) => resolvePolityName(code, polityLookup) || "";
+    const region = (entry) => resolveRegionName(entry, regionLookup) || "a region";
+    const unitName = (id) => getUnitById(id)?.name || `unit ${id}`;
+    const note = (text) => (text ? ` — ${text}` : "");
+    const lines = [];
+    for (const transfer of impacts.regionTransfers ?? []) {
+        lines.push({ kind: "territory", text: `${region(transfer)}: ${polity(transfer.fromCode) || "unowned"} → ${polity(transfer.toCode) || "unowned"}${transfer.wholeCountry ? " (whole country)" : ""}${note(transfer.note)}` });
+    }
+    for (const op of impacts.regionControlOps ?? []) {
+        if (op?.op === "contest") lines.push({ kind: "control", text: `${region(op)}: contested by ${polity(op.actorCode)}, held by ${polity(op.fromCode) || "no one"}${note(op.note)}` });
+        else if (op?.op === "control") lines.push({ kind: "control", text: `${region(op)}: control passes from ${polity(op.fromCode) || "no one"} to ${polity(op.toCode)}${note(op.note)}` });
+        else if (op?.op === "clear_contest") lines.push({ kind: "control", text: `${region(op)}: ${op.clearAll ? "every contest settled" : `${polity(op.claimantCode)} no longer contests it`}${note(op.note)}` });
+    }
+    for (const claim of impacts.regionClaims ?? []) {
+        lines.push({ kind: "claim", text: `${region(claim)}: ${claim.drop ? `${polity(claim.claimantCode)} drops its claim` : `claimed by ${polity(claim.claimantCode)}`}${note(claim.note)}` });
+    }
+    for (const change of impacts.polityChanges ?? []) {
+        const verb = { create: "created", rename: "renamed", dissolve: "dissolved", restore: "restored", update: "updated" }[change.operation] || "updated";
+        const name = change.name || polity(change.code) || "a polity";
+        const details = [];
+        if (change.operation === "rename" && change.code && change.name && change.code !== change.name) details.push(`was ${polity(change.code)}`);
+        if (change.color) details.push(`colour ${change.color}`);
+        if (change.reputation != null && change.reputation !== "") details.push(`reputation ${change.reputation}`);
+        if (change.intelligence != null && change.intelligence !== "") details.push(`intelligence ${change.intelligence}`);
+        if (Array.isArray(change.tags) && change.tags.length) details.push(`tags ${change.tags.join(", ")}`);
+        lines.push({ kind: "polity", text: `${name}: ${verb}${details.length ? ` (${details.join("; ")})` : ""}${note(change.note)}` });
+    }
+    for (const op of impacts.unitOps ?? []) {
+        if (op?.op === "spawn") lines.push({ kind: "unit", text: `${op.unit?.name || "A formation"} raised — ${op.unit?.type || "unit"} of ${polity(op.unit?.ownerCode) || "an unknown owner"}${note(op.unit?.note)}` });
+        else if (op?.op === "move") lines.push({ kind: "unit", text: `${unitName(op.unitId)} moves${op.regionId ? ` to ${op.regionId}` : ""}${op.posture ? ` (${op.posture})` : ""}${note(op.note)}` });
+        else if (op?.op === "strength") lines.push({ kind: "unit", text: `${unitName(op.unitId)}: strength ${op.strength}%${note(op.note)}` });
+        else if (op?.op === "remove") lines.push({ kind: "unit", text: `${unitName(op.unitId)} removed${note(op.note)}` });
+    }
+    for (const op of impacts.markerOps ?? []) {
+        if (op?.op === "build") lines.push({ kind: "structure", text: `${op.marker?.name || "A structure"} built${op.marker?.kind ? ` (${op.marker.kind})` : ""}${op.marker?.ownerCode ? ` by ${polity(op.marker.ownerCode)}` : ""}${note(op.marker?.note)}` });
+        else if (op?.op === "remove") lines.push({ kind: "structure", text: `${op.name || op.markerId || "A structure"} removed${note(op.note)}` });
+        else if (op?.op === "rename") lines.push({ kind: "structure", text: `${op.name || op.markerId} renamed ${op.newName}${note(op.note)}` });
+        else if (op?.op === "update") lines.push({ kind: "structure", text: `${op.name || op.markerId} updated` });
+        else if (op?.op === "population") lines.push({ kind: "structure", text: `${op.name || op.markerId}: population changed` });
+    }
+    return lines;
+};
+
+const getEventMapChangeCount = (event) => describeEventMapChanges(event).length;
 
 const collectEventTags = (event, { polityLookup, regionLookup }) => {
     const labels = new Set();
@@ -488,7 +536,7 @@ const buildTurnRecord = ({ entry, index, history, eventLookup, game, lookups }) 
     };
 };
 
-const MetricPill = ({ children, icon = null, tone = "default" }) => {
+const MetricPill = ({ children, icon = null, tone = "default", onClick = null, active = false }) => {
     const toneMap = {
         default: {
             background: "rgba(148,163,184,0.12)",
@@ -509,15 +557,21 @@ const MetricPill = ({ children, icon = null, tone = "default" }) => {
 
     const resolved = toneMap[tone] || toneMap.default;
 
+    // With onClick the pill is a real button (the map-changes pill opens its list).
+    const Tag = onClick ? "button" : "span";
     return (
-        <span
+        <Tag
+        type={onClick ? "button" : undefined}
+        onClick={onClick ?? undefined}
         style={{
             alignItems: "center",
-            background: resolved.background,
+            background: active ? "rgba(96,165,250,0.24)" : resolved.background,
             border: resolved.border,
             borderRadius: "999px",
             color: resolved.color,
+            cursor: onClick ? "pointer" : undefined,
             display: "inline-flex",
+            font: "inherit",
             fontSize: "0.69rem",
             fontWeight: 600,
             gap: "0.32rem",
@@ -527,7 +581,7 @@ const MetricPill = ({ children, icon = null, tone = "default" }) => {
         >
         {icon}
         <span>{children}</span>
-        </span>
+        </Tag>
     );
 };
 
@@ -567,7 +621,9 @@ const ghostButtonStyle = {
 const EventCard = ({ event, footer = null, lookups }) => {
     // The model's category tags first, then the participants the card derives.
     const tags = [...(Array.isArray(event.tags) ? event.tags : []), ...collectEventTags(event, lookups)];
-    const mapChangeCount = getEventMapChangeCount(event);
+    const mapChanges = describeEventMapChanges(event, lookups);
+    const mapChangeCount = mapChanges.length;
+    const [showMapChanges, setShowMapChanges] = useState(false);
 
     return (
         <div
@@ -595,8 +651,8 @@ const EventCard = ({ event, footer = null, lookups }) => {
         {formatDate(event.date)}
         </MetricPill>
         {mapChangeCount > 0 && (
-            <MetricPill icon={<MapIcon />} tone="accent">
-            {mapChangeCount} map change{mapChangeCount === 1 ? "" : "s"}
+            <MetricPill icon={<MapIcon />} tone="accent" active={showMapChanges} onClick={() => setShowMapChanges((open) => !open)}>
+            {mapChangeCount} map change{mapChangeCount === 1 ? "" : "s"}{showMapChanges ? " ▴" : " ▾"}
             </MetricPill>
         )}
         {event.source === "fallback" && (
@@ -610,6 +666,17 @@ const EventCard = ({ event, footer = null, lookups }) => {
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
             {tags.map((tag) => (
                 <TagPill key={`${event.id}-${tag}`}>{tag}</TagPill>
+            ))}
+            </div>
+        )}
+        {showMapChanges && mapChanges.length > 0 && (
+            <div style={{ background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.18)", borderRadius: "12px", display: "grid", gap: "0.3rem", padding: "0.55rem 0.7rem" }}>
+            <div style={{ color: "#bfdbfe", fontSize: "0.64rem", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" }}>What changed on the map</div>
+            {mapChanges.map((change, index) => (
+                <div key={`${event.id}-change-${index}`} style={{ color: "rgba(228,228,231,0.86)", display: "flex", fontSize: "0.74rem", gap: "0.45rem", lineHeight: 1.45 }}>
+                <span style={{ color: "rgba(191,219,254,0.7)", flexShrink: 0, fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.04em", minWidth: "4.4rem", paddingTop: "0.12rem", textTransform: "uppercase" }}>{change.kind}</span>
+                <span>{change.text}</span>
+                </div>
             ))}
             </div>
         )}

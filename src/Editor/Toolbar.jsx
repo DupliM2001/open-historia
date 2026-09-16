@@ -8,6 +8,7 @@
 // phases). P1 wires Select + Pan; the geometry tools are shown but disabled until
 // their phases land, so the layout matches the official editor from the start.
 
+import { useEffect, useRef } from "react";
 import Icon from "./Icon.jsx";
 import { panelSurface, toolButton } from "./editorStyles.js";
 
@@ -25,58 +26,100 @@ const TOOLS = [
   { id: "dissolve", icon: "eraser", label: "Delete border (merge two regions)", enabled: true },
   { id: "paint", icon: "paint", label: "Paint polity (click or drag across regions; one stroke = one undo)", enabled: true },
   { id: "feature", icon: "feature", label: "City tool (click map to add a city, click a city to edit it)", enabled: true },
+  { id: "unit", icon: "unit", label: "Unit tool (click the map to place a starting unit, click a unit to edit it)", enabled: true },
+  { id: "feature-box", icon: "pin", label: "Box-select features (drag a rectangle over cities and features to select them all)", enabled: true },
 ];
+
+// The CSS variable the side panels (Panel.jsx) read for their top edge, so a
+// strip that wrapped into two rows pushes them down instead of sitting under
+// them.
+export const TOOLBAR_BOTTOM_VAR = "--editor-toolbar-bottom";
 
 const Separator = () => (
   <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.14)", margin: "0 2px" }} />
 );
 
-const Toolbar = ({ activeTool, onToolChange, onFit, onUndo, onRedo, canUndo, canRedo }) => (
-  <div
-    style={{
-      ...panelSurface,
-      position: "fixed",
-      top: 12,
-      left: "50%",
-      transform: "translateX(-50%)",
-      display: "flex",
-      alignItems: "center",
-      // Wraps into extra rows on narrow (phone) screens instead of overflowing.
-      flexWrap: "wrap",
-      justifyContent: "center",
-      maxWidth: "calc(100vw - 12px)",
-      gap: 4,
-      padding: "6px 8px",
-      zIndex: 30,
-    }}
-  >
-    {TOOLS.map((t, i) =>
-      t.sep ? (
-        <Separator key={`sep-${i}`} />
-      ) : (
-        <button
-          key={t.id}
-          title={t.enabled ? t.label : `${t.label} (coming soon)`}
-          disabled={!t.enabled}
-          onClick={() => t.enabled && onToolChange(t.id)}
-          style={toolButton(activeTool === t.id, !t.enabled)}
-        >
-          <Icon name={t.icon} />
+// On desktop the strip sits in a band between the documents chip on the left
+// and the Save / Apply / Close group on the right, centred in that band and
+// wrapping into more rows when the band is narrower than the strip. Centring on
+// the whole window instead let the last tools slide underneath the Save buttons
+// on a ~1000px window, where a click on the City or Unit tool hit Save & Exit.
+// On a phone the side groups are one icon wide, so the band is the window.
+const Toolbar = ({ activeTool, onToolChange, onFit, onUndo, onRedo, canUndo, canRedo, isMobile = false }) => {
+  const stripRef = useRef(null);
+
+  useEffect(() => {
+    const strip = stripRef.current;
+    const root = document.documentElement;
+    if (!strip || typeof ResizeObserver === "undefined") return undefined;
+    const publish = () => {
+      root.style.setProperty(TOOLBAR_BOTTOM_VAR, `${Math.ceil(strip.getBoundingClientRect().bottom) + 6}px`);
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(strip);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty(TOOLBAR_BOTTOM_VAR);
+    };
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 12,
+        left: isMobile ? 6 : 130,
+        right: isMobile ? 6 : 440,
+        display: "flex",
+        justifyContent: "center",
+        pointerEvents: "none",
+        zIndex: 30,
+      }}
+    >
+      <div
+        ref={stripRef}
+        style={{
+          ...panelSurface,
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          maxWidth: "100%",
+          gap: 4,
+          padding: "6px 8px",
+          pointerEvents: "auto",
+        }}
+      >
+        {TOOLS.map((t, i) =>
+          t.sep ? (
+            <Separator key={`sep-${i}`} />
+          ) : (
+            <button
+              key={t.id}
+              title={t.enabled ? t.label : `${t.label} (coming soon)`}
+              disabled={!t.enabled}
+              onClick={() => t.enabled && onToolChange(t.id)}
+              style={toolButton(activeTool === t.id, !t.enabled)}
+            >
+              <Icon name={t.icon} />
+            </button>
+          ),
+        )}
+        <Separator />
+        <button title="Undo" disabled={!canUndo} onClick={onUndo} style={toolButton(false, !canUndo)}>
+          <Icon name="undo" />
         </button>
-      ),
-    )}
-    <Separator />
-    <button title="Undo" disabled={!canUndo} onClick={onUndo} style={toolButton(false, !canUndo)}>
-      <Icon name="undo" />
-    </button>
-    <button title="Redo" disabled={!canRedo} onClick={onRedo} style={toolButton(false, !canRedo)}>
-      <Icon name="redo" />
-    </button>
-    <Separator />
-    <button title="Fit to data" onClick={onFit} style={toolButton(false, false)}>
-      <Icon name="fit" />
-    </button>
-  </div>
-);
+        <button title="Redo" disabled={!canRedo} onClick={onRedo} style={toolButton(false, !canRedo)}>
+          <Icon name="redo" />
+        </button>
+        <Separator />
+        <button title="Fit to data" onClick={onFit} style={toolButton(false, false)}>
+          <Icon name="fit" />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default Toolbar;

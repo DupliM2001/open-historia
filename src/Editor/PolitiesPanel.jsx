@@ -54,6 +54,7 @@ const PolitiesPanel = ({
   api,
   polities = {},
   selection = [],
+  setSelection,
   regionEpoch = 0,
   colors = {},
   flags = {},
@@ -124,6 +125,14 @@ const PolitiesPanel = ({
       }
     : null;
 
+  // The regions the selected country owns, for the list under its name: a scan
+  // of the region features, keyed like usageRows so it follows ownership edits.
+  const ownedRegions = useMemo(
+    () => (current?.key ? api?.listOwnerRegions?.(current.key) || [] : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [api, current?.key, regionEpoch, refreshNonce],
+  );
+
   useEffect(() => {
     setDraftName(current?.name || "");
     setTransferFrom("");
@@ -140,10 +149,10 @@ const PolitiesPanel = ({
       return;
     }
     upsertPolity?.(key, { name, code: key, aliases: [name], status: "active", note: "" });
+    // A country is registered the moment it is created, regions or not: with a
+    // selection it takes those regions now; otherwise it waits, landless, for
+    // the paint tool or an assignment, and ships to the game either way.
     if (selection.length) api?.setRegionAttrs?.(selection, { owner: key });
-    // A polity exists on the map or not at all: with nothing selected the new
-    // one goes straight to the paint tool so it gets its first region now.
-    else onPaintPolity?.(key);
     setRefreshNonce((n) => n + 1);
     setSelectedKey(key);
     setNewName("");
@@ -339,15 +348,15 @@ const PolitiesPanel = ({
   };
 
   return (
-    <Panel title="Polities" icon="list" onClose={onClose} width={390}>
+    <Panel title="Countries" icon="list" onClose={onClose} width={390}>
       <div style={{ fontSize: 12, lineHeight: 1.45, color: "rgba(255,255,255,0.62)" }}>
-        Every polity here is on the map — it owns a region or a region is disputed in its name — and it leaves this list when its last region does. A polity is <b>keyed by its name</b>: renaming it here re-keys everything on this map — regions, claims, colour, flag, tags and cities — and keeps the old name as a former name, so nothing becomes a new one-province country.
+        Every country on the map is listed — it owns a region or a region is disputed in its name — and so is every country registered here, with regions or not; a registered country stays until it is removed. Click one to select its whole territory. A country is <b>keyed by its name</b>: renaming it re-keys everything that carried the old name.
       </div>
 
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search polity name…"
+        placeholder="Search country name…"
         style={inputStyle}
       />
 
@@ -358,7 +367,7 @@ const PolitiesPanel = ({
             <button
               key={row.key}
               type="button"
-              onClick={() => setSelectedKey(row.key)}
+              onClick={() => { setSelectedKey(row.key); api?.selectOwner?.(row.key, { zoom: true }); }}
               style={{
                 gridColumn: "1 / -1",
                 display: "flex",
@@ -388,7 +397,7 @@ const PolitiesPanel = ({
                   {row.name}
                 </div>
                 <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {row.regionCount} regions{row.claimantCount ? ` · ${row.claimantCount} claims` : ""}{Array.isArray(polities?.[row.key]?.formerNames) && polities[row.key].formerNames.length ? ` · formerly ${polities[row.key].formerNames.join(", ")}` : ""}
+                  {row.regionCount ? `${row.regionCount} regions` : "registered, no regions yet"}{row.claimantCount ? ` · ${row.claimantCount} claims` : ""}{Array.isArray(polities?.[row.key]?.formerNames) && polities[row.key].formerNames.length ? ` · formerly ${polities[row.key].formerNames.join(", ")}` : ""}
                 </div>
               </span>
             </button>
@@ -437,6 +446,31 @@ const PolitiesPanel = ({
               Paint this polity
             </button>
           </div>
+
+          <details style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 9px" }}>
+            <summary style={{ cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>
+              Regions ({ownedRegions.length}){current.claimantCount ? ` · ${current.claimantCount} claimed` : ""}
+            </summary>
+            {ownedRegions.length === 0 ? (
+              <div style={{ fontSize: 10.8, color: "rgba(255,255,255,0.5)", marginTop: 6 }}>
+                No regions yet — this country is registered and ships to the game without land until it is painted or assigned some.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 3, marginTop: 6, maxHeight: 200, overflowY: "auto" }}>
+                {ownedRegions.map((region) => (
+                  <button
+                    key={region.id}
+                    type="button"
+                    onClick={() => { setSelection?.([region.id]); api?.zoomToRegion?.(region.id); }}
+                    title="Select this region and zoom to it"
+                    style={{ textAlign: "left", padding: "4px 7px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "white", cursor: "pointer", fontSize: 11.5 }}
+                  >
+                    {region.name || region.id}
+                  </button>
+                ))}
+              </div>
+            )}
+          </details>
 
           <div>
             <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", marginBottom: 4 }}>Transfer all territory from another polity</div>
@@ -548,11 +582,11 @@ const PolitiesPanel = ({
       </div>
 
       <div style={{ paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Create polity</div>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Create country</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name, e.g. Austria-Hungary" style={inputStyle} />
           <button type="button" style={pillButton(false)} disabled={!clean(newName)} onClick={createPolity}>
-            {selection.length ? `Create + assign ${selection.length} selected regions` : "Create + paint it onto the map"}
+            {selection.length ? `Create country + assign ${selection.length} selected regions` : "Create country (no regions yet)"}
           </button>
         </div>
       </div>
