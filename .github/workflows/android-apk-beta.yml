@@ -25,7 +25,9 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # Node 24 is the Active LTS; Node 20 went end-of-life in March 2026 and
+          # GitHub removes the Node 20 action runtime on 23 Sep 2026.
+          node-version: 24
 
       - uses: actions/setup-java@v5
         with:

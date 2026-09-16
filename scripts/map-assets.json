@@ -1,5 +1,5 @@
 {
-  "_comment": "Large world-map binaries used to be tracked in Git LFS, whose free bandwidth (1 GB/mo, shared org-wide) was exhausted by a handful of installs. They now live as assets on a GitHub Release, whose download bandwidth is free and unmetered. scripts/fetch-map-assets.mjs reads this manifest and downloads any listed file that is missing or out of date; the launcher and updater call it instead of touching Git LFS. When a map file changes: upload the new asset to the release below and update its sha256 + bytes here.",
+  "_comment": "Large world-map binaries used to be tracked in Git LFS, whose free bandwidth (1 GB/mo, shared org-wide) was exhausted by a handful of installs. They now live as assets on a GitHub Release, whose download bandwidth is free and unmetered. scripts/fetch-map-assets.mjs reads this manifest and downloads any listed file that is missing or out of date; the launcher and updater call it instead of touching Git LFS. When a map file changes: upload the new asset to the release below and update its sha256 + bytes here. The last entry is the stock GADM world that every scenario without a map of its own renders on; the built-in Modern Day scenario's OWN map is not listed here at all — it ships inside the app under server/seed/default/ and the server seeds it into the data directory (see docs/assets-and-data.md).",
   "owner": "Open-Historia",
   "repo": "open-historia",
   "release": "map-data",
@@ -9,6 +9,6 @@
     { "path": "public/assets/cities.pmtiles", "asset": "cities.pmtiles", "bytes": 1547924, "sha256": "41edf847114a0c1b04c9a11e9501fc97e680a105b2ec618f5caffca3df61e87a" },
     { "path": "public/assets/cities-seed.json", "asset": "cities-seed.json", "bytes": 7857627, "sha256": "2138650914b87fa7036b065a9d18bd88cbb97ec6c67e9ec22f2be1a9f8bff101" },
     { "path": "public/assets/regions-seed.geojson", "asset": "regions-seed-z8.geojson", "bytes": 55350393, "sha256": "64f1e3708e1f17016f38f86d3b6f928971c7842e8126d74efa65eb04654c770d" },
-    { "path": "server/data/scenarios/default/regions.geojson", "asset": "default-regions-names.geojson", "bytes": 55401660, "sha256": "ec77627d2f081339cef679147a4a5aa53d73af89991225b11173e96c2ba131f2" }
+    { "path": "server/data/stock/regions.geojson", "asset": "default-regions-names.geojson", "bytes": 55401660, "sha256": "ec77627d2f081339cef679147a4a5aa53d73af89991225b11173e96c2ba131f2" }
   ]
 }

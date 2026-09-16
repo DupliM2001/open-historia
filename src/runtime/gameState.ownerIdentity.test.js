@@ -100,7 +100,7 @@ test("a transfer to the new name lands on the renamed polity, not beside it", ()
     events: [event({ regionTransfers: [{ regionId: "AUT.9_1", toCode: "Third Reich" }] })],
   });
 
-  assert.equal(world.regionOwnershipOverrides["AUT.9_1"], "Germany");
+  assert.equal(world.regionOwnershipOverrides["AUT.9_1"], "Third Reich");
 });
 
 test("a rename and a conquest under the new name in the same turn agree", () => {
@@ -112,9 +112,9 @@ test("a rename and a conquest under the new name in the same turn agree", () => 
     ],
   });
 
-  assert.deepEqual(Object.keys(world.polityOverrides), ["Germany"]);
-  assert.equal(world.regionOwnershipOverrides["AUT.9_1"], "Germany");
-  assert.equal(world.regionOwnershipOverrides["DEU.1_1"], "Germany");
+  assert.deepEqual(Object.keys(world.polityOverrides), ["Third Reich"]);
+  assert.equal(world.regionOwnershipOverrides["AUT.9_1"], "Third Reich");
+  assert.equal(world.regionOwnershipOverrides["DEU.1_1"], "Third Reich");
 });
 
 test("a rename and the conquest it names, in ONE event, agree", () => {
@@ -128,8 +128,8 @@ test("a rename and the conquest it names, in ONE event, agree", () => {
     })],
   });
 
-  assert.deepEqual(Object.keys(world.polityOverrides), ["Germany"]);
-  assert.equal(world.regionOwnershipOverrides["AUT.9_1"], "Germany");
+  assert.deepEqual(Object.keys(world.polityOverrides), ["Third Reich"]);
+  assert.equal(world.regionOwnershipOverrides["AUT.9_1"], "Third Reich");
 });
 
 test("a polity created and given land in ONE event keeps its own identity", () => {
@@ -160,13 +160,14 @@ test("a later change addressed to the display name updates the same polity", () 
     })],
   });
 
-  assert.deepEqual(Object.keys(world.polityOverrides), ["Germany"]);
-  assert.equal(world.polityOverrides.Germany.name, "Third Reich");
-  assert.equal(world.internationalReputation.Germany, 12);
-  assert.deepEqual(world.countryTags.Germany, ["authoritarian"]);
-  assert.equal(world.countryStats.Germany.leader, "A. N. Other");
-  assert.deepEqual(colors.Germany, [128, 64, 64]);
-  assert.equal("Third Reich" in world.countryTags, false);
+  assert.deepEqual(Object.keys(world.polityOverrides), ["Third Reich"]);
+  assert.equal(world.polityOverrides["Third Reich"].name, "Third Reich");
+  assert.deepEqual(world.polityOverrides["Third Reich"].formerNames, ["Germany"]);
+  assert.equal(world.internationalReputation["Third Reich"], 12);
+  assert.deepEqual(world.countryTags["Third Reich"], ["authoritarian"]);
+  assert.equal(world.countryStats["Third Reich"].leader, "A. N. Other");
+  assert.deepEqual(colors["Third Reich"], [128, 64, 64]);
+  assert.equal("Germany" in world.countryTags, false);
 });
 
 test("a battalion raised under the new name flies the right country's flag", () => {
@@ -181,7 +182,7 @@ test("a battalion raised under the new name flies the right country's flag", () 
   });
 
   assert.equal(world.units.length, 1);
-  assert.equal(world.units[0].ownerCode, "Germany");
+  assert.equal(world.units[0].ownerCode, "Third Reich");
 });
 
 test("a structure built under the new name belongs to the same polity", () => {
@@ -192,7 +193,7 @@ test("a structure built under the new name belongs to the same polity", () => {
     })],
   });
 
-  assert.equal(world.markers[0].ownerCode, "Germany");
+  assert.equal(world.markers[0].ownerCode, "Third Reich");
 });
 
 test("a genuinely new polity is still created, not folded into an existing one", () => {
@@ -201,7 +202,7 @@ test("a genuinely new polity is still created, not folded into an existing one",
     events: [event({ polityChanges: [{ code: "Free Bavaria", name: "Free Bavaria" }] })],
   });
 
-  assert.deepEqual(Object.keys(world.polityOverrides).sort(), ["Free Bavaria", "Germany"]);
+  assert.deepEqual(Object.keys(world.polityOverrides).sort(), ["Free Bavaria", "Third Reich"]);
 });
 
 // ---- Group D: annexation ---------------------------------------------------
@@ -224,6 +225,9 @@ test("annexation moves every region and leaves the loser landless, not deleted",
   assert.deepEqual(Object.values(world.regionOwnershipOverrides), ["Germany", "Germany"]);
   // The polity survives as a stateless actor (isPolityLandless), keeping its
   // registry entry and everything keyed to it.
-  assert.equal(world.polityOverrides.Belgium.name, "Kingdom of Belgium");
-  assert.deepEqual(world.countryTags.Belgium, ["neutral"]);
+  // A record whose display name differed from its key is keyed by that name
+  // from now on; the old key stays as a former name.
+  assert.equal(world.polityOverrides["Kingdom of Belgium"].name, "Kingdom of Belgium");
+  assert.deepEqual(world.polityOverrides["Kingdom of Belgium"].formerNames, ["Belgium"]);
+  assert.deepEqual(world.countryTags["Kingdom of Belgium"], ["neutral"]);
 });

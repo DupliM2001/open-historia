@@ -3,6 +3,7 @@ import React from "react";
 import dayjs from "dayjs";
 import advancedFormat from "dayjs/plugin/advancedFormat";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
+import { logDebugEvent } from "../../runtime/debugLog.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
 import { generateActionSuggestions, refinePlayerAction } from "../AI/gameplay.js";
 import { revertUnitOrder } from "../Map/unitsController.js";
@@ -12,6 +13,7 @@ import {
     readActionsState,
     writeActionsState,
 } from "../../runtime/gameState.js";
+import { formatGameDateReadable } from "../../runtime/gameDates.js";
 
 dayjs.extend(advancedFormat);
 
@@ -275,7 +277,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
                 }
 
                 if (data.gameDate) {
-                    setGameDate(dayjs(data.gameDate).format("MMMM Do, YYYY"));
+                    setGameDate(formatGameDateReadable(data.gameDate, "MMMM Do, YYYY") || dayjs(data.gameDate).format("MMMM Do, YYYY"));
                 }
 
                 // After a jump, applySimulationResult re-marks last round's actions
@@ -294,12 +296,29 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             .catch(() => {});
         };
 
+        // Actions created/edited from OUTSIDE this panel (the advisor, chatting in
+        // its own drawer) used to be invisible here until the panel was closed and
+        // reopened. Poll and merge in additions — signature-gated so a tick with no
+        // actual change doesn't re-render/reset hover state on every row.
+        const actionsSignature = (list) => list.map((a) => `${a.id}:${a.title}:${a.text}:${a.status}`).join("|");
+        const syncActions = () => {
+            readActionsState({ force: true })
+            .then((saved) => {
+                if (cancelled) return;
+                setActions((prev) => (actionsSignature(saved) === actionsSignature(prev) ? prev : saved));
+            })
+            .catch(() => {});
+        };
+
         fetchGameData();
+        syncActions();
         const interval = setInterval(fetchGameData, 5000);
+        const actionsInterval = setInterval(syncActions, 5000);
 
         return () => {
             cancelled = true;
             clearInterval(interval);
+            clearInterval(actionsInterval);
         };
     }, [isOpen]);
 
@@ -337,6 +356,14 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         setIsSubmitting(true);
         try {
             await persistActions([...actions, nextAction]);
+            // What the player told their country to do is half of "the series of
+            // events they did" — a turn that goes wrong usually goes wrong
+            // BECAUSE of an order, and the diagnostics log is unreadable without
+            // them. The text is short and the player wrote it, so it goes in
+            // whole rather than as a length.
+            logDebugEvent("action", `Order queued: ${nextAction.title || nextAction.text || "(untitled)"}`, {
+                queued: actions.length + 1,
+            });
             setInputValue("");
         } finally {
             setIsSubmitting(false);
@@ -386,6 +413,9 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
                 console.warn("[actions] could not revert the unit order:", error);
             }
         }
+        logDebugEvent("action", `Order removed: ${removed?.title || removed?.text || "(untitled)"}`, {
+            reverted: Boolean(removed?.unitRevert && (removed.status ?? "planned") === "planned"),
+        });
         await persistActions(actions.filter((_, actionIndex) => actionIndex !== index));
     };
 
@@ -398,6 +428,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         }
 
         await persistActions([...actions, queuedAction]);
+        logDebugEvent("action", `Suggested order queued: ${queuedAction.title || queuedAction.text || "(untitled)"}`);
         // Visible click feedback: the suggestion button flips to "✓ Queued".
         setQueuedSuggestionIds((previous) => new Set(previous).add(action.id));
     };
@@ -512,7 +543,12 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
 
         <button
         type="button"
-        onClick={onOpenAdvisor}
+        // Opens the Advisor primed with a starter message (in its input box, not
+        // auto-sent) rather than blank — the advisor can create/edit/remove
+        // queued actions right from that conversation (see advisor.jsx), so this
+        // is the more direct route into the same plan-the-turn workflow the AI
+        // suggestions above offer.
+        onClick={() => onOpenAdvisor("Let's brainstorm a plan of concrete actions for this round. Ask me what I'm trying to accomplish, then propose specific ones we can queue.")}
         style={{
             background: "rgba(109, 40, 217, 0.15)",
             border: "1px solid rgba(139, 92, 246, 0.4)",
@@ -755,23 +791,17 @@ const Actions = ({ onOpenAdvisor, hovered, setHovered, isOpen, onToggle }) => {
         style={{
             alignItems: "center",
             background: isOpen
-            ? "linear-gradient(145deg, rgba(109,40,217,0.4), rgba(76,29,149,0.4))"
+            ? "rgba(59,130,246,0.16)"
             : hovered
-            ? "linear-gradient(145deg, rgba(54,54,59,0.95), rgba(32,32,35,0.95))"
-            : "linear-gradient(145deg, rgba(43,43,47,0.95), rgba(24,24,27,0.95))",
-            border: hovered
-            ? "1px solid rgba(255,255,255,0.2)"
-            : isOpen
-            ? "1px solid rgba(139,92,246,0.5)"
-            : "1px solid rgba(255,255,255,0.1)",
+            ? "rgba(255,255,255,0.075)"
+            : "rgba(255,255,255,0.035)",
+            border: isOpen ? "1px solid rgba(96,165,250,0.34)" : "1px solid rgba(255,255,255,0.1)",
             borderRadius: "10px",
-            boxShadow: hovered
-            ? "inset 0 1px 0 rgba(255,255,255,0.1), 0 2px 8px rgba(0,0,0,0.4)"
-            : "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.3), 0 2px 6px rgba(0,0,0,0.35)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
             color: "white",
             cursor: "pointer",
             display: "flex",
-            fontFamily: "sans-serif",
+            fontFamily: "inherit",
             fontSize: "1.2rem",
             height: "3.3rem",
             justifyContent: "center",

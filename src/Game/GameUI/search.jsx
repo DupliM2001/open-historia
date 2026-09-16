@@ -277,8 +277,10 @@ const Search = memo(({ mapRef }) => {
         // Phones: the expanded box wouldn't fit there, so it opens as a
         // full-width bar just above the toolbar instead.
         bottom: expanded && isMobile ? "5rem" : "1rem",
-        // Clear of the bottom toolbar (0.5rem + 8.75rem wide).
-        left: expanded && isMobile ? "0.5rem" : "9.75rem",
+        // Clear of the bottom toolbar (0.5rem left + 12.8rem wide + 0.5rem gap).
+        // Keep this in step with the pill's width in chat.jsx — it grew when the
+        // Projects launcher became its third button.
+        left: expanded && isMobile ? "0.5rem" : "13.8rem",
         height: "3rem",
         width: expanded ? (isMobile ? "calc(100vw - 1rem)" : "17rem") : "3rem",
         overflow: "visible",
@@ -288,10 +290,10 @@ const Search = memo(({ mapRef }) => {
         alignItems: "center",
         zIndex: 9999,
         borderRadius: hasSuggestions ? "0 0 12px 12px" : "12px",
-        backgroundColor: "rgba(24, 24, 27, 0.9)",
-        backdropFilter: "blur(4px)",
-        border: "1px solid rgba(255,255,255,0.1)",
-        boxShadow: "0 4px 6px -1px rgba(0,0,0,0.2)",
+        backgroundColor: "var(--oh-hud-bg)",
+        backdropFilter: "var(--oh-hud-blur)",
+        border: "1px solid var(--oh-hud-border)",
+        boxShadow: "var(--oh-hud-shadow-soft)",
         color: "white",
         fontFamily: "sans-serif",
       }}
@@ -406,10 +408,10 @@ const Search = memo(({ mapRef }) => {
             bottom: "calc(3rem - 1px)",
             left: "-1px",
             right: "-1px",
-            backgroundColor: "rgba(24, 24, 27, 0.97)",
-            backdropFilter: "blur(4px)",
+            backgroundColor: "var(--oh-hud-bg-strong)",
+            backdropFilter: "var(--oh-hud-blur)",
             borderRadius: "12px 12px 0 0",
-            border: "1px solid rgba(255,255,255,0.1)",
+            border: "1px solid var(--oh-hud-border)",
             borderBottom: "none",
             boxShadow: "0 -6px 16px rgba(0,0,0,0.3)",
             overflow: "hidden",

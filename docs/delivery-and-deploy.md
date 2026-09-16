@@ -262,7 +262,7 @@ The ~200 MB world-map binaries left Git LFS (whose free 1 GB/mo org-wide bandwid
 
 - **Manifest:** `scripts/map-assets.json` — `owner`/`repo`/`release` (`Open-Historia`/`open-historia`/`map-data`) plus each asset's `path`, release `asset` name, `bytes`, and `sha256`.
 - **Fetcher:** `scripts/fetch-map-assets.mjs` makes the local tree match the manifest. Full run verifies SHA-256 and re-fetches anything missing or changed; `--ensure` trusts byte-size for speed. **Best-effort — never exits non-zero**, so it can never block a launch, update, or the `app-bundle.yml` bundle step. Downloads to a `.download` temp then atomic-renames.
-- **Name namespaces:** the manifest maps a *versioned* release asset name to a *stable* local path — e.g. `regions-seed-z8.geojson` (release) → `public/assets/regions-seed.geojson` (tree), and `default-regions-names.geojson` → `server/data/scenarios/default/regions.geojson`. The client always reads the stable path.
+- **Name namespaces:** the manifest maps a *versioned* release asset name to a *stable* local path — e.g. `regions-seed-z8.geojson` (release) → `public/assets/regions-seed.geojson` (tree), and `default-regions-names.geojson` → `server/data/stock/regions.geojson` (the stock world every scenario without a map of its own renders on; it used to be the built-in scenario's file). The client always reads the stable path. The built-in scenario's own map is not on the release at all: it ships in the app as `server/seed/default/regions.geojson` (see [Assets](assets-and-data.md) §3).
 - **Callers:** the app launchers/updater and `app-bundle.yml` call it in place of `git lfs pull`. **Never re-add these files to Git LFS.**
 
 When a map file changes: upload the new asset to the `map-data` Release, then update its `sha256` + `bytes` in `scripts/map-assets.json`.
@@ -288,7 +288,7 @@ The ~200 MB map binaries deliberately never ship in the APK — the app download
 
 ## 10. Web-mode seed (`seed-web-defaults.mjs`)
 
-`scripts/seed-web-defaults.mjs` runs only from `build:web` / `build:site` / `dev:web`. It bundles the built-in `default` scenario (`server/data/scenarios/default`) into JS modules under `src/runtime/web/generated/` (git-ignored) so a fresh browser can seed its IndexedDB library with a playable scenario. The desktop build never imports these, so no seed data ships in the download.
+`scripts/seed-web-defaults.mjs` runs only from `build:web` / `build:site` / `dev:web`. It bundles the built-in `default` scenario (`server/seed/default`) into JS modules under `src/runtime/web/generated/` (git-ignored) so a fresh browser can seed its IndexedDB library with a playable scenario; the scenario's own map (`regions.geojson`, ~5.6 MB) is copied beside them and becomes a hashed static asset of the web build, referenced from `defaultScenarioMeta.js`. The desktop build never imports these, so no seed data ships in the download.
 
 | Output | Content |
 |---|---|
@@ -296,7 +296,7 @@ The ~200 MB map binaries deliberately never ship in the APK — the app download
 | `countryNames.js` | Canonical code→name registry, mirroring `server/country-names.json` (used by `canonicalizeCountryRef`) |
 | `fallbackColors.js` | App-level default palette from `public/assets/colors.json`, immutable & scenario-independent |
 
-It reads only from `server/data`, which **is** committed — so the website build (including CI) needs nothing from the `map-data` Release.
+It reads only from `server/seed/default`, which **is** committed (map included) — so the website build (including CI) needs nothing from the `map-data` Release.
 
 ---
 

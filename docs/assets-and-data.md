@@ -13,7 +13,9 @@ Every runtime asset the map depends on, with its physical filename, MIME, and ho
 | Regions vector tiles | `regions` | `regions.pmtiles` (~105.8 MB) | `map-data` Release | `GET /api/runtime/pmtiles/regions` | GADM level-1 borders; the z0 tile is the region catalog; paints owners above z6.5 |
 | Countries vector tiles | `countries` | `countries.pmtiles` (~62.7 MB) | `map-data` Release | `GET /api/runtime/pmtiles/countries` | z0 tile is the country index + label source; warmed on **every** map |
 | Cities vector tiles | `cities` | `cities.pmtiles` (~1.5 MB) | `map-data` Release | `GET /api/runtime/pmtiles/cities` | Modern-day city labels layer |
-| Custom regions geometry | `regionsGeojson` | `regions.geojson` (per-scenario) | Scenario dir / `default` scenario | `GET /api/runtime/json/regionsGeojson` | Editor-drawn shapes; `EMPTY_FEATURE_COLLECTION` when absent; **never cached client-side** |
+| Custom regions geometry | `regionsGeojson` | `regions.geojson` (per-scenario) | Scenario dir, else the stock world below | `GET /api/runtime/json/regionsGeojson` | The scenario's own map (the built-in Modern Day has one, a hand-drawn world); a scenario without one renders on the stock world; **never cached client-side** |
+| Stock world geometry | — | `server/data/stock/regions.geojson` (~55.4 MB) | `map-data` Release (`default-regions-names.geojson`) | via `regionsGeojson` for scenarios without a map | GADM level-1 regions with owner names — what the hub's re-ownership presets (keyed by GADM ids) and "Modern Day (classic map)" render on |
+| Built-in scenario seed | — | `server/seed/default/` (`regions.geojson` ~5.6 MB, `cities.geojson`, `world.json`, `colors.json`, cover…) | the app bundle (committed) | copied into `server/data/scenarios/default` by the server | Modern Day's own map; `world.builtInMap` names the map generation (§3) |
 | Custom cities geometry | `citiesGeojson` | `cities.geojson` (per-scenario) | Scenario dir | `GET /api/runtime/json/citiesGeojson` | Era-accurate city points; rendered when `world.customCities`; **never cached client-side** |
 | Region seed | — | `regions-seed.geojson` (~55.3 MB) | `map-data` Release → `public/assets/` | `GET /assets/regions-seed.geojson` | Offline-produced seed the **map editor** imports; not a runtime map layer |
 | City seed | — | `cities-seed.json` (~7.9 MB) | `map-data` Release → `public/assets/` | `GET /assets/cities-seed.json` | Consumed by the editor (`citiesImport.js`) and AI prompt context (`promptContext.js`) |
@@ -87,11 +89,24 @@ The manifest that `fetch-map-assets.mjs` reads. Note the **name/namespace split*
 | `public/assets/cities.pmtiles` | `cities.pmtiles` | 1 547 924 | same |
 | `public/assets/cities-seed.json` | `cities-seed.json` | 7 857 627 | same |
 | `public/assets/regions-seed.geojson` | **`regions-seed-z8.geojson`** | 55 350 393 | client name is stable; release name is versioned to a zoom generation (z8) |
-| `server/data/scenarios/default/regions.geojson` | **`default-regions-names.geojson`** | 55 401 660 | the `default` scenario's named custom-region geometry |
+| `server/data/stock/regions.geojson` | **`default-regions-names.geojson`** | 55 401 660 | the stock GADM world with owner names — every scenario without a map of its own renders on it (it WAS the built-in scenario's file until Modern Day was redrawn; the release name kept its history) |
 
 Root keys: `owner: "Open-Historia"`, `repo: "open-historia"`, `release: "map-data"`. Download URL is `https://github.com/<owner>/<repo>/releases/download/<release>/<asset>`.
 
 **Namespacing gotcha:** the client always requests the *stable* path (e.g. `regions-seed.geojson`), while the release stores a *versioned* name (`regions-seed-z8.geojson`). The manifest is the only bridge. If a new zoom generation is uploaded under a new release name but the manifest's `sha256`/`bytes` aren't bumped, clients keep the old bytes; conversely a stable client name can silently point at a stale release generation. **When a map file changes: upload the new asset AND update its `sha256` + `bytes` in the manifest.**
+
+### The built-in scenario seed (`server/seed/default`)
+
+The built-in Modern Day scenario is **not** on the release and not under `server/data` in Git. It is a committed seed directory — `scenario.json`, `world.json`, `game.json`, `colors.json`, `cover-image.bin`, `storage/*.json`, and its own map: `regions.geojson` (a hand-drawn world of ~4,850 regions, ~5.6 MB) and `cities.geojson` (~2,500 authored cities). The app bundle ships it (`server/**`), and `server/libraryStore.js` (`syncBuiltInScenarioFromSeed`) copies it into the data directory:
+
+- **First run:** the whole seed is copied into `server/data/scenarios/default` (a packaged install used to get only a meta file and the fetched map; now it gets the world, colours and cover too). `prompts.json` is deliberately not copied — a game starts on the code's current prompt defaults.
+- **A newer map in the seed** (`world.json` `builtInMap` differs from the install's): the campaigns started on the previous map — and a built-in the player had edited — keep it in a forked scenario, `modern-day-classic` ("Modern Day (classic map)"), and those games are re-pointed at the fork; then the built-in is reset to the seed. The fork carries no `regions.geojson`: the previous built-in map was the stock world, so the fork renders on it like any other scenario without a map. An install whose built-in still holds the stock file as its `regions.geojson` has that file **moved** to `server/data/stock/` (the size matches the manifest entry) rather than downloaded again; a file of another size is a map the player uploaded and travels with the fork. `electron/main.cjs` does the same move before the manifest check so the setup screen never re-downloads it.
+- **A deliberately deleted built-in** stays deleted (the guard in `ensureDefaultScenario`).
+- **A scenario created from scratch** copies the built-in's map, cities and colours (`createScenario`), so it starts on the same world the game shows — and the Workshop opens on that map rather than the stock seed.
+
+To ship a new built-in map: open Modern Day's Workshop, import the map, Save, copy the resulting `regions.geojson`, `cities.geojson`, `world.json` and `colors.json` from the data directory into `server/seed/default/`, and change `world.builtInMap` to a new value. `server/builtInScenarioSeed.test.js` checks the seed's world matches its map and exercises every branch above.
+
+The web build bundles the same map: `scripts/seed-web-defaults.mjs` copies it beside the generated seed module and `src/runtime/web/generated/defaultScenarioMeta.js` exports its URL and stamp; `src/runtime/web/libraryStore.js` serves it for any scenario whose world carries the stamp (`usesBuiltInMap`) and keeps fetching the stock world from the content origin for every other scenario without a map. Its `ensureSeeded` runs the same fork-and-reset for a stored library that predates the redraw.
 
 ### `scripts/fetch-map-assets.mjs`
 

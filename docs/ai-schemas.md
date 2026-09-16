@@ -40,6 +40,8 @@ Each task is identified by a **task key**. `GAMEPLAY_SCHEMAS` maps the key to it
 | `catalystSummary` | `CATALYST_SUMMARY_SCHEMA` | `submit_catalyst_summary` | resolved catalyst → event |
 | `gameMaster` | `GAME_MASTER_SCHEMA` | `submit_game_master` | `applyGameMasterCommand` |
 | `countryStatSheet` | `COUNTRY_STAT_SHEET_SCHEMA` | `submit_country_stat_sheet` | national stat sheet |
+| `timelineCurator` | `TIMELINE_CURATOR_SCHEMA` | `submit_timeline_curator` | one judgment per fresh event; native gates in `nativeTimelineCurator.js` decide what a judgment may remove |
+| `unitDirector` | `UNIT_DIRECTOR_SCHEMA` | `submit_unit_director` | unit operations for the turn's military events (sanitized by `nativeUnitDirector.js`) |
 | `idleDiplomacy` | `IDLE_DIPLOMACY_SCHEMA` | `submit_idle_diplomacy` | idle inbox drip |
 | `pregameHistory` | `PREGAME_HISTORY_SCHEMA` | `submit_pregame_history` | pre-game backstory |
 
@@ -86,6 +88,7 @@ The heart of the map-mutating pipeline. Attached to events (`eventSchema.impacts
 | `createdChats` | `createdChatSchema[]` | Diplomatic chats the event opens toward the player | no |
 | `polityChanges` | `polityChangeSchema[]` | Polity metadata changes (name/color/reputation/tags…) | no |
 | `regionTransfers` | `regionTransferSchema[]` | **Map ownership changes.** Required by prompt whenever narration says territory changed hands — one entry per region | no |
+| `regionClaims` | `regionClaimSchema[]` | **Territory claimed but not held.** Marks a region disputed (striped) *without* moving the border — an irredentist declaration, a proclaimed union, a contested frontier. `drop: true` withdraws a claim | no |
 | `unitOps` | `unitOpSchema[]` | Military unit mutations | no |
 | `markerOps` | `markerOpSchema[]` | Structures built/destroyed on the map | no |
 
@@ -139,6 +142,44 @@ Not a single object: an `anyOf` of four shapes discriminated by `op`. Each branc
 
 > **Note:** `validateGeneratedWorldChanges` (Layer 2) also accepts `op: "found"` as an alias of `build` and `op: "destroy"` as an alias of `remove` (`gameplay.js:1095`, `:1105`), and for a build reads coordinates from `operation.marker ?? operation`. The **schema itself only declares `build`/`remove`** — the aliases pass Layer 1 only because `unitOp`/`markerOp` schemas validate loosely (see the caveat in §6).
 
+### 4.5-bis `projectOpSchema` — ONE object, discriminated by `op` (`:805`)
+
+Unlike `unitOpSchema` and `markerOpSchema`, this is a single object with an `op` enum and all-optional fields, not an `anyOf`.
+
+| `op` | Meaning |
+|---|---|
+| `create` | open a new effort (give it a `summary` too) |
+| `update` | progress moved, or the status changed; `newName` renames |
+| `milestone` | a checkpoint reached or missed (`projectMilestoneSchema`, `:607`) |
+| `complete` / `cancel` / `fail` | it ended; all three keep it on the board under Closed |
+| `remove` | erase an entry that should never have been opened — NOT how a project ends |
+
+Required: `op` and `name`. `eventIndex` says which of the events this op follows from.
+
+> **Why it is not an `anyOf`.** It used to be, with six branches — and three of them (nested `create`, flat `create`, `update`) each restated `projectSchema`'s twenty properties in full. Serialized, that was **41,538 characters of a 63,161-character jump schema**: two thirds of the entire output contract for one impact branch, more than three times every other branch combined, sent on every jump and once per segment.
+>
+> It was also duplication rather than information. `normalizeProjectOp` (`runtime/gameState.js`) already accepts a create written flat *or* nested (`operation.project ?? operation`), already resolves every op alias, and already merges a create naming an existing project into an update of only the fields it carried. The schema was spending 13 KB describing tolerance the reducer had all along.
+>
+> Collapsing it was also a **reliability** win, not only a size one: a six-branch `anyOf` is one of the worst constructs for Gemini's OpenAPI subset (see `geminiSchema.js`) and for small local models, which routinely pick the wrong branch or blend two. `onComplete` was thinned the same way — it re-embedded `polityChangeSchema`, `regionTransferSchema` and `regionClaimSchema` in full, all three of which appear elsewhere in the very same payload.
+>
+> The nested `create` spelling survives as a permissive `project: { type: "object" }` key. The model is no longer told to nest, but `additionalProperties: false` means one that does anyway would fail validation and cost the whole turn — the exact failure the flat variant was added to prevent. ~150 characters instead of 13,000.
+>
+> `src/Game/AI/projectOpSchema.test.js` is the safety net: every op shape the six-variant schema accepted must still validate.
+
+### 4.5-ter `PROJECTS_SCHEMA` — the board's own task (`:2082`)
+
+`projectOps` no longer appears on a jump at all. `jumpImpactsSchema` is `impactsSchema` minus that branch, and the board is moved by a separate `projects` call (`submit_project_ops`) that runs once per jump, after the segments merge and before anything is written.
+
+```
+{ "projectOps": [ { "op": "update", "id": "...", "name": "...", "eventIndex": 0, "progress": 58, ... } ] }
+```
+
+`{"projectOps": []}` is a valid and expected answer — the prompt says so explicitly, because a schema that rejected it would push the model into inventing progress, which is the one thing the board must never contain.
+
+The **game master keeps the full `impactsSchema`**, board included: it is a single call with no second pass to hand the work to.
+
+Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It has grown again since with what beta added to the jump (30,441 at this commit); the figures are there for the reduction each change bought, not for the absolute number, which every new branch moves.
+
 ### 4.6 `createdChatSchema` (`:57`)
 
 The initiating polity always speaks first — a blank untitled chat tells the player nothing.
@@ -170,6 +211,20 @@ Also used for `autoJumpForward`. This is the largest task.
 | `diplomaticOutreach` | `createdChatSchema[]` | Polities reaching out on their own initiative, not tied to any event | no |
 
 `eventSchema` (`:322`): `id`, `date`* , `title`* , `description`* , `importance`, `kind`, `notable` (bool), `playerRelated` (bool), `impacts` (`impactsSchema`).
+
+#### Ledger transports (`warUpdates`, `relationUpdates`, `agreementUpdates`)
+
+Three optional strings, one record per line, fields separated by `~`. They deliberately stay text: the nested object form is what Gemini function calling and strict tool modes choke on, and the formats are taught in the live prompt (`buildWarLedgerDirective` / `buildDiplomaticLedgerDirective` in gameplay.js), so frozen prompt packs get them too.
+
+| Transport | Line | Ops |
+|---|---|---|
+| `warUpdates` | `warId~op~actorsCSV~opponentsCSV~eventNumbersCSV~note` | start, join-a, join-b, leave, ceasefire, resume, end |
+| `relationUpdates` | `A~B~score~status~eventNumbersCSV~summary` | absolute score; a blank status is derived from it |
+| `agreementUpdates` | `agreementId~op~type~partiesCSV~eventNumbersCSV~title~terms` | start, update, suspend, resume, end, expire |
+
+`eventNumbersCSV` (1-based) is a hint first: the engine rebinds war records from `event.warId` and the transition's wording (`normalizeWorldWarEventLinks`, in `nativeWarLedger.js`) whenever an event carries the record's warId, and the diplomatic director binds relation and agreement records to the one event that matches. When no event carries the warId the model's own numbers are kept rather than blanked, so the validator reports the real defect (the event is missing its `warId`) instead of asking for a number the model already gave. Validation runs per segment against the world as the earlier segments left it (`validateSegmentLedgers`): strict while a retry remains, repaired on the final attempt (`repairWarLedgerPayload`): a record's own event numbers are stamped onto their events as the warId they declare, a record that still cannot bind is dropped with the war bindings of its events (events of wars that already exist keep theirs), and the segment is kept — the events stand as narrative, and only the canonical war change is lost, logged to the diagnostics log. Accepted records are bound to the segment's event ids, concatenated by `mergeSegmentPayloads`, remapped to the canonical round-scoped ids minted in `applySimulationResult` (`src/runtime/eventIdentity.js`), and applied by `applyWarUpdates` / `applyDiplomaticUpdates`. `eventSchema` carries `warId` and `combatants[]` for the combat rule (docs/world-state.md §2b-bis).
+
+`PREGAME_HISTORY_SCHEMA` takes the same facts for round zero as one flat `canonicalUpdates` array (`canonicalUpdateSchema`: `kind` = relation | war:<op> | agreement:start, plus id / polities / opponents / score / category / title / detail), which `expandCanonicalUpdateEnvelope` turns into the three transports before `validatePregameCanonicalBootstrap` runs.
 
 ### 4.8 `catalystSchema` (`:346`) and executor/summary
 

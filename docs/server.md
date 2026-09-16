@@ -90,8 +90,8 @@ All routes are JSON in / JSON out unless noted. Errors are `{ error: message }` 
 ### AI relay, hub proxy, telemetry, shutdown
 | Method | Path | Purpose | Handler |
 | --- | --- | --- | --- |
-| POST | `/api/ai/relay` | Server-to-server relay to a player-configured OpenAI-compatible endpoint (defeats the endpoint's missing CORS). Streams status/body back; aborts upstream if the client disconnects | `server/server.js:523` |
-| POST | `/api/server/shutdown` | Stop the process from the UI's ⏻ button (acks first, then `process.exit(0)`) | `server/server.js:559` |
+| POST | `/api/ai/relay` | Server-to-server relay to a player-configured OpenAI-compatible endpoint (defeats the endpoint's missing CORS). Speaks `http`/`https` directly — **not** `fetch`, whose undici default gave up on any generation that took over 300s to answer — and pipes the upstream body straight back, so a streamed answer reaches the browser as it arrives. Aborts upstream if the client disconnects; `OH_RELAY_TIMEOUT_MS` (default 600000) is the only deadline, and it replies `504` rather than hanging | `server/server.js:844` |
+| POST | `/api/server/shutdown` | Stop the process (acks first, then `process.exit(0)`); the beta UI no longer has a button for it | `server/server.js:559` |
 | GET | `/api/hub/file?url=` | Proxy-download a community bundle from GitHub only; manual redirect-following with per-hop allowlist re-check; on-disk cache keyed by URL SHA-256 | `server/server.js:575` |
 | POST | `/api/hub/import-log` | Best-effort import telemetry; one ping per scenario per install (atomic `wx` marker), forwarded to the counter Worker | `server/server.js:657` |
 | GET | `/api/hub/import-counts` | Read import counts back from the counter Worker (60 s in-memory cache) | `server/server.js:691` |
@@ -161,6 +161,7 @@ server/data/
 Key path constants live at `server/libraryStore.js:19-35`: `SCENARIOS_DIR`, `GAMES_DIR`, `SCENARIO_MANIFEST_PATH`, `GAME_MANIFEST_PATH`, `DATA_ASSETS_DIR`, plus the read-only source roots `DIST_DIR`/`PUBLIC_DIR` and `PMTILES_ASSETS_DIR = public/assets`.
 
 ### Asset-file groupings (the vocabulary of `assetKey`)
+
 Defined at `server/libraryStore.js:240-324`. These maps drive every read/write/serve path:
 
 | Group | Keys → files | Notes |
@@ -175,6 +176,8 @@ Defined at `server/libraryStore.js:240-324`. These maps drive every read/write/s
 | `*_IMAGE_ASSET_FILES` | `cover`→`cover-image.bin` | Content type recorded in meta |
 | `UPLOADABLE_SCENARIO_ASSET_FILES` | image ∪ optional-JSON ∪ PMTiles ∪ geojson | The valid `:assetKey` set for scenario upload/serve/delete |
 | `UPLOADABLE_GAME_ASSET_FILES` | just `cover` | Games only accept a cover upload |
+
+> `GET /api/scenarios/:id/assets/regionsGeojson?coarse=1` serves a coarse copy of the regions (`resolveScenarioCoarseRegionsAsset`, `server/coarseGeometry.js`): the far tier's Douglas-Peucker coarsening, built once per upload beside it as `regions.coarse.geojson` and invalidated by a size+mtime stamp. The country picker draws that (a few MB) instead of the full-resolution file (221 MB for the stock world); the web store computes the same on demand. Never exported or cloned.
 
 `flags`/`tags` are separate JSON assets (not fields on `world.json`) specifically because `world.json` is re-polled every 5 s and a few hundred flags would be megabytes on every poll (`server/libraryStore.js:258-270`). See [World state](world-state.md).
 
@@ -257,7 +260,7 @@ The mirror of this logic for the web build is `src/runtime/web/ownerMigration.js
 
 Bundles are the shareable unit strangers swap on the community hub. Schema string `pax-historia-scenario-bundle/2` is the **only** compatibility gate (`version` is written and read by nobody). `ACCEPTED_BUNDLE_SCHEMAS` also accepts the unversioned v1 string — old bundles import fine and get named by the migration on first read.
 
-- **Export** — `exportScenarioBundle(id, {mode})` (`server/libraryStore.js:2477`) returns `{ schema, scenario{meta}, data{7 core assets}, assets{...}, mode, exportedAt }`. `mode: "light"` embeds cover/colors/flags/tags/geojson/background but **not** PMTiles (they're huge and reconstructable); `mode: "full"` base64-embeds the PMTiles too. Custom geometry is always embedded even in light mode — a shared custom map is broken without it.
+- **Export** — `exportScenarioBundle(id)` (`server/libraryStore.js`) returns `{ schema, scenario{meta}, data{7 core assets}, assets{...}, mode: "full", exportedAt }`. Every export is full: cover, colors, flags, tags, geometry, background and any custom PMTiles archive are base64-embedded whenever the scenario has them. The former light mode (which dropped custom PMTiles) is gone; `?mode=` on the route is accepted and ignored, and older `mode: "light"` bundles still import.
 - **Import** — `importScenarioBundle` (`server/libraryStore.js:2529`) creates a **new** scenario, writes its core data via `updateScenario`, lays down each embedded asset via `applyScenarioBundleAsset`, then stamps `hubOrigin` last (so the import's own meta writes don't clear it) and selects it.
 - **Update-in-place** — `updateScenarioFromBundle` (`server/libraryStore.js:2635`) is the hub card's "Update" button: it keeps the local `id` (games reference scenarios by id) and `createdAt`, replaces meta/world/assets from the new bundle, and visits **every** uploadable key so an asset the new version dropped doesn't linger. `hubOrigin` is re-stamped last so the card reverts to "New Game" after refresh.
 

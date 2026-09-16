@@ -4,84 +4,24 @@
 // builders, snapshot detection, asset-key sets). Web build only.
 
 import COUNTRY_NAME_REGISTRY from "./generated/countryNames.js";
+import {
+  BUILT_IN_SCENARIO_DEFAULT_DATE,
+  DEFAULT_GAME_META,
+  DEFAULT_SCENARIO_ID,
+  DEFAULT_SCENARIO_META,
+  SUPPORTED_IMAGE_CONTENT_TYPES,
+  TEMPLATE_WORLD_OVERRIDE_KEYS,
+} from "./storeConstants.js";
 import { cloneJson } from "./util.js";
 
-export const DEFAULT_SCENARIO_ID = "default";
-export const DEFAULT_GAME_ID = "default";
-export const BUILT_IN_SCENARIO_DEFAULT_DATE = "2016-01-01";
-// Mirrors server/libraryStore.js — see there for why the schema string moves with
-// the owner rename. In short: it is the ONLY compatibility gate on a file strangers
-// swap, and an old build would otherwise accept a name-keyed bundle and resolve its
-// names down to codes, leaving the player owning nothing.
-export const SCENARIO_BUNDLE_SCHEMA = "pax-historia-scenario-bundle/2";
-export const ACCEPTED_BUNDLE_SCHEMAS = new Set([SCENARIO_BUNDLE_SCHEMA, "pax-historia-scenario-bundle"]);
-export const SCENARIO_BUNDLE_VERSION = 2;
-export const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
-export const COVER_IMAGE_ASSET_KEY = "cover";
-
-// --- Asset-key sets (server/libraryStore.js:153-239) ---
-export const STORAGE_JSON_ASSET_KEYS = ["actions", "advisor", "chat", "events"];
-export const CORE_JSON_ASSET_KEYS = ["game", "prompts", "world"];
-export const JSON_ASSET_KEYS = [...STORAGE_JSON_ASSET_KEYS, ...CORE_JSON_ASSET_KEYS];
-export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags"];
-export const RUNTIME_ONLY_JSON_ASSET_KEYS = ["snapshots", "intercepts"];
-export const PMTILES_ASSET_KEYS = ["cities", "countries", "regions"];
-export const SCENARIO_GEOJSON_ASSET_KEYS = ["regionsGeojson", "citiesGeojson", "backgroundData"];
-// Order matters for assetStatus (Object.keys(UPLOADABLE_SCENARIO_ASSET_FILES)).
-export const UPLOADABLE_SCENARIO_ASSET_KEYS = [
-  COVER_IMAGE_ASSET_KEY,
-  ...OPTIONAL_JSON_ASSET_KEYS,
-  ...PMTILES_ASSET_KEYS,
-  ...SCENARIO_GEOJSON_ASSET_KEYS,
-];
-export const UPLOADABLE_GAME_ASSET_KEYS = [COVER_IMAGE_ASSET_KEY];
-
-export const JSON_ASSET_DEFAULTS = {
-  actions: [], advisor: [], chat: [], colors: {}, events: [],
-  game: {}, prompts: {}, world: {}, snapshots: [], intercepts: {},
-};
-
-export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
-  "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
-  "regionOwnershipOverrides", "regionClaimants", "simulationRules", "startingTimelineText",
-];
-
-export const SUPPORTED_IMAGE_CONTENT_TYPES = new Set([
-  "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
-]);
-
-export const DEFAULT_SCENARIO_META = {
-  accentColor: "#7c3aed",
-  description: "Server-backed base scenario",
-  eyebrow: "Scenario",
-  heroSubtitle: "Editable server-backed scenario template.",
-  heroTitle: "Modern Day",
-  name: "Modern Day",
-  subtitle: "Base template",
-};
-
-export const DEFAULT_GAME_META = {
-  accentColor: "#7c3aed",
-  description: "Active playable game",
-  eyebrow: "Game",
-  heroSubtitle: "Playable campaign session",
-  heroTitle: "Modern Day",
-  name: "Modern Day Session",
-  scenarioId: DEFAULT_SCENARIO_ID,
-  subtitle: "Current campaign",
-};
+// The constants themselves live in storeConstants.js, which imports nothing, so
+// Node tests can load them without a web build; see there.
+export * from "./storeConstants.js";
 
 // --- Country reference resolution (mirrors server/libraryStore.js) ---
-// A country is identified by its NAME ("Russia"), not its GADM code. This used to
-// run the other way — names canonicalized DOWN to a code — and inverting it is the
-// whole point: the old direction silently undid every name-keyed write at the
-// persistence boundary, and it could not be made correct anyway (NAME_TO_CODE was
-// last-write-wins over a registry where six codes share the name "India", so
-// "India" resolved to Z07, a disputed sliver of Kashmir).
-//
-// A legacy code still resolves, and so does a polity's alias, so an author writing
-// "Rome" reaches "Roman Empire" and a model still saying "RUS" lands on "Russia".
+// Migrated worlds use the polityOverrides KEY as stable lineage identity. The
+// visible/current name may change without re-keying ownership or presentation maps.
+// Legacy codes and aliases still resolve back onto one unambiguous stable key.
 export { COUNTRY_NAME_REGISTRY };
 
 export const resolveOwnerRef = (value, world) => {
@@ -89,31 +29,84 @@ export const resolveOwnerRef = (value, world) => {
   if (!raw) return raw;
 
   const lower = raw.toLowerCase();
-  const overrides = world?.polityOverrides;
-  // A polity the map editor marked `verbatim` was named by a human whose text
-  // collides with a GADM code ("USA"); honour it literally rather than
-  // canonicalising it to the code's country. Nothing else sets this flag, so
-  // legacy and model-written owners are untouched. Mirrors server/libraryStore.js.
-  const verbatimPolity = overrides?.[raw];
-  if (verbatimPolity?.verbatim) return String(verbatimPolity.name ?? raw).trim() || raw;
-  if (overrides && typeof overrides === "object") {
-    for (const [key, polity] of Object.entries(overrides)) {
-      const name = String(polity?.name ?? key).trim();
-      // Self-named: tells us nothing the token didn't. Skip it so the registry gets
-      // a chance — {"MNG":{name:"MNG"}} would otherwise pin MNG forever. Safe for
-      // genuinely self-named polities: they miss the registry and come back as
-      // themselves. See server/libraryStore.js for the full note.
-      if (name === raw) continue;
-      if (name.toLowerCase() === lower) return name;
-      if (polity && Array.isArray(polity.aliases)
-          && polity.aliases.some((alias) => String(alias).trim().toLowerCase() === lower)) {
-        return name;
+  const overrides =
+    world?.polityOverrides && typeof world.polityOverrides === "object"
+      ? world.polityOverrides
+      : null;
+  const legacyOwnerShape = Number(world?.ownerSchema ?? 1) < 4;
+
+  // Web mode can encounter an un-migrated imported bundle before its store has
+  // normalized it. Preserve the old code -> authored/stock NAME interpretation
+  // for that shape; stable-lineage semantics begin at ownerSchema 4.
+  if (legacyOwnerShape) {
+    const verbatimPolity = overrides?.[raw];
+    if (verbatimPolity?.verbatim) {
+      return String(verbatimPolity.name ?? raw).trim() || raw;
+    }
+    if (overrides) {
+      for (const [key, polity] of Object.entries(overrides)) {
+        const name = String(polity?.name ?? key).trim();
+        if (name === raw) continue;
+        if (name.toLowerCase() === lower) return name;
+        if (
+          Array.isArray(polity?.aliases) &&
+          polity.aliases.some(
+            (alias) => String(alias ?? "").trim().toLowerCase() === lower,
+          )
+        ) {
+          return name;
+        }
+        if (key === raw) return name;
       }
-      if (key === raw) return name;
+    }
+    return COUNTRY_NAME_REGISTRY[raw.toUpperCase()] || raw;
+  }
+
+  if (overrides) {
+    // Mirrors server/libraryStore.js: polityOverrides keys are stable campaign
+    // lineage IDs. record.name is presentation state and may change mid-game.
+    if (Object.prototype.hasOwnProperty.call(overrides, raw)) return raw;
+
+    const exactMatches = [];
+    for (const [key, polity] of Object.entries(overrides)) {
+      const tokens = [
+        key,
+        polity?.code,
+        polity?.name,
+        ...(Array.isArray(polity?.aliases) ? polity.aliases : []),
+      ]
+        .map((entry) => String(entry ?? "").trim().toLowerCase())
+        .filter(Boolean);
+      if (tokens.includes(lower)) exactMatches.push(key);
+    }
+    if (exactMatches.length === 1) return exactMatches[0];
+    if (exactMatches.length > 1) return raw;
+
+    const rawUpper = raw.toUpperCase();
+    const stockCodes = new Set();
+    if (COUNTRY_NAME_REGISTRY[rawUpper]) stockCodes.add(rawUpper);
+    for (const [code, name] of Object.entries(COUNTRY_NAME_REGISTRY)) {
+      if (String(name ?? "").trim().toLowerCase() === lower) {
+        stockCodes.add(code.toUpperCase());
+      }
+    }
+
+    if (stockCodes.size > 0) {
+      const mapRefMatches = [];
+      for (const [key, polity] of Object.entries(overrides)) {
+        const refs = Array.isArray(polity?.mapRefs?.gadm0)
+          ? polity.mapRefs.gadm0
+              .map((entry) => String(entry ?? "").trim().toUpperCase())
+              .filter(Boolean)
+          : [];
+        if (refs.some((code) => stockCodes.has(code))) mapRefMatches.push(key);
+      }
+      if (mapRefMatches.length === 1) return mapRefMatches[0];
+      if (mapRefMatches.length > 1) return raw;
     }
   }
 
-  const known = COUNTRY_NAME_REGISTRY[raw];
+  const known = COUNTRY_NAME_REGISTRY[raw.toUpperCase()];
   if (known) return known;
   return raw;
 };
@@ -122,22 +115,44 @@ export const canonicalizeWorldCountryRefs = (world) => {
   if (!world || typeof world !== "object" || Array.isArray(world)) return world;
   const next = { ...world };
 
+  const canonicalizeClaimants = (raw) => {
+    const source = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === "object"
+        ? Object.keys(raw).filter((key) => raw[key])
+        : [];
+    return [...new Set(source.map((entry) => resolveOwnerRef(entry, world)).filter(Boolean))];
+  };
+
   if (next.regionOwnershipOverrides && typeof next.regionOwnershipOverrides === "object") {
     next.regionOwnershipOverrides = Object.fromEntries(
       Object.entries(next.regionOwnershipOverrides).map(([regionId, owner]) => [regionId, resolveOwnerRef(owner, world)]),
+    );
+  }
+  if (next.regionSovereigntyOverrides && typeof next.regionSovereigntyOverrides === "object") {
+    next.regionSovereigntyOverrides = Object.fromEntries(
+      Object.entries(next.regionSovereigntyOverrides).map(([regionId, owner]) => [regionId, resolveOwnerRef(owner, world)]),
+    );
+  }
+  if (next.regionClaimants && typeof next.regionClaimants === "object") {
+    next.regionClaimants = Object.fromEntries(
+      Object.entries(next.regionClaimants)
+        .map(([regionId, claimants]) => [regionId, canonicalizeClaimants(claimants)])
+        .filter(([, claimants]) => claimants.length > 0),
     );
   }
   if (Array.isArray(next.ownerCodes)) {
     next.ownerCodes = [...new Set(next.ownerCodes.map((entry) => resolveOwnerRef(entry, world)))];
   }
   if (next.polityOverrides && typeof next.polityOverrides === "object") {
-    // Keyed by name, `.code` dropped — the key IS the identifier now.
+    // Keep the stable lineage key even when the visible/current name changes.
     next.polityOverrides = Object.fromEntries(
       Object.entries(next.polityOverrides).map(([key, polity]) => {
-        const name = resolveOwnerRef(polity?.name || key, world);
-        if (!polity || typeof polity !== "object") return [name, polity];
+        const stableKey = resolveOwnerRef(key, world) || String(key ?? "").trim();
+        if (!polity || typeof polity !== "object") return [stableKey, polity];
         const { code, ...rest } = polity;
-        return [name, { ...rest, name }];
+        const displayName = String(polity.name ?? stableKey).trim() || stableKey;
+        return [stableKey, { ...rest, name: displayName }];
       }),
     );
   }
@@ -166,9 +181,8 @@ export const canonicalizeColorKeys = (colors, world) => {
   return Object.fromEntries(Object.entries(colors).map(([key, value]) => [resolveOwnerRef(key, world), value]));
 };
 
-// `world` is REQUIRED: without it a preset's game.country ("ROM") reaches neither
-// its polity nor the registry, stays a raw code while every region around it says
-// "Roman Empire", and the player owns nothing.
+// `world` is REQUIRED so aliases/current names/legacy codes resolve back to the
+// stable player polity key.
 export const canonicalizeGameCountry = (game, world) => {
   if (!game || typeof game !== "object" || Array.isArray(game) || !game.country) return game;
   return { ...game, country: resolveOwnerRef(game.country, world) };
@@ -236,6 +250,13 @@ export const readGameMeta = (gameId, raw = {}) => {
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     id: gameId,
+    // Server twin: server/libraryStore.js readGameMeta. What the sender called
+    // the scenario, and where they believed it could still be fetched — read
+    // when this browser opens a game whose map it does not hold.
+    importedScenarioName: String(raw?.importedScenarioName ?? "").trim() || null,
+    importedScenarioOrigin: normalizeHubOrigin(raw?.importedScenarioOrigin),
+    // Server twin: when this game arrived, used by the Last Played row.
+    importedAt: String(raw?.importedAt ?? "").trim() || null,
     lastPlayedAt: String(raw?.lastPlayedAt ?? "").trim() || null,
     name,
     playCount: normalizePlayCount(raw?.playCount),

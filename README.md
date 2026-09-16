@@ -102,8 +102,11 @@ and open it to install (allow installs from your browser when Android asks).
 It's a thin client: the game itself runs on whatever server it connects to, so you need
 one of the two:
 
-- **A desktop on the same network** running the launcher — type its address
-  (e.g. `http://192.168.1.20:3000`) into the app once; it's remembered.
+- **A desktop on the same network** running the launcher — turn on
+  **Settings → Network → "Let other devices connect"** there, then type the
+  address it shows you (e.g. `http://192.168.1.20:3000`) into the app once;
+  it's remembered. See
+  [Reaching the server from another device](#reaching-the-server-from-another-device).
 - **[Termux](https://termux.dev/) on the phone itself** running the server — the app
   finds it on first launch by itself, no address needed.
 
@@ -126,7 +129,7 @@ release APK — run it after changing `mobile/`.
 
 ### Manual
 
-Prerequisites: [Git](https://git-scm.com/) and [Node.js](https://nodejs.org/en) 22 LTS or newer (minimum 20.19 / 22.12 — the client build runs on Vite 7, which requires it).
+Prerequisites: [Git](https://git-scm.com/) and [Node.js](https://nodejs.org/en) 22 LTS or newer (minimum 20.19 / 22.12 — the client build runs on Vite 7, which requires it). Building the **desktop app** needs 22.12+, which is what Electron 44 requires; the server and the web client still run on 20.19.
 
 ```bash
 git clone https://github.com/Open-Historia/open-historia.git
@@ -138,6 +141,41 @@ node server/server.js              # Start the server
 ```
 
 Then open **http://localhost:3000** in your browser.
+
+### Reaching the server from another device
+
+Out of the box the server answers **only the machine it runs on** — which covers
+the desktop app, Termux on the same phone, and a browser on the same computer.
+
+To play from your phone or another computer, turn on
+**Settings → Network → "Let other devices connect"**. It takes effect
+immediately (no restart), it is remembered for next time, and it shows you the
+exact address to type into the Android app, so you never have to go and find
+your own IP:
+
+> Type this into the Android app:
+> `http://192.168.1.20:3000`
+
+Worth knowing before you do: **the game's API has no password.** While sharing is
+on, anyone who can reach that address can read, change and delete your games and
+scenarios — the server can't tell them apart from you. That's fine on a home
+network you control and a bad idea on café, hotel, dorm or office Wi-Fi. The
+switch is off by default for that reason, not because sharing is discouraged.
+
+Running headless — Termux, a NAS, a box with no screen to click a toggle on? Set
+`OH_HOST`. It overrides the setting and makes the in-game switch read-only, so a
+script and a player can't disagree about who can reach the server:
+
+```bash
+OH_HOST=0.0.0.0 node server/server.js      # every interface
+OH_HOST=192.168.1.20 node server/server.js # one interface only
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `OH_HOST` | unset | Which interface to listen on. Overrides the Settings toggle and locks it. Anything but loopback puts the API on your network. |
+| `OH_ALLOW_REMOTE_RELAY` | off | Lets other devices use this server's AI relay. Off means the relay only answers this machine, so it can't be used as a proxy by anyone else on the network. |
+| `OH_RATE_LIMIT` | `1200` | Requests per minute per network client (loopback is exempt). |
 
 > [!TIP]
 > **Running the server only — Termux/Android, a headless box, a NAS?** Skip the
@@ -155,8 +193,8 @@ Then open **http://localhost:3000** in your browser.
 > `optionalDependency`, so npm reports the failure and carries on — but there is no
 > reason to download it in the first place.
 
-> **Note:** the large map binaries (`*.pmtiles`, `public/assets/*-seed.*`, and
-> `server/data/scenarios/default/regions.geojson`) are **not** in the repo — they are
+> **Note:** the large map binaries (`*.pmtiles`, `public/assets/*-seed.*`, and the stock
+> world `server/data/stock/regions.geojson`) are **not** in the repo — they are
 > hosted as [GitHub Release assets](https://github.com/Open-Historia/open-historia/releases/tag/map-data)
 > and downloaded by `scripts/fetch-map-assets.mjs`. The launcher script for your platform
 > runs this for you automatically, so a plain ZIP download works too — no Git LFS needed.
@@ -177,7 +215,11 @@ To rebuild an official preset from source (specs live in `scripts/presets/`):
 node scripts/presets/build-preset.mjs scripts/presets/wwii-1939.spec.mjs
 ```
 
-To regenerate the built-in Modern Day map: `node scripts/build-default-map.mjs`
+The built-in Modern Day map is authored in the Scenario Workshop and lives in the repo as
+`server/seed/default/regions.geojson` (with its cities, world and colours beside it); the server
+copies that seed into its data directory on first run and whenever the seed's `builtInMap` changes.
+`node scripts/build-default-map.mjs` regenerates the *stock* GADM world instead — the map every
+scenario without one of its own (the hub presets) renders on.
 
 ## 🗺️ Map editor
 

@@ -1,5 +1,5 @@
 /*! Open Historia — portions (map-editor embed, apply-to-scenario, country picker) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Presence } from "./presence.jsx";
 import {
   PROMPT_SECTION_DEFINITIONS,
@@ -15,6 +15,7 @@ import {
   downloadScenarioJsonAsset,
   ensureLibraryCatalog,
   exportScenarioBundle,
+  importGameBundle,
   importScenarioBundle,
   updateScenarioFromBundle,
   loadGameDetails,
@@ -28,8 +29,10 @@ import {
   uploadGameAsset,
   uploadScenarioAsset,
   useLibraryState,
+  writeGameSnapshotsText,
 } from "../../runtime/library.js";
 import { loadCountryNames, readJson, writeJson, JSON_URLS } from "../../runtime/assets.js";
+import { LABEL_FONT_SUGGESTIONS } from "../../runtime/mapSettings.js";
 import FactionCreator from "./FactionCreator.jsx";
 import { UNIT_TYPES } from "../../runtime/gameState.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
@@ -42,6 +45,8 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
+import { buildGameZipBlob, formatZipSize, readGameZip, saveGameZipToDisk } from "../../runtime/gameZip.js";
+import { isNativeApp } from "../../runtime/web/nativeBoot.js";
 
 const UNIT_TYPE_LABELS = {
   infantry: "Infantry",
@@ -99,17 +104,28 @@ let menuOpenDefault = true;
 // For background work that should not run for a game the player hasn't
 // actually entered (e.g. pre-game history generation while browsing the menu).
 export const isMainMenuOpen = () => menuOpenDefault;
+// The reactive twin, for HUD pieces that portal to document.body above the
+// menu's own layer (the diplomatic bell and toasts): they follow this rather
+// than juggling z-indexes against the menu.
+const mainMenuListeners = new Set();
+const subscribeMainMenu = (listener) => {
+  mainMenuListeners.add(listener);
+  return () => mainMenuListeners.delete(listener);
+};
+export const useMainMenuOpen = () => useSyncExternalStore(subscribeMainMenu, isMainMenuOpen, isMainMenuOpen);
 // With the full-width in-game bar gone, top-anchored UI (settings ⋮, date
 // widget, forces panel, editor drawer) starts at the screen edge.
 const TOP_BAR_OFFSET = "0.5rem";
 
+const DEFAULT_SCENARIO_COVER = "/scenario-placeholder.png";
+
 const surfaceStyle = {
   background:
-    "linear-gradient(180deg, rgba(13, 13, 15, 0.97) 0%, rgba(8, 10, 15, 0.94) 100%)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
+    "linear-gradient(180deg, rgba(50, 50, 55, 0.58) 0%, rgba(17, 17, 19, 0.48) 100%)",
+  border: "1px solid var(--oh-hud-border)",
+  boxShadow: "var(--oh-hud-shadow-soft)",
+  backdropFilter: "var(--oh-hud-blur)",
+  WebkitBackdropFilter: "var(--oh-hud-blur)",
 };
 
 const actionButtonStyle = {
@@ -249,6 +265,11 @@ const buildGameEditorState = (details) => {
   };
 };
 
+// Scenario exports and JSON bundles only. It revokes the object URL in the same
+// task as the click, which Firefox treats as a cancelled download — a latent bug
+// in those two paths, left alone here because fixing them is not this change's
+// business. Anything NEW that saves a file should use saveGameZipToDisk in
+// runtime/gameZip.js, which defers the revoke.
 const saveBlobToDisk = (blob, fileName) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -363,7 +384,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
   const assetBadges = Object.entries(scenarioBadgeLabels)
     .filter(([key]) => scenario.assetStatus?.[key])
     .map(([, label]) => label.replace(" PMTiles", "").replace(" JSON", ""));
-  const cardImageUrl = scenario.coverImageUrl || "/loading_screen.jpg";
+  const cardImageUrl = scenario.coverImageUrl || DEFAULT_SCENARIO_COVER;
 
   return (
     <div
@@ -395,7 +416,8 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
           background:
             `linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.72) 100%), ` +
             `radial-gradient(circle at 14% 18%, ${scenario.accentColor}bb, transparent 34%), ` +
-            `url("${cardImageUrl}") center/cover`,
+            `url("${cardImageUrl}") center/cover, ` +
+            `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
           inset: 0,
           opacity: 0.92,
           position: "absolute",
@@ -517,8 +539,45 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
   );
 };
 
-const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
-  const cardImageUrl = game.coverImageUrl || "/loading_screen.jpg";
+// Edit, Clone and Export live behind the ⋮ in the corner rather than on the
+// face of the card. Three verbs compete for width with Play, and Play is the one a
+// player came to press; the other three are occasional, and none of them is
+// destructive, which is why Archive stays out here on its own.
+const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, onExport }) => {
+  const cardImageUrl = game.coverImageUrl || DEFAULT_SCENARIO_COVER;
+  const [cardMenuOpen, setCardMenuOpen] = useState(false);
+  // Which row the pointer is over. These are plain buttons on a translucent
+  // surface, so without this nothing moves under the cursor and there is no way
+  // to tell which one is about to be clicked.
+  const [hoveredMenuItem, setHoveredMenuItem] = useState(null);
+
+  // Export is the one that takes a moment — a second or two on a phone for a game
+  // with roll-back points, longer when a map has to go in. So it keeps the menu
+  // open and says so on the row that was pressed, rather than closing and leaving
+  // the card looking like nothing happened. Edit and Clone are instant and close.
+  const [exporting, setExporting] = useState(false);
+
+  const runExport = async () => {
+    setExporting(true);
+    try {
+      await onExport(game);
+    } finally {
+      setExporting(false);
+      setCardMenuOpen(false);
+      setHoveredMenuItem(null);
+    }
+  };
+
+  const cardMenuItems = [
+    ["Edit", () => { setCardMenuOpen(false); onEdit(game.id); }, false],
+    ["Clone", () => { setCardMenuOpen(false); onClone(game); }, false],
+    // Android's WebView cannot save a file at all — its download listener hands
+    // every URL to the system browser, where a blob: URL means nothing (see
+    // saveDebugLog.js). The Diagnostics log copes by falling back to the
+    // clipboard; a multi-megabyte zip has nothing to fall back to, so the row is
+    // not offered rather than failing in silence. Same gate as Settings.
+    ...(isNativeApp() ? [] : [[exporting ? "Exporting…" : "Export", runExport, exporting]]),
+  ];
 
   return (
     <div
@@ -537,7 +596,8 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
           background:
             `linear-gradient(180deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.72) 100%), ` +
             `radial-gradient(circle at 16% 20%, ${game.accentColor}aa, transparent 32%), ` +
-            `url("${cardImageUrl}") center/cover`,
+            `url("${cardImageUrl}") center/cover, ` +
+            `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
           inset: 0,
           opacity: 0.96,
           position: "absolute",
@@ -555,26 +615,152 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
         }}
       >
         <div>
-          <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between" }}>
-            <span
-              style={{
-                background: active ? `${game.accentColor}66` : "rgba(255,255,255,0.12)",
-                border: "1px solid rgba(255,255,255,0.15)",
-                borderRadius: "999px",
-                color: "rgba(248,250,252,0.94)",
-                display: "inline-flex",
-                fontSize: "0.69rem",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                padding: "0.35rem 0.6rem",
-                textTransform: "uppercase",
-              }}
-            >
-              {active ? "Current Game" : game.eyebrow || "Game"}
-            </span>
-            <span style={{ color: "rgba(255,255,255,0.72)", fontSize: "0.76rem" }}>
-              {game.scenarioName}
-            </span>
+          <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+            {/* The pill and the scenario name are both caption text and read as a
+                pair; the corner belongs to the menu. */}
+            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", minWidth: 0 }}>
+              <span
+                style={{
+                  background: active ? `${game.accentColor}66` : "rgba(255,255,255,0.12)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: "999px",
+                  color: "rgba(248,250,252,0.94)",
+                  display: "inline-flex",
+                  flex: "0 0 auto",
+                  fontSize: "0.69rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  padding: "0.35rem 0.6rem",
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {active ? "Current Game" : game.eyebrow || "Game"}
+              </span>
+              <span
+                style={{
+                  color: "rgba(255,255,255,0.72)",
+                  fontSize: "0.76rem",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={game.scenarioName}
+              >
+                {game.scenarioName}
+              </span>
+            </div>
+
+            <div style={{ flex: "0 0 auto", position: "relative" }}>
+              {/* Building a zip takes a moment — measured, one to two seconds on a
+                  phone for a game with its roll-back points, longer when a map has
+                  to go in — and the menu closes on the click, so without this the
+                  card looks like it did nothing and gets pressed again. */}
+              <button
+                aria-haspopup="menu"
+                aria-expanded={cardMenuOpen}
+                aria-label={busy ? "Working…" : `More for ${game.name}`}
+                disabled={busy}
+                onClick={() => setCardMenuOpen((open) => !open)}
+                style={{
+                  ...actionButtonStyle,
+                  background: cardMenuOpen ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.35)",
+                  cursor: busy ? "progress" : "pointer",
+                  fontSize: "1.05rem",
+                  lineHeight: 1,
+                  minWidth: "2rem",
+                  opacity: busy ? 0.5 : 1,
+                  padding: "0.3rem 0.45rem",
+                }}
+                title={busy ? "Working…" : undefined}
+                type="button"
+              >
+                ⋮
+              </button>
+              {cardMenuOpen && (
+                <>
+                  {/* Click-away, rather than a document listener: the card is one of
+                      many in a scrolling shelf and a listener per card is a listener
+                      per card. */}
+                  <div
+                    onClick={() => {
+                      if (exporting) return;
+                      setCardMenuOpen(false);
+                      setHoveredMenuItem(null);
+                    }}
+                    style={{ inset: 0, position: "fixed", zIndex: 1 }}
+                  />
+                  <div
+                    role="menu"
+                    style={{
+                      ...surfaceStyle,
+                      borderRadius: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      minWidth: "13rem",
+                      overflow: "hidden",
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 0.35rem)",
+                      zIndex: 2,
+                    }}
+                  >
+                    {/* Not boilerplate: an exported game carries every diplomatic
+                        conversation, advisor exchange and event in the campaign,
+                        and some of that is fiction a player may not want in
+                        public. Saying so is what stops the careful half deciding
+                        not to share at all — the same reasoning as the Diagnostics
+                        warning in settings.jsx. */}
+                    {cardMenuItems.map(([label, run, working]) => (
+                      <button
+                        key={label}
+                        disabled={exporting}
+                        onClick={() => { setHoveredMenuItem(null); run(); }}
+                        onFocus={() => setHoveredMenuItem(label)}
+                        onBlur={() => setHoveredMenuItem(null)}
+                        onMouseEnter={() => setHoveredMenuItem(label)}
+                        onMouseLeave={() => setHoveredMenuItem(null)}
+                        role="menuitem"
+                        style={{
+                          ...actionButtonStyle,
+                          background:
+                            working || hoveredMenuItem === label ? "rgba(255,255,255,0.16)" : "transparent",
+                          border: "none",
+                          borderRadius: 0,
+                          // Keyboard focus lands here too, so the highlight follows
+                          // Tab as well as the pointer.
+                          color: working || hoveredMenuItem === label ? "#fff" : "rgba(248,250,252,0.82)",
+                          cursor: working ? "progress" : undefined,
+                          justifyContent: "flex-start",
+                          // The row grows by a character when it changes to
+                          // "Exporting…"; a fixed width stops the menu twitching.
+                          minWidth: "8rem",
+                          opacity: exporting && !working ? 0.45 : 1,
+                          padding: "0.55rem 0.8rem",
+                          textAlign: "left",
+                        }}
+                        type="button"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    {!isNativeApp() && (
+                      <div
+                        style={{
+                          borderTop: "1px solid rgba(255,255,255,0.08)",
+                          color: "rgba(255,255,255,0.45)",
+                          fontSize: "0.68rem",
+                          lineHeight: 1.35,
+                          padding: "0.5rem 0.8rem 0.55rem",
+                        }}
+                      >
+                        An exported game carries its conversations, advisors and events — worth a look before posting it publicly.
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div style={{ marginTop: "2rem" }}>
@@ -602,17 +788,11 @@ const GameCard = ({ active, game, onActivate, onArchive, onClone, onEdit }) => {
                 background: active ? "rgba(255,255,255,0.16)" : `${game.accentColor}cc`,
                 borderColor: active ? "rgba(255,255,255,0.22)" : `${game.accentColor}dd`,
                 color: "#fff",
-                flex: 1,
+                flexBasis: "100%",
               }}
               type="button"
             >
               {active ? "Current" : "Play"}
-            </button>
-            <button onClick={() => onEdit(game.id)} style={{ ...actionButtonStyle, flex: 1 }} type="button">
-              Edit
-            </button>
-            <button onClick={() => onClone(game)} style={{ ...actionButtonStyle, flex: 1 }} type="button">
-              Clone
             </button>
             {/* Hide a finished or abandoned run without destroying it — the case
                 Delete cannot serve. Archiving the ACTIVE game is allowed: the
@@ -817,7 +997,13 @@ const EditorDrawer = ({
             </div>
             <div>
               <label style={fieldLabelStyle}>Game Date</label>
-              <input style={inputStyle} value={formState.gameDate} onChange={(event) => onChange("gameDate", event.target.value)} />
+              <input
+                style={inputStyle}
+                value={formState.gameDate}
+                onChange={(event) => onChange("gameDate", event.target.value)}
+                placeholder="YYYY-MM-DD — before AD 1 use a minus: -0218-03-01 is 1 March 218 BC"
+                title="Dates are YYYY-MM-DD. A year before AD 1 carries a leading minus and counts backwards with no year zero: -0218-03-01 is 1 March 218 BC, -0001-12-31 the last day of 1 BC."
+              />
             </div>
             <div>
               <label style={fieldLabelStyle}>Language</label>
@@ -868,18 +1054,19 @@ const EditorDrawer = ({
             </div>
             {/* Country-label styling. Labels rasterize from each player's LOCAL
                 fonts (the map has no glyph server), so any installed family
-                works — the list only suggests safe common ones. Empty = Impact. */}
+                works — the list only suggests safe common ones. Empty = Georgia,
+                the map's default (Nations.jsx labelFontStack). */}
             <div>
               <label style={fieldLabelStyle}>Country Label Font</label>
               <input
                 list="oh-label-font-options"
-                placeholder="Impact (default)"
+                placeholder="Georgia (default)"
                 style={inputStyle}
                 value={formState.labelFont}
                 onChange={(event) => onChange("labelFont", event.target.value)}
               />
               <datalist id="oh-label-font-options">
-                {["Impact", "Arial Black", "Arial", "Georgia", "Times New Roman", "Trebuchet MS", "Verdana", "Courier New", "Garamond", "Comic Sans MS"].map((font) => (
+                {LABEL_FONT_SUGGESTIONS.map((font) => (
                   <option key={font} value={font} />
                 ))}
               </datalist>
@@ -1004,10 +1191,10 @@ const EditorDrawer = ({
             Download the scenario as one self-contained file — custom map geometry, cities and basemap all travel with it, ready to share or re-import. The <strong>.zip</strong> carries a custom basemap as a real image file (smaller, and the form the community hub expects); the <strong>JSON</strong> packs everything into one text file.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
-            <button onClick={() => onExportBundle("light", "zip")} style={actionButtonStyle} type="button">
+            <button onClick={() => onExportBundle("zip")} style={actionButtonStyle} type="button">
               Download .zip
             </button>
-            <button onClick={() => onExportBundle("light", "json")} style={actionButtonStyle} type="button">
+            <button onClick={() => onExportBundle("json")} style={actionButtonStyle} type="button">
               Download JSON
             </button>
           </div>
@@ -1072,6 +1259,7 @@ const LibraryTopBar = () => {
   const setMenuOpen = (open) => {
     menuOpenDefault = open;
     setMenuOpenState(open);
+    mainMenuListeners.forEach((listener) => listener());
   };
   // Bridge for outside callers: open the main menu on a library tab.
   _openLibraryTab = (tab) => {
@@ -1087,6 +1275,9 @@ const LibraryTopBar = () => {
   const [isBusy, setIsBusy] = useState(false);
   const assetFileInputsRef = useRef({});
   const importScenarioInputRef = useRef(null);
+  const importGameInputRef = useRef(null);
+  // The game whose map this library does not hold, while its prompt is up.
+  const [missingScenarioGame, setMissingScenarioGame] = useState(null);
 
   useEffect(() => {
     if (!loaded) {
@@ -1306,7 +1497,7 @@ const LibraryTopBar = () => {
         // Load custom region geometry so the map renders the scenario's actual
         // boundaries instead of the stock world seed.
         if (details?.data?.world?.customRegions) {
-          downloadScenarioJsonAsset(scenario.id, "regionsGeojson")
+          downloadScenarioJsonAsset(scenario.id, "regionsGeojson", { coarse: true })
             .then((geojson) => { if (geojson) setCustomRegionData(geojson); })
             .catch(() => {});
         }
@@ -1417,6 +1608,15 @@ const LibraryTopBar = () => {
   };
 
   const handleGameActivate = async (gameId) => {
+    // A game whose scenario is not in this library has no map to open on — the
+    // ordinary state of a game imported from someone else. Offer to go and get
+    // it rather than dropping the player into a blank world.
+    const game = games.find((entry) => entry.id === gameId);
+    if (game?.scenarioMissing) {
+      setMissingScenarioGame(game);
+      return;
+    }
+
     setMenuOpen(false);
     try {
       await activateGame(gameId);
@@ -1425,6 +1625,128 @@ const LibraryTopBar = () => {
       setEditorError(nextError.message);
     }
   };
+
+  const handleGameExport = async (game) => {
+    if (isBusy) return;
+    setEditorError(null);
+    setIsBusy(true);
+
+    try {
+      // The one case where the file can be big: nothing else can fetch this map,
+      // so it has to travel. Asked BEFORE the map is fetched rather than after the
+      // zip is built — a player who says no should not have waited for the work
+      // first. Refusing outright is not an option either: it would leave them with
+      // a game nobody else can ever open.
+      const result = await buildGameZipBlob(game.id, {
+        confirmCarryingScenario: ({ bytes, name }) =>
+          window.confirm(
+            `“${name}” isn't a scenario the other machine can download, so the map has to travel ` +
+            `inside this file — about ${formatZipSize(bytes)} before it is compressed.\n\nExport it?`,
+          ),
+      });
+      if (!result) return; // the player backed out
+
+      const { blob, oversizeScenario } = result;
+      if (oversizeScenario) {
+        // Saved anyway: a game without its map still opens for anyone who has the
+        // map, and is still the thing a maintainer needs. Refusing would leave the
+        // player with nothing.
+        setEditorError(
+          `“${oversizeScenario.name}” is ${formatZipSize(oversizeScenario.bytes)} — too large to travel inside a game file, ` +
+          `so this export carries everything except the map. Send the scenario separately from the Scenarios tab.`,
+        );
+      }
+      // The deferred-revoke saver, NOT the saveBlobToDisk defined above: that one
+      // revokes the object URL in the same task as the click, which Firefox treats
+      // as a cancelled download.
+      saveGameZipToDisk(blob, `${game.id}-game.zip`);
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleImportGameFile = async (event) => {
+    const [file] = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setEditorError(null);
+    setIsBusy(true);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      // By magic bytes, not by extension, so a renamed file still imports — the
+      // same rule the scenario import uses.
+      if (!looksLikeZip(new Uint8Array(buffer))) {
+        throw new Error("That file isn't a game export. Pick the .zip you saved with Export.");
+      }
+
+      const { bundle, scenarioBundle, snapshotsText } = await readGameZip(buffer);
+
+      // The scenario first, so the game's card names its map the moment it
+      // appears. Only when this library doesn't already hold that id: importing
+      // regardless would mint a second copy of the same map — up to 53 MB —
+      // every time the same game was imported, and ensureUniqueId would rename
+      // it, so the game would point at whichever copy arrived first anyway.
+      let scenarioId = bundle.scenarioRef?.scenarioId ?? "";
+      if (scenarioBundle && !scenarios.some((entry) => entry.id === scenarioId)) {
+        const imported = await importScenarioBundle(scenarioBundle);
+        scenarioId = imported.scenario.id;
+      }
+
+      const details = await importGameBundle({
+        ...bundle,
+        scenarioRef: { ...(bundle.scenarioRef ?? {}), scenarioId },
+      });
+      // Restore points go back as the text they arrived as, so neither side ever
+      // parses ~21 MB of them.
+      if (snapshotsText) await writeGameSnapshotsText(details.game.id, snapshotsText);
+
+      await refreshLibraryCatalog({ force: true });
+      setActiveTab("games");
+      setMenuOpen(true);
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  // "Import & play" on the missing-map prompt: fetch the scenario the sender
+  // recorded, import it, point the game at it, and go straight in. Offered only
+  // when there is somewhere to fetch from — see handleGameActivate.
+  const handleMissingScenarioImport = async (game) => {
+    setEditorError(null);
+    setIsBusy(true);
+
+    try {
+      const { downloadHubBundle } = await import("./communityHub.jsx");
+      const origin = game.importedScenarioOrigin;
+      const bundle = await downloadHubBundle(origin.bundleUrl);
+      // Stamp where it came from, exactly as the Community tab's own import does
+      // (communityHub.jsx). Without it the scenario looks editor-made to every
+      // later export, which would try to carry the whole map inside the next game
+      // exported from it — hundreds of megabytes, built in the page.
+      bundle.hubOrigin = { bundleUrl: origin.bundleUrl, postId: origin.postId, syncedAt: origin.syncedAt };
+      const imported = await importScenarioBundle(bundle);
+      await saveGame(game.id, { scenarioId: imported.scenario.id });
+      await refreshLibraryCatalog({ force: true });
+      setMissingScenarioGame(null);
+      setMenuOpen(false);
+      await activateGame(game.id);
+    } catch (nextError) {
+      setMenuOpen(true);
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
 
   // Blank scenario from the menu's + tile: create (seeded server-side from the
   // default scenario) and drop straight into its editor, above the menu.
@@ -1648,7 +1970,7 @@ const LibraryTopBar = () => {
     }
   };
 
-  const handleExportBundle = async (mode, format = "json") => {
+  const handleExportBundle = async (format = "json") => {
     if (editorKind !== "scenario" || !editorDetails) {
       return;
     }
@@ -1658,7 +1980,7 @@ const LibraryTopBar = () => {
 
     try {
       const id = editorDetails.scenario.id;
-      const bundle = await exportScenarioBundle(id, mode);
+      const bundle = await exportScenarioBundle(id);
       if (format === "zip") {
         // Package the scenario as a real .zip. When it carries a custom basemap, that
         // image/geojson rides inside as an actual file (+ a small preview) instead of a
@@ -1675,7 +1997,7 @@ const LibraryTopBar = () => {
         }
         saveBlobToDisk(await zipBundle(files), `${id}-scenario.zip`);
       } else {
-        saveJsonBundleToDisk(bundle, `${id}-${mode}.json`);
+        saveJsonBundleToDisk(bundle, `${id}-scenario.json`);
       }
     } catch (nextError) {
       setEditorError(nextError.message);
@@ -1739,21 +2061,6 @@ const LibraryTopBar = () => {
   }, [activeGame, activeCountryName]);
 
   const isMobile = useIsMobile();
-  // True once the user shut the server down from the ⏻ button — swaps the whole
-  // UI for a "server stopped" screen (every poll would just error underneath).
-  const [serverDown, setServerDown] = useState(false);
-
-  const handleShutdownServer = async () => {
-    if (!window.confirm("Shut down the Open Historia server? The game stops for everyone connected to it.")) {
-      return;
-    }
-    try {
-      await fetch("/api/server/shutdown", { method: "POST" });
-    } catch {
-      // The socket may drop before the response arrives — that IS the shutdown.
-    }
-    setServerDown(true);
-  };
 
   const [isMapEditorOpen, setIsMapEditorOpen] = useState(false);
   const [mapEditorScenario, setMapEditorScenario] = useState(null);
@@ -1781,7 +2088,7 @@ const LibraryTopBar = () => {
   // player SEES the map right away — the stock country-level renderer can't show
   // per-region ownership, so every applied map ships its geometry and renders via
   // the custom GeoJSON layer.
-  const applyMapToScenario = async (scenario, seed) => {
+  const applyMapToScenario = async (scenario, seed, { play = true } = {}) => {
     if (!scenario || !seed) return;
     const scenarioId = scenario.id;
 
@@ -1789,14 +2096,25 @@ const LibraryTopBar = () => {
     const currentWorld = details?.data?.world ?? {};
     const currentGame = details?.data?.game ?? {};
 
-    await saveScenario(scenarioId, {
+    // A Workshop that has not finished loading the scenario's map holds an empty
+    // document, and writing that over a scenario with territory is never what a
+    // save meant. The Workshop disables its buttons until the map is in; this
+    // is the second line of defence for any other way in.
+    const seedRegionCount = Array.isArray(seed.regions?.features) ? seed.regions.features.length : 0;
+    const hadTerritory = Object.keys(currentWorld.regionOwnershipOverrides ?? {}).length > 0;
+    if (seedRegionCount === 0 && hadTerritory) {
+      throw new Error("The map in the editor is empty while this scenario has territory — its map had not finished loading. Wait for it to appear, then save again.");
+    }
+
+    const savedScenarioDetails = await saveScenario(scenarioId, {
       world: {
         ...currentWorld,
         regionOwnershipOverrides: seed.world?.regionOwnershipOverrides ?? {},
-        polityOverrides: {
-          ...(currentWorld.polityOverrides ?? {}),
-          ...(seed.world?.polityOverrides ?? {}),
-        },
+        // The Workshop is authoritative for the polity registry: it hydrated the
+        // full current registry (landless polities included) before editing, so
+        // merging here would resurrect deleted or renamed entries forever.
+        polityOverrides: seed.world?.polityOverrides ?? {},
+        ownerSchema: seed.world?.ownerSchema ?? currentWorld.ownerSchema,
         // Playable factions for the start-country picker.
         ownerCodes: [...new Set(Object.values(seed.world?.regionOwnershipOverrides ?? {}))].sort(),
         customRegions: true,
@@ -1819,6 +2137,11 @@ const LibraryTopBar = () => {
           currentGame.startDate || currentGame.gameDate || seed.game?.startDate || seed.game?.gameDate || "2016-01-01",
       },
     });
+
+    // The canonical scenario just written, kept in the drawer too; otherwise
+    // reopening the Workshop resurrects the old world.json and a later ordinary
+    // scenario save can write the stale basemap back.
+    setEditorDetails(savedScenarioDetails);
 
     await uploadScenarioAsset(
       scenarioId,
@@ -1877,6 +2200,10 @@ const LibraryTopBar = () => {
       await clearScenarioAsset(scenarioId, "backgroundData").catch(() => {});
     }
 
+    // A Workshop save is complete by itself; Apply & Play opts into the fresh-game
+    // flow below.
+    if (!play) return { saved: true, scenarioId };
+
     // Create + activate a fresh game so the running map reflects the edit. Relying
     // on the player finishing a follow-up picker left the old active game (and old
     // map) in place — this guarantees the new map is live. Menu flag first: the
@@ -1920,7 +2247,7 @@ const LibraryTopBar = () => {
         setPickerOwnerOverrides(seedWorld.regionOwnershipOverrides ?? null);
         // The map editor just saved custom region geometry — load it so the
         // country picker renders the scenario's actual map, not the stock seed.
-        downloadScenarioJsonAsset(scenario.id, "regionsGeojson")
+        downloadScenarioJsonAsset(scenario.id, "regionsGeojson", { coarse: true })
           .then((geojson) => { if (geojson) setCustomRegionData(geojson); })
           .catch(() => {});
       })
@@ -1992,10 +2319,28 @@ const LibraryTopBar = () => {
       .sort((a, b) => String(b.lastPlayedAt ?? "").localeCompare(String(a.lastPlayedAt ?? ""))),
     [games],
   );
-  const lastPlayedGames = useMemo(
-    () => [...visibleGames].sort((a, b) => String(b.lastPlayedAt ?? "").localeCompare(String(a.lastPlayedAt ?? ""))),
-    [visibleGames],
-  );
+  // Sorting on lastPlayedAt alone sends a game that has never been played to the
+  // far right, behind every campaign the player has ever opened — which is where
+  // a game imported thirty seconds ago landed, the one place nobody thinks to
+  // look for something they just added. Importing counts as touching a game, so
+  // an import ranks by when it ARRIVED and turns up beside the current game.
+  //
+  // createdAt cannot be used for this: readGameMeta mints a fresh one on every
+  // read for a game that has none on disk, and real saves do exist without one,
+  // so such a game reads as newer than everything forever. A game nobody has
+  // played or imported keeps its place in the library's own order, which is
+  // what the stable sort below leaves it in.
+  //
+  // The current game stays first: this row is how the player gets back to it,
+  // and nothing newly added should displace it.
+  const lastPlayedGames = useMemo(() => {
+    const touchedAt = (game) => String(game.lastPlayedAt || game.importedAt || "");
+    return [...visibleGames].sort((a, b) => {
+      if (a.id === activeGameId) return -1;
+      if (b.id === activeGameId) return 1;
+      return touchedAt(b).localeCompare(touchedAt(a));
+    });
+  }, [visibleGames, activeGameId]);
   const mostPlayedGames = useMemo(
     () => [...visibleGames].sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0) || (b.round ?? 0) - (a.round ?? 0)),
     [visibleGames],
@@ -2023,9 +2368,10 @@ const LibraryTopBar = () => {
     <>
       {/* In-game the full-width top bar is gone — the map gets the space. What
           remains is a compact floating cluster beside the ⋮ settings button: a
-          small sleek pill with the session summary, plus Exit Game and ⏻.
+          small sleek pill with the session summary, plus Exit Game.
           Below the settings menu and date widget (z 9998/9999) so opening
-          either covers it instead of the other way around. */}
+          either covers it instead of the other way around, and below the
+          desktop advisor drawer (9997) so a wide drawer covers it too. */}
       {!menuOpen && !isMobile && (
         <div
           style={{
@@ -2036,64 +2382,43 @@ const LibraryTopBar = () => {
             left: "5rem",
             position: "fixed",
             top: "0.5rem",
-            zIndex: 9997,
+            zIndex: 9996,
           }}
         >
           <div
             style={{
               ...surfaceStyle,
-              borderRadius: "999px",
+              alignItems: "center",
+              borderRadius: "13px",
               color: "rgba(255,255,255,0.72)",
-              fontSize: "0.74rem",
-              fontWeight: 600,
+              display: "flex",
+              gap: "0.55rem",
               // Shrinks to nothing before it can reach under the date widget
               // on narrow desktop windows (the widget owns the top right).
               maxWidth: "min(34rem, max(0rem, calc(100vw - 44rem)))",
               overflow: "hidden",
-              padding: "0.5rem 0.85rem",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              padding: "0.42rem 0.7rem",
             }}
           >
-            {summaryText}
+            <img alt="Open Historia" src="/logo.png" style={{ borderRadius: "8px", flexShrink: 0, height: "1.9rem", width: "1.9rem" }} />
+            <div style={{ minWidth: 0, lineHeight: 1.08 }}>
+              <div style={{ color: "rgba(255,255,255,0.94)", fontSize: "0.72rem", fontWeight: 850 }}>Open Historia</div>
+              <div style={{ color: "rgba(226,226,229,0.42)", fontSize: "0.6rem", marginTop: "0.18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summaryText}</div>
+            </div>
           </div>
           <button
             onClick={() => setMenuOpen(true)}
             title="Leave this game and return to the main menu"
             type="button"
-            style={{ ...actionButtonStyle, ...surfaceStyle, borderRadius: "999px", fontSize: "0.74rem", minHeight: "0", padding: "0.5rem 0.85rem" }}
+            style={{ ...actionButtonStyle, ...surfaceStyle, borderRadius: "11px", fontSize: "0.68rem", minHeight: "2.85rem", padding: "0 0.85rem" }}
           >
             ⌂ Exit Game
           </button>
-          {/* Shut the server down (phones/Termux have no terminal handy). Hidden
-              on the hosted website (web build) — there's no local server to stop
-              there, and the compile-time flag strips this from that bundle. */}
-          {!import.meta.env.VITE_OH_WEB && (
-            <button
-              onClick={handleShutdownServer}
-              title="Exit: shut down the Open Historia server"
-              type="button"
-              style={{
-                ...actionButtonStyle,
-                ...surfaceStyle,
-                background: "rgba(220,70,70,0.14)",
-                borderColor: "rgba(248,113,113,0.35)",
-                borderRadius: "999px",
-                color: "#fca5a5",
-                fontSize: "0.74rem",
-                minHeight: "0",
-                minWidth: "0",
-                padding: "0.5rem 0.7rem",
-              }}
-            >
-              ⏻
-            </button>
-          )}
         </div>
       )}
 
-      {/* Phones: the date widget spans the whole top row, so Exit Game and ⏻
-          stack in the left gutter under the ⋮ settings button instead. */}
+      {/* Phones: the date widget spans the whole top row, so Exit Game sits
+          in the left gutter under the ⋮ settings button instead. */}
       {!menuOpen && isMobile && (
         <div
           style={{
@@ -2115,55 +2440,6 @@ const LibraryTopBar = () => {
           >
             ⌂
           </button>
-          {!import.meta.env.VITE_OH_WEB && (
-            <button
-              onClick={handleShutdownServer}
-              title="Exit: shut down the Open Historia server"
-              type="button"
-              style={{
-                ...actionButtonStyle,
-                ...surfaceStyle,
-                background: "rgba(220,70,70,0.14)",
-                borderColor: "rgba(248,113,113,0.35)",
-                borderRadius: "12px",
-                color: "#fca5a5",
-                fontSize: "1rem",
-                height: "2.6rem",
-                minHeight: "0",
-                minWidth: "0",
-                padding: 0,
-                width: "2.6rem",
-              }}
-            >
-              ⏻
-            </button>
-          )}
-        </div>
-      )}
-
-      {serverDown && (
-        <div
-          style={{
-            alignItems: "center",
-            background: "rgba(10,10,12,0.97)",
-            color: "#fff",
-            display: "flex",
-            flexDirection: "column",
-            fontFamily: "sans-serif",
-            gap: "0.8rem",
-            inset: 0,
-            justifyContent: "center",
-            padding: "1rem",
-            position: "fixed",
-            textAlign: "center",
-            zIndex: 20000,
-          }}
-        >
-          <div style={{ fontSize: "2.2rem" }}>⏻</div>
-          <div style={{ fontSize: "1.2rem", fontWeight: 800 }}>Server stopped</div>
-          <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.85rem", maxWidth: "22rem" }}>
-            You can close this tab now. Run the launcher (or <code>node server/server.js</code>) to start it again.
-          </div>
         </div>
       )}
 
@@ -2185,7 +2461,7 @@ const LibraryTopBar = () => {
               scenarioName={mapEditorScenario?.name}
               initialMap={mapEditorSeed}
               onApplyToScenario={
-                mapEditorScenario ? (seed) => applyMapToScenario(mapEditorScenario, seed) : undefined
+                mapEditorScenario ? (seed, options) => applyMapToScenario(mapEditorScenario, seed, options) : undefined
               }
             />
           </Suspense>
@@ -2325,10 +2601,81 @@ const LibraryTopBar = () => {
         )}
       </Presence>
 
+      {/* Pressing Play on a game whose scenario this library does not hold. The
+          third button appears only when the sender recorded somewhere to fetch
+          the map from: a button that cannot do anything is worse than two. */}
+      <Presence open={Boolean(missingScenarioGame)} value={missingScenarioGame}>
+        {(pending) => (
+          <div
+            onClick={() => setMissingScenarioGame(null)}
+            style={{ alignItems: "center", background: "rgba(0,0,0,0.55)", display: "flex", inset: 0, justifyContent: "center", position: "fixed", zIndex: 10060 }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{ ...surfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
+            >
+              <div style={{ fontSize: "1rem", fontWeight: 800 }}>This game's scenario isn't here</div>
+              <div style={{ color: "rgba(255,255,255,0.62)", fontSize: "0.82rem", lineHeight: 1.5, margin: "0.5rem 0 1rem" }}>
+                “{pending.name}” was played on{" "}
+                <strong style={{ color: "rgba(255,255,255,0.86)" }}>
+                  {pending.importedScenarioName || pending.scenarioName}
+                </strong>
+                , which isn't in your library — so there is no map to open it on.
+                {pending.importedScenarioOrigin
+                  ? " It's on the community hub, so it can be fetched now."
+                  : " Ask whoever sent you the game for the scenario file, then import it from the Scenarios tab."}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+                {pending.importedScenarioOrigin && (
+                  <button
+                    disabled={isBusy}
+                    onClick={() => handleMissingScenarioImport(pending)}
+                    style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.3)", borderColor: "rgba(139,92,246,0.55)", minHeight: "2.6rem" }}
+                    type="button"
+                  >
+                    {isBusy ? "Getting the scenario…" : "Import & play"}
+                  </button>
+                )}
+                {/* The hub is only worth offering when the map is actually on it.
+                    Otherwise the player has a file to import, and the Scenarios
+                    tab is where importing one happens. */}
+                <button
+                  onClick={() => {
+                    setMissingScenarioGame(null);
+                    setActiveTab(pending.importedScenarioOrigin ? "community" : "scenarios");
+                  }}
+                  style={{ ...actionButtonStyle, minHeight: "2.6rem" }}
+                  type="button"
+                >
+                  {pending.importedScenarioOrigin ? "Browse the community hub" : "Go to scenarios"}
+                </button>
+                <button
+                  onClick={() => setMissingScenarioGame(null)}
+                  style={{ ...actionButtonStyle, minHeight: "2.6rem" }}
+                  type="button"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Presence>
+
       <input
         ref={importScenarioInputRef}
         accept=".json,application/json,.zip,application/zip"
         onChange={handleImportScenarioFile}
+        style={{ display: "none" }}
+        type="file"
+      />
+
+      {/* A game export is always a .zip — the bundle alone is never a whole game,
+          because its restore points and any map ride beside it. */}
+      <input
+        ref={importGameInputRef}
+        accept=".zip,application/zip"
+        onChange={handleImportGameFile}
         style={{ display: "none" }}
         type="file"
       />
@@ -2356,23 +2703,40 @@ const LibraryTopBar = () => {
               display: "grid",
               flexShrink: 0,
               gap: isMobile ? "0.4rem" : "0.9rem",
-              gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+              // Three columns keeps the tabs optically centred on a desktop. On a
+              // phone the tabs and the action buttons together are wider than the
+              // bar, so the actions column collapses to nothing and its buttons
+              // spill left across the Community tab. Two columns, and the logo —
+              // decorative, and its wordmark is already hidden here — gives up its
+              // space.
+              gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : "minmax(0, 1fr) auto minmax(0, 1fr)",
               height: `${BAR_HEIGHT}px`,
               padding: isMobile ? "0 0.5rem" : "0 1rem",
             }}
           >
-            <div style={{ alignItems: "center", display: "flex", gap: "0.8rem", minWidth: 0 }}>
-              <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", flexShrink: 0, height: "2.65rem", justifyContent: "center", overflow: "hidden", width: "2.65rem" }}>
-                <img alt="Open Historia" src="/logo.png" style={{ height: "1.7rem", width: "1.7rem" }} />
-              </div>
-              {!isMobile && (
+            {!isMobile && (
+              <div style={{ alignItems: "center", display: "flex", gap: "0.8rem", minWidth: 0 }}>
+                <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", flexShrink: 0, height: "2.65rem", justifyContent: "center", overflow: "hidden", width: "2.65rem" }}>
+                  <img alt="Open Historia" src="/logo.png" style={{ height: "1.7rem", width: "1.7rem" }} />
+                </div>
                 <div style={{ color: "#fff", fontSize: "1.05rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
                   Open Historia
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            <div style={{ alignItems: "center", display: "flex", gap: "0.55rem", justifyContent: "center", justifySelf: "center" }}>
+            <div
+              style={{
+                alignItems: "center",
+                display: "flex",
+                gap: "0.55rem",
+                justifyContent: isMobile ? "flex-start" : "center",
+                justifySelf: isMobile ? "start" : "center",
+                minWidth: 0,
+                overflowX: "auto",
+                scrollbarWidth: "none",
+              }}
+            >
               {["games", "scenarios", "community"].map((tab) => (
                 <button
                   key={tab}
@@ -2382,7 +2746,7 @@ const LibraryTopBar = () => {
                     background: activeTab === tab ? "rgba(124,58,237,0.24)" : "rgba(255,255,255,0.05)",
                     borderColor: activeTab === tab ? "rgba(124,58,237,0.38)" : "rgba(255,255,255,0.08)",
                     minWidth: isMobile ? "0" : "6.6rem",
-                    padding: isMobile ? "0.55rem 0.7rem" : undefined,
+                    padding: isMobile ? "0.55rem 0.6rem" : undefined,
                   }}
                   type="button"
                 >
@@ -2391,32 +2755,35 @@ const LibraryTopBar = () => {
               ))}
             </div>
 
-            <div style={{ alignItems: "center", display: "flex", gap: "0.55rem", justifyContent: "flex-end" }}>
+            <div style={{ alignItems: "center", display: "flex", flexShrink: 0, gap: "0.55rem", justifyContent: "flex-end" }}>
               {activeTab !== "community" && (
-                <button onClick={() => refreshLibraryCatalog({ force: true }).catch(() => {})} style={actionButtonStyle} type="button">
+                <button
+                  onClick={() => refreshLibraryCatalog({ force: true }).catch(() => {})}
+                  style={{ ...actionButtonStyle, flexShrink: 0, padding: isMobile ? "0 0.7rem" : undefined }}
+                  title={isMobile ? "Refresh" : undefined}
+                  type="button"
+                >
                   {isMobile ? "⟳" : "Refresh"}
                 </button>
               )}
               {activeTab === "scenarios" && (
-                <button onClick={() => importScenarioInputRef.current?.click()} style={actionButtonStyle} type="button">
+                <button
+                  onClick={() => importScenarioInputRef.current?.click()}
+                  style={{ ...actionButtonStyle, flexShrink: 0, padding: isMobile ? "0 0.7rem" : undefined }}
+                  title={isMobile ? "Import a scenario" : undefined}
+                  type="button"
+                >
                   {isMobile ? "⬆" : "Import JSON"}
                 </button>
               )}
-              {!import.meta.env.VITE_OH_WEB && (
+              {activeTab === "games" && (
                 <button
-                  onClick={handleShutdownServer}
-                  title="Exit: shut down the Open Historia server"
+                  onClick={() => importGameInputRef.current?.click()}
+                  style={{ ...actionButtonStyle, flexShrink: 0, padding: isMobile ? "0 0.7rem" : undefined }}
+                  title={isMobile ? "Import a game" : undefined}
                   type="button"
-                  style={{
-                    ...actionButtonStyle,
-                    background: "rgba(220,70,70,0.14)",
-                    borderColor: "rgba(248,113,113,0.35)",
-                    color: "#fca5a5",
-                    minWidth: "2.35rem",
-                    padding: isMobile ? "0.55rem 0.7rem" : undefined,
-                  }}
                 >
-                  ⏻
+                  {isMobile ? "⬆" : "Import game"}
                 </button>
               )}
             </div>
@@ -2465,11 +2832,13 @@ const LibraryTopBar = () => {
                       <GameCard
                         key={game.id}
                         active={game.id === activeGameId}
+                        busy={isBusy}
                         game={game}
                         onActivate={handleGameActivate}
                         onArchive={handleGameArchive}
                         onClone={handleGameClone}
                         onEdit={openGameEditor}
+                        onExport={handleGameExport}
                       />
                     ))}
                   </MenuRow>
@@ -2478,11 +2847,13 @@ const LibraryTopBar = () => {
                       <GameCard
                         key={game.id}
                         active={game.id === activeGameId}
+                        busy={isBusy}
                         game={game}
                         onActivate={handleGameActivate}
                         onArchive={handleGameArchive}
                         onClone={handleGameClone}
                         onEdit={openGameEditor}
+                        onExport={handleGameExport}
                       />
                     ))}
                   </MenuRow>
@@ -2492,11 +2863,13 @@ const LibraryTopBar = () => {
                         <GameCard
                           key={game.id}
                           active={game.id === activeGameId}
+                          busy={isBusy}
                           game={game}
                           onActivate={handleGameActivate}
                           onArchive={handleGameArchive}
                           onClone={handleGameClone}
                           onEdit={openGameEditor}
+                          onExport={handleGameExport}
                         />
                       ))}
                     </MenuRow>
@@ -2611,6 +2984,9 @@ const LibraryTopBar = () => {
                 colors: colors && typeof colors === "object" && !Array.isArray(colors) ? colors : null,
                 flags: flags && typeof flags === "object" && !Array.isArray(flags) ? flags : null,
                 tags: tags && typeof tags === "object" && !Array.isArray(tags) ? tags : null,
+                polities: world.polityOverrides && typeof world.polityOverrides === "object" && !Array.isArray(world.polityOverrides)
+                  ? world.polityOverrides
+                  : {},
                 background,
                 basemap: world.basemap || null,
               });

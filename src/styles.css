@@ -18,6 +18,32 @@ body {
   box-sizing: border-box;
 }
 
+/* -------------------------------------------------------------------------
+   HUD glass surface tokens (ported from kernely's Continuum branch). Every
+   fixed HUD surface — the menu button and game menu, the bottom toolbar, the
+   date widget, the search field, the polity badge, the top session pill —
+   reads its finish from here, so they stay one material.
+   ------------------------------------------------------------------------- */
+:root {
+  --oh-hud-bg: rgba(18, 18, 20, 0.52);
+  --oh-hud-bg-strong: rgba(17, 17, 19, 0.66);
+  --oh-hud-bg-soft: rgba(34, 34, 38, 0.46);
+  --oh-hud-border: rgba(236, 236, 238, 0.17);
+  --oh-hud-border-strong: rgba(240, 240, 242, 0.29);
+  --oh-hud-text: #f8f8f9;
+  --oh-hud-muted: rgba(233, 233, 236, 0.64);
+  --oh-hud-faint: rgba(233, 233, 236, 0.38);
+  --oh-hud-blue: #4b91ff;
+  --oh-hud-blue-soft: rgba(75, 145, 255, 0.16);
+  --oh-hud-amber: #f5bd4f;
+  --oh-hud-amber-hover: #ffd06d;
+  --oh-hud-red: #ef4444;
+  --oh-hud-radius: 16px;
+  --oh-hud-shadow: 0 20px 56px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(255,255,255,0.025);
+  --oh-hud-shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.095);
+  --oh-hud-blur: blur(14px) saturate(1.18);
+}
+
 .startup-shell {
   position: fixed;
   inset: 0;
@@ -388,4 +414,82 @@ button:active:not(:disabled) {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* The game menu grows out of the menu button and shrinks back into it. The
+   card's top-left corner sits on the button, so a scale from the button's
+   size (the --oh-grow-* ratios, measured by settings.jsx) is the button
+   becoming the menu; the contents fade in once the card is most of the way. */
+@keyframes oh-menu-grow {
+  from { opacity: 0.35; transform: scale(var(--oh-grow-x, 0.14), var(--oh-grow-y, 0.17)); }
+  to { opacity: 1; transform: scale(1, 1); }
+}
+@keyframes oh-menu-shrink {
+  from { opacity: 1; transform: scale(1, 1); }
+  to { opacity: 0.2; transform: scale(var(--oh-grow-x, 0.14), var(--oh-grow-y, 0.17)); }
+}
+.oh-menu-card {
+  transform-origin: top left;
+}
+.oh-menu-grow {
+  animation: oh-menu-grow 240ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards !important;
+}
+.oh-menu-grow > * {
+  animation: oh-fade-in 180ms ease-out 120ms backwards;
+}
+[data-oh-presence="leaving"] > .oh-menu-card {
+  animation: oh-menu-shrink 220ms ease-in both !important;
+  pointer-events: none !important;
+}
+[data-oh-presence="leaving"] > .oh-menu-card > * {
+  animation: oh-fade-out 90ms ease-in both !important;
+}
+
+/* The small menu becomes the settings workspace: the card starts on the small
+   menu's rectangle wearing its tint, then eases to its own place as the tint
+   lifts and its contents fade in (settings.jsx useWorkspaceMorph sets the
+   transform). Back runs it in reverse before the workspace unmounts. */
+.oh-ws-card {
+  position: relative;
+}
+.oh-ws-tint {
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.oh-ws-morphing .oh-ws-tint {
+  opacity: 1;
+  transition: none;
+}
+.oh-ws-unmorph .oh-ws-tint {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+.oh-ws-card > :not(.oh-ws-tint) {
+  transition: opacity 200ms ease 80ms;
+}
+.oh-ws-morphing > :not(.oh-ws-tint) {
+  opacity: 0;
+  transition: none;
+}
+.oh-ws-unmorph > :not(.oh-ws-tint) {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.oh-fade-out-slow {
+  animation: oh-fade-out 240ms ease-in both !important;
+  pointer-events: none !important;
+}
+
+/* The screen a game opens under (GameUI/gameLoadingScreen.jsx): the logo
+   turns until the map is drawn, then the whole screen fades off. */
+@keyframes oh-logo-spin {
+  to { transform: rotate(360deg); }
+}
+.oh-loading-logo {
+  animation: oh-logo-spin 4s linear infinite;
+  filter: drop-shadow(0 6px 22px rgba(0, 0, 0, 0.5));
+}
+[data-oh-presence="leaving"] > .oh-loading-screen {
+  animation: oh-fade-out 450ms ease both !important;
+  pointer-events: none !important;
 }
