@@ -2,10 +2,11 @@
 import { JSON_URLS, primeJson, readJson, reportPerfOperation, writeJson } from "./assets.js";
 import { enqueueContentStrings } from "./translator.js";
 import { normalizeTagList } from "./countryTags.js";
+import { displayNameMigrations, renamePolityInColors, renamePolityInWorld } from "../../server/polityRename.js";
 import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from "./projects.js";
 import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
 import { normalizeEventTags } from "./eventTags.js";
-import { buildOwnerAliasMap, createOwnerResolver, toCountryName } from "./ownerNames.js";
+import { buildOwnerAliasMap, createOwnerResolver, isRealCountryName, toCountryName } from "./ownerNames.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -2856,10 +2857,15 @@ const normalizePolityOverride = (key, value) => {
       .filter(Boolean),
   )];
 
+  // The names this polity was keyed by before a rename re-keyed it; they keep
+  // old references folding onto it (ownerNames.js) and its starting tags found
+  // (countryTags.js).
+  const formerNames = normalizeActionParticipants(value.formerNames);
   return {
     aliases: normalizeActionParticipants(value.aliases || value.additionalNames),
     code,
     color: normalizeOptionalString(value.color),
+    ...(formerNames.length ? { formerNames } : {}),
     ...(gadm0.length ? { mapRefs: { ...rawMapRefs, gadm0 } } : {}),
     ...(normalizeOptionalString(value.mapLabel) ? { mapLabel: normalizeOptionalString(value.mapLabel) } : {}),
     ...(normalizeOptionalString(value.mapDistinctLabel) ? { mapDistinctLabel: normalizeOptionalString(value.mapDistinctLabel) } : {}),
@@ -3915,31 +3921,48 @@ const applyPolityAndTerritoryImpacts = ({
     }
   }
 
-  for (const { change, code } of polityChanges) {
+  // Renames this event performed, so a later entry in the same event that
+  // still says the old name lands on the new key rather than minting it back.
+  const renamed = [];
+  const currentKey = (key) => renamed.reduce((resolved, entry) => (samePolity(resolved, entry.from) ? entry.to : resolved), key);
+  for (const { change, code: resolvedCode } of polityChanges) {
     const operation = change.operation || "update";
     if (operation === "dissolve") continue;
+    let code = currentKey(resolvedCode);
+    // A country IS its name everywhere, so any new name re-keys the polity: every
+    // store is rewritten from the old key to the new one and the old name stays
+    // only as a former name (server/polityRename.js). A name another polity
+    // already answers to is refused rather than merging two countries.
+    if (change.name && !samePolity(code, change.name)) {
+      try {
+        const result = renamePolityInWorld(world, code, change.name);
+        Object.assign(world, result.world);
+        const nextColors = renamePolityInColors(colors, result.from, result.to);
+        for (const key of Object.keys(colors)) delete colors[key];
+        Object.assign(colors, nextColors);
+        renamed.push({ from: result.from, to: result.to });
+        code = result.to;
+        console.info(`[polity lifecycle] renamed "${result.from}" to "${result.to}".`);
+      } catch (error) {
+        console.warn(`[polity lifecycle] rename of "${code}" to "${change.name}" refused: ${error?.message || error}`);
+      }
+    }
     const current = world.polityOverrides[code] ?? {
       aliases: [],
       code,
       color: "",
-      name: "",
+      name: code,
       note: "",
     };
-    // A rename keeps the polity's stable key and remembers the old display name
-    // as an alias, so history written under it still folds onto this polity.
-    const renamedFrom = operation === "rename" && change.name && current.name && !samePolity(current.name, change.name)
-      ? [current.name]
-      : [];
     const aliases = [...new Set([
       ...normalizeArray(current.aliases),
       ...(change.aliases?.length > 0 ? change.aliases : []),
-      ...renamedFrom,
-    ].map(normalizeOptionalString).filter(Boolean))];
+    ].map(normalizeOptionalString).filter(Boolean))].filter((name) => !samePolity(name, code));
     world.polityOverrides[code] = {
       ...current,
       ...(aliases.length > 0 || change.aliases?.length > 0 ? { aliases } : {}),
       ...(change.color ? { color: change.color } : {}),
-      ...(change.name ? { name: change.name } : {}),
+      name: code,
       ...(change.note ? { note: change.note } : {}),
     };
 
@@ -4043,6 +4066,7 @@ const applyPolityAndTerritoryImpacts = ({
     delete colors[code];
     console.info(`[polity lifecycle] dissolved "${code}".`);
   }
+  return renamed;
 };
 
 // `boardOnlyEventIds` names events that are not on the timeline — carriers for a
@@ -4053,9 +4077,26 @@ export const applyEventImpactsToWorld = ({
   colors = {}, events = [], world, motion = null, round = 0, boardOnlyEventIds = [],
 }) => {
   const boardOnly = new Set(normalizeArray(boardOnlyEventIds).map(normalizeOptionalString).filter(Boolean));
-  const nextColors = cloneValue(colors) ?? {};
+  let nextColors = cloneValue(colors) ?? {};
   const nextWorld = normalizeWorldState(world);
   let cursorDate = motion ? normalizeOptionalString(motion.originDate) : "";
+  // Every polity renamed by this apply, for gameplay.js to carry into what the
+  // world does not hold (the game's own polity, chats, flags, baked regions).
+  // A save from before renames re-keyed still shows a display name over a key;
+  // it is brought across first, the same way, so this turn and every prompt
+  // after it see one name for one country.
+  const renamedPolities = [];
+  for (const { from, to } of displayNameMigrations(nextWorld, { isReserved: isRealCountryName })) {
+    try {
+      const result = renamePolityInWorld(nextWorld, from, to);
+      Object.assign(nextWorld, result.world);
+      nextColors = renamePolityInColors(nextColors, result.from, result.to);
+      renamedPolities.push({ from: result.from, to: result.to });
+      console.info(`[polity lifecycle] "${result.from}" is keyed by its name "${result.to}" from now on.`);
+    } catch (error) {
+      console.warn(`[polity lifecycle] could not re-key "${from}" as "${to}": ${error?.message || error}`);
+    }
+  }
   // Every owner written below goes through here first. The model reads the story
   // it just wrote, so the turn after a polity is renamed it hands back the NEW
   // name — and storing that verbatim splits one country into two owners, one of
@@ -4094,7 +4135,7 @@ export const applyEventImpactsToWorld = ({
       ));
     }
 
-    applyPolityAndTerritoryImpacts({
+    const renamedHere = applyPolityAndTerritoryImpacts({
       colors: nextColors,
       eventDate: event.date,
       eventId: event.id,
@@ -4105,6 +4146,12 @@ export const applyEventImpactsToWorld = ({
       resolveOwner,
       world: nextWorld,
     });
+    if (renamedHere.length) {
+      renamedPolities.push(...renamedHere);
+      // The polity is keyed by its new name now: this event's unit and structure
+      // ops, and every later event, must resolve either name to the new key.
+      resolveOwner = createOwnerResolver(buildOwnerAliasMap(nextWorld.polityOverrides));
+    }
 
     if (event.impacts.unitOps?.length) {
       // A battalion's owner is the same namespace: spawned under a display name
@@ -4184,6 +4231,7 @@ export const applyEventImpactsToWorld = ({
 
   return {
     colors: nextColors,
+    renamedPolities,
     // Stamp the turn as the engine's. A save last written by the old classic
     // system still says "classic", which is how resumeStandingOrders knows game
     // time passed with nothing advancing its orders.

@@ -52,12 +52,33 @@ export const normalizeTagList = (list, { maxTags = MAX_TAGS, maxLen = MAX_TAG_LE
 // only while owners were GADM codes, which are already uppercase — with names it
 // looked up baseTags["RUSSIA"] for a tags.json keyed "Russia" and every author tag
 // silently vanished.
+// The names a polity was keyed by before it was renamed (polityRename.js).
+const formerNamesOf = (world, key) => {
+  const record = world?.polityOverrides?.[key];
+  return Array.isArray(record?.formerNames) ? record.formerNames.map((name) => String(name ?? "").trim()).filter(Boolean) : [];
+};
+
+// The current key of a name the scenario's tags were written under: the polity
+// that was renamed away from it, if any.
+const currentKeyFor = (world, name) => {
+  const wanted = String(name ?? "").trim().toLowerCase();
+  for (const [key, record] of Object.entries(world?.polityOverrides ?? {})) {
+    if (Array.isArray(record?.formerNames) && record.formerNames.some((former) => String(former ?? "").trim().toLowerCase() === wanted)) return key;
+  }
+  return name;
+};
+
 export const resolveCountryTags = (baseTags, world, country) => {
   const key = String(country || "").trim();
   if (!key) return [];
   const live = world?.countryTags?.[key];
   if (Array.isArray(live)) return normalizeTagList(live);
-  return normalizeTagList(baseTags?.[key]);
+  if (baseTags?.[key] != null) return normalizeTagList(baseTags[key]);
+  // A renamed polity's starting tags are keyed by the name the scenario knew.
+  for (const former of formerNamesOf(world, key)) {
+    if (baseTags?.[former] != null) return normalizeTagList(baseTags[former]);
+  }
+  return [];
 };
 
 // Every country that has tags, live list winning over the author's. Used to build
@@ -65,7 +86,7 @@ export const resolveCountryTags = (baseTags, world, country) => {
 export const resolveAllCountryTags = (baseTags, world) => {
   const out = {};
   for (const country of new Set([
-    ...Object.keys(baseTags || {}),
+    ...Object.keys(baseTags || {}).map((name) => currentKeyFor(world, name)),
     ...Object.keys(world?.countryTags || {}),
   ])) {
     const tags = resolveCountryTags(baseTags, world, country);

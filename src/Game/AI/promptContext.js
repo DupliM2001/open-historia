@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import { JSON_URLS, getNationTags, loadRegionCatalog, readJson } from "../../runtime/assets.js";
 import { resolveAllCountryTags, resolveCountryTags } from "../../runtime/countryTags.js";
-import { toCountryName } from "../../runtime/ownerNames.js";
+import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
 import {
   buildActionDisplayText,
   haversineKm,
@@ -1513,16 +1513,21 @@ export const buildWorldSummary = async (bundle, regionCatalog = null, { regionLi
   const regionLookup = new Map(regions.map((region) => [region.id, region]));
   // Only overrides that CHANGE an owner are changes: on a hand-drawn world every
   // region carries an override equal to its baked owner, and listing sixty of
-  // those as "territorial changes" was noise the model read as history.
+  // those as "territorial changes" was noise the model read as history. The
+  // baked name is read through the alias map: a renamed country's regions are
+  // overridden to its new name (polityRename.js), and that is not a transfer.
+  const bakedAliases = buildOwnerAliasMap(world.polityOverrides);
   const territoryEntries = Object.entries(world.regionOwnershipOverrides).filter(([regionId, ownerCode]) => {
     const baked = normalizeString(regionLookup.get(regionId)?.country);
-    return !baked || baked.toLowerCase() !== normalizeString(ownerCode).toLowerCase();
+    if (!baked) return true;
+    return canonicalOwnerName(baked, bakedAliases).toLowerCase() !== canonicalOwnerName(ownerCode, bakedAliases).toLowerCase();
   });
   const territorySummary = territoryEntries.length === 0
     ? "No territorial changes from the base scenario are currently recorded."
     : territoryEntries.slice(0, 60).map(([regionId, ownerCode]) => {
       const region = regionLookup.get(regionId);
-      return `- ${region?.name || regionId}${region?.country ? ` (${region.country})` : ""} -> ${ownerCode}`;
+      const bakedOwner = region?.country ? canonicalOwnerName(region.country, bakedAliases) : "";
+      return `- ${region?.name || regionId}${bakedOwner ? ` (${bakedOwner})` : ""} -> ${ownerCode}`;
     }).join("\n");
   const polities = Object.values(world.polityOverrides);
   const politySummary = polities.length === 0

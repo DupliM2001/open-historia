@@ -34,6 +34,7 @@ import Snap from "ol/interaction/Snap";
 import PointerInteraction from "ol/interaction/Pointer";
 import { fromExtent as polygonFromExtent } from "ol/geom/Polygon";
 import Feature from "ol/Feature";
+import { samePolityName } from "../../server/polityRename.js";
 import { BORDER_CLEANUP, bucketRegions, planTopologyChunks, yieldToBrowser } from "./topologySweep.js";
 import Collection from "ol/Collection";
 import GeoJSON from "ol/format/GeoJSON";
@@ -1310,6 +1311,37 @@ const OlMap = ({
             }),
           });
         }
+      },
+      // Re-key an owner across the whole map (Polities panel rename): every
+      // region owned by, or claimed for, `from` now says `to`, as ONE undo step.
+      renameOwner: (from, to) => {
+        const same = (value) => samePolityName(value, from);
+        const undos = [];
+        for (const f of regionSource.getFeatures()) {
+          const owner = f.get("owner") || null;
+          const claimants = Array.isArray(f.get("claimants")) ? f.get("claimants") : [];
+          const ownerHit = Boolean(owner) && same(owner);
+          const claimHit = claimants.some(same);
+          if (!ownerHit && !claimHit) continue;
+          const before = { owner, claimants: claimants.length ? claimants.slice() : null };
+          const nextClaimants = claimHit ? [...new Set(claimants.map((claimant) => (same(claimant) ? to : claimant)))] : before.claimants;
+          const after = { owner: ownerHit ? to : owner, claimants: nextClaimants?.length ? nextClaimants : null };
+          f.set("owner", after.owner);
+          f.set("claimants", after.claimants);
+          undos.push([f, before, after]);
+        }
+        if (!undos.length) return 0;
+        const refresh = () => {
+          regionLayer.changed();
+          labelLayer.changed();
+          notifyRegions();
+        };
+        refresh();
+        pushCmd({
+          undo: () => { undos.forEach(([f, b]) => { f.set("owner", b.owner); f.set("claimants", b.claimants); }); refresh(); },
+          redo: () => { undos.forEach(([f, , a]) => { f.set("owner", a.owner); f.set("claimants", a.claimants); }); refresh(); },
+        });
+        return undos.length;
       },
       deleteRegions: (ids) => {
         const removed = [];

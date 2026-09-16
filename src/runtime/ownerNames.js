@@ -59,6 +59,11 @@ export const ownerIdentityKey = (value) =>
 // to some other polity — the guard that stops a scenario whose polity happens to
 // be NAMED "India" from swallowing the actual India's territory.
 const COUNTRY_NAME_KEYS = new Set(Object.values(COUNTRY_NAMES).map(ownerIdentityKey));
+// True for the name of a real country the stock map knows. The automatic
+// re-keying of a record onto its display name (polityRename.js) stops here: a
+// scenario polity merely NAMED "India" must not become the India whose regions
+// the tiles bake.
+export const isRealCountryName = (name) => COUNTRY_NAME_KEYS.has(ownerIdentityKey(name));
 
 // polity display name / alias -> the token that polity is keyed by. Names that
 // identify someone already (another polity's key, a real country) and names two
@@ -82,6 +87,10 @@ export const buildOwnerAliasMap = (polityOverrides) => {
     identities.add(tokenKey);
     rows.push({
       names: [polity.name, ...(Array.isArray(polity.aliases) ? polity.aliases : [])],
+      // The keys this polity had before a rename re-keyed it. They WERE this
+      // country, so a real country's name among them still folds onto it —
+      // unless that country is alive again as a polity of its own.
+      formerNames: Array.isArray(polity.formerNames) ? polity.formerNames : [],
       token,
       tokenKey,
     });
@@ -89,9 +98,9 @@ export const buildOwnerAliasMap = (polityOverrides) => {
 
   const aliases = new Map();
   for (const row of rows) {
-    for (const name of row.names) {
+    for (const [name, former] of [...row.names.map((entry) => [entry, false]), ...row.formerNames.map((entry) => [entry, true])]) {
       const nameKey = ownerIdentityKey(name);
-      if (!nameKey || nameKey === row.tokenKey || identities.has(nameKey) || COUNTRY_NAME_KEYS.has(nameKey)) {
+      if (!nameKey || nameKey === row.tokenKey || identities.has(nameKey) || (!former && COUNTRY_NAME_KEYS.has(nameKey))) {
         continue;
       }
 

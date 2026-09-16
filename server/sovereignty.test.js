@@ -98,7 +98,7 @@ test("normalisation keeps the sovereignty map sparse and the override's provenan
   assert.equal(world.polityOverrides.Ruritania.verbatim, true);
 });
 
-test("the polity lifecycle: create, rename keeps the key, dissolve waits for the land to be settled", () => {
+test("the polity lifecycle: create, rename re-keys the country, dissolve waits for the land to be settled", () => {
   let world = apply(baseWorld(), {
     polityChanges: [{ operation: "create", code: "Free Syldavia", name: "Free Syldavia", color: "#112233" }],
   });
@@ -107,9 +107,10 @@ test("the polity lifecycle: create, rename keeps the key, dissolve waits for the
   world = apply(world, {
     polityChanges: [{ operation: "rename", code: "Borduria", name: "Bordurian Republic" }],
   });
-  assert.equal(world.polityOverrides.Borduria.name, "Bordurian Republic", "the display name changes");
-  assert.ok(world.polityOverrides.Borduria.aliases.includes("Borduria"), "the old name folds onto the key");
-  assert.equal(world.regionOwnershipOverrides.r3, "Borduria", "ownership keeps the stable key");
+  assert.equal("Borduria" in world.polityOverrides, false, "the country is keyed by its new name");
+  assert.equal(world.polityOverrides["Bordurian Republic"].name, "Bordurian Republic");
+  assert.ok(world.polityOverrides["Bordurian Republic"].formerNames.includes("Borduria"), "the old name folds onto it as a former name");
+  assert.equal(world.regionOwnershipOverrides.r3, "Bordurian Republic", "ownership follows the rename");
 
   world = apply(world, {
     polityChanges: [{ operation: "dissolve", code: "Ruritania" }],
