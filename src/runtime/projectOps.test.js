@@ -348,15 +348,16 @@ test("an onComplete carrying nothing usable normalizes to null, not an empty bag
 // The actual issue-#7 regression. Note the assertion on the KEY: polityOverrides
 // is keyed by the polity's stable identity and the new name is a display layer,
 // so a rename that moved the key would split one country into two.
-test("completing a project applies its onComplete rename under the ORIGINAL key", () => {
+test("completing a project applies its onComplete rename, which re-keys the country", () => {
   const world = worldWith(applyProjectOps([], [annexation(renameRuritania)]));
   const { world: next } = applyEventImpactsToWorld({
     events: [eventWith([{ op: "complete", name: "Northern Question", note: "Done." }])],
     world,
   });
 
-  assert.equal(next.polityOverrides.Ruritania.name, "Federal Republic of Ruritania");
-  assert.equal("Federal Republic of Ruritania" in next.polityOverrides, false, "the key must not move");
+  assert.equal(next.polityOverrides["Federal Republic of Ruritania"].name, "Federal Republic of Ruritania");
+  assert.equal("Ruritania" in next.polityOverrides, false, "the country is keyed by its new name");
+  assert.deepEqual(next.polityOverrides["Federal Republic of Ruritania"].formerNames, ["Ruritania"]);
   assert.equal(next.projects[0].status, "complete");
   assert.ok(next.projects[0].onCompleteAppliedAt, "the latch must be stamped");
 });
@@ -390,7 +391,7 @@ test("a board-only event completes a project and releases its effects without st
   });
 
   assert.equal(next.projects[0].status, "complete");
-  assert.equal(next.polityOverrides.Ruritania.name, "Federal Republic of Ruritania", "the completion effects were lost");
+  assert.equal(next.polityOverrides["Federal Republic of Ruritania"].name, "Federal Republic of Ruritania", "the completion effects were lost");
   assert.deepEqual(next.projects[0].eventIds, [], "a Hidden event is not a timeline card to link to");
 });
 
@@ -416,7 +417,7 @@ test("an update carrying status complete releases the effects too", () => {
     world,
   });
 
-  assert.equal(next.polityOverrides.Ruritania.name, "Federal Republic of Ruritania");
+  assert.equal(next.polityOverrides["Federal Republic of Ruritania"].name, "Federal Republic of Ruritania");
   assert.ok(next.projects[0].onCompleteAppliedAt);
 });
 
@@ -433,7 +434,7 @@ test("an event may use the name its completed project introduces", () => {
     world,
   });
 
-  assert.equal(next.regionOwnershipOverrides["RUR.2_1"], "Ruritania", "the transfer minted a phantom polity");
+  assert.equal(next.regionOwnershipOverrides["RUR.2_1"], "Federal Republic of Ruritania", "the transfer lands on the renamed country");
 });
 
 test("onComplete region effects clear the dispute they settle", () => {
@@ -460,7 +461,7 @@ test("a completion matched by name alone fires and latches the same entry", () =
     world,
   });
 
-  assert.equal(next.polityOverrides.Ruritania.name, "Federal Republic of Ruritania");
+  assert.equal(next.polityOverrides["Federal Republic of Ruritania"].name, "Federal Republic of Ruritania");
   assert.ok(next.projects[0].onCompleteAppliedAt);
 });
 
@@ -517,7 +518,7 @@ test("the simulation closes what the advisor deferred, and the effects land then
     world: afterChat,
   });
 
-  assert.equal(afterJump.polityOverrides.Ruritania.name, "Federal Republic of Ruritania");
+  assert.equal(afterJump.polityOverrides["Federal Republic of Ruritania"].name, "Federal Republic of Ruritania");
   assert.equal(afterJump.projects[0].status, "complete");
 });
 

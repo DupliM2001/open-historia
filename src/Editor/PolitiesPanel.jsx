@@ -59,7 +59,7 @@ const PolitiesPanel = ({
   flags = {},
   tags = {},
   upsertPolity,
-  renamePolityDisplay,
+  renamePolity,
   removePolity,
   importPolityRoster,
   setColorOverride,
@@ -71,7 +71,6 @@ const PolitiesPanel = ({
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
   const [draftName, setDraftName] = useState("");
-  const [newKey, setNewKey] = useState("");
   const [newName, setNewName] = useState("");
   const [transferFrom, setTransferFrom] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -130,12 +129,14 @@ const PolitiesPanel = ({
     setTransferFrom("");
   }, [current?.key, current?.name]);
 
+  // A polity is keyed by its name: the name typed here is the key, and renaming
+  // it later re-keys everything (renamePolity).
   const createPolity = () => {
-    const key = clean(newKey || newName);
-    const name = clean(newName || newKey);
-    if (!key || !name) return;
+    const name = clean(newName);
+    const key = name;
+    if (!key) return;
     if (Object.prototype.hasOwnProperty.call(polities || {}, key) || usage.has(key)) {
-      window.alert(`A polity with the stable key “${key}” already exists.`);
+      window.alert(`A polity named “${key}” already exists.`);
       return;
     }
     upsertPolity?.(key, { name, code: key, aliases: [name], status: "active", note: "" });
@@ -145,7 +146,6 @@ const PolitiesPanel = ({
     else onPaintPolity?.(key);
     setRefreshNonce((n) => n + 1);
     setSelectedKey(key);
-    setNewKey("");
     setNewName("");
   };
 
@@ -341,13 +341,13 @@ const PolitiesPanel = ({
   return (
     <Panel title="Polities" icon="list" onClose={onClose} width={390}>
       <div style={{ fontSize: 12, lineHeight: 1.45, color: "rgba(255,255,255,0.62)" }}>
-        Every polity here is on the map — it owns a region or a region is disputed in its name — and it leaves this list when its last region does. Regions store a <b>stable polity key</b>: rename the polity here to change its visible identity without creating a new one-province country.
+        Every polity here is on the map — it owns a region or a region is disputed in its name — and it leaves this list when its last region does. A polity is <b>keyed by its name</b>: renaming it here re-keys everything on this map — regions, claims, colour, flag, tags and cities — and keeps the old name as a former name, so nothing becomes a new one-province country.
       </div>
 
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search polity name or stable key…"
+        placeholder="Search polity name…"
         style={inputStyle}
       />
 
@@ -388,7 +388,7 @@ const PolitiesPanel = ({
                   {row.name}
                 </div>
                 <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  key: {row.key} · {row.regionCount} regions{row.claimantCount ? ` · ${row.claimantCount} claims` : ""}
+                  {row.regionCount} regions{row.claimantCount ? ` · ${row.claimantCount} claims` : ""}{Array.isArray(polities?.[row.key]?.formerNames) && polities[row.key].formerNames.length ? ` · formerly ${polities[row.key].formerNames.join(", ")}` : ""}
                 </div>
               </span>
             </button>
@@ -399,23 +399,26 @@ const PolitiesPanel = ({
       {current && (
         <div style={{ display: "flex", flexDirection: "column", gap: 9, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
           <div>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", marginBottom: 4 }}>Stable key</div>
-            <div style={{ ...inputStyle, opacity: 0.75, userSelect: "text" }}>{current.key}</div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", marginBottom: 4 }}>Current display name</div>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", marginBottom: 4 }}>Name</div>
             <div style={{ display: "flex", gap: 6 }}>
               <input value={draftName} onChange={(e) => setDraftName(e.target.value)} style={inputStyle} />
               <button
                 type="button"
                 style={pillButton(false)}
-                disabled={!clean(draftName) || clean(draftName) === current.name}
-                onClick={() => renamePolityDisplay?.(current.key, draftName)}
+                disabled={!clean(draftName) || clean(draftName) === current.key}
+                title="Renames the country everywhere on this map: its regions, claims, colour, flag, tags and cities. The old name is kept as a former name."
+                onClick={() => {
+                  const next = clean(draftName);
+                  renamePolity?.(current.key, next);
+                  setSelectedKey(next);
+                }}
               >
                 Rename
               </button>
             </div>
+            {Array.isArray(current.record?.formerNames) && current.record.formerNames.length > 0 && (
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>Formerly {current.record.formerNames.join(", ")}</div>
+            )}
           </div>
 
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -429,7 +432,7 @@ const PolitiesPanel = ({
               type="button"
               style={pillButton(true)}
               onClick={() => onPaintPolity?.(current.key)}
-              title="Close this panel and start drag-painting this stable polity key across regions"
+              title="Close this panel and start drag-painting this polity across regions"
             >
               Paint this polity
             </button>
@@ -514,7 +517,7 @@ const PolitiesPanel = ({
 
         <div style={{ fontSize: 10.8, lineHeight: 1.45, color: "rgba(255,255,255,0.5)" }}>
           <b>Fill standard flags</b> stores Open Historia&apos;s built-in country flags in this scenario for safely recognized polities that are currently missing a flag; custom/historical flags are never overwritten. Roster import creates or updates polity records in bulk. Territory is untouched. Supports
-          <code> {"{ polities: [...] }"}</code>, a direct array, or an object keyed by stable polity key.
+          <code> {"{ polities: [...] }"}</code>, a direct array, or an object keyed by polity name.
         </div>
 
         {rosterPreview && (
@@ -547,9 +550,8 @@ const PolitiesPanel = ({
       <div style={{ paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
         <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Create polity</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Display name, e.g. Austria-Hungary" style={inputStyle} />
-          <input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="Stable key (optional; defaults to display name)" style={inputStyle} />
-          <button type="button" style={pillButton(false)} disabled={!clean(newName || newKey)} onClick={createPolity}>
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name, e.g. Austria-Hungary" style={inputStyle} />
+          <button type="button" style={pillButton(false)} disabled={!clean(newName)} onClick={createPolity}>
             {selection.length ? `Create + assign ${selection.length} selected regions` : "Create + paint it onto the map"}
           </button>
         </div>

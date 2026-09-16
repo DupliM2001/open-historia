@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { OWNER_SCHEMA } from "./documentMigration.js";
 import { normalizeTagList } from "../runtime/countryTags.js";
+import { renamePolityInDocument } from "../../server/polityRename.js";
 import { mergeCityMarkers } from "./cityMarkers.js";
 
 // The official editor ships a handful of region "types" carrying render +
@@ -207,28 +208,21 @@ export const useMapDocument = (initial) => {
     setSaveStatus("dirty");
   }, []);
 
-  // Rename the CURRENT DISPLAY name without touching the stable key used by
-  // regions, flags, tags, colors and campaign continuity. This is the operation
-  // scenario authors actually mean by "Austria -> Austria-Hungary".
-  const renamePolityDisplay = useCallback((key, nextName) => {
-    const stableKey = String(key || "").trim();
-    const name = String(nextName || "").trim();
-    if (!stableKey || !name) return;
+  // Renaming a polity re-keys it: the record moves to the new name and every
+  // colour, flag, tag and city marker keyed by the old one follows, with the old
+  // name kept as a former name (server/polityRename.js). The map's regions are
+  // re-keyed by OlMap.renameOwner; MapEditor calls both.
+  const renamePolity = useCallback((key, nextName) => {
+    const from = String(key || "").trim();
+    const to = String(nextName || "").trim();
+    if (!from || !to) return;
     setDoc((d) => {
-      const current = d.polities?.[stableKey] || { name: stableKey, aliases: [] };
-      const oldName = String(current.name || stableKey).trim();
-      const aliases = [...new Set([
-        ...(Array.isArray(current.aliases) ? current.aliases : []),
-        oldName,
-        name,
-      ].map((v) => String(v || "").trim()).filter(Boolean))];
-      return {
-        ...d,
-        polities: {
-          ...(d.polities || {}),
-          [stableKey]: { ...current, code: current.code || stableKey, name, aliases },
-        },
-      };
+      try {
+        return renamePolityInDocument(d, from, to);
+      } catch (error) {
+        console.warn("[editor] polity rename refused:", error);
+        return d;
+      }
     });
     setSaveStatus("dirty");
   }, []);
@@ -419,7 +413,7 @@ export const useMapDocument = (initial) => {
     polities: doc.polities || {},
     setPolities,
     upsertPolity,
-    renamePolityDisplay,
+    renamePolity,
     removePolity,
     importPolityRoster,
     importCityMarkers,

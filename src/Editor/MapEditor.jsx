@@ -19,6 +19,7 @@ import RegionsPanel from "./RegionsPanel.jsx";
 import PolitiesPanel from "./PolitiesPanel.jsx";
 import TopologyPanel from "./TopologyPanel.jsx";
 import BorderCleanupOverlay, { BorderCleanupNote } from "./BorderCleanupOverlay.jsx";
+import { samePolityName } from "../../server/polityRename.js";
 import { BORDER_CLEANUP, describeCleanupResult, yieldToBrowser } from "./topologySweep.js";
 import ProvinceImportPanel from "./ProvinceImportPanel.jsx";
 import LayersPanel from "./LayersPanel.jsx";
@@ -885,7 +886,22 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
           flags={d.flags}
           tags={d.tags}
           upsertPolity={d.upsertPolity}
-          renamePolityDisplay={d.renamePolityDisplay}
+          // Renaming re-keys the polity on the map (regions, claims) and in the
+          // document (record, colour, flag, tags, cities) in one go.
+          renamePolity={(key, nextName) => {
+            const from = String(key || "").trim();
+            const to = String(nextName || "").trim();
+            if (!from || !to || from === to) return;
+            const clash = Object.keys(d.polities || {}).find((other) => samePolityName(other, to) && !samePolityName(other, from));
+            if (clash) {
+              window.alert(`“${to}” is already the name of another polity (“${clash}”). A rename cannot merge two countries.`);
+              return;
+            }
+            api?.renameOwner?.(from, to);
+            d.renamePolity(from, to);
+            if (paintOwner === from) setPaintOwner(to);
+            if (paintOnlyOwner === from) setPaintOnlyOwner(to);
+          }}
           removePolity={d.removePolity}
           importPolityRoster={d.importPolityRoster}
           setColorOverride={d.setColorOverride}

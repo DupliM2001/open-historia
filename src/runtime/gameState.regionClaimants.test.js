@@ -111,8 +111,8 @@ test("regionClaims: a region claimed and then transferred in the same event ends
 });
 
 // Same owner namespace as every other polity-keyed field: a claim asserted by a
-// polity that is renamed in the SAME event must land on the stable key's current
-// display name, not mint a second claimant beside it.
+// polity that is renamed in the SAME event must land on the renamed country,
+// not mint a second claimant beside it.
 test("regionClaims: a claimant renamed by the same event still resolves to one polity", () => {
   const { world: next } = applyEventImpactsToWorld({
     events: [eventWithClaims(
@@ -121,5 +121,6 @@ test("regionClaims: a claimant renamed by the same event still resolves to one p
     )],
     world: emptyWorld(),
   });
-  assert.deepEqual(next.regionClaimants["POL.11_1"], ["Germany"]);
+  assert.deepEqual(next.regionClaimants["POL.11_1"], ["Third Reich"]);
+  assert.equal("Germany" in next.polityOverrides, false, "the rename re-keyed the country");
 });
