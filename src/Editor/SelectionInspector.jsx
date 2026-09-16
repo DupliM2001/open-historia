@@ -32,7 +32,7 @@ const commonOr = (arr, blank = "") => {
 
 const foldPolityName = (value) => String(value ?? "").trim().toLowerCase();
 
-const SelectionInspector = ({ api, selection, types, colors, colorOverrides, setColorOverride, flags, setFlag, onOpenFlagPicker, tags, setTags, setSelection, polities = {}, upsertPolity, regionEpoch = 0, onOpenPolities }) => {
+const SelectionInspector = ({ api, selection, types, colors, colorOverrides, setColorOverride, flags, setFlag, onOpenFlagPicker, tags, setTags, setSelection, polities = {}, upsertPolity, regionEpoch = 0, onOpenPolities, onCopyToClipboard = null }) => {
   const summaries = useMemo(
     () => (api ? selection.map((id) => api.getRegionSummary(id)).filter(Boolean) : []),
     [api, selection, regionEpoch],
@@ -293,9 +293,22 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
             <Icon name="merge" size={13} /> Merge
           </button>
         )}
-        <button onClick={() => api?.copyRegions(selection)} style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}>
-          <Icon name="copy" size={13} /> Copy
+        <button
+          onClick={() => api?.copyRegions(selection)}
+          style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}
+          title="Duplicate the selection beside itself, on this map"
+        >
+          <Icon name="copy" size={13} /> Duplicate
         </button>
+        {onCopyToClipboard && (
+          <button
+            onClick={() => onCopyToClipboard(selection)}
+            style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}
+            title="Copy the selection to the region clipboard, to paste into another map (Ctrl+C)"
+          >
+            <Icon name="copy" size={13} /> Copy to clipboard
+          </button>
+        )}
         <button onClick={() => api?.zoomToSelection(selection)} style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}>
           <Icon name="fit" size={13} /> Zoom
         </button>
