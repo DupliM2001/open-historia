@@ -25,6 +25,8 @@ import ProvinceImportPanel from "./ProvinceImportPanel.jsx";
 import LayersPanel from "./LayersPanel.jsx";
 import ReferencePanel from "./ReferencePanel.jsx";
 import FeatureManager from "./FeatureManager.jsx";
+import UnitsPanel from "./UnitsPanel.jsx";
+import UnitPopup from "./UnitPopup.jsx";
 import SelectionInspector from "./SelectionInspector.jsx";
 import DocumentsMenu from "./DocumentsMenu.jsx";
 import CityPopup from "./CityPopup.jsx";
@@ -101,6 +103,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
   const [hydrated, setHydrated] = useState(false);
   const hydratedRef = useRef(false);
   const [cityPopup, setCityPopup] = useState(null); // {id, x, y, isNew} — inline city editor
+  const [unitPopup, setUnitPopup] = useState(null); // {id, x, y, isNew} — inline unit editor
+  const [featureSelection, setFeatureSelection] = useState([]); // feature ids ticked in the Features panel or box-selected on the map
   const [customBg, setCustomBg] = useState(null); // live background applied to the map
   const [customBgId, setCustomBgId] = useState(null); // library basemap id applied (null = built-in / doc's own)
   const [basemapPickerOpen, setBasemapPickerOpen] = useState(false);
@@ -237,7 +241,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     flags: d.flags,
     tags: d.tags,
     // Scenario Workshop: polity metadata keyed by stable identity, for the
-    // polities the map has (pruned to them as the map changes). Display names
+    // every registered country, with regions or not. Display names
     // change here without re-owning every region.
     polities: d.polities,
     // Without this the marker never persists, so a document migrates on every open,
@@ -476,6 +480,21 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
         tags: f.properties?.capital === "primary" ? ["city", "capital"] : ["city"],
       }))
       .filter((f) => Array.isArray(f.coord));
+    // The scenario's starting units come back into the Workshop too, so a
+    // round-trip keeps them and the Units panel edits what the game starts with.
+    base.units = (Array.isArray(initialMap.units) ? initialMap.units : [])
+      .filter((u) => Number.isFinite(Number(u?.lng)) && Number.isFinite(Number(u?.lat)))
+      .map((u) => ({
+        id: String(u.id || newId("unit")),
+        name: String(u.name || "Unit"),
+        type: String(u.type || "infantry"),
+        ownerCode: String(u.ownerCode || ""),
+        lng: Number(u.lng),
+        lat: Number(u.lat),
+        strength: Number.isFinite(Number(u.strength)) ? Number(u.strength) : 100,
+        composition: String(u.composition || ""),
+        note: String(u.note || ""),
+      }));
     d.setDoc(base);
     if (initialMap.colors) d.mergeColors(normalizePolityKeyedMap(initialMap.colors, initialMap.polities));
     // Some historical scenarios keep their authored colour only in the polity
@@ -505,7 +524,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
   // it floating over the wrong spot, so any map movement closes it.
   useEffect(() => {
     if (!api?.map) return undefined;
-    const close = () => setCityPopup(null);
+    const close = () => { setCityPopup(null); setUnitPopup(null); };
     api.map.on("movestart", close);
     return () => api.map.un("movestart", close);
   }, [api]);
@@ -517,37 +536,12 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     [api, d.types, d.selection, d.regionCount],
   );
 
-  // The polity registry is the map's. A polity exists because a region is
-  // owned by it or disputed in its name; the registry only carries metadata for
-  // those keys. A key that leaves the map leaves the registry — its record is
-  // kept for the session, so painting it back restores the name, aliases and
-  // lore — and a scenario cannot ship a polity nobody can find on the map,
-  // which is how an empire painted off the map kept writing to the player.
-  // Nothing is pruned before the map has loaded: an empty usage list then means
-  // "not here yet", not "no polities".
-  const retiredPolitiesRef = useRef(new Map());
-  useEffect(() => {
-    if (!api?.listPolityUsage) return;
-    const onMap = new Set((api.listPolityUsage() || []).map((row) => row.key));
-    if (!onMap.size && !d.regionCount) return;
-    const registry = d.polities || {};
-    const gone = Object.keys(registry).filter((key) => !onMap.has(key));
-    const back = [...onMap].filter((key) => !registry[key] && retiredPolitiesRef.current.has(key));
-    if (!gone.length && !back.length) return;
-    d.setPolities((prev) => {
-      const next = { ...(prev || {}) };
-      for (const key of gone) {
-        retiredPolitiesRef.current.set(key, next[key]);
-        delete next[key];
-      }
-      for (const key of back) {
-        next[key] = retiredPolitiesRef.current.get(key);
-        retiredPolitiesRef.current.delete(key);
-      }
-      return next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, d.polities, d.regionCount, regionEpoch]);
+  // The polity registry keeps every country that was registered — created in
+  // the Countries panel, imported in a roster, or written by an owner field —
+  // whether or not it holds a region right now. A country with no regions is
+  // still a country to the game (buildGameSeed emits it), which is what lets an
+  // author register one before painting it, or keep a government in exile.
+  // Removing one is explicit: the Countries panel's "Remove from the map".
 
   const polityCount = useMemo(() => {
     const keys = new Set(Object.keys(d.polities || {}));
@@ -588,6 +582,9 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
         defaultTypeId={d.types[0]?.id || "land"}
         paintOwner={paintOwner}
         paintOnlyOwner={paintOnlyOwner}
+        units={d.units}
+        featureSelectionIds={featureSelection}
+        onFeatureSelectionChange={setFeatureSelection}
         features={d.features}
         onSelectionChange={d.setSelection}
         onRegionCount={d.setRegionCount}
@@ -619,6 +616,16 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
           d.setFeatures((list) => list.filter((f) => f.id !== id));
           d.setSaveStatus("dirty");
           setCityPopup((p) => (p?.id === id ? null : p));
+        }}
+        onUnitCreate={({ pixel, ...partial }) => {
+          const id = newId("unit");
+          d.setUnits((list) => [...list, { id, name: "New unit", type: "infantry", strength: 100, composition: "", note: "", ...partial }]);
+          setUnitPopup({ id, x: pixel?.[0] ?? 80, y: pixel?.[1] ?? 80, isNew: true });
+        }}
+        onUnitEdit={({ id, pixel }) => setUnitPopup({ id, x: pixel[0], y: pixel[1], isNew: false })}
+        onUnitRemove={(id) => {
+          d.setUnits((list) => list.filter((u) => u.id !== id));
+          setUnitPopup((p) => (p?.id === id ? null : p));
         }}
         onHistory={setHistory}
         onReady={setApi}
@@ -753,6 +760,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
 
       <Toolbar
         activeTool={d.activeTool}
+        isMobile={isMobile}
         onToolChange={d.setActiveTool}
         onFit={() => api?.fitToData()}
         canUndo={history.canUndo}
@@ -881,6 +889,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
           api={api}
           polities={d.polities}
           selection={d.selection}
+          setSelection={d.setSelection}
           regionEpoch={regionEpoch}
           colors={d.colors}
           flags={d.flags}
@@ -949,7 +958,42 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
         />
       )}
       {openPanel === "features" && (
-        <FeatureManager features={d.features} setFeatures={d.setFeatures} api={api} onClose={() => setOpenPanel(null)} />
+        <FeatureManager
+          features={d.features}
+          setFeatures={d.setFeatures}
+          api={api}
+          selection={featureSelection}
+          setSelection={setFeatureSelection}
+          activeTool={d.activeTool}
+          setActiveTool={d.setActiveTool}
+          onClose={() => {
+            setOpenPanel(null);
+            if (d.activeTool === "feature-box") d.setActiveTool("select");
+          }}
+        />
+      )}
+      {openPanel === "units" && (
+        <UnitsPanel
+          units={d.units}
+          polityName={(key) => String(d.polities?.[key]?.name || key || "")}
+          activeTool={d.activeTool}
+          setActiveTool={d.setActiveTool}
+          onLocate={(unit) => api?.locateFeature?.([unit.lng, unit.lat])}
+          onEdit={(id) => {
+            const unit = d.units.find((u) => u.id === id);
+            if (!unit) return;
+            api?.locateFeature?.([unit.lng, unit.lat]);
+            setUnitPopup({ id, x: Math.round((window.innerWidth || 1200) / 2), y: Math.round((window.innerHeight || 800) / 2) - 160, isNew: false });
+          }}
+          onRemove={(id) => d.setUnits((list) => list.filter((u) => u.id !== id))}
+          onRemoveAll={() => {
+            if (window.confirm(`Remove all ${d.units.length} starting units from this map?`)) d.setUnits([]);
+          }}
+          onClose={() => {
+            setOpenPanel(null);
+            if (d.activeTool === "unit") d.setActiveTool("select");
+          }}
+        />
       )}
 
       <SelectionInspector
@@ -985,6 +1029,22 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
             setCityPopup(null);
           }}
           onClose={() => setCityPopup(null)}
+        />
+      )}
+
+      {unitPopup && (
+        <UnitPopup
+          unit={d.units.find((u) => u.id === unitPopup.id)}
+          x={unitPopup.x}
+          y={unitPopup.y}
+          isNew={unitPopup.isNew}
+          polities={polityChoices}
+          onChange={(patch) => d.setUnits((list) => list.map((u) => (u.id === unitPopup.id ? { ...u, ...patch } : u)))}
+          onDelete={() => {
+            d.setUnits((list) => list.filter((u) => u.id !== unitPopup.id));
+            setUnitPopup(null);
+          }}
+          onClose={() => setUnitPopup(null)}
         />
       )}
 

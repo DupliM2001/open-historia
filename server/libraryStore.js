@@ -1,5 +1,6 @@
 /*! Open Historia — portions (regions.geojson scenario asset + custom-map seeding) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import fs from "fs";
+import { normalizeFeatureOverrides, normalizeFeatureSettings } from "./gameFeatures.js";
 import path from "path";
 import url from "url";
 import { resolveChildPath as resolveWithinDirectory } from "./security.js";
@@ -464,6 +465,7 @@ const TEMPLATE_WORLD_OVERRIDE_KEYS = [
 "notes",
 "ownerCodes",
 "polityOverrides",
+"units",
 "regionClaimants",
 "regionOwnershipOverrides",
 "regionSovereigntyOverrides",
@@ -727,6 +729,7 @@ const readScenarioMeta = (scenarioId) => {
     createdAt: raw?.createdAt ?? new Date().toISOString(),
     description,
     eyebrow: String(raw?.eyebrow ?? "").trim() || DEFAULT_SCENARIO_META.eyebrow,
+    features: normalizeFeatureSettings(raw?.features),
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     hubOrigin: normalizeHubOrigin(raw?.hubOrigin),
@@ -784,6 +787,7 @@ const readGameMeta = (gameId) => {
     createdAt: raw?.createdAt ?? new Date().toISOString(),
     description,
     eyebrow: String(raw?.eyebrow ?? "").trim() || DEFAULT_GAME_META.eyebrow,
+    features: normalizeFeatureOverrides(raw?.features),
     heroSubtitle: String(raw?.heroSubtitle ?? "").trim() || description,
     heroTitle: String(raw?.heroTitle ?? "").trim() || name,
     id: gameId,
@@ -1878,6 +1882,7 @@ const createScenario = ({
   countryNameOverrides,
   description,
   eyebrow,
+  features,
   heroSubtitle,
   heroTitle,
   id,
@@ -1930,6 +1935,7 @@ const createScenario = ({
   writeJsonFile(getScenarioMetaPath(scenarioId), {
     accentColor: String(accentColor ?? "").trim() || DEFAULT_SCENARIO_META.accentColor,
                 coverImageContentType: sourceScenario?.coverImageContentType ?? null,
+                features: normalizeFeatureSettings(features ?? sourceScenario?.features),
                 countryNameOverrides:
                 countryNameOverrides && typeof countryNameOverrides === "object"
                 ? countryNameOverrides
@@ -1978,6 +1984,7 @@ const createGame = ({
   accentColor,
   description,
   eyebrow,
+  features,
   heroSubtitle,
   heroTitle,
   id,
@@ -2011,6 +2018,7 @@ const createGame = ({
   const seedName = sourceGame?.name ?? scenarioSummary.name;
 
   writeJsonFile(getGameMetaPath(resolvedGameId), {
+    features: normalizeFeatureOverrides(features ?? sourceGame?.features),
     accentColor:
     String(accentColor ?? "").trim() ||
     sourceGame?.accentColor ||
@@ -2070,6 +2078,7 @@ const updateScenario = (
     countryNameOverrides,
     description,
     eyebrow,
+    features,
     game,
     gamePatch,
     heroSubtitle,
@@ -2097,6 +2106,7 @@ const updateScenario = (
                     countryNameOverrides && typeof countryNameOverrides === "object"
                     ? countryNameOverrides
                     : currentMeta.countryNameOverrides,
+                    features: features !== undefined ? normalizeFeatureSettings(features) : currentMeta.features,
                     description: String(description ?? currentMeta.description).trim() || currentMeta.description,
                     eyebrow: String(eyebrow ?? currentMeta.eyebrow).trim() || currentMeta.eyebrow,
                     heroSubtitle:
@@ -2163,6 +2173,7 @@ const updateGame = (
     archived,
     description,
     eyebrow,
+    features,
     game,
     gamePatch,
     heroSubtitle,
@@ -2187,6 +2198,7 @@ const updateGame = (
   writeGameMeta(gameId, {
     accentColor: String(accentColor ?? currentMeta.accentColor).trim() || currentMeta.accentColor,
                 archived: typeof archived === "boolean" ? archived : currentMeta.archived,
+                features: features !== undefined ? normalizeFeatureOverrides(features) : currentMeta.features,
                 description: String(description ?? currentMeta.description).trim() || currentMeta.description,
                 eyebrow: String(eyebrow ?? currentMeta.eyebrow).trim() || currentMeta.eyebrow,
                 heroSubtitle:
@@ -3134,6 +3146,7 @@ const exportScenarioBundle = (scenarioId) => {
     scenario: {
       accentColor: summary.accentColor,
       countryNameOverrides: cloneJson(summary.countryNameOverrides),
+      features: cloneJson(summary.features),
       description: summary.description,
       eyebrow: summary.eyebrow,
       heroSubtitle: summary.heroSubtitle,
@@ -3172,6 +3185,7 @@ const importScenarioBundle = (bundle, { setSelected = true } = {}) => {
   const created = createScenario({
     accentColor: scenario.accentColor,
     countryNameOverrides: scenario.countryNameOverrides,
+    features: scenario.features,
     description: scenario.description,
     eyebrow: scenario.eyebrow,
     heroSubtitle: scenario.heroSubtitle,
@@ -3277,6 +3291,9 @@ const updateScenarioFromBundle = (scenarioId, bundle) => {
   }
   if (scenario.countryNameOverrides && typeof scenario.countryNameOverrides === "object") {
     metaPatch.countryNameOverrides = scenario.countryNameOverrides;
+  }
+  if (scenario.features && typeof scenario.features === "object") {
+    metaPatch.features = normalizeFeatureSettings(scenario.features);
   }
   writeScenarioMeta(scenarioId, metaPatch);
 
@@ -3393,6 +3410,7 @@ const exportGameBundle = (gameId) => {
       // record had them. An import that minted its own would tell the receiver the
       // campaign started the moment it arrived.
       createdAt: game.createdAt,
+      features: cloneJson(game.features),
       description: game.description,
       eyebrow: game.eyebrow,
       heroSubtitle: game.heroSubtitle,
@@ -3485,6 +3503,7 @@ const importGameBundle = (bundle) => {
 
   writeJsonFile(getGameMetaPath(gameId), {
     accentColor: String(meta.accentColor ?? "").trim() || DEFAULT_GAME_META.accentColor,
+    features: normalizeFeatureOverrides(meta.features),
     createdAt,
     description: String(meta.description ?? "").trim() || DEFAULT_GAME_META.description,
     eyebrow: String(meta.eyebrow ?? "").trim() || DEFAULT_GAME_META.eyebrow,

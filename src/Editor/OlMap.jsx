@@ -32,6 +32,7 @@ import Modify from "ol/interaction/Modify";
 import Translate from "ol/interaction/Translate";
 import Snap from "ol/interaction/Snap";
 import PointerInteraction from "ol/interaction/Pointer";
+import DragBox from "ol/interaction/DragBox";
 import { fromExtent as polygonFromExtent } from "ol/geom/Polygon";
 import Feature from "ol/Feature";
 import { samePolityName } from "../../server/polityRename.js";
@@ -293,6 +294,66 @@ const cityStyle = (size, name) => {
   return style;
 };
 
+// A feature the Features panel has selected (box-select or a ticked row):
+// always drawn, ringed in yellow, labelled — so a selection reads on the map.
+const selectedCityStyleCache = new Map();
+const selectedCityStyle = (size, name) => {
+  const key = name ? `${size}|${name}` : size;
+  let style = selectedCityStyleCache.get(key);
+  if (!style) {
+    style = new Style({
+      image: new CircleStyle({
+        radius: size === "large" ? 9 : size === "mid" ? 7.5 : 6.5,
+        fill: new Fill({ color: "rgba(250,204,21,0.35)" }),
+        stroke: new Stroke({ color: "#facc15", width: 2.5 }),
+      }),
+      text: name
+        ? new Text({
+            text: name,
+            font: "700 11px sans-serif",
+            offsetY: -13,
+            fill: new Fill({ color: "#fef3c7" }),
+            stroke: new Stroke({ color: "rgba(0,0,0,0.9)", width: 3 }),
+          })
+        : undefined,
+    });
+    selectedCityStyleCache.set(key, style);
+  }
+  return style;
+};
+
+// A starting unit placed in the Workshop: a diamond in its owner's colour with
+// the type's initial; the name replaces the initial at closer zooms.
+const UNIT_GLYPH = { infantry: "I", armor: "A", air: "✈", naval: "N", artillery: "R", garrison: "G" };
+const unitStyleCache = new Map();
+const unitStyle = (feature, zoom, rgb) => {
+  const type = feature.get("type") || "infantry";
+  const name = zoom >= 4.5 ? feature.get("name") || "" : "";
+  const color = Array.isArray(rgb) && rgb.length >= 3 ? `rgb(${rgb.slice(0, 3).join(",")})` : "rgb(110,110,120)";
+  const key = `${type}|${color}|${name}`;
+  let style = unitStyleCache.get(key);
+  if (!style) {
+    style = new Style({
+      image: new RegularShape({
+        points: 4,
+        radius: 9,
+        angle: Math.PI / 4,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: "rgba(0,0,0,0.9)", width: 1.5 }),
+      }),
+      text: new Text({
+        text: name ? `${UNIT_GLYPH[type] || "?"} ${name}` : UNIT_GLYPH[type] || "?",
+        font: "700 10.5px sans-serif",
+        offsetY: name ? -15 : 0,
+        fill: new Fill({ color: "#fff" }),
+        stroke: new Stroke({ color: "rgba(0,0,0,0.9)", width: 3 }),
+      }),
+    });
+    unitStyleCache.set(key, style);
+  }
+  return style;
+};
+
 // Same reasoning for region labels: the region styles are memoised (see
 // olStyle.js) and these were the one place still allocating per feature per
 // frame. Keyed on the text, the only thing that varies.
@@ -345,6 +406,12 @@ const OlMap = ({
   paintOwner = "",
   paintOnlyOwner = "*",
   features = [],
+  units = [],
+  featureSelectionIds = [],
+  onFeatureSelectionChange,
+  onUnitCreate,
+  onUnitEdit,
+  onUnitRemove,
   onSelectionChange,
   onRegionCount,
   onRegionsChanged,
@@ -369,6 +436,13 @@ const OlMap = ({
   const labelLayerRef = useRef(null);
   const pointSourceRef = useRef(null);
   const pointLayerRef = useRef(null);
+  const unitSourceRef = useRef(null);
+  const unitLayerRef = useRef(null);
+  const featureSelectionRef = useRef(new Set());
+  const onFeatureSelectionRef = useRef(onFeatureSelectionChange);
+  const onUnitCreateRef = useRef(onUnitCreate);
+  const onUnitEditRef = useRef(onUnitEdit);
+  const onUnitRemoveRef = useRef(onUnitRemove);
   const topologySourceRef = useRef(null);
   const topologyLayerRef = useRef(null);
   const importPreviewLayerRef = useRef(null);
@@ -399,6 +473,10 @@ const OlMap = ({
   onFeatureCreateRef.current = onFeatureCreate;
   const onFeatureEditRef = useRef(onFeatureEdit);
   onFeatureEditRef.current = onFeatureEdit;
+  onFeatureSelectionRef.current = onFeatureSelectionChange;
+  onUnitCreateRef.current = onUnitCreate;
+  onUnitEditRef.current = onUnitEdit;
+  onUnitRemoveRef.current = onUnitRemove;
   const onFeatureRemoveRef = useRef(onFeatureRemove);
   onFeatureRemoveRef.current = onFeatureRemove;
   const onHistoryRef = useRef(onHistory);
@@ -529,13 +607,26 @@ const OlMap = ({
         const tags = feature.get("tags") || [];
         const large = tags.includes("capital") || pop >= 1000000;
         const mid = pop >= 100000;
-        if (!(large || (mid && zoom >= 3.5) || zoom >= 5)) return null;
+        // A selected feature (the Features panel) always shows, highlighted.
+        const selected = featureSelectionRef.current.has(String(feature.getId()));
+        if (!selected && !(large || (mid && zoom >= 3.5) || zoom >= 5)) return null;
         const size = large ? "large" : mid ? "mid" : "small";
-        const showLabel = zoom >= 6 || (large && zoom >= 4.3) || (mid && zoom >= 5.3);
-        return cityStyle(size, showLabel ? feature.get("name") || "" : "");
+        const showLabel = selected || zoom >= 6 || (large && zoom >= 4.3) || (mid && zoom >= 5.3);
+        const name = showLabel ? feature.get("name") || "" : "";
+        return selected ? selectedCityStyle(size, name) : cityStyle(size, name);
       },
     });
     pointLayer.setZIndex(30);
+
+    // Starting units placed in the Workshop (world.units, source "scenario").
+    const unitSource = new VectorSource({ wrapX: false });
+    const unitLayer = new VectorLayer({
+      source: unitSource,
+      wrapX: false,
+      declutter: true,
+      style: (feature, resolution) => unitStyle(feature, getZoom(resolution), colorsRef.current?.[feature.get("ownerCode")]),
+    });
+    unitLayer.setZIndex(31);
 
     // Province-raster alignment preview. It is display-only and never becomes
     // part of the document. The importer swaps the source as the geographic
@@ -580,7 +671,7 @@ const OlMap = ({
     const map = new Map({
       target: containerRef.current,
       controls: defaultControls({ rotate: false }),
-      layers: [regionLayer, labelLayer, pointLayer, importPreviewLayer, paintPreviewLayer, topologyLayer, borderAssistLayer],
+      layers: [regionLayer, labelLayer, pointLayer, unitLayer, importPreviewLayer, paintPreviewLayer, topologyLayer, borderAssistLayer],
       view: new View({ center: fromLonLat([0, 20]), zoom: 2.1, minZoom: 1, maxZoom: 20 }),
     });
 
@@ -589,6 +680,8 @@ const OlMap = ({
     labelLayerRef.current = labelLayer;
     pointSourceRef.current = pointSource;
     pointLayerRef.current = pointLayer;
+    unitSourceRef.current = unitSource;
+    unitLayerRef.current = unitLayer;
     topologySourceRef.current = topologySource;
     topologyLayerRef.current = topologyLayer;
     importPreviewLayerRef.current = importPreviewLayer;
@@ -629,9 +722,23 @@ const OlMap = ({
       return point;
     };
 
+    // A placed unit under the cursor, for the Unit and Delete tools.
+    const unitAtPixel = (pixel, tolerance = 10) => {
+      let unit = null;
+      map.forEachFeatureAtPixel(
+        pixel,
+        (feature) => {
+          unit = feature;
+          return true;
+        },
+        { layerFilter: (l) => l === unitLayerRef.current, hitTolerance: tolerance },
+      );
+      return unit;
+    };
+
     map.on("singleclick", (evt) => {
       const tool = activeToolRef.current;
-      if (tool !== "select" && tool !== "delete" && tool !== "paint" && tool !== "feature" && tool !== "dissolve") return;
+      if (tool !== "select" && tool !== "delete" && tool !== "paint" && tool !== "feature" && tool !== "dissolve" && tool !== "unit") return;
       let hit = null;
       map.forEachFeatureAtPixel(
         evt.pixel,
@@ -642,7 +749,12 @@ const OlMap = ({
         { layerFilter: (l) => l === regionLayerRef.current, hitTolerance: 2 },
       );
       if (tool === "delete") {
-        // Deleting works on cities too — a point hit wins over the region under it.
+        // Deleting works on units and cities too — a point hit wins over the region under it.
+        const unitHit = unitAtPixel(evt.pixel);
+        if (unitHit) {
+          onUnitRemoveRef.current?.(unitHit.getId());
+          return;
+        }
         const point = pointAtPixel(evt.pixel);
         if (point) {
           onFeatureRemoveRef.current?.(point.getId());
@@ -654,6 +766,24 @@ const OlMap = ({
       if (tool === "paint") {
         // R2.7 paint is handled by a PointerInteraction so a click and a whole
         // drag stroke use the same one-operation Undo/Redo transaction.
+        return;
+      }
+      if (tool === "unit") {
+        // Clicking an existing unit edits it; clicking the map places a new one
+        // where the click landed, owned by the region under it.
+        const unitHit = unitAtPixel(evt.pixel);
+        if (unitHit) {
+          onUnitEditRef.current?.({ id: unitHit.getId(), pixel: [...evt.pixel] });
+          return;
+        }
+        const [lng, lat] = toLonLat(evt.coordinate);
+        onUnitCreateRef.current?.({
+          lng: Number(lng.toFixed(5)),
+          lat: Number(lat.toFixed(5)),
+          ownerCode: hit ? hit.get("owner") || "" : "",
+          regionId: hit ? hit.getId() : null,
+          pixel: [...evt.pixel],
+        });
         return;
       }
       if (tool === "feature") {
@@ -754,16 +884,16 @@ const OlMap = ({
         layerFilter: (l) => l === regionLayerRef.current,
       });
       const tool = activeToolRef.current;
-      if (tool === "lasso" || tool === "draw" || tool === "modify" || tool === "paint") {
+      if (tool === "lasso" || tool === "draw" || tool === "modify" || tool === "paint" || tool === "feature-box") {
         map.getTargetElement().style.cursor = "crosshair";
-      } else if (tool === "feature" || tool === "delete") {
+      } else if (tool === "feature" || tool === "delete" || tool === "unit") {
         // City-aware tools: pointer over an existing city (edit/remove target).
         const pointHit = map.hasFeatureAtPixel(evt.pixel, {
-          layerFilter: (l) => l === pointLayerRef.current,
+          layerFilter: (l) => l === pointLayerRef.current || l === unitLayerRef.current,
           hitTolerance: 8,
         });
         map.getTargetElement().style.cursor =
-          pointHit || (hit && tool === "delete") ? "pointer" : tool === "feature" ? "crosshair" : "";
+          pointHit || (hit && tool === "delete") ? "pointer" : tool === "feature" || tool === "unit" ? "crosshair" : "";
       } else {
         map.getTargetElement().style.cursor =
           hit && (tool === "select" || tool === "paint" || tool === "dissolve") ? "pointer" : "";
@@ -1472,6 +1602,15 @@ const OlMap = ({
           map.getView().fit(ext, { padding: [80, 80, 80, 80], duration: 300, maxZoom: 7 });
         }
         return ids;
+      },
+      // The regions a polity owns, by name, for the Countries panel's list.
+      listOwnerRegions: (ownerKey) => {
+        const key = String(ownerKey || "").trim();
+        if (!key) return [];
+        return regionSource.getFeatures()
+          .filter((f) => String(f.get("owner") || "").trim() === key)
+          .map((f) => ({ id: f.getId(), name: String(f.get("name") || "").trim(), typeId: f.get("typeId") || "land" }))
+          .sort((a, b) => (a.name || String(a.id)).localeCompare(b.name || String(b.id)));
       },
       queryRegions: (text, limit = 200) => {
         const q = (text || "").trim().toLowerCase();
@@ -2190,6 +2329,22 @@ const OlMap = ({
       const draw = new Draw({ type: "Polygon", features: new Collection(), freehand: true });
       draw.on("drawend", (e) => selectWithinPolygon(e.feature.getGeometry()));
       added.push(draw);
+    } else if (activeTool === "feature-box") {
+      // Hold the mouse down and drag a rectangle: every city/feature inside it
+      // is selected (shift-drag adds to the selection). The Features panel then
+      // tags or deletes them together.
+      const box = new DragBox();
+      box.on("boxend", (e) => {
+        const extent = box.getGeometry().getExtent();
+        const ids = [];
+        pointSourceRef.current?.forEachFeatureInExtent(extent, (f) => {
+          ids.push(String(f.getId()));
+        });
+        const additive = Boolean(e?.mapBrowserEvent?.originalEvent?.shiftKey);
+        const next = additive ? [...new Set([...featureSelectionRef.current, ...ids])] : ids;
+        onFeatureSelectionRef.current?.(next);
+      });
+      added.push(box);
     }
 
     added.forEach((i) => {
@@ -2238,6 +2393,33 @@ const OlMap = ({
       src.addFeature(feat);
     }
   }, [features]);
+
+  // Rebuild the unit layer whenever the units list changes; recolour it when the
+  // palette does (an owner's colour is read at draw time).
+  useEffect(() => {
+    const src = unitSourceRef.current;
+    if (!src) return;
+    src.clear();
+    for (const u of units) {
+      const lng = Number(u?.lng);
+      const lat = Number(u?.lat);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+      const feat = new Feature({ geometry: new Point(fromLonLat([lng, lat])) });
+      feat.setId(u.id);
+      feat.setProperties({ name: u.name, type: u.type, ownerCode: u.ownerCode, strength: u.strength });
+      src.addFeature(feat);
+    }
+  }, [units]);
+  useEffect(() => {
+    unitLayerRef.current?.changed();
+  }, [colors]);
+
+  // Selected features (the Features panel's box-select or ticked rows) draw
+  // highlighted, and always, whatever the zoom.
+  useEffect(() => {
+    featureSelectionRef.current = new Set((featureSelectionIds || []).map(String));
+    pointLayerRef.current?.changed();
+  }, [featureSelectionIds]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -1,0 +1,152 @@
+/*! Open Historia — guidance segments of the system prompts © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
+// The prompts an author edits are a few guidance passages inside a fixed
+// technical template. These tests pin what makes that safe: every passage is
+// found by unique, ordered anchors in the shipped text; an unedited pack
+// renders the shipped prompt byte for byte; an edit replaces its own passage
+// and nothing else; a pack in the old whole-prompt shape is ignored.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import defaultPrompts from "./defaultPrompts.json" with { type: "json" };
+import {
+  PROMPT_GUIDANCE,
+  PROMPT_MODEL_VERSION,
+  buildGuidanceDefaults,
+  composePrompt,
+  guidanceSegmentsFor,
+  hasGuidance,
+  locateSegment,
+  normalizePackGuidance,
+  normalizeSectionGuidance,
+} from "./promptGuidance.js";
+
+const ROOT_KEYS = ["advisor", "leader"];
+const SECTION_KEYS = [...ROOT_KEYS, ...Object.keys(PROMPT_GUIDANCE.tasks)];
+const defaultTextOf = (key) => (ROOT_KEYS.includes(key) ? defaultPrompts[key] : defaultPrompts.tasks[key]);
+const GUIDANCE_DEFAULTS = buildGuidanceDefaults(defaultPrompts);
+const guidanceDefaultsOf = (key) => (ROOT_KEYS.includes(key) ? GUIDANCE_DEFAULTS[key] : GUIDANCE_DEFAULTS.tasks[key]);
+
+test("every guidance section is a prompt that ships", () => {
+  for (const key of Object.keys(PROMPT_GUIDANCE.tasks)) {
+    assert.equal(typeof defaultPrompts.tasks[key], "string", `${key} is not a bundled task`);
+  }
+  assert.ok(hasGuidance("advisor"));
+  assert.ok(hasGuidance("jumpForward"));
+  assert.ok(!hasGuidance("timelineCurator"), "the curator is technical end to end");
+  assert.ok(!hasGuidance("gameMaster"), "the GM contract is native");
+  assert.deepEqual(guidanceSegmentsFor("nope"), []);
+});
+
+test("every segment's anchors are found once, in order, without overlap", () => {
+  for (const key of SECTION_KEYS) {
+    const text = defaultTextOf(key);
+    const ids = new Set();
+    let cursor = 0;
+    for (const segment of guidanceSegmentsFor(key)) {
+      assert.ok(!ids.has(segment.id), `${key}: segment id ${segment.id} repeats`);
+      ids.add(segment.id);
+      const found = locateSegment(text, segment, cursor);
+      assert.ok(found, `${key}.${segment.id}: anchors not found after offset ${cursor}`);
+      assert.ok(found.text.startsWith(segment.start) && found.text.endsWith(segment.end), `${key}.${segment.id}`);
+      assert.ok(found.text.length >= segment.start.length, `${key}.${segment.id}: end anchor precedes the start`);
+      assert.equal(text.indexOf(segment.start, found.start + 1), -1, `${key}.${segment.id}: the start anchor repeats later`);
+      cursor = found.end;
+    }
+    assert.deepEqual(Object.keys(guidanceDefaultsOf(key)), [...ids], `${key}: defaults cover every segment`);
+  }
+});
+
+test("no passage carries the technical layer", () => {
+  for (const key of SECTION_KEYS) {
+    for (const [id, text] of Object.entries(guidanceDefaultsOf(key))) {
+      assert.ok(!text.includes("```"), `${key}.${id} carries a code block`);
+      assert.ok(!/\{\s*"/.test(text), `${key}.${id} carries a JSON contract`);
+    }
+  }
+});
+
+test("an unedited pack composes the shipped prompt byte for byte", () => {
+  for (const key of SECTION_KEYS) {
+    const text = defaultTextOf(key);
+    assert.equal(composePrompt(key, text, {}), text, `${key}: no guidance`);
+    assert.equal(composePrompt(key, text, guidanceDefaultsOf(key)), text, `${key}: default guidance`);
+    assert.equal(composePrompt(key, text, null), text, `${key}: null guidance`);
+  }
+});
+
+test("an edit replaces its own passage and nothing else", () => {
+  const key = "jumpForward";
+  const text = defaultTextOf(key);
+  const segment = guidanceSegmentsFor(key).find((entry) => entry.id === "difficulty");
+  const found = locateSegment(text, segment);
+  const edit = "Difficulty is a suggestion for ${PLAYER_POLITY}.";
+  const out = composePrompt(key, text, { difficulty: `  ${edit}\n` });
+  assert.equal(out, text.slice(0, found.start) + edit + text.slice(found.end));
+  for (const other of guidanceSegmentsFor(key)) {
+    if (other.id === segment.id) continue;
+    assert.ok(out.includes(locateSegment(text, other).text), `${other.id} survived`);
+  }
+  assert.ok(out.includes("${PLAYER_POLITY}"), "placeholders in guidance are kept for rendering");
+});
+
+test("two edits land on their own passages even when one contains another's anchor", () => {
+  const key = "advisor";
+  const text = defaultTextOf(key);
+  const [role, guidelines] = guidanceSegmentsFor(key);
+  const out = composePrompt(key, text, {
+    [role.id]: `Role text that quotes "${guidelines.start}" for fun.`,
+    [guidelines.id]: "Guidelines text.",
+  });
+  assert.ok(out.startsWith(`Role text that quotes "${guidelines.start}" for fun.`));
+  assert.equal(out.split("Guidelines text.").length, 2);
+  assert.ok(!out.includes(locateSegment(text, guidelines).text), "the default guidelines were replaced");
+});
+
+test("a pack in the old whole-prompt shape carries nothing", () => {
+  const empty = { advisor: {}, leader: {}, tasks: {} };
+  assert.deepEqual(
+    normalizePackGuidance(
+      { advisor: "hacked", leader: "hacked", tasks: { jumpForward: "hacked" }, jumpForward: "hacked", helpers: { PLAYER_POLITY: "x" } },
+      GUIDANCE_DEFAULTS,
+    ),
+    empty,
+  );
+  assert.deepEqual(normalizePackGuidance({ promptModel: 1, guidance: { advisor: { role: "x" } } }, GUIDANCE_DEFAULTS), empty);
+  assert.deepEqual(normalizePackGuidance({ promptModel: PROMPT_MODEL_VERSION, guidance: "nope" }, GUIDANCE_DEFAULTS), empty);
+  assert.deepEqual(normalizePackGuidance(null, GUIDANCE_DEFAULTS), empty);
+  assert.deepEqual(normalizePackGuidance([], GUIDANCE_DEFAULTS), empty);
+});
+
+test("only real edits are kept", () => {
+  const guidance = normalizePackGuidance(
+    {
+      promptModel: PROMPT_MODEL_VERSION,
+      guidance: {
+        advisor: {
+          role: "   ",
+          reminders: `  ${GUIDANCE_DEFAULTS.advisor.reminders}  `,
+          guidelines: " Be blunt. ",
+          bogus: "x",
+          tone: 12,
+        },
+        leader: [],
+        tasks: {
+          jumpForward: { quality: "Short headlines." },
+          timelineCurator: { anything: "x" },
+          nope: { a: "b" },
+        },
+      },
+    },
+    GUIDANCE_DEFAULTS,
+  );
+  assert.deepEqual(guidance, { advisor: { guidelines: "Be blunt." }, leader: {}, tasks: { jumpForward: { quality: "Short headlines." } } });
+  assert.deepEqual(normalizeSectionGuidance("advisor", { role: "x" }), { role: "x" });
+  assert.deepEqual(normalizeSectionGuidance("advisor", { role: GUIDANCE_DEFAULTS.advisor.role }), { role: GUIDANCE_DEFAULTS.advisor.role }, "without defaults nothing is folded");
+});
+
+test("the Prompts tab has a section for every guided prompt", () => {
+  const source = readFileSync(new URL("./gameplayPrompts.js", import.meta.url), "utf8");
+  for (const key of SECTION_KEYS) {
+    assert.ok(source.includes(`key: "${key}"`), `${key} has no PROMPT_SECTION_DEFINITIONS entry`);
+  }
+});

@@ -30,7 +30,7 @@ const doc = (polities) => ({
   polities,
 });
 
-test("a registry record that owns no region and claims none is not shipped", () => {
+test("a registry record that owns no region and claims none still ships: a registered country is a country", () => {
   const seed = buildGameSeed(
     doc({
       Carthage: record("Carthage", { note: "Barcid ascendancy" }),
@@ -40,8 +40,13 @@ test("a registry record that owns no region and claims none is not shipped", () 
   );
   assert.ok(seed.world.polityOverrides.Carthage, "the polity on the map ships");
   assert.equal(seed.world.polityOverrides.Carthage.note, "Barcid ascendancy", "with its metadata");
-  assert.equal(seed.world.polityOverrides["Kushan Empire"], undefined, "the landless record does not");
-  assert.equal(seed.colors["Kushan Empire"], undefined, "and gets no colour either");
+  // A country registered in the Countries panel is a country to the game whether
+  // or not it holds a region yet: a government in exile, a nation waiting to be
+  // painted. It ships with its record and a colour; only "Remove from the map"
+  // takes it out.
+  assert.ok(seed.world.polityOverrides["Kushan Empire"], "the landless record ships too");
+  assert.equal(seed.world.polityOverrides["Kushan Empire"].note, "left over from the template", "with its metadata");
+  assert.ok(seed.colors["Kushan Empire"], "and a colour");
   assert.deepEqual(seed.world.regionOwnershipOverrides, { r1: "Carthage", r2: "Carthage" });
 });
 

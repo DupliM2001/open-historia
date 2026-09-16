@@ -171,6 +171,32 @@ const buildBackgroundForGame = (customBackground) => {
 // the model that it exists at all.
 const STOCK_COUNTRY_NAMES = new Set(Object.values(COUNTRY_NAMES));
 
+// The scenario's starting units, in the game's own unit shape: a unit the
+// author placed ships with source "scenario" and stands on the map at round
+// one; the game normalises it again on read (normalizeUnitEntry).
+const buildUnitsForGame = (units) => (Array.isArray(units) ? units : [])
+  .map((unit, index) => {
+    const lng = Number(unit?.lng);
+    const lat = Number(unit?.lat);
+    const ownerCode = String(unit?.ownerCode || "").trim();
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || !ownerCode) return null;
+    const strength = Number(unit?.strength);
+    return {
+      id: String(unit?.id || `scenario-unit-${index + 1}`),
+      name: String(unit?.name || "").trim() || "Unit",
+      type: String(unit?.type || "infantry").trim().toLowerCase() || "infantry",
+      ownerCode,
+      strength: Number.isFinite(strength) ? Math.max(1, Math.min(100, Math.round(strength))) : 100,
+      lng: Number(lng.toFixed(5)),
+      lat: Number(lat.toFixed(5)),
+      composition: String(unit?.composition || "").trim(),
+      note: String(unit?.note || "").trim(),
+      status: "idle",
+      source: "scenario",
+    };
+  })
+  .filter(Boolean);
+
 export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = {}) => {
   const regionOwnershipOverrides = {};
   const owners = new Set();
@@ -245,13 +271,13 @@ export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = 
 
   for (const owner of owners) emitPolity(owner, declaredPolities[owner]);
   for (const key of claimants) if (!owners.has(key)) emitPolity(key, declaredPolities[key]);
-  // Nothing else. The registry holds metadata FOR the map's polities (a display
-  // name, aliases, lore); it does not conjure a polity the map cannot show.
-  // Declared-but-landless records used to be emitted here as "governments in
-  // exile", and that is how an empire an author had painted off the map kept
-  // its polity record, stayed in the model's roster and wrote to the player.
-  // A polity exists on the map or not at all: paint it back and its record
-  // returns with it (the editor keeps the metadata for the session).
+  // And every country the author registered without giving it a region yet: a
+  // registered country is a country to the game, land or no land — a government
+  // in exile, a nation waiting to be painted. Removing one is the Countries
+  // panel's explicit "Remove from the map", never a side effect of painting.
+  for (const key of Object.keys(declaredPolities)) {
+    if (!owners.has(key) && !claimants.has(key)) emitPolity(key, declaredPolities[key]);
+  }
 
   const author = (doc.metadata?.author || "").trim();
   const gameCities = buildCitiesForGame(doc.features);
@@ -260,6 +286,8 @@ export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = 
     ownerSchema: doc.ownerSchema ?? OWNER_SCHEMA,
     regionOwnershipOverrides,
     polityOverrides,
+    // The starting units the author placed (Units panel / Unit tool).
+    units: buildUnitsForGame(doc.units),
     // A custom background replaces Earth, so it must also hide the stock modern
     // political overlay (country fills, borders, "Russia"/"France" labels) — those
     // are gated on customRegions in the game, so force it on whenever there's a
