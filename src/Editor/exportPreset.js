@@ -245,13 +245,13 @@ export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = 
 
   for (const owner of owners) emitPolity(owner, declaredPolities[owner]);
   for (const key of claimants) if (!owners.has(key)) emitPolity(key, declaredPolities[key]);
-  // Nothing else. The registry holds metadata FOR the map's polities (a display
-  // name, aliases, lore); it does not conjure a polity the map cannot show.
-  // Declared-but-landless records used to be emitted here as "governments in
-  // exile", and that is how an empire an author had painted off the map kept
-  // its polity record, stayed in the model's roster and wrote to the player.
-  // A polity exists on the map or not at all: paint it back and its record
-  // returns with it (the editor keeps the metadata for the session).
+  // And every country the author registered without giving it a region yet: a
+  // registered country is a country to the game, land or no land — a government
+  // in exile, a nation waiting to be painted. Removing one is the Countries
+  // panel's explicit "Remove from the map", never a side effect of painting.
+  for (const key of Object.keys(declaredPolities)) {
+    if (!owners.has(key) && !claimants.has(key)) emitPolity(key, declaredPolities[key]);
+  }
 
   const author = (doc.metadata?.author || "").trim();
   const gameCities = buildCitiesForGame(doc.features);

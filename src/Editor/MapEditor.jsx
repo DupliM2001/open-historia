@@ -237,7 +237,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     flags: d.flags,
     tags: d.tags,
     // Scenario Workshop: polity metadata keyed by stable identity, for the
-    // polities the map has (pruned to them as the map changes). Display names
+    // every registered country, with regions or not. Display names
     // change here without re-owning every region.
     polities: d.polities,
     // Without this the marker never persists, so a document migrates on every open,
@@ -517,37 +517,12 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     [api, d.types, d.selection, d.regionCount],
   );
 
-  // The polity registry is the map's. A polity exists because a region is
-  // owned by it or disputed in its name; the registry only carries metadata for
-  // those keys. A key that leaves the map leaves the registry — its record is
-  // kept for the session, so painting it back restores the name, aliases and
-  // lore — and a scenario cannot ship a polity nobody can find on the map,
-  // which is how an empire painted off the map kept writing to the player.
-  // Nothing is pruned before the map has loaded: an empty usage list then means
-  // "not here yet", not "no polities".
-  const retiredPolitiesRef = useRef(new Map());
-  useEffect(() => {
-    if (!api?.listPolityUsage) return;
-    const onMap = new Set((api.listPolityUsage() || []).map((row) => row.key));
-    if (!onMap.size && !d.regionCount) return;
-    const registry = d.polities || {};
-    const gone = Object.keys(registry).filter((key) => !onMap.has(key));
-    const back = [...onMap].filter((key) => !registry[key] && retiredPolitiesRef.current.has(key));
-    if (!gone.length && !back.length) return;
-    d.setPolities((prev) => {
-      const next = { ...(prev || {}) };
-      for (const key of gone) {
-        retiredPolitiesRef.current.set(key, next[key]);
-        delete next[key];
-      }
-      for (const key of back) {
-        next[key] = retiredPolitiesRef.current.get(key);
-        retiredPolitiesRef.current.delete(key);
-      }
-      return next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, d.polities, d.regionCount, regionEpoch]);
+  // The polity registry keeps every country that was registered — created in
+  // the Countries panel, imported in a roster, or written by an owner field —
+  // whether or not it holds a region right now. A country with no regions is
+  // still a country to the game (buildGameSeed emits it), which is what lets an
+  // author register one before painting it, or keep a government in exile.
+  // Removing one is explicit: the Countries panel's "Remove from the map".
 
   const polityCount = useMemo(() => {
     const keys = new Set(Object.keys(d.polities || {}));
@@ -881,6 +856,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
           api={api}
           polities={d.polities}
           selection={d.selection}
+          setSelection={d.setSelection}
           regionEpoch={regionEpoch}
           colors={d.colors}
           flags={d.flags}

@@ -195,6 +195,7 @@ import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
 import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
+import { idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 
 const CHAT_HINT_PATTERNS = [
@@ -1576,7 +1577,7 @@ const runJsonTask = async (taskKey, {
   // Two tasks get the espionage picture, framed differently because they do
   // different jobs with it: the simulator turns it into events, the board turns
   // it into entries. Both see the same uncensored brief.
-  if (["jumpForward", "autoJumpForward", "projects"].includes(taskKey)) {
+  if (isActiveFeatureEnabled("espionage") && ["jumpForward", "autoJumpForward", "projects"].includes(taskKey)) {
     try {
       const [world, game] = await Promise.all([readWorldState({ force: false }), readGameData()]);
       const brief = espionageBrief(normalizeWorldState(world), await readOpenedIntercepts(), { playerPolity: normalizeString(game.country) });
@@ -2019,7 +2020,9 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     systemPrompt = `${systemPrompt}\n\n${ACTIONS_REFERENCE}`;
     // The espionage lever rides after the menu for the same reason: it reaches
     // campaigns whose prompts were frozen before it existed.
-    systemPrompt = `${systemPrompt}\n\n${buildSpyOrdersDirective(normalizeString(variables?.playerPolity) || "the player")}`;
+    if (isActiveFeatureEnabled("espionage")) {
+      systemPrompt = `${systemPrompt}\n\n${buildSpyOrdersDirective(normalizeString(variables?.playerPolity) || "the player")}`;
+    }
   }
 
   // The scenario briefing and simulation rules each arrive twice on most
@@ -5571,12 +5574,16 @@ const applySimulationResult = async ({
     }
     return { polity, hostility, hostile: hostility >= 0.75 };
   });
-  const espionage = resolveEspionage(worldWithImpacts, {
-    round: nextGame.round,
-    date: nextGame.gameDate,
-    playerPolity: normalizeString(baseGame.country),
-    candidates: espionageCandidates,
-  });
+  // With espionage switched off for this game nothing is rolled: the agents
+  // already in the world stay where they are, silent, and no new one arrives.
+  const espionage = isActiveFeatureEnabled("espionage")
+    ? resolveEspionage(worldWithImpacts, {
+      round: nextGame.round,
+      date: nextGame.gameDate,
+      playerPolity: normalizeString(baseGame.country),
+      candidates: espionageCandidates,
+    })
+    : { spies: normalizeArray(worldWithImpacts.spies), events: [], notices: [] };
   worldWithImpacts.spies = espionage.spies;
   // A spy in the world needs a seal for what it will report under.
   if (!isSeal(worldWithImpacts.spySeal) && espionage.spies.length) worldWithImpacts.spySeal = newSeal();
@@ -5679,7 +5686,9 @@ const applySimulationResult = async ({
   // sync right below already sees the new agent. After resolveEspionage on
   // purpose: an agent placed this turn is not also caught this turn.
   const spyOrders = normalizeArray(freshEvents).flatMap((event) => normalizeArray(event?.impacts?.spyOps));
-  if (spyOrders.length) {
+  if (spyOrders.length && !isActiveFeatureEnabled("espionage")) {
+    logDebugEvent("espionage", `Spy orders ignored: espionage is off for this game (${spyOrders.length}).`);
+  } else if (spyOrders.length) {
     const outcome = applySpyOps(worldWithImpacts, spyOrders, { date: nextGame.gameDate, playerPolity });
     worldWithImpacts.spies = outcome.spies;
     if (outcome.applied.length) {
@@ -8553,6 +8562,7 @@ let spyReportInFlight = false;
 // nothing at all — every failure is silent, exactly like the diplomacy drip.
 export const maybeGatherIntelligence = async ({ chance = SPY_REPORT_CHANCE } = {}) => {
   if (spyReportInFlight || isSimulationBusy()) return null;
+  if (!isActiveFeatureEnabled("espionage")) return null;
   if (Math.random() >= chance) return null;
   spyReportInFlight = true;
   try {
@@ -8573,6 +8583,7 @@ export const maybeGatherIntelligence = async ({ chance = SPY_REPORT_CHANCE } = {
 };
 
 export const refreshSpyIntercepts = async () => {
+  if (!isActiveFeatureEnabled("espionage")) return;
   let world;
   try {
     world = normalizeWorldState(await readWorldState({ force: true }));
@@ -12182,12 +12193,13 @@ export const maybeGeneratePregameHistory = async () => {
 // one polity sends a short note to the player's inbox. Hard-suspended while any
 // simulation is in flight (busy lock above), never stacked, and silent on any
 // failure — there is no canned fallback small talk.
-// Raised from 1/20: at 1/20 (with a 60s visible-tab-only roll) a player waited ~20
-// idle minutes just to CONSULT the model, and most consulted rolls still returned
-// null — so AI-initiated chats felt almost nonexistent. 1/8 keeps a parked tab from
-// filling the inbox while making an idle approach actually plausible; the jump-path
-// cap (see defaultPrompts.json) remains the primary source of diplomacy.
-const IDLE_DIPLOMACY_CHANCE = 1 / 8;
+// The chat half's chance per 60 s roll comes from the scenario's (or the game's)
+// "one attempt every N minutes" setting — the Features tab of either editor —
+// read from the active features: 1/8 by default, the value 1/20 was raised to
+// when a player waited ~20 idle minutes just to CONSULT the model and most
+// consulted rolls still returned null. The jump-path cap (see
+// defaultPrompts.json) remains the primary source of diplomacy; switching idle
+// diplomacy off keeps the movement pulse below.
 // How often the pulse RUNS at all. Higher than the chat chance because the call
 // now also moves the world's forces a little, and the map benefits from breathing
 // more often than the inbox does. Splitting the two off one roll keeps the chat
@@ -12262,13 +12274,16 @@ const appendSightingEvent = async (bundle, sighting, unitOps) => {
   await writeEventsState(next);
 };
 
-export const maybeSendIdleDiplomacy = async ({ chance = IDLE_PULSE_CHANCE } = {}) => {
+export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
   if (idleDiplomacyInFlight || isSimulationBusy()) return null;
+  const chatChance = idleDiplomacyChancePerMinute();
+  const pulseChance = chance ?? Math.max(IDLE_PULSE_CHANCE, chatChance);
   const roll = Math.random();
-  if (roll >= chance) return null;
-  // One call, two rates: the chat half keeps the cadence the player already has,
-  // while the movement half runs on every pulse.
-  const allowChat = roll < Math.min(chance, IDLE_DIPLOMACY_CHANCE);
+  if (roll >= pulseChance) return null;
+  // One call, two rates: the chat half runs at the configured cadence (and not
+  // at all when idle diplomacy is off), while the movement half runs on every
+  // pulse.
+  const allowChat = chatChance > 0 && roll < Math.min(pulseChance, chatChance);
   idleDiplomacyInFlight = true;
   idleChatPollInFlight = allowChat;
   try {

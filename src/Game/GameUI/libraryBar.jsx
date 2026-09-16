@@ -34,6 +34,8 @@ import {
 import { loadCountryNames, readJson, writeJson, JSON_URLS } from "../../runtime/assets.js";
 import { LABEL_FONT_SUGGESTIONS } from "../../runtime/mapSettings.js";
 import FactionCreator from "./FactionCreator.jsx";
+import FeaturesSectionEditor from "./FeaturesSectionEditor.jsx";
+import { normalizeFeatureOverrides, normalizeFeatureSettings } from "../../runtime/gameFeatures.js";
 import { UNIT_TYPES } from "../../runtime/gameState.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { DIFFICULTY_LEVELS } from "../../runtime/difficulty.js";
@@ -205,6 +207,7 @@ const gameAssetAccept = {
 const editorSectionLabels = {
   assets: "Assets",
   bundles: "Bundles",
+  features: "Features",
   overview: "Overview",
   prompts: "Prompts",
   world: "World",
@@ -224,6 +227,7 @@ const buildScenarioEditorState = (details) => {
     country: game.country ?? "",
     description: scenario.description ?? "",
     eyebrow: scenario.eyebrow ?? "",
+    features: normalizeFeatureSettings(scenario.features),
     gameDate: game.gameDate ?? "",
     heroSubtitle: scenario.heroSubtitle ?? "",
     heroTitle: scenario.heroTitle ?? "",
@@ -250,6 +254,8 @@ const buildGameEditorState = (details) => {
     country: game.country ?? "",
     description: gameMeta.description ?? "",
     eyebrow: gameMeta.eyebrow ?? "",
+    features: normalizeFeatureOverrides(gameMeta.features),
+    scenarioFeatures: normalizeFeatureSettings(details?.scenario?.features),
     gameDate: game.gameDate ?? "",
     heroSubtitle: gameMeta.heroSubtitle ?? "",
     heroTitle: gameMeta.heroTitle ?? "",
@@ -911,8 +917,8 @@ const EditorDrawer = ({
   const record = kind === "scenario" ? details.scenario : details.game;
   const visibleSections =
     kind === "scenario"
-      ? ["overview", "world", "prompts", "assets", "bundles"]
-      : ["overview", "world", "prompts", "assets"];
+      ? ["overview", "world", "features", "prompts", "assets", "bundles"]
+      : ["overview", "world", "features", "prompts", "assets"];
 
   return (
     <div
@@ -1091,6 +1097,16 @@ const EditorDrawer = ({
             </div>
           </div>
         </div>
+      )}
+
+      {editorSection === "features" && (
+        <FeaturesSectionEditor
+          kind={kind}
+          features={formState.features}
+          scenarioFeatures={kind === "scenario" ? formState.features : formState.scenarioFeatures}
+          onChange={(next) => onChange("features", next)}
+          styles={{ actionButtonStyle, fieldLabelStyle, inputStyle }}
+        />
       )}
 
       {editorSection === "prompts" && (
@@ -1819,6 +1835,7 @@ const LibraryTopBar = () => {
           accentColor: editorState.accentColor,
           description: editorState.description,
           eyebrow: editorState.eyebrow,
+          features: editorState.features,
           game: {
             ...currentGame,
             country: editorState.country,
@@ -1853,6 +1870,7 @@ const LibraryTopBar = () => {
           accentColor: editorState.accentColor,
           description: editorState.description,
           eyebrow: editorState.eyebrow,
+          features: editorState.features,
           game: {
             ...currentGame,
             country: editorState.country,

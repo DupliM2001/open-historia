@@ -8,12 +8,13 @@
 // tags) + locate + delete, Delete All, and an "Import major cities" action that
 // pulls capitals + large cities from cities.pmtiles.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Panel from "./Panel.jsx";
 import Icon from "./Icon.jsx";
 import { pillButton, inputStyle } from "./editorStyles.js";
 import { TextField, SelectField } from "./fields.jsx";
 import { importAllCities, importMajorCities } from "./citiesImport.js";
+import { mergeImportedFeatures, parseFeatureImport } from "./featureImport.js";
 
 const SYMBOLS = [
   { value: "square", label: "Square" },
@@ -26,6 +27,8 @@ const FeatureManager = ({ features, setFeatures, api, onClose }) => {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState("");
+  const fileInputRef = useRef(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -50,6 +53,29 @@ const FeatureManager = ({ features, setFeatures, api, onClose }) => {
       return [...list, ...cities.filter((c) => !have.has(`${c.name}|${c.coord?.join(",")}`))];
     });
     setImporting(false);
+  };
+
+  // The author's own features from a file — GeoJSON points, a Workshop document,
+  // or plain lon/lat rows (featureImport.js) — merged like the city import, so
+  // importing the same file twice adds nothing twice.
+  const importFile = async (file) => {
+    if (!file) return;
+    setImportNote("");
+    try {
+      const { features: imported, skipped, format } = parseFeatureImport(await file.text());
+      const outcome = mergeImportedFeatures(features, imported);
+      setFeatures(outcome.features);
+      setImportNote(
+        `Imported ${outcome.added} feature${outcome.added === 1 ? "" : "s"} from ${file.name} (${format})`
+        + (outcome.duplicates ? `, ${outcome.duplicates} already here` : "")
+        + (skipped ? `, ${skipped} entr${skipped === 1 ? "y" : "ies"} without a usable point skipped` : "")
+        + ".",
+      );
+    } catch (e) {
+      setImportNote(`Import failed: ${e?.message || e}`);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   return (
@@ -94,6 +120,26 @@ const FeatureManager = ({ features, setFeatures, api, onClose }) => {
           Major only
         </button>
       </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          title="Your own features from a file: GeoJSON points, a Workshop document, or a JSON list of rows with lon/lat — each with a name and, optionally, a symbol, tags and a country"
+          style={{ ...pillButton(false), flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Icon name="plus" size={14} /> Import from file…
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,.geojson,application/json,application/geo+json"
+          style={{ display: "none" }}
+          onChange={(e) => importFile(e.target.files?.[0] || null)}
+        />
+      </div>
+      {importNote && (
+        <div style={{ fontSize: 11, lineHeight: 1.4, color: importNote.startsWith("Import failed") ? "#f87171" : "rgba(255,255,255,0.7)" }}>{importNote}</div>
+      )}
 
       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{filtered.length}{filtered.length >= 300 ? "+" : ""} shown</div>
 

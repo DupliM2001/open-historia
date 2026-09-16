@@ -189,12 +189,13 @@ The Games tab's empty state ("No games yet") offers **Start from a scenario** / 
 
 `EditorDrawer` (`libraryBar.jsx:692`) — the fixed right-side form (z 10048, `width: min(34rem, …)`), the primary scenario/game authoring surface. Driven by `editorKind` (`"scenario"`|`"game"`), `editorDetails`, `editorState`, `editorSection`, `promptSectionKey`.
 
-Section tabs (`SectionTabs`): scenarios show `overview | world | prompts | assets | bundles`; games drop `bundles`.
+Section tabs (`SectionTabs`): scenarios show `overview | world | features | prompts | assets | bundles`; games drop `bundles`.
 
 | Section | Fields | Writes via |
 |---|---|---|
 | overview | Name, Eyebrow, Accent (color), Subtitle, Description, Hero Title, Hero Subtitle | `saveScenario`/`saveGame` meta |
 | world | Player Country, Game Date, Language, **Deployable Troop Types** (scenario only, `UNIT_TYPES` toggles), World Before Round One (`startingTimelineText`), Simulation Rules, Country Label Font/Letter Color/Border Color | merged into `world` |
+| features | `FeaturesSectionEditor` (`FeaturesSectionEditor.jsx`): one card per entry of `FEATURE_DEFINITIONS` (`server/gameFeatures.js`) — today Espionage, and Idle diplomacy with its "one attempt every N minutes" setting. A scenario edits its complete configuration (On/Off + settings), the default for every game made from it; a game edits only overrides, each control offering **Scenario default** so an unset field keeps following the scenario, including changes made to the scenario later (`resolveFeatures`). The library resolves the active game's features into `src/runtime/gameFeatures.js` (`useActiveFeatures` for the UI, `isActiveFeatureEnabled` for the simulation): espionage off hides the Spy tab and stops spy reports, intercept refreshes, the turn's espionage resolution and the simulator's spy orders; idle diplomacy's setting sets the per-minute chance of `maybeSendIdleDiplomacy`'s chat half (off keeps only the movement pulse). Scenario and game bundles carry `features`. | `saveScenario`/`saveGame` meta `features` (`readScenarioMeta`/`readGameMeta` normalise it on both stores) |
 | prompts | `PromptSectionEditor`: per-section prompt textareas + helpers from `PROMPT_SECTION_DEFINITIONS` | `serializePromptPack` → `prompts` |
 | assets | Upload/Reset per asset (cover; scenario adds cities/colors/countries/regions) via hidden file inputs | `uploadScenarioAsset`/`clearScenarioAsset` etc. |
 | bundles | **Download .zip** / **Download JSON** (`exportScenarioBundle` + `splitScenarioBundleImage`) | disk download |

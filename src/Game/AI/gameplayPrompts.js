@@ -360,6 +360,13 @@ export const PROMPT_SECTION_DEFINITIONS = [
     label: "Game Master",
     type: "task",
   },
+  {
+    description: "An unprompted note between turns: while the game sits open, whether some polity has a live reason to write to the player, and the small movement of forces that rides on the same call. How often it is asked is the Features tab's idle diplomacy setting.",
+    helpers: [],
+    key: "idleDiplomacy",
+    label: "Idle Diplomacy",
+    type: "task",
+  },
 ];
 
 export const PROMPT_SECTION_BY_KEY = Object.fromEntries(

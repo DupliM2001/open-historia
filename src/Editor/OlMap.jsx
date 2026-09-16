@@ -1473,6 +1473,15 @@ const OlMap = ({
         }
         return ids;
       },
+      // The regions a polity owns, by name, for the Countries panel's list.
+      listOwnerRegions: (ownerKey) => {
+        const key = String(ownerKey || "").trim();
+        if (!key) return [];
+        return regionSource.getFeatures()
+          .filter((f) => String(f.get("owner") || "").trim() === key)
+          .map((f) => ({ id: f.getId(), name: String(f.get("name") || "").trim(), typeId: f.get("typeId") || "land" }))
+          .sort((a, b) => (a.name || String(a.id)).localeCompare(b.name || String(b.id)));
+      },
       queryRegions: (text, limit = 200) => {
         const q = (text || "").trim().toLowerCase();
         const out = [];

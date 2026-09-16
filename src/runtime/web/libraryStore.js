@@ -26,6 +26,7 @@ import {
   GAME_BUNDLE_SCHEMA, ACCEPTED_GAME_BUNDLE_SCHEMAS, GAME_BUNDLE_DATA_KEYS,
   OPTIONAL_GAME_BUNDLE_KEYS, BUILT_IN_SCENARIO_IDS,
 } from "./models.js";
+import { normalizeFeatureOverrides, normalizeFeatureSettings } from "../../../server/gameFeatures.js";
 // Imported, not mirrored: server/ownerMigration.js is pure ESM with no node
 // imports, so Vite bundles it into the web build. One implementation of the
 // resolver rather than two hand-kept copies that drift.
@@ -42,7 +43,7 @@ import {
 
 const SCENARIO_MANIFEST_KEY = "scenario-manifest";
 const GAME_MANIFEST_KEY = "game-manifest";
-const META_KEYS = ["accentColor", "countryNameOverrides", "description", "eyebrow", "heroSubtitle", "heroTitle", "name", "subtitle"];
+const META_KEYS = ["accentColor", "countryNameOverrides", "description", "eyebrow", "features", "heroSubtitle", "heroTitle", "name", "subtitle"];
 
 // --- Record accessors -----------------------------------------------------
 // scenario record: { id, meta, json:{7}, colors?, geojson:{...}, pmtiles:{...}, cover?:{contentType,bytes} }
@@ -123,6 +124,7 @@ const writeScenarioMeta = (record, updates = {}) => {
         : current.coverImageContentType,
     countryNameOverrides: updates.countryNameOverrides && typeof updates.countryNameOverrides === "object"
       ? updates.countryNameOverrides : current.countryNameOverrides,
+      features: updates.features !== undefined ? normalizeFeatureSettings(updates.features) : current.features,
     // Hub provenance survives ONLY when a write explicitly carries it — any
     // other meta write is a local modification, which turns the copy into a
     // fork that must stop offering hub updates (server twin has the same rule).
@@ -145,6 +147,7 @@ const writeGameMeta = (record, updates = {}) => {
       : typeof updates.coverImageContentType === "string" ? readStoredImageContentType(updates.coverImageContentType)
         : current.coverImageContentType,
     scenarioId: String(updates.scenarioId ?? current.scenarioId).trim() || current.scenarioId,
+    features: updates.features !== undefined ? normalizeFeatureOverrides(updates.features) : current.features,
     id: record.id,
     updatedAt: nowIso(),
   };
@@ -767,6 +770,7 @@ const createScenario = async (body = {}) => {
   record.meta = {
     accentColor: trimmed(body.accentColor) || DEFAULT_SCENARIO_META.accentColor,
     coverImageContentType: sourceSummary?.coverImageContentType ?? null,
+    features: normalizeFeatureSettings(body.features ?? sourceSummary?.features),
     countryNameOverrides: body.countryNameOverrides && typeof body.countryNameOverrides === "object" ? body.countryNameOverrides : {},
     createdAt,
     description: trimmed(body.description) || trimmed(body.subtitle) || trimmed(body.name) || DEFAULT_SCENARIO_META.description,
@@ -896,6 +900,7 @@ const createGame = async (body = {}) => {
     name: trimmed(body.name) || `${seedName} Session`,
     scenarioId: scenarioSummary.id,
     coverImageContentType: sourceGameSummary?.coverImageContentType ?? null,
+    features: normalizeFeatureOverrides(body.features ?? sourceGameSummary?.features),
     subtitle: trimmed(body.subtitle) || sourceGameSummary?.subtitle || scenarioSummary.subtitle || DEFAULT_GAME_META.subtitle,
     updatedAt: createdAt,
   };
@@ -1098,7 +1103,7 @@ const exportScenarioBundle = async (id) => {
   }
   return {
     schema: SCENARIO_BUNDLE_SCHEMA, version: SCENARIO_BUNDLE_VERSION, mode: "full", exportedAt: nowIso(),
-    scenario: { accentColor: meta.accentColor, countryNameOverrides: meta.countryNameOverrides, description: meta.description,
+    scenario: { accentColor: meta.accentColor, countryNameOverrides: meta.countryNameOverrides, features: meta.features, description: meta.description,
       eyebrow: meta.eyebrow, heroSubtitle: meta.heroSubtitle, heroTitle: meta.heroTitle, id: meta.id, name: meta.name, subtitle: meta.subtitle },
     data, assets,
   };
@@ -1174,6 +1179,9 @@ const updateScenarioFromBundle = async (scenarioId, bundle) => {
   }
   if (scenario.countryNameOverrides && typeof scenario.countryNameOverrides === "object") {
     metaPatch.countryNameOverrides = scenario.countryNameOverrides;
+  }
+  if (scenario.features && typeof scenario.features === "object") {
+    metaPatch.features = normalizeFeatureSettings(scenario.features);
   }
   writeScenarioMeta(existing, metaPatch);
   await putScenario(existing);
@@ -1399,6 +1407,7 @@ const exportGameBundle = async (id) => {
     exportedAt: nowIso(),
     game: {
       accentColor: game.accentColor,
+      features: game.features,
       // Server twin: the sender's dates travel with the record.
       createdAt: meta.createdAt,
       description: game.description,
@@ -1476,6 +1485,7 @@ const importGameBundle = async (bundle) => {
   const createdAt = trimmed(metaIn.createdAt) || arrivedAt;
   record.meta = {
     accentColor: trimmed(metaIn.accentColor) || DEFAULT_GAME_META.accentColor,
+    features: normalizeFeatureOverrides(metaIn.features),
     createdAt,
     description: trimmed(metaIn.description) || DEFAULT_GAME_META.description,
     eyebrow: trimmed(metaIn.eyebrow) || DEFAULT_GAME_META.eyebrow,

@@ -40,7 +40,7 @@ test("the board task runs AFTER espionage resolves", () => {
   // Espionage produces events partway through the turn. A board call made before
   // it never sees an exposure, so a covert operation can be rolled up in the story
   // while its entry carries on filling. Nothing else fails if this order flips.
-  const espionage = at("const espionage = resolveEspionage(", "resolveEspionage");
+  const espionage = at('const espionage = isActiveFeatureEnabled("espionage")', "resolveEspionage");
   const board = at("if (projects) {", "the projects/board call");
   assert.ok(
     espionage < board,
