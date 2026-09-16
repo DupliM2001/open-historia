@@ -14,7 +14,8 @@ The whole web backend is behind one Vite mode flag. `.env.web` sets `VITE_OH_WEB
 |---|---|---|
 | Gate | `src/main.jsx:28` | `if (import.meta.env.VITE_OH_WEB)` dynamically `import("./runtime/web/index.js")`, calls `installWebBackend()`, then `mount()`s the React app. Non-web builds just `mount()`. |
 | Entry | `src/runtime/web/index.js` | `installWebBackend()` — seed → install interceptor → accounts/sync → home page. |
-| Content fetch | `src/runtime/assets.js:855` | For pmtiles, dynamically imports `web/contentTrust.js` and tries `fetchVerifiedBuffer(url)` (node swarm) before the origin. |
+| Content fetch | `src/runtime/assets.js` (`warmPmtilesArchive`) | For pmtiles, dynamically imports `web/contentTrust.js` and tries `fetchVerifiedBuffer(url)` (node swarm) before the origin; the origin's bytes are then held to the same signed manifest by `verifyOriginBuffer(url, buffer)`. A scenario's own archive skips both. |
+| Worker fetches | `src/runtime/assets.js` (`prepareWorkerFetchableUrl`) | Workers never see the `window.fetch` patch, so the scenario's regions GeoJSON reaches MapLibre's `custom-regions-source` and the cartography worker through a `blob:` copy (`Nations.jsx` via `useWorkerFetchableUrl`); the runtime URL stays the epoch/cache key. |
 
 `installWebBackend()` (`src/runtime/web/index.js`) runs, in order:
 

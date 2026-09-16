@@ -25,6 +25,7 @@ import {
   resolveCountryDisplayName,
 } from "../../runtime/assets.js";
 import { resolveRegionName } from "../../runtime/regionNameFixes.js";
+import { useWorkerFetchableUrl } from "./useWorkerFetchableUrl.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
 import {
   loadCountryLabelCollections,
@@ -607,6 +608,12 @@ const WorldMap = ({ isGlobe = false }) => {
   const countriesUrl = PMTILES_PROTOCOL_URLS.countries;
   const regionsUrl = PMTILES_PROTOCOL_URLS.regions;
   const regionsGeojsonUrl = JSON_URLS.regionsGeojson;
+  // What the MapLibre source and the cartography worker actually fetch: the
+  // runtime URL itself on the desktop, a blob: copy of it on the website
+  // (assets.js, prepareWorkerFetchableUrl), "" while that copy is being staged.
+  // The runtime URL above stays the identity for epochs, catalog keys and
+  // readiness.
+  const regionsGeojsonFetchUrl = useWorkerFetchableUrl(regionsGeojsonUrl);
   const activeGeometryEpoch = String(regionsGeojsonUrl || "custom-regions");
   const activeRegionRenderRepair = regionRenderRepair.geometryEpoch === activeGeometryEpoch
     ? regionRenderRepair
@@ -1513,6 +1520,12 @@ const WorldMap = ({ isGlobe = false }) => {
       clearDerivedCartography({ resetMetadata: true });
     }
 
+    // Website: the worker reads the regions through a blob: copy that is still
+    // being staged, and there is nothing to initialize with until it exists —
+    // an empty URL would publish an empty catalog and open the map on nothing.
+    // The effect runs again when the copy lands (it is a dependency below).
+    if (regionsGeojsonUrl && !regionsGeojsonFetchUrl) return undefined;
+
     // Readiness belongs to THIS worker/geometry epoch. On an ordinary watchdog
     // restart of the same geometry, already-published metadata remains valid; on
     // a geometry switch, readiness must be re-established by catalog-ready.
@@ -1861,7 +1874,7 @@ const WorldMap = ({ isGlobe = false }) => {
     enqueuedBoundaryLabelNamesRef.current = labelNames;
     scheduler.enqueue({
       type: "initialize",
-      regionsUrl: regionsGeojsonUrl,
+      regionsUrl: regionsGeojsonFetchUrl,
       ownershipOverrides,
       regionClaimants: claimants,
       labelNames,
@@ -1881,6 +1894,7 @@ const WorldMap = ({ isGlobe = false }) => {
     boundaryWorkerEpoch,
     clearDerivedCartography,
     customFlag,
+    regionsGeojsonFetchUrl,
     regionsGeojsonUrl,
     releaseAllOwnershipPresentation,
     releaseOwnershipPresentation,
@@ -3136,7 +3150,7 @@ const WorldMap = ({ isGlobe = false }) => {
       <Source
         id="custom-regions-source"
         type="geojson"
-        data={regionsGeojsonUrl}
+        data={regionsGeojsonFetchUrl || EMPTY_FEATURE_COLLECTION}
         promoteId="id"
         tolerance={0.001}
       >

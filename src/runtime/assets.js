@@ -228,6 +228,89 @@ let regionTileIdSetPromiseKey = "";
 let primedCustomRegionCatalog = null;
 let primedCustomRegionCatalogKey = "";
 
+// --- Worker-fetchable runtime URLs -----------------------------------------
+// The website has no server: /api/* is answered on the page by the web router,
+// a window.fetch patch (src/runtime/web/router.js). Workers never see that
+// patch — MapLibre's tile workers and the political-cartography worker fetch
+// with their own global — so a runtime URL handed to either 404s against the
+// static host, and the scenario's regions never render. For those consumers
+// the same bytes are re-served through a blob: URL, which both can reach: a
+// dedicated worker resolves a blob URL its page created, and MapLibre forwards
+// any non-http(s) URL from its workers to the main thread. The runtime URL
+// stays the identity everywhere else (geometry epochs, catalog keys, readiness);
+// only the fetch moves. The desktop keeps the plain URL: a real server answers.
+const workerFetchableUrls = new Map(); // runtime url → { blobUrl, failed, promise }
+const workerFetchableUrlListeners = new Set();
+// A retired copy is revoked after a grace period rather than at once: a worker
+// restarting on the same URL, or a source still loading, may be mid-fetch.
+const WORKER_URL_REVOKE_GRACE_MS = 60_000;
+
+const notifyWorkerFetchableUrls = () => {
+  for (const listener of workerFetchableUrlListeners) listener();
+};
+
+// The store contract for useWorkerFetchableUrl (useSyncExternalStore): the
+// consumer re-reads peekWorkerFetchableUrl whenever a copy lands, fails or is
+// released, so a copy landing between a render and its effects is never missed.
+export const subscribeWorkerFetchableUrls = (listener) => {
+  workerFetchableUrlListeners.add(listener);
+  return () => {
+    workerFetchableUrlListeners.delete(listener);
+  };
+};
+
+// What a worker should fetch for `url`: the URL itself off the web build, the
+// staged blob: copy once it exists, the runtime URL again when staging failed
+// (the worker's own failure handling then applies), null while it is staged.
+export const peekWorkerFetchableUrl = (url) => {
+  if (!import.meta.env.VITE_OH_WEB || !url) return url;
+  const entry = workerFetchableUrls.get(url);
+  if (!entry) return null;
+  if (entry.blobUrl) return entry.blobUrl;
+  return entry.failed ? url : null;
+};
+
+export const prepareWorkerFetchableUrl = async (url) => {
+  if (!import.meta.env.VITE_OH_WEB || !url) return url;
+  const existing = workerFetchableUrls.get(url);
+  if (existing) return existing.blobUrl || existing.promise;
+  const entry = { blobUrl: "", failed: false, promise: null };
+  entry.promise = (async () => {
+    // The page's fetch: the router serves the scenario's bytes from IndexedDB.
+    const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    // Superseded while in flight (the token rotated, or the asset was written):
+    // the store has already dropped this entry and its consumers are on the new
+    // URL, so there is nothing to report and nothing to keep.
+    if (workerFetchableUrls.get(url) !== entry) return null;
+    entry.blobUrl = URL.createObjectURL(blob);
+    notifyWorkerFetchableUrls();
+    return entry.blobUrl;
+  })();
+  entry.promise.catch(() => {
+    // A superseded entry is already gone. A failed one stays, answering with
+    // the runtime URL, rather than being staged again on every render.
+    if (workerFetchableUrls.get(url) !== entry) return;
+    entry.failed = true;
+    notifyWorkerFetchableUrls();
+  });
+  workerFetchableUrls.set(url, entry);
+  return entry.promise;
+};
+
+const releaseWorkerFetchableUrl = (url) => {
+  const entry = workerFetchableUrls.get(url);
+  if (!entry) return;
+  workerFetchableUrls.delete(url);
+  if (entry.blobUrl && typeof URL.revokeObjectURL === "function") {
+    setTimeout(() => URL.revokeObjectURL(entry.blobUrl), WORKER_URL_REVOKE_GRACE_MS);
+  }
+  notifyWorkerFetchableUrls();
+};
+
 // getNationColors and loadCountryNames memoize on the scenario token, which only
 // changes on a scenario/library switch — never on a runtime write. So after the
 // AI (or a cheat) writes new colors or creates a polity mid-game, those caches
@@ -267,6 +350,8 @@ const invalidateDerivedCachesForWrite = (url, { emitEvents = true } = {}) => {
     regionCatalogPromiseKey = "";
     primedCustomRegionCatalog = null;
     primedCustomRegionCatalogKey = "";
+    // The staged copy the workers read (website) holds the pre-write bytes.
+    releaseWorkerFetchableUrl(url);
   }
 };
 let mapRuntimeConfigured = false;
@@ -294,6 +379,8 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
       // Must rotate with the URLs: a stale entry would claim the NEXT
       // generation's geometry had already resolved.
       jsonLoadedUrls.delete(url);
+      // The workers' staged copy (website) belongs to the old generation too.
+      releaseWorkerFetchableUrl(url);
     }
 
     // PMTILES_ARCHIVES rotate too — buildAbsoluteUrl runs the path through
