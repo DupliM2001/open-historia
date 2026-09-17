@@ -13112,13 +13112,15 @@ export const maybeGeneratePregameHistory = async () => {
 // read from the active features: 1/8 by default, the value 1/20 was raised to
 // when a player waited ~20 idle minutes just to CONSULT the model and most
 // consulted rolls still returned null. The jump-path cap (see
-// defaultPrompts.json) remains the primary source of diplomacy; switching idle
-// diplomacy off keeps the movement pulse below.
-// How often the pulse RUNS at all. Higher than the chat chance because the call
-// now also moves the world's forces a little, and the map benefits from breathing
-// more often than the inbox does. Splitting the two off one roll keeps the chat
-// cadence the player already has exactly as it was while still being ONE request.
-const IDLE_PULSE_CHANCE = 1 / 4;
+// defaultPrompts.json) remains the primary source of diplomacy.
+//
+// The pulse runs at THAT cadence and no other. It used to run at least one roll
+// in four, however the feature was set — the same call also moves the world's
+// forces a little, and "the map benefits from breathing more often than the
+// inbox does" — so switching idle diplomacy OFF still left about fifteen model
+// calls an hour. A request is the scarce thing on a free key
+// (requestBudget.js): the forces move when a note is being considered, which is
+// the same one request, and with the feature off the pulse does not run.
 let idleDiplomacyInFlight = false;
 // Narrower than idleDiplomacyInFlight above: true only for the half of a pulse
 // that actually asks whether a polity would send a note (allowChat). A
@@ -13192,19 +13194,19 @@ export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
   if (idleDiplomacyInFlight || isSimulationBusy()) return null;
   // Nobody pressed anything, so this is background AI (requestBudget.js): it
   // spends nothing until the player turns it on, and stops at its daily cap.
-  // This check used to be missing entirely, and the movement half below runs
-  // even with idle diplomacy switched OFF for the game — one roll in four, every
-  // minute the game was visible: about fifteen model calls an hour, each of them
-  // up to four requests with lookups, from a player who was reading the map.
   if (!backgroundAiAllowance().allowed) return null;
+  // One cadence, the feature's own (see the comment above idleDiplomacyInFlight);
+  // zero when idle diplomacy is off for this game, and then nothing runs. An
+  // explicit `chance` is a caller's own roll (the tests, a debug trigger).
   const chatChance = idleDiplomacyChancePerMinute();
-  const pulseChance = chance ?? Math.max(IDLE_PULSE_CHANCE, chatChance);
+  const pulseChance = chance ?? chatChance;
+  if (!(pulseChance > 0)) return null;
   const roll = Math.random();
   if (roll >= pulseChance) return null;
-  // One call, two rates: the chat half runs at the configured cadence (and not
-  // at all when idle diplomacy is off), while the movement half runs on every
-  // pulse.
-  const allowChat = chatChance > 0 && roll < Math.min(pulseChance, chatChance);
+  // One call, both halves: whether a polity would write, and whether any forces
+  // would visibly move. A caller's own roll does not switch on notes the game has
+  // switched off.
+  const allowChat = chatChance > 0;
   idleDiplomacyInFlight = true;
   setChatGenerationInFlight(allowChat);
   try {
