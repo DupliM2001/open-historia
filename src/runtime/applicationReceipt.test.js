@@ -104,6 +104,21 @@ test("only the first sentence of a strict complaint is carried forward", () => {
   assert.ok(firstComplaintLine("y".repeat(900)).length <= 220);
 });
 
+test("an abbreviation is not the end of a sentence", () => {
+  // From the first live run: the reluctance guard's complaint was cut at "(e.g."
+  // and the note that reached the next turn said nothing at all.
+  const guard = 'Your events describe a wartime capture/occupation/control change (e.g. "Separatists seize Sloviansk") '
+    + "but the payload contains ZERO impacts.regionControlOps. Either add the matching control operations or rewrite the event.";
+  assert.equal(
+    firstComplaintLine(guard, 400),
+    'Your events describe a wartime capture/occupation/control change (e.g. "Separatists seize Sloviansk") but the payload contains ZERO impacts.regionControlOps.',
+  );
+  assert.equal(
+    firstComplaintLine("Use regionId vs. regionName consistently across the whole payload, please. Then resend."),
+    "Use regionId vs. regionName consistently across the whole payload, please.",
+  );
+});
+
 test("a receipt survives the save round trip bounded, and older turns keep only their counts", () => {
   const receipt = createApplicationReceipt();
   noteReceipt(receipt, "dropped", "fact one");

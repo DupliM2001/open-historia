@@ -164,10 +164,15 @@ export const tallyAppliedEvents = (receipt, events) => {
 // The first sentence of a strict-attempt complaint. The full text can run to a
 // 200-region vocabulary list that was already spent on the in-turn retry; next
 // turn only needs to know what kind of mistake it was.
+//
+// A sentence ends at . ! or ? followed by a space and then a capital or an opening
+// bracket. The capital matters: the validators write "(e.g. "Fall of Kassala")"
+// and "regionId vs. regionName", and a first live run cut a complaint off at
+// "(e.g." — a note that says nothing.
 export const firstComplaintLine = (text, max = 220) => {
   const value = clean(text);
   if (!value) return "";
-  const stop = value.search(/(?<=[.!?])\s/);
+  const stop = value.search(/(?<=[.!?])\s+(?=[A-Z[])/);
   return clip(stop > 40 ? value.slice(0, stop) : value, max);
 };
 
