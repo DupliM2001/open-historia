@@ -11,6 +11,7 @@ import {
     updateEntry,
 } from "./providerConfig.js";
 import { formatResetTime, runWithFallback } from "./fallbackRunner.js";
+import { BACKGROUND_REQUEST, PLAYER_REQUEST, requestLedger } from "./requestBudget.js";
 import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
@@ -837,6 +838,7 @@ async function callGemini(systemPrompt, history, {
     maxTokens = 8192,
     onActivity,
     onChunk,
+    onRequest,
     onUsage,
     rateLimitPolicy = "wait",
     retries = 3,
@@ -924,6 +926,7 @@ async function callGemini(systemPrompt, history, {
                 }),
                 signal,
             });
+            onRequest?.(response.status);
             if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
                 await retryOrFail(response, pass, OVERLOADED_RETRY_DELAY);
                 continue;
@@ -997,6 +1000,9 @@ async function callGemini(systemPrompt, history, {
             }),
             signal,
         });
+        // Every response is one request against the player's allowance, whatever
+        // became of it (requestBudget.js): a lookup round, a retry, a refusal.
+        onRequest?.(response.status);
 
         // A 429 used to be fatal here while every other provider retried it, so
         // one per-minute trip on a free-tier key destroyed the turn and dropped
@@ -1087,6 +1093,7 @@ async function callOpenAIStyleChatCompletions({
     tool,
     onActivity,
     onChunk,
+    onRequest,
     onUsage,
     allowJsonSchemaFallback = false,
     configuredStructuredMode = "auto",
@@ -1239,6 +1246,7 @@ async function callOpenAIStyleChatCompletions({
                 } : {}),
             },
         });
+        onRequest?.(response.status);
 
         // One read of the body serves every concession below — a Response can only
         // be read once, and the streaming retry has to look at the message before
@@ -1606,6 +1614,7 @@ async function callAnthropic(systemPrompt, history, {
     maxTokens,
     onActivity,
     onChunk,
+    onRequest,
     onUsage,
     rateLimitPolicy = "wait",
     retries = 3,
@@ -1699,6 +1708,7 @@ async function callAnthropic(systemPrompt, history, {
             body: JSON.stringify(body),
             signal,
         });
+        onRequest?.(response.status);
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
             await retryOrFailByStatus(response, {
@@ -1818,6 +1828,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
     maxTokens,
     onActivity,
     onChunk,
+    onRequest,
     onUsage,
     rateLimitPolicy = "wait",
     retries = 3,
@@ -1931,6 +1942,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
             } : {}),
         };
         const response = await providerFetch(`${endpoint}/messages`, { headers, payload: body, signal });
+        onRequest?.(response.status);
 
         if (RETRYABLE_HTTP_STATUSES.has(response.status)) {
             await retryOrFailByStatus(response, {
@@ -2237,7 +2249,14 @@ export async function callAI(systemPrompt, history, opts = {}) {
     // are ours too, and stripped for the same reason.
     // `lookups` is ours as well: the loop above runs it, the providers only
     // ever see the per-round `lookupTools` / `requireOutputTool` it derives.
-    const { languageMode = "ui", logLabel = "", __debug: debugMeta = null, __debugSink: debugSink = null, lookups = null, ...providerOpts } = opts;
+    // `requestKind` says whether the player asked for this call or the game made
+    // it in the background, and `onRequest` lets the caller count along (a time
+    // skip reports what it cost): both are for the request budget below.
+    const {
+        languageMode = "ui", logLabel = "", __debug: debugMeta = null, __debugSink: debugSink = null, lookups = null,
+        requestKind = PLAYER_REQUEST, onRequest: observeRequest = null,
+        ...providerOpts
+    } = opts;
     const directive = languageMode === "none" ? ""
         : languageMode === "chat" ? chatLanguageDirective()
         : languageDirective();
@@ -2288,6 +2307,23 @@ export async function callAI(systemPrompt, history, opts = {}) {
     // The timer wraps the caller's own onActivity (runJsonTask passes the idle
     // watchdog's note()), so it observes the first chunk without displacing it.
     const timer = createFirstByteTimer(providerOpts.onActivity);
+    // The request budget (requestBudget.js): every response any provider path
+    // gets is one request against the player's daily allowance, so it is counted
+    // HERE, under the lookup rounds, the retries and the Fallback list, rather
+    // than per call — one callAI can be many requests. The ledger must never
+    // cost a call its answer.
+    const noteRequest = (status) => {
+        try {
+            requestLedger.note({
+                status,
+                kind: requestKind === BACKGROUND_REQUEST ? BACKGROUND_REQUEST : PLAYER_REQUEST,
+                taskKey: debugMeta?.taskKey ?? providerOpts.taskKey ?? (logLabel || "direct"),
+            });
+            observeRequest?.(status);
+        } catch (error) {
+            console.warn("[ai] the request count could not be updated; continuing.", error);
+        }
+    };
     // Summed across the rounds of a lookup conversation (each round is a
     // whole request); the latest round's own figure is what a lookup round
     // is recorded with.
@@ -2318,6 +2354,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
                     canFallBack,
                     rateLimitPolicy: getRateLimitPolicy(),
                     onActivity: timer.note,
+                    onRequest: noteRequest,
                     onUsage: (data) => {
                         const reported = normalizeUsage(data);
                         if (!reported) return;
