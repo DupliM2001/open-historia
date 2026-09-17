@@ -227,7 +227,8 @@ import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
 import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
+import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
+import { buildWorldDirectionDirective, worldShareShortfall } from "./worldDirection.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 import {
   NO_RESPONSE_BODY_NOTE,
@@ -975,7 +976,7 @@ const selectBreadthRepairContext = (state, context) => {
     originDate,
     targetDate,
     horizonDays: safeDays,
-    eventCeiling: segmentEventRange(safeDays, plannedActionCount)[1],
+    eventCeiling: segmentEventRange(safeDays, plannedActionCount, { pace: getActiveWorldDirection()?.eventPace })[1],
     generationSource: normalizeString(state.generation?.source) || "ai",
   };
 };
@@ -2151,6 +2152,18 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   // so it stands next to the output contract rather than under the campaign.
   if (Array.isArray(lookups?.tools) && lookups.tools.length) {
     systemPrompt = `${systemPrompt}\n\n${LOOKUP_DIRECTIVE}`;
+  }
+
+  // The scenario author's direction (worldDirection.js), and LAST of all: the end
+  // of a long prompt is what a model follows best, and the priority rules are
+  // meant to outrank everything above them. By default it is one paragraph, the
+  // world's share; with world direction switched off it is nothing, and the
+  // prompt is what it always was.
+  if (["jumpForward", "autoJumpForward"].includes(taskKey)) {
+    const directionDirective = buildWorldDirectionDirective(getActiveWorldDirection(), {
+      playerPolity: normalizeString(variables?.playerPolity),
+    });
+    if (directionDirective) systemPrompt = `${systemPrompt}\n\n${directionDirective}`;
   }
 
   return { prompts, promptTemplate, staticPromptPrefix, systemPrompt };
@@ -10115,9 +10128,12 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       const segmentTarget = isFinalSegment
         ? targetDate
         : (addIsoDays(state.segmentOrigin, spanDays) || targetDate);
+      // The scenario author's settings (worldDirection.js): the pace scales what
+      // the period is asked for here, and the world's share is counted below.
+      const direction = getActiveWorldDirection();
       const [minEvents, maxEvents] = segmentCount > 1
-        ? segmentEventRange(spanDays, plannedActionShare)
-        : segmentEventRange(safeDays, plannedActionCount);
+        ? segmentEventRange(spanDays, plannedActionShare, { pace: direction?.eventPace })
+        : segmentEventRange(safeDays, plannedActionCount, { pace: direction?.eventPace });
       // targetDate reaches only these two variables (promptContext.js), so the
       // expensive context — region catalog, city seed, territory index — is built
       // once for the whole jump and only the dates move per segment.
@@ -10225,6 +10241,15 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
                   : "Fewer, weightier events serve a period better than a long list of small ones."),
             );
           }
+          // The world's share, a scenario author's setting the engine counts
+          // (worldDirection.js). Never a rejection, on any attempt: a lopsided
+          // period is still a period, asking again is a whole second request, and
+          // the simulator is told at the top of its next turn.
+          const playerName = normalizeString(bundle.game.country);
+          const shareShortfall = worldShareShortfall(candidate?.events, direction?.worldShare, {
+            playerNames: [...new Set([playerName, toCountryName(playerName)].map(normalizeString).filter(Boolean))],
+          });
+          if (shareShortfall) noteReceipt(draft, "short", shareShortfall.text);
           // Each segment is checked against ITS OWN span, so an event dated outside
           // the segment is caught while the model can still fix it rather than at the
           // end of the whole round.

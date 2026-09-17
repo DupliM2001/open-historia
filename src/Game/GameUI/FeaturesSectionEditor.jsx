@@ -78,6 +78,46 @@ const FeaturesSectionEditor = ({ kind, features, scenarioFeatures, onChange, sty
                   {definition.settings.map((setting) => {
                     const overridden = isGame && override[setting.key] !== undefined;
                     const value = isGame ? (override[setting.key] ?? "") : effective[definition.key][setting.key];
+                    // A text setting (the director's priority rules). A game's
+                    // blank follows the scenario, exactly as a blank number does.
+                    if (setting.type === "text") {
+                      const scenarioText = String(base[definition.key][setting.key] ?? "");
+                      // Shown as TYPED, not as normalized: the normalizer trims, and
+                      // a field that trims on every keystroke cannot hold the space
+                      // between two words. The store trims when it saves.
+                      const typed = features?.[definition.key]?.[setting.key];
+                      const shown = typeof typed === "string" ? typed : value;
+                      return (
+                        <div key={setting.key}>
+                          <label style={styles.fieldLabelStyle}>{setting.label}</label>
+                          <textarea
+                            data-no-translate
+                            rows={setting.rows || 4}
+                            maxLength={setting.maxLength || 2000}
+                            style={{ ...styles.inputStyle, fontFamily: "inherit", lineHeight: 1.45, minHeight: "5rem", resize: "vertical", width: "100%" }}
+                            value={shown}
+                            placeholder={isGame ? (scenarioText || "Following the scenario, which sets none") : ""}
+                            onChange={(event) => {
+                              const raw = event.target.value;
+                              setFeature(definition.key, { [setting.key]: isGame && raw.trim() === "" ? undefined : raw });
+                            }}
+                          />
+                          {isGame && (
+                            <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.3rem" }}>
+                              <span style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.74rem" }}>
+                                {overridden ? "This game's own rules replace the scenario's." : "Following the scenario"}
+                              </span>
+                              {overridden && (
+                                <button type="button" style={{ ...choice(false), minHeight: "1.7rem", padding: "0 0.55rem" }} onClick={() => setFeature(definition.key, { [setting.key]: undefined })}>
+                                  Use scenario default
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.72rem", marginTop: "0.3rem" }}>{setting.description}</div>
+                        </div>
+                      );
+                    }
                     return (
                       <div key={setting.key}>
                         <label style={styles.fieldLabelStyle}>{setting.label}</label>

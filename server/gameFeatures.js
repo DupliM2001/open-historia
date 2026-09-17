@@ -33,6 +33,47 @@ export const FEATURE_DEFINITIONS = Object.freeze([
       }),
     ]),
   }),
+  // The director: what a scenario's author decides about HOW the world is run,
+  // as numbers the engine reads and enforces rather than prose the model may or
+  // may not follow (src/Game/AI/worldDirection.js). None of it costs a request:
+  // each setting shapes the one request a time skip already makes, and what the
+  // model gets wrong is told to it in the next turn's receipt.
+  Object.freeze({
+    key: "worldDirection",
+    label: "World direction",
+    description: "How the world is run in this scenario: how eventful a period is, how much of it belongs to the rest of the world rather than the player, and rules that outrank everything else the simulator is told. Off: the built-in pace, the built-in one-third floor in the simulator's guidance (unchecked), and no priority rules.",
+    settings: Object.freeze([
+      Object.freeze({
+        key: "eventPace",
+        label: "Pace",
+        unit: "% of the usual number of events",
+        min: 40,
+        max: 250,
+        step: 5,
+        defaultValue: 100,
+        description: "How many events a time skip writes. 100 is the built-in count (a month is 5 to 7). Lower for a slow, weighty chronicle; higher for a crowded world. It scales what the simulator is asked for and what it is checked against.",
+      }),
+      Object.freeze({
+        key: "worldShare",
+        label: "The world's share",
+        unit: "% of events, at least, that are not about the player",
+        min: 0,
+        max: 80,
+        step: 5,
+        defaultValue: 35,
+        description: "The least part of a period that must belong to powers other than the player's. The engine counts it on every skip; a skip that falls short is kept, and the simulator is told at the top of its next turn. 0 turns the count off.",
+      }),
+      Object.freeze({
+        key: "priorityRules",
+        type: "text",
+        label: "Priority rules",
+        maxLength: 2400,
+        rows: 6,
+        defaultValue: "",
+        description: "Rules for this scenario that outrank every default the simulator is given, written last in its instructions and marked as such. Keep them few and absolute: \"No power may field nuclear weapons before 1945.\" \"The Ottoman Empire cannot collapse before 1918.\"",
+      }),
+    ]),
+  }),
 ]);
 
 export const FEATURE_KEYS = Object.freeze(FEATURE_DEFINITIONS.map((definition) => definition.key));
@@ -50,7 +91,14 @@ const readBoolean = (value) => {
   return null;
 };
 
+// A setting is a number unless it says `type: "text"`. Blank text is "not set":
+// a scenario's blank is its default, and a game's blank follows the scenario.
 const readSetting = (value, setting) => {
+  if (setting.type === "text") {
+    if (typeof value !== "string") return null;
+    const text = value.replace(/\r\n/g, "\n").trim().slice(0, setting.maxLength || 2000);
+    return text || null;
+  }
   if (value === "" || value === null || value === undefined) return null;
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
@@ -113,6 +161,19 @@ export const resolveFeatures = (scenarioFeatures, gameFeatures) => {
 };
 
 export const isFeatureEnabled = (features, key) => features?.[key]?.enabled !== false;
+
+// The director's settings as the engine reads them: null when world direction is
+// off for this game, so every caller's "nothing to enforce" is one check.
+export const worldDirectionOf = (features) => {
+  const direction = features?.worldDirection;
+  if (!direction || direction.enabled === false) return null;
+  const percent = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+  return {
+    eventPace: percent(direction.eventPace, 100),
+    worldShare: percent(direction.worldShare, 35),
+    priorityRules: typeof direction.priorityRules === "string" ? direction.priorityRules.trim() : "",
+  };
+};
 
 // Idle diplomacy rolls once a minute while the game is on screen; an average
 // interval of N minutes is a chance of 1/N per roll. 0 when the feature is off.
