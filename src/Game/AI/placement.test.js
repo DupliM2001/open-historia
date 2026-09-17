@@ -132,6 +132,9 @@ test("each form of words is read as what it says", () => {
     const kinds = (phrase) => readPlacement(phrase).map((reading) => reading.kind);
     assert.ok(kinds("near Midburg").includes("near"));
     assert.ok(kinds("just outside Midburg").includes("near"));
+    // An objective is a destination beside the place; the move's travel clamp does the rest.
+    assert.ok(kinds("toward Midburg").includes("near"));
+    assert.ok(kinds("advancing on Midburg").includes("near"));
     assert.deepEqual(readPlacement("north-west of Midburg").find((r) => r.kind === "direction"), { kind: "direction", direction: "northwest", name: "Midburg" });
     assert.deepEqual(readPlacement("eastern Westmark").find((r) => r.kind === "part"), { kind: "part", direction: "east", name: "Westmark" });
     assert.deepEqual(readPlacement("Westmark South, north").find((r) => r.kind === "part"), { kind: "part", direction: "north", name: "Westmark South" });

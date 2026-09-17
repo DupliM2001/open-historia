@@ -256,6 +256,11 @@ export const readPlacement = (phrase) => {
     if ((match = text.match(/^(?:near|nearby|close to|outside|just outside|beside|by|around|outskirts of|the outskirts of|on the outskirts of|in the vicinity of|vicinity of|approaches to|the approaches to) (.+)$/i))) {
         add({ kind: "near", name: stripArticle(match[1]) });
     }
+    // "toward Kharkiv", "against Kharkiv", "advancing on Kharkiv": an objective. The
+    // destination is beside the place; a move gets there as far as its days allow.
+    if ((match = text.match(/^(?:toward|towards|against|targeting|target|onto|on to|advancing on|advance on|marching on|attacking|to attack|to take) (.+)$/i))) {
+        add({ kind: "near", name: stripArticle(match[1]) });
+    }
     if ((match = text.match(/^(?:at|in|inside|within|on|into|to) (.+)$/i))) add({ kind: "place", name: stripArticle(match[1]) });
     // Where the words could be grammar, the whole phrase is a name only as the
     // map spells it; a phrase that can be nothing else may be matched loosely.
@@ -490,7 +495,7 @@ export const PLACEMENT_DIRECTIVE = [
     "[Placing Things — say WHERE in words]",
     "Every unit you spawn or move and every structure you build can be placed with `at`: a phrase naming places the map knows. The engine finds the exact point, keeps it inside the right borders, and moves it clear of anything already standing there. Prefer `at` to coordinates: a guessed longitude puts an army in the sea.",
     "- \"Kharkiv\" — a city, a region, an existing structure or unit, exactly as the map spells it.",
-    "- \"near Kharkiv\" — beside it. \"east of Kharkiv\" — a short way off in that direction.",
+    "- \"near Kharkiv\" — beside it. \"east of Kharkiv\" — a short way off in that direction. \"toward Kharkiv\" — a move's objective; it gets as far as the days allow.",
     "- \"eastern Ukraine\", \"Donetsk Oblast, north\" — that part of a country or region.",
     "- \"Donetsk Oblast facing Russia\" — the side of one place nearest another: a front, a border garrison.",
     "- \"coast of Crimea\" — on land at the sea's edge. \"off Sevastopol\" — AT SEA, for fleets.",
