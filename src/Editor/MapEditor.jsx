@@ -9,7 +9,7 @@
 // wired to the document state hook. Kept isolated from the game (its own React
 // tree, its own map instance) so it can't disturb the game's MapLibre map.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import "ol/ol.css";
 import OlMap from "./OlMap.jsx";
 import Toolbar from "./Toolbar.jsx";
@@ -27,6 +27,16 @@ import ReferencePanel from "./ReferencePanel.jsx";
 import FeatureManager from "./FeatureManager.jsx";
 import UnitsPanel from "./UnitsPanel.jsx";
 import UnitPopup from "./UnitPopup.jsx";
+import ClipboardPanel from "./ClipboardPanel.jsx";
+import {
+  buildClipboardPayload,
+  clearRegionClipboard,
+  getRegionClipboard,
+  planClipboardMerge,
+  readRegionClipboard,
+  subscribeRegionClipboard,
+  writeRegionClipboard,
+} from "./regionClipboard.js";
 import SelectionInspector from "./SelectionInspector.jsx";
 import DocumentsMenu from "./DocumentsMenu.jsx";
 import CityPopup from "./CityPopup.jsx";
@@ -120,6 +130,60 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
   const [fmgOpen, setFmgOpen] = useState(false); // FMG "Generate" drawer
   const [fmgBusy, setFmgBusy] = useState(false);
   const [fmgLog, setFmgLog] = useState([]);
+
+  // ---- the region clipboard: pieces of one map pasted into another ----------
+  // The clipboard lives in regionClipboard.js (IndexedDB behind a module
+  // store), so it outlives this editor: copy on one map, paste on the next.
+  const clipboard = useSyncExternalStore(subscribeRegionClipboard, getRegionClipboard, () => null);
+  useEffect(() => {
+    readRegionClipboard();
+  }, []);
+  const clipboardCount = clipboard?.regions?.features?.length ?? 0;
+  const [clipboardResult, setClipboardResult] = useState(null);
+  const copySelectionToClipboard = (ids = d.selection) => {
+    if (!api || !ids?.length) return false;
+    const regions = api.exportRegions(ids);
+    if (!regions.features.length) return false;
+    writeRegionClipboard(buildClipboardPayload({ regions, doc: d.doc, colors: d.colors, sourceName: d.name, sourceId: d.doc.id }));
+    setClipboardResult({ kind: "copied", count: regions.features.length });
+    return true;
+  };
+  const pasteClipboard = () => {
+    if (!api || !clipboard) return false;
+    // The document's side first (countries, colours, flags, tags, types this
+    // map lacks), then the map's: OlMap carves and adds, one undo step.
+    const plan = planClipboardMerge(clipboard, { polities: d.polities, colors: d.colors, flags: d.flags, tags: d.tags, types: d.types });
+    if (plan.types.length) d.setTypes((list) => [...list, ...plan.types]);
+    for (const [key, record] of Object.entries(plan.upserts)) d.upsertPolity(key, record);
+    for (const [key, rgb] of Object.entries(plan.colorOverrides)) d.setColorOverride(key, rgb);
+    for (const [key, flag] of Object.entries(plan.flags)) d.setFlag(key, flag);
+    for (const [key, list] of Object.entries(plan.tags)) d.setTags(key, list);
+    const result = api.pasteRegions(clipboard.regions);
+    if (result.added.length) {
+      d.setSaveStatus("dirty");
+      api.zoomToSelection(result.added);
+    }
+    setClipboardResult({ kind: "pasted", ...result });
+    return result.added.length > 0;
+  };
+  const clipboardKeysRef = useRef({ copy: copySelectionToClipboard, paste: pasteClipboard });
+  clipboardKeysRef.current = { copy: copySelectionToClipboard, paste: pasteClipboard };
+  useEffect(() => {
+    // Ctrl/Cmd+C copies the selected regions, Ctrl/Cmd+V pastes — unless the
+    // author is typing in a field or has text selected, which stay the browser's.
+    const onKeyDown = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== "c" && key !== "v") return;
+      const active = document.activeElement;
+      if (active && (/^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName) || active.isContentEditable)) return;
+      if (key === "c" && String(window.getSelection?.()?.toString() || "").length) return;
+      const acted = key === "c" ? clipboardKeysRef.current.copy() : clipboardKeysRef.current.paste();
+      if (acted) e.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const togglePanel = (name) => setOpenPanel((cur) => (cur === name ? null : name));
 
@@ -996,6 +1060,21 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
         />
       )}
 
+      {openPanel === "clipboard" && (
+        <ClipboardPanel
+          clipboard={clipboard}
+          selectionCount={d.selection.length}
+          result={clipboardResult}
+          onCopySelection={() => copySelectionToClipboard()}
+          onPaste={pasteClipboard}
+          onClear={() => {
+            clearRegionClipboard();
+            setClipboardResult(null);
+          }}
+          onClose={() => setOpenPanel(null)}
+        />
+      )}
+
       <SelectionInspector
         api={api}
         selection={d.selection}
@@ -1013,6 +1092,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
         upsertPolity={d.upsertPolity}
         regionEpoch={regionEpoch}
         onOpenPolities={() => setOpenPanel("polities")}
+        onCopyToClipboard={(ids) => copySelectionToClipboard(ids)}
       />
 
       {cityPopup && (
@@ -1051,6 +1131,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
       <BottomBar
         counts={d.counts}
         polityCount={polityCount}
+        clipboardCount={clipboardCount}
         basemap={d.basemap}
         hasCustomBackground={Boolean(customBg)}
         onOpenBasemaps={() => setBasemapPickerOpen(true)}

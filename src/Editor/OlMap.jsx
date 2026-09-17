@@ -1550,6 +1550,144 @@ const OlMap = ({
           });
         }
       },
+      // ---- the region clipboard (regionClipboard.js) -----------------------
+      // The selected regions as GeoJSON, ids in the properties like a saved
+      // map, so another map can paste them.
+      exportRegions: (ids) => {
+        const feats = (ids || []).map((id) => regionSource.getFeatureById(id)).filter(Boolean);
+        const fc = new GeoJSON().writeFeaturesObject(feats, {
+          dataProjection: "EPSG:4326",
+          featureProjection: "EPSG:3857",
+          decimals: 5,
+        });
+        for (const f of fc.features || []) {
+          if (f.id != null) f.properties = { ...(f.properties || {}), id: String(f.id) };
+        }
+        return fc;
+      },
+      // Paste regions copied from another map (or this one). Each pasted region
+      // takes its land OUT of whatever already covers it, exactly as the Draw
+      // tool does: a region beneath keeps what is not covered (a bite, or a
+      // hole), one covered entirely is removed. A pasted region keeps its id
+      // when this map has no region by that id (a stock-world id keeps its tile
+      // linkage), otherwise it gets a fresh one; it is always marked edited,
+      // since its shape is this map's own now whatever tiles it came from. The
+      // whole paste is one undo step.
+      pasteRegions: (fc, { select = true } = {}) => {
+        const incoming = fc && Array.isArray(fc.features)
+          ? new GeoJSON().readFeatures(fc, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })
+          : [];
+        const pasted = incoming.filter((f) => /Polygon$/.test(f.getGeometry()?.getType() || ""));
+        if (!pasted.length) return { added: [], trimmed: 0, removed: 0 };
+
+        // Carve first, against the map as it is; the pasted regions join the
+        // source afterwards, so they never cut each other. A region beneath
+        // several pasted ones is cut once per overlap and restored once on undo.
+        // A remainder thinner than a couple of metres end to end (2A/P) is
+        // rounding, not territory — both maps were saved at five decimals — so it
+        // counts as covered entirely rather than survive as a hairline ghost.
+        const hairline = (geom) => {
+          const polys = geom.getType() === "Polygon" ? [geom.getCoordinates()] : geom.getCoordinates();
+          let perimeter = 0;
+          for (const poly of polys) {
+            for (const ring of poly) {
+              for (let i = 1; i < ring.length; i += 1) {
+                perimeter += Math.hypot(ring[i][0] - ring[i - 1][0], ring[i][1] - ring[i - 1][1]);
+              }
+            }
+          }
+          return perimeter === 0 || (2 * geom.getArea()) / perimeter < 2;
+        };
+        const carved = new globalThis.Map();
+        for (const f of pasted) {
+          const cutter = f.getGeometry();
+          const candidates = [];
+          // A truthy return stops OpenLayers' extent walk, and push() returns the
+          // new length — so the block body, or each paste cuts one neighbour only.
+          regionSource.forEachFeatureIntersectingExtent(cutter.getExtent(), (other) => {
+            candidates.push(other);
+          });
+          for (const other of candidates) {
+            const geom = other.getGeometry();
+            if (!geom || !overlaps(geom, cutter)) continue;
+            const entry = carved.get(other) || {
+              feature: other,
+              before: geom.clone(),
+              after: null,
+              removed: false,
+              edited: other.get("edited"),
+            };
+            const after = subtractFrom(geom, cutter);
+            if (!after || hairline(after)) {
+              regionSource.removeFeature(other);
+              entry.after = null;
+              entry.removed = true;
+            } else {
+              other.setGeometry(after);
+              other.set("edited", true);
+              entry.after = after.clone();
+              entry.removed = false;
+            }
+            carved.set(other, entry);
+          }
+        }
+
+        const taken = new Set(regionSource.getFeatures().map((f) => String(f.getId())));
+        const added = [];
+        for (const f of pasted) {
+          const wanted = f.getId() != null ? String(f.getId()) : f.get("id") != null ? String(f.get("id")) : null;
+          let id = wanted && !taken.has(wanted) ? wanted : newId();
+          while (taken.has(id)) id = newId();
+          taken.add(id);
+          f.setId(id);
+          f.set("id", id);
+          if (f.get("typeId") == null) f.set("typeId", defaultTypeIdRef.current || "land");
+          if (f.get("owner") === undefined) f.set("owner", null);
+          if (!f.get("name")) f.set("name", "Region");
+          f.set("edited", true);
+          regionSource.addFeature(f);
+          added.push(f);
+        }
+
+        const entries = [...carved.values()];
+        const restore = (entry) => {
+          entry.feature.setGeometry(entry.before.clone());
+          if (entry.edited) entry.feature.set("edited", entry.edited);
+          else entry.feature.unset("edited");
+          if (entry.removed) regionSource.addFeature(entry.feature);
+        };
+        const reapply = (entry) => {
+          if (entry.removed) {
+            regionSource.removeFeature(entry.feature);
+          } else {
+            entry.feature.setGeometry(entry.after.clone());
+            entry.feature.set("edited", true);
+          }
+        };
+        regionLayer.changed();
+        labelLayer.changed();
+        if (select) onSelectionRef.current?.(added.map((f) => f.getId()));
+        notifyRegions();
+        pushCmd({
+          undo: () => {
+            added.forEach((f) => regionSource.removeFeature(f));
+            entries.forEach(restore);
+            regionLayer.changed();
+            labelLayer.changed();
+          },
+          redo: () => {
+            entries.forEach(reapply);
+            added.forEach((f) => regionSource.addFeature(f));
+            regionLayer.changed();
+            labelLayer.changed();
+          },
+        });
+        return {
+          added: added.map((f) => f.getId()),
+          trimmed: entries.filter((entry) => !entry.removed).length,
+          removed: entries.filter((entry) => entry.removed).length,
+        };
+      },
       getRegionSummary: (id) => {
         const f = regionSource.getFeatureById(id);
         return f ? summarize(f) : null;

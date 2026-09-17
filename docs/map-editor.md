@@ -154,6 +154,8 @@ This is the surface every panel drives. Each mutating call pushes an undo/redo c
 | `deleteRegions(ids)` | Remove regions. |
 | `mergeRegions(ids)` | Union ≥2 regions into the first; others removed. Uses `unionGeoms` (`geometry.js`). |
 | `copyRegions(ids)` | Duplicate with a view-scaled offset; new ids, `" copy"` name, carries typeId/owner/gid0/claimants. |
+| `exportRegions(ids)` | The regions as a GeoJSON FC (EPSG:4326, 5 decimals, ids in the properties) for the region clipboard (§9c). |
+| `pasteRegions(fc)` | Adds regions copied from another map, carving each one's land out of whatever already covers it (`overlaps` + `subtractFrom`, the Draw tool's rule: a bite, a hole, or the region beneath removed, survivors marked `edited`). A pasted region keeps its id when the target has none by that id, else gets a fresh `reg_` id, and is always marked `edited`. Selects the pasted regions; returns `{ added, trimmed, removed }`; one undo step. |
 | `getRegionSummary(id)` | `{ id, name, owner, typeId, country, claimants }`. |
 | `listOwners()` | Sorted unique owner names — backs the Country field's suggestions so re-owning offers existing names (avoids near-miss forks). |
 | `queryRegions(text, limit=200)` | Search id/name/owner. |
@@ -211,7 +213,7 @@ Shown whenever ≥1 region is selected. Writes go straight through `api.setRegio
 | **Flag** | opens `FlagPicker` via `onOpenFlagPicker(owner)` | Renders current flag thumbnail. |
 | **Tags** | `setTags(owner, next)` | `TagField` with `TAG_SUGGESTIONS`; free vocabulary. |
 
-Footer buttons: **Clear country** (`owner:null`), **Merge** (≥2), **Copy**, **Zoom**, **Delete**.
+Footer buttons: **Clear country** (`owner:null`), **Merge** (≥2), **Duplicate** (`copyRegions`, a copy beside the original on this map), **Copy to clipboard** (§9c), **Zoom**, **Delete**.
 
 Note the owner/colour/flag/tag edits are keyed to the *country name*, so editing one region's colour recolours the whole country everywhere.
 
@@ -266,6 +268,14 @@ Prominence tier (`exportPreset.js:100`, `cityTier`): `capital`→4, ≥1M→3, �
 `doc.units` holds the formations that stand on the map at round one. Place one with the **Unit tool** (click the map: the unit belongs to the region's owner, and `UnitPopup` opens at the click for name, type — `UNIT_TYPES` from `src/runtime/gameState.js` — strength 1..100, owner, composition and note; click an existing unit to edit it; the Delete tool removes one). The **Units** chip opens `UnitsPanel`: a searchable list with locate / edit / delete per unit, **Remove all**, and a toggle for the tool. Units draw on their own layer (`unitLayer`, z 31: a diamond in the owner's colour with a type glyph).
 
 Export (`buildUnitsForGame`, `exportPreset.js`) writes them as `world.units` with `source: "scenario"` and `status: "idle"`; the scenario's `world.json` gets them on Save (`applyMapToScenario`), the editor reads them back on open (`mapEditorSeed.units`), and every new game starts with them — `"units"` is in `TEMPLATE_WORLD_OVERRIDE_KEYS` (server and web stores), so a game made from a scenario that has been played still gets the authored formations rather than the played-out ones.
+
+---
+
+## 9c. Combining maps: the region clipboard (`regionClipboard.js`, `ClipboardPanel.jsx`)
+
+Pieces of one map can be pasted into another. **Copy to clipboard** in the selection panel (or Ctrl/⌘+C with regions selected and no text selected) calls `api.exportRegions(ids)` and stores, through `buildClipboardPayload`, the regions as GeoJSON plus everything they need elsewhere: for every country they name as owner or claimant, the source document's registry record, effective colour, flag and tags, and the region types they use. The clipboard is one slot in IndexedDB (`oh-workshop` / `clipboard`), mirrored in a module store the editor reads with `useSyncExternalStore`, so it survives closing the Workshop and switching scenarios: open the built-in map, copy a country, open your own scenario's map, paste.
+
+**Paste into this map** (the Clipboard chip's panel, or Ctrl/⌘+V) first gives the document what it lacks — `planClipboardMerge`: a country the target already knows keeps its record, colour, flag and tags, only the missing ones arrive; missing region types are added — then `api.pasteRegions(fc)` carves and adds: each pasted region takes its land out of whatever already covers it exactly as the Draw tool does (a region beneath keeps what is not covered, a hole or a bite, and is marked `edited`; one covered entirely is removed), then the copies are added, selected and zoomed to. A pasted region keeps its id when the target has no region by that id (a stock-world id keeps its tile linkage; a region the paste removed entirely frees its id for its replacement), otherwise it gets a fresh `reg_` id; it is always marked `edited`. The whole paste is one undo step, and the panel reports what happened ("12 regions · 3 underneath trimmed · 1 replaced entirely"). Cities and units are not copied. Tests: `regionClipboard.test.js`.
 
 ---
 

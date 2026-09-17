@@ -280,3 +280,52 @@ test("recent models: newest first, no duplicates, capped at ten", () => {
   assert.equal(recent[0], "model-11");
   assert.deepEqual(config.getRecentModels("gemini"), []);
 });
+
+// ---- the start-of-game prompt's one-step setup (applyQuickAiSetup) ----------
+
+test("quick setup completes the migrated key-less connection and its entry answers first", () => {
+  store.set("api_provider", "gemini"); // migrated: one Gemini connection, no key
+  assert.equal(config.getResolvedFallbackList().length, 1);
+  assert.equal(config.isFallbackListConfigured(), false);
+
+  const { connectionId, entryId } = config.applyQuickAiSetup({ provider: "gemini", apiKey: " AIzaQUICK123 ", model: " gemini-3.5-flash " });
+
+  assert.equal(config.getConnections().length, 1, "completed, not duplicated");
+  assert.equal(config.getConnections()[0].id, connectionId);
+  const list = config.getResolvedFallbackList();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, entryId);
+  assert.equal(list[0].apiKey, "AIzaQUICK123");
+  assert.equal(list[0].model, "gemini-3.5-flash", "the typed model replaces the migrated default");
+  assert.equal(config.isFallbackListConfigured(), true);
+});
+
+test("quick setup with no model keeps the entry's model", () => {
+  store.set("api_provider", "gemini");
+  store.set("gemini_model", "gemini-3.7-flash");
+  config.applyQuickAiSetup({ provider: "gemini", apiKey: "AIzaKEEP" });
+  assert.equal(config.getResolvedFallbackList()[0].model, "gemini-3.7-flash");
+});
+
+test("quick setup for another provider adds a connection whose entry goes to the top", () => {
+  store.set("api_provider", "gemini"); // a key-less Gemini entry sits at the top
+  const { entryId } = config.applyQuickAiSetup({ provider: "anthropic", apiKey: "sk-ant-quick" });
+  const list = config.getResolvedFallbackList();
+  assert.equal(list.length, 2);
+  assert.equal(list[0].id, entryId);
+  assert.equal(list[0].provider, "anthropic");
+  assert.equal(list[0].apiKey, "sk-ant-quick");
+  assert.equal(list[1].provider, "gemini");
+  assert.equal(config.getConnections().length, 2);
+  assert.equal(config.isFallbackListConfigured(), true);
+});
+
+test("quick setup needs the provider's requirement, and a self-hosted one needs only its endpoint", () => {
+  assert.throws(() => config.applyQuickAiSetup({ provider: "gemini", apiKey: "   " }), /API key/);
+  assert.throws(() => config.applyQuickAiSetup({ provider: "openai-compatible", endpoint: "" }), /endpoint/);
+  const { entryId } = config.applyQuickAiSetup({ provider: "openai-compatible", endpoint: "http://localhost:11434/v1" });
+  const [top] = config.getResolvedFallbackList();
+  assert.equal(top.id, entryId);
+  assert.equal(top.endpoint, "http://localhost:11434/v1");
+  assert.equal(config.isFallbackListConfigured(), true);
+});

@@ -150,3 +150,22 @@ test("the Prompts tab has a section for every guided prompt", () => {
     assert.ok(source.includes(`key: "${key}"`), `${key} has no PROMPT_SECTION_DEFINITIONS entry`);
   }
 });
+
+test("when the defaults change, an edited passage stays and everything else follows the new default", () => {
+  const key = "advisor";
+  const original = defaultTextOf(key);
+  const [, guidelines, reminders] = guidanceSegmentsFor(key);
+  // A later release: a reworded reminders passage (its anchors kept, as
+  // promptGuidance.js requires) and a new technical block after the guidance.
+  const oldReminders = locateSegment(original, reminders).text;
+  const newReminders = `${reminders.start} Revised for the new release. ${oldReminders.slice(reminders.start.length)}`;
+  const contract = "[Output contract v2]\nReturn one JSON object.";
+  const updated = `${original.replace(oldReminders, newReminders)}\n\n${contract}`;
+  const stored = normalizePackGuidance({ promptModel: PROMPT_MODEL_VERSION, guidance: { advisor: { guidelines: "Be blunt." } } }, GUIDANCE_DEFAULTS);
+  const out = composePrompt(key, updated, stored.advisor);
+  assert.ok(out.endsWith(contract), "new technical text arrives");
+  assert.ok(out.includes(newReminders), "an unedited passage takes its new default");
+  assert.ok(out.includes("Be blunt."), "the edited passage keeps the author's text");
+  assert.ok(!out.includes(locateSegment(original, guidelines).text), "the edited passage's old default is gone");
+  assert.equal(composePrompt(key, updated, {}), updated, "nothing edited: the whole new prompt");
+});

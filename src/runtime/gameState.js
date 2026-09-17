@@ -7,6 +7,7 @@ import { advanceRecurringDate, canPlayerDirect, normalizeMilestoneRepeat } from 
 import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
 import { normalizeEventTags } from "./eventTags.js";
 import { buildOwnerAliasMap, createOwnerResolver, isRealCountryName, toCountryName } from "./ownerNames.js";
+import { foundPolityIfUnknown } from "./polityFounding.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -3829,6 +3830,8 @@ const applyPolityAndTerritoryImpacts = ({
   // that has already moved still rendering as disputed.
   for (const claim of regionClaims) {
     const claimant = resolveOwner(claim.claimantCode) || claim.claimantCode;
+    // A claimant nobody knows becomes a landless polity rather than a phantom name.
+    if (!claim.drop) foundPolityIfUnknown(world, colors, claimant);
     const current = normalizeArray(world.regionClaimants[claim.regionId])
       .map((entry) => normalizeOptionalString(entry))
       .filter(Boolean);
@@ -3853,6 +3856,9 @@ const applyPolityAndTerritoryImpacts = ({
     const regionId = transfer.regionId;
     const toCode = resolveOwner(transfer.toCode) || normalizeOptionalString(transfer.toCode);
     if (!toCode) continue;
+    // A receiver the world does not know is founded on the spot (polityFounding.js):
+    // territory given to a polity that does not exist yet brings it into being.
+    foundPolityIfUnknown(world, colors, toCode);
     const fromCode = resolveOwner(transfer.fromCode) || normalizeOptionalString(transfer.fromCode);
     const controller = normalizeOptionalString(world.regionOwnershipOverrides[regionId]);
     const previousSovereign = normalizeOptionalString(world.regionSovereigntyOverrides[regionId]) || controller || fromCode;
@@ -3892,6 +3898,7 @@ const applyPolityAndTerritoryImpacts = ({
     if (op.op === "contest") {
       const actor = resolveOwner(op.actorCode) || normalizeOptionalString(op.actorCode);
       if (!actor || samePolity(actor, currentController)) continue;
+      foundPolityIfUnknown(world, colors, actor);
       const claimants = [...existing, actor];
       if (legalSovereign && currentController && !samePolity(legalSovereign, currentController)) claimants.push(legalSovereign);
       writeRegionClaimants(world, regionId, claimants.filter((name) => !samePolity(name, currentController)));
@@ -3901,6 +3908,7 @@ const applyPolityAndTerritoryImpacts = ({
     if (op.op === "control") {
       const toCode = resolveOwner(op.toCode) || normalizeOptionalString(op.toCode);
       if (!toCode) continue;
+      foundPolityIfUnknown(world, colors, toCode);
       world.regionOwnershipOverrides[regionId] = toCode;
       writeRegionSovereign(world, regionId, legalSovereign);
       const claimants = existing.filter((name) => !samePolity(name, toCode));
