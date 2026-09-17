@@ -2768,51 +2768,63 @@ const ensureGameOwnerSchema = (gameId) => {
   }
 };
 
-const readRuntimeJsonAsset = (assetKey) => {
+// Resolves the source file WITHOUT reading it, so the GET route can stream it.
+// Null for every other key, which is what keeps `world` on normalizeRuntimeWorld.
+const resolveRuntimeGeojsonAsset = (assetKey) => {
+  // Custom region/city geometry is scenario-scoped (static map data). Resolve it
+  // from the active game's scenario, mirroring how pmtiles overrides resolve.
+  if (!Object.hasOwn(SCENARIO_GEOJSON_ASSET_FILES, assetKey)) return null;
+
   ensureGameStore();
-  // Above the geojson branch deliberately: that branch returns before anything
-  // else runs, and it is the branch that serves the file `owner` lives in.
+  // Before the scenario resolution: this branch serves the file `owner` lives in.
   const activeGame = getActiveGameSummary();
   if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
 
-  // Custom region/city geometry is scenario-scoped (static map data). Resolve it
-  // from the active game's scenario, mirroring how pmtiles overrides resolve.
-  if (Object.hasOwn(SCENARIO_GEOJSON_ASSET_FILES, assetKey)) {
-    const scenario = getActiveRuntimeScenarioSummary();
-    ensureScenarioOwnerSchema(scenario.id);
-    let sourcePath = getScenarioUploadPath(scenario.id, assetKey);
-    if (!fs.existsSync(sourcePath)) {
-      sourcePath = null;
-      // Scenarios without a map of their own render on the STOCK world (the
-      // hub's re-ownership presets key their ownership by its GADM ids), so
-      // EVERY scenario renders with the custom map style (the scenario's
-      // ownership overrides still recolor it). Not the built-in scenario's own
-      // map: since Modern Day was redrawn that is a different world, and a
-      // scenario CREATED from it carries its own copy (createScenario). Cities
-      // stay absent unless the scenario ships its own set.
-      if (assetKey === "regionsGeojson" && scenario.id !== DEFAULT_SCENARIO_ID) {
-        const stockPath = resolveStockRegionsPath();
-        if (stockPath) {
-          // An install that still keeps the stock world as the built-in's file
-          // migrates it as DEFAULT'S record, not this scenario's: the file's
-          // owners live in default's owner-space, so resolving them against this
-          // scenario's polities would name Russia after whatever this world
-          // calls that token. The stock map's own home needs no migration.
-          if (stockPath !== STOCK_REGIONS_PATH) ensureScenarioOwnerSchema(DEFAULT_SCENARIO_ID);
-          sourcePath = stockPath;
-        }
+  const scenario = getActiveRuntimeScenarioSummary();
+  ensureScenarioOwnerSchema(scenario.id);
+  let sourcePath = getScenarioUploadPath(scenario.id, assetKey);
+  if (!fs.existsSync(sourcePath)) {
+    sourcePath = null;
+    // Scenarios without a map of their own render on the STOCK world (the
+    // hub's re-ownership presets key their ownership by its GADM ids), so
+    // EVERY scenario renders with the custom map style (the scenario's
+    // ownership overrides still recolor it). Not the built-in scenario's own
+    // map: since Modern Day was redrawn that is a different world, and a
+    // scenario CREATED from it carries its own copy (createScenario). Cities
+    // stay absent unless the scenario ships its own set.
+    if (assetKey === "regionsGeojson" && scenario.id !== DEFAULT_SCENARIO_ID) {
+      const stockPath = resolveStockRegionsPath();
+      if (stockPath) {
+        // An install that still keeps the stock world as the built-in's file
+        // migrates it as DEFAULT'S record, not this scenario's: the file's
+        // owners live in default's owner-space, so resolving them against this
+        // scenario's polities would name Russia after whatever this world
+        // calls that token. The stock map's own home needs no migration.
+        if (stockPath !== STOCK_REGIONS_PATH) ensureScenarioOwnerSchema(DEFAULT_SCENARIO_ID);
+        sourcePath = stockPath;
       }
     }
+  }
+  return { contentType: "application/json; charset=utf-8", sourcePath };
+};
+
+const readRuntimeJsonAsset = (assetKey) => {
+  const geojson = resolveRuntimeGeojsonAsset(assetKey);
+  if (geojson) {
     return {
-      contentType: "application/json; charset=utf-8",
-      data: sourcePath ? readJsonFile(sourcePath, EMPTY_FEATURE_COLLECTION) : cloneJson(EMPTY_FEATURE_COLLECTION),
-      sourcePath,
+      ...geojson,
+      data: geojson.sourcePath
+        ? readJsonFile(geojson.sourcePath, EMPTY_FEATURE_COLLECTION)
+        : cloneJson(EMPTY_FEATURE_COLLECTION),
     };
   }
 
-  // No games yet — runtime data resolves from the scenario below. (activeGame is
-  // resolved at the top of this function, above the geojson branch, so the
-  // migration hook can see it.)
+  ensureGameStore();
+  const activeGame = getActiveGameSummary();
+  if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
+
+  // No games yet, runtime data resolves from the scenario below. activeGame is
+  // resolved above so the migration hook can see it.
   const gamePath =
   activeGame && (Object.hasOwn(JSON_ASSET_FILES, assetKey) || Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey) || Object.hasOwn(RUNTIME_ONLY_JSON_ASSET_FILES, assetKey))
   ? getGameJsonPath(activeGame.id, assetKey)
@@ -3579,6 +3591,7 @@ export {
   updateScenarioFromBundle,
   readGameSnapshots,
   readRuntimeJsonAsset,
+  resolveRuntimeGeojsonAsset,
   removeGameAsset,
   removeScenarioAsset,
   resolveGameUploadAsset,
