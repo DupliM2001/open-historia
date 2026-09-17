@@ -121,6 +121,7 @@ export const drawGlobeLighting = ({
   width,
   height,
   opacity,
+  terrainRadii = 0,
   immediate = false,
 }) => {
   if (!canvas || !matrix || !cameraPosition || !sunDirection || opacity <= 0 || width <= 0 || height <= 0) {
@@ -152,6 +153,7 @@ export const drawGlobeLighting = ({
       pixelWidth,
       pixelHeight,
       opacity,
+      terrainRadii,
       outputPixels: state.interactivePixels,
     });
     paintPixels(canvas, state.interactivePixels, pixelWidth, pixelHeight);
@@ -167,6 +169,7 @@ export const drawGlobeLighting = ({
     pixelWidth,
     pixelHeight,
     opacity,
+    terrainRadii,
     requestId,
   };
 
