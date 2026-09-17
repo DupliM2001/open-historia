@@ -8,6 +8,8 @@ import { dedupeEventLog, eventCanonicalKey } from "./eventDedup.js";
 import { normalizeEventTags } from "./eventTags.js";
 import { buildOwnerAliasMap, createOwnerResolver, isRealCountryName, toCountryName } from "./ownerNames.js";
 import { foundPolityIfUnknown } from "./polityFounding.js";
+import { normalizeTerritoryBasis, screenTerritoryBasis } from "./territoryBasis.js";
+import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -632,7 +634,13 @@ const normalizeRegionTransfer = (entry) => {
     return null;
   }
 
+  // Why the land moves (runtime/territoryBasis.js). Carried only when the entry
+  // has one, so a transfer written before the field existed round-trips
+  // byte-for-byte and reads as it always did.
+  const basis = normalizeTerritoryBasis(entry.basis);
+
   return {
+    ...(basis ? { basis } : {}),
     fromCode,
     note: normalizeOptionalString(entry.note || entry.reason),
     regionId,
@@ -711,6 +719,7 @@ const normalizeRegionControlOp = (entry) => {
   if (op === "control" || op === "control_flip") {
     const toCode = toCountryName(normalizeOptionalString(entry.toCode || entry.controllerCode || entry.ownerCode));
     if (!fromCode || !toCode || fromCode.toLowerCase() === toCode.toLowerCase()) return null;
+    const basis = normalizeTerritoryBasis(entry.basis);
     return {
       op: "control",
       regionId,
@@ -718,6 +727,7 @@ const normalizeRegionControlOp = (entry) => {
       fromCode,
       toCode,
       note,
+      ...(basis ? { basis } : {}),
       ...(entry.wholeCountry === true ? { wholeCountry: true } : {}),
     };
   }
@@ -3339,13 +3349,25 @@ export const normalizeWorldState = (world) => {
     regionOwnershipOverrides,
     regionSovereigntyOverrides,
     simulationHistory: normalizeArray(nextWorld.simulationHistory)
-      .map((entry) => {
+      .map((entry, index, entries) => {
         if (!entry || typeof entry !== "object") {
           return null;
         }
 
+        // What the engine did with that turn's answer (runtime/applicationReceipt.js).
+        // Only the newest receipt keeps its notes — they are read once, by the next
+        // jump — so this polled file never carries more than one receipt's text.
+        // "Newest receipt", not "newest entry": a Game Master intervention or a
+        // resolved catalyst is recorded here too and carries none, and it must not
+        // cost the simulator what it was about to be told.
+        const newestReceiptIndex = entries.findIndex((candidate) => candidate && typeof candidate === "object" && candidate.receipt);
+        const receipt = normalizeApplicationReceipt(entry.receipt, { keepNotes: index === newestReceiptIndex });
+        // Taken out of the spread so a malformed receipt is dropped, not kept raw.
+        const { receipt: _storedReceipt, ...rest } = cloneValue(entry);
+
         return {
-          ...cloneValue(entry),
+          ...rest,
+          ...(receipt ? { receipt } : {}),
           catalyst: normalizeCatalyst(entry.catalyst),
           date: normalizeOptionalString(entry.date),
           eventIds: normalizeActionParticipants(entry.eventIds),
@@ -3796,6 +3818,22 @@ const POLITY_LIFECYCLE_STORES = ["countryStats", "countryTags", "internationalRe
 const applyPolityAndTerritoryImpacts = ({
   colors, eventDate = "", eventId = "", polityChanges = [], regionClaims = [], regionControlOps = [], regionTransfers = [], resolveOwner, world,
 }) => {
+  // The net under the turn validator (runtime/territoryBasis.js). A transfer or
+  // a control flip that says its own basis is a claim, a threat or a raid moves
+  // no border: the claim becomes a regionClaims entry and the rest is left out.
+  // The validator has normally done this already and told the model; this
+  // catches the impacts that never met it (the Game Master console, a project's
+  // stored onComplete effects, a hand-edited save). Screening is idempotent, and
+  // an entry with no basis passes through untouched.
+  const screened = screenTerritoryBasis({ regionClaims, regionControlOps, regionTransfers });
+  for (const action of screened.actions) {
+    console.warn(
+      `[territory basis] ${action.family} on ${action.region}${action.toCode ? ` to "${action.toCode}"` : ""} ` +
+        `carried basis "${action.basis}"; ${action.outcome === "claimed" ? "recorded as a claim" : "not applied"}.`,
+    );
+  }
+  ({ regionClaims, regionControlOps, regionTransfers } = screened);
+
   // Lifecycle first: a polity this event creates or restores exists before the
   // same event's territory is resolved. Dissolution waits until the end, so the
   // event can settle the polity's land before it is judged gone.

@@ -3,6 +3,17 @@ import { callAI, providerSupportsBatch, retrieveAIBatch, sendDiplomaticMessageOn
 import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
 import { NATIVE_GAME_MASTER_PROMPT, normalizePromptPack } from "./gameplayPrompts.js";
 import { collectFoundedPolities, foundingPolityChange } from "../../runtime/polityFounding.js";
+import { TERRITORY_BASIS_DIRECTIVE, describeBasisAction, screenTerritoryBasis } from "../../runtime/territoryBasis.js";
+import {
+  createApplicationReceipt,
+  firstComplaintLine,
+  mergeReceipts,
+  noteMalformedImpacts,
+  noteReceipt,
+  renderLastTurnReceipt,
+  tallyAppliedEvents,
+  withReceiptDraft,
+} from "../../runtime/applicationReceipt.js";
 import { directGeneratedUnitOps } from "./nativeUnitDirector.js";
 import { directGeneratedTerritoryOps } from "./nativeTerritoryDirector.js";
 import { expandWholeCountryTransfer, wholeCountrySourceToken } from "./territoryTransferScope.js";
@@ -645,13 +656,43 @@ const expandCanonicalUpdateEnvelope = (candidate) => {
   return expanded;
 };
 
+// Why an event the simulator wrote is not on the timeline, in words it can act
+// on (runtime/applicationReceipt.js). Two different fates share this: a rejection
+// (it never happened) and a canonical event judged too routine to show. Either
+// way the record the simulator is shown next turn does not contain it.
+const WITHHELD_ROUTE_WORDS = Object.freeze({
+  NON_BELLIGERENT_WARTIME_CAUSALITY: "rejected as impossible in this world",
+  UNSUPPORTED_REVERSAL: "rejected because it contradicts the established record",
+  EXACT_DUPLICATE: "a restatement of an event already on the record",
+  EVIDENCED_REDUNDANCY: "a restatement of an event already on the record",
+  RETRIEVAL_ASSISTED_REDUNDANCY: "a restatement of an event already on the record",
+  NATIVE_PROCESS_FILLER: "process with no concrete outcome — report what changed, not that work continued",
+  LOW_VALUE_INCREMENTAL_CHURN: "an increment too small to record",
+  ROUTINE_MILITARY_NO_DELTA: "routine military activity that changed nothing",
+  ROUTINE_MILITARY_PRECURATION: "routine military activity that changed nothing",
+  ROUTINE_ADMINISTRATIVE_PROCESS: "routine administration with no concrete outcome",
+  SATURATED_ROUTINE_MILITARY_CHURN: "one more routine military update on a thread that already had several",
+  SATURATED_INCREMENTAL_REDUNDANCY: "one more small update on a thread that already had several",
+  LOW_TRAJECTORY_FEED_SATURATION: "one more low-consequence update on a thread that already had several",
+});
+const WITHHELD_ROUTES_WITH_REASON = new Set(["NON_BELLIGERENT_WARTIME_CAUSALITY", "UNSUPPORTED_REVERSAL"]);
+
+const describeWithheldEvent = (row) => {
+  const title = normalizeString(row?.title || row?.event?.title) || "(untitled)";
+  const route = normalizeString(row?.route);
+  const reason = normalizeString(row?.reason);
+  const words = WITHHELD_ROUTE_WORDS[route] || reason || "kept off the timeline";
+  const detail = WITHHELD_ROUTES_WITH_REASON.has(route) && reason ? `: ${reason}` : "";
+  return `"${title}" — ${words}${detail}.`;
+};
+
 // One jump segment's ledger records, checked against the world as the earlier
 // segments left it. Strict while a retry remains (the model gets the exact
 // error), salvaged on the final attempt: an ambiguous combat event is dropped
 // together with the war record only it established, rather than the whole
 // segment going to the fallback. Ends by binding every record to this
 // segment's event ids, which is what lets mergeSegmentPayloads concatenate.
-const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0 }) => {
+const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0, receipt = null }) => {
   const events = normalizeArray(candidate?.events);
   // Temporary ids: the canonical round-scoped ones are minted once the whole
   // round is in hand (applySimulationResult), and the records follow them.
@@ -686,6 +727,14 @@ const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0 }) 
         .filter((index) => Number.isInteger(index) && index >= 0);
       if (eventIndexes.length && eventIndexes.every((index) => dropIndexes.has(index))) orphaned.add(updateIndex);
     });
+    for (const entry of combatWarRepair.unresolved) {
+      noteReceipt(
+        receipt,
+        "withheld",
+        `"${normalizeString(entry?.title) || `event ${Number(entry?.index) + 1}`}" — removed: it narrated combat that could not be tied to a war (${firstComplaintLine(entry?.reason, 90) || "no matching war"}). `
+          + "Combat needs event.combatants naming both sides plus a matching warUpdates record.",
+      );
+    }
     candidate.events = normalizeArray(candidate.events).filter((_, index) => !dropIndexes.has(index));
     if (orphaned.size) candidate.warUpdates = boundBefore.filter((_, index) => !orphaned.has(index));
     console.warn(
@@ -716,6 +765,15 @@ const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0 }) 
       unboundEvents: repair.strippedEvents,
       residual: repair.residual,
     });
+    if (repair.droppedIds.length || repair.strippedEvents) {
+      noteReceipt(
+        receipt,
+        "dropped",
+        `War ledger: ${repair.droppedIds.length} war record(s) were dropped`
+          + `${repair.droppedIds.length ? ` (${repair.droppedIds.join(", ")})` : ""} and ${repair.strippedEvents} event(s) lost their war binding `
+          + `because the records could not be tied to their events — ${firstComplaintLine(first)}`,
+      );
+    }
     warError = "";
   }
   if (warError) return warError;
@@ -852,6 +910,8 @@ const screenSegmentPayload = (payload, {
       `[OH world integrity] dropped ${screened.dropped.length} segment event(s) before the round: ` +
       screened.dropped.map((entry) => `"${entry?.title || entry?.id}" (${entry?.route})`).join(", "),
     );
+    // Runs only on an accepted segment, so these go straight onto the turn's receipt.
+    for (const entry of screened.dropped) noteReceipt(state.receipt, "withheld", describeWithheldEvent(entry));
   }
   payload.events = screened.events;
   // Canonical events the screen kept off the timeline still happened: the board
@@ -1575,6 +1635,10 @@ const runJsonTask = async (taskKey, {
     // reaches them. This also disarms an over-cautious reading of the agency
     // rule above ("don't act for the player") as "don't move the map".
     systemPrompt = `${systemPrompt}\n\n[Map Truth — Control is not Sovereignty]\nTerritorial narration and the map must never disagree, but wartime control and legal sovereignty are DIFFERENT things. A battle capture, occupation, liberation or retaking uses impacts.regionControlOps (usually op=control; op=contest while the region is actively disputed). A treaty cession, annexation/incorporation, recognized hand-over, sale, unification or final settlement uses impacts.regionTransfers because legal sovereignty changed. Do NOT turn every front-line advance into a permanent legal border. When you do not know the exact region id, preserve the grounded place wording in regionId and set fromCode so the native geography resolver can map it conservatively. Resolving ${playerName}'s own ordered military operations into their real control consequences is REQUIRED and is never a player-agency violation. If nothing actually changed control or sovereignty this period, keep capture/cession language out of the event text.\n\n[Current Non-Normal Territorial State]\n${normalizeString(variables.territorialControlContext) || "No active occupations or contested regions recorded."}`;
+    // The prose rule above, as a field the model has to fill in and the engine
+    // reads (runtime/territoryBasis.js): a transfer that admits it is only a claim
+    // becomes a claim instead of a border.
+    systemPrompt = `${systemPrompt}\n\n${TERRITORY_BASIS_DIRECTIVE}`;
     // No restating: the model is shown the recent timeline as context and, left
     // unchecked, re-narrates events it already reported — each restatement gets a
     // fresh id, so the same event stacks up and shows turn after turn. A content-key
@@ -4775,11 +4839,35 @@ const buildProjectFeedback = (operationPath, operation, knownProjects) => {
 
 // captureGuard: the reluctance check below is for turn narration; an administrative
 // GM correction may legitimately mention an annexation without moving a border.
+// What to tell the NEXT turn about a territorial operation the resolver could not
+// place. buildTransferFeedback above is the in-turn version: it spends up to two
+// hundred region names on the one retry. By the next turn that vocabulary is a
+// lookup away, so the receipt only says what failed to land and why.
+const describeUnresolvedTerritory = (entry, family, eventTitle) => {
+  const where = eventTitle ? `Event "${eventTitle}": ` : "";
+  const what = family === "regionControlOps" ? "control operation on" : "transfer of";
+  const label = normalizeString(entry?.label) || "(blank)";
+  if (entry?.kind === "narrated-city-coverage") {
+    return `${where}the text says control changed in ${entry.cityName || label} (${entry.regionName}), but no control operation targeted that region — the map still shows its previous controller.`;
+  }
+  if (entry?.wholeCountry) {
+    return `${where}the whole-country ${what} "${label}" was dropped — no regions are held under that exact polity name.`;
+  }
+  if (entry?.unknownOwner) {
+    return `${where}the ${what} "${label}" was dropped — "${entry.unknownOwner}" is not a power on this map, and the side that loses land must be named exactly as the map spells it.`;
+  }
+  const owner = normalizeString(entry?.fromCode);
+  return `${where}the ${what} "${label}" was dropped — no map region matches that name${owner ? ` among ${owner}'s regions` : ""}.`;
+};
+
 export const validateGeneratedWorldChanges = async (candidate, world, {
   strictTransfers = false,
   captureGuard = true,
   resolvedRegionIdsOnly = false,
   explicitScopeText = "",
+  // Collects what salvage drops or changes (runtime/applicationReceipt.js), so
+  // the next turn can be told. Null when the caller is not keeping a receipt.
+  receipt = null,
 } = {}) => {
   const strict = strictTransfers;
   const containers = Array.isArray(candidate?.events)
@@ -4789,6 +4877,26 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         impacts: candidate?.impacts,
         path: "$.impacts",
       }];
+  const titleAt = (path) => normalizeString(containers.find((container) => container.path === path)?.event?.title);
+  const drop = (path, text) => noteReceipt(receipt, "dropped", `${titleAt(path) ? `Event "${titleAt(path)}": ` : ""}${text}`);
+
+  // A transfer or control flip that says its own basis is a claim, a threat or a
+  // raid moves no border (runtime/territoryBasis.js). Never an error and never a
+  // retry: the intent is unambiguous, so the claim is recorded, the rest is left
+  // out, and the model is told next turn. Runs before the geography resolver so a
+  // claim this produces is resolved to a region id like any other.
+  for (const { impacts, path } of containers) {
+    if (!impacts || typeof impacts !== "object") continue;
+    const screened = screenTerritoryBasis(impacts);
+    if (screened.actions.length === 0) continue;
+    impacts.regionTransfers = screened.regionTransfers;
+    impacts.regionControlOps = screened.regionControlOps;
+    impacts.regionClaims = screened.regionClaims;
+    for (const action of screened.actions) {
+      noteReceipt(receipt, "adjusted", describeBasisAction(action, { eventTitle: titleAt(path) }));
+      console.info(`[ai] ${path}.${action.family}: basis "${action.basis}" on ${action.region} — ${action.outcome === "claimed" ? "recorded as a claim" : "not applied"}.`);
+    }
+  }
   // Every project an op could legitimately address: what is already on the
   // board, plus anything a create earlier in this same payload opens.
   const knownProjects = new Map();
@@ -4807,12 +4915,20 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
   if (strict && unresolvedTransfers.length > 0) {
     return buildTransferFeedback(unresolvedTransfers);
   }
+  // Salvage: the resolver has already left these out of the payload. The turn is
+  // kept — and the model, which still believes the land moved, is told it did not.
+  for (const entry of unresolvedTransfers) {
+    noteReceipt(receipt, "dropped", describeUnresolvedTerritory(entry, "regionTransfers", titleAt(entry?.path)));
+  }
   const unresolvedControlOps = await resolveRegionControlOps(containers, world, {
     exactRegionIdsOnly: resolvedRegionIdsOnly,
     explicitScopeText,
   });
   if (strict && unresolvedControlOps.length > 0) {
     return buildControlFeedback(unresolvedControlOps);
+  }
+  for (const entry of unresolvedControlOps) {
+    noteReceipt(receipt, "dropped", describeUnresolvedTerritory(entry, "regionControlOps", titleAt(entry?.path)));
   }
   if (resolvedRegionIdsOnly) {
     const exactClaimError = validateExactApprovedRegionClaims(containers);
@@ -4862,6 +4978,7 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
       const countries = await resolveInvitees(createdChat?.countries, world, generatedPolities);
       if (countries.length === 0) {
         if (strict) return `${path}.createdChats[${index}].countries must contain at least one known polity.`;
+        drop(path, `the chat "${normalizeString(createdChat?.title) || "(untitled)"}" was not opened — none of its participants is a polity on this map.`);
         continue; // salvage: drop the unresolvable chat, keep the turn
       }
       if (strict) {
@@ -4879,6 +4996,7 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
       if (operation.op === "spawn") {
         if (!normalizeString(operation.unit?.name) || !normalizeString(operation.unit?.ownerCode)) {
           if (strict) return `${operationPath}.unit must have nonblank name and ownerCode values.`;
+          drop(path, "a unit spawn was dropped — it had no name or no ownerCode, so no formation appeared.");
           continue;
         }
         const spawnedId = normalizeString(operation.unit?.id);
@@ -4893,12 +5011,15 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
       }
 
       const unitId = normalizeString(operation.unitId);
+      const unitOpName = normalizeString(operation.op) || "unit";
       if (!unitId) {
         if (strict) return `${operationPath}.unitId must not be blank.`;
+        drop(path, `a ${unitOpName} operation was dropped — it named no unitId, so no formation changed.`);
         continue;
       }
       if (!unitIds.has(unitId)) {
         if (strict) return `${operationPath}.unitId does not identify an existing unit.`;
+        drop(path, `the ${unitOpName} operation on unit "${unitId}" was dropped — no unit has that id (it may have been destroyed or never existed).`);
         continue; // salvage: drop the op aimed at a unit that no longer exists
       }
       if (operation.op === "remove" || (operation.op === "strength" && operation.strength === 0)) unitIds.delete(unitId);
@@ -4917,15 +5038,18 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         const marker = operation.marker ?? operation;
         if (!normalizeString(marker?.name)) {
           if (strict) return `${operationPath}.marker.name must not be blank.`;
+          drop(path, "a structure was not built — the build operation gave it no name.");
           continue;
         }
         if (!Number.isFinite(Number(marker?.lng)) || !Number.isFinite(Number(marker?.lat))) {
           if (strict) return `${operationPath}.marker must carry numeric lng and lat coordinates.`;
+          drop(path, `"${normalizeString(marker?.name)}" was not built — the build operation carried no numeric lng and lat.`);
           continue;
         }
       } else if (op === "remove" || op === "destroy") {
         if (!normalizeString(operation?.name) && !normalizeString(operation?.markerId)) {
           if (strict) return `${operationPath} must carry the name (or markerId) of the structure to remove.`;
+          drop(path, "a structure removal was dropped — it named nothing to remove.");
           continue;
         }
       }
@@ -4949,6 +5073,7 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         const project = operation.project ?? operation;
         if (!normalizeString(project?.name)) {
           if (strict) return `${operationPath} must name the project it is opening.`;
+          drop(path, "a project was not opened — the create operation gave it no name.");
           continue;
         }
         // A create is also how a project first appears, so remember it: a later
@@ -4963,10 +5088,12 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         || normalizeString(operation?.name || operation?.project).toLowerCase();
       if (!target) {
         if (strict) return `${operationPath} must carry the name (or id) of the project it changes.`;
+        drop(path, `a project ${op || "update"} was dropped — it named no project.`);
         continue;
       }
       if (!knownProjects.has(target)) {
         if (strict) return buildProjectFeedback(operationPath, operation, knownProjects);
+        drop(path, `the project ${op || "update"} on "${normalizeString(operation?.projectId || operation?.id || operation?.name || operation?.project)}" was dropped — nothing on the board has that name, so the board did not move.`);
         continue;
       }
       keptProjectOps.push(operation);
@@ -4986,6 +5113,7 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
       );
       if (countries.length === 0) {
         if (strict) return `$.diplomaticOutreach[${index}].countries must contain at least one known polity.`;
+        noteReceipt(receipt, "dropped", `The outreach chat "${normalizeString(candidate.diplomaticOutreach[index]?.title) || "(untitled)"}" was not opened — none of its participants is a polity on this map.`);
         continue;
       }
       if (strict) {
@@ -5297,11 +5425,21 @@ const applySimulationResult = async ({
   baseWorld,
   result,
 }) => {
+  // Only a jump keeps one: a resolved catalyst comes through here too, and it is
+  // not an answer the simulator will be asked to build on. Every call below is a
+  // no-op on null. A copy, because a turn held on its projects pass runs this
+  // function a second time with the same arguments, and the tally must not count
+  // the turn twice.
+  const receipt = result.receipt ? mergeReceipts(createApplicationReceipt(), result.receipt) : null;
   const generatedEvents = normalizeArray(result.events)
-    .map((entry, index) => normalizeGeneratedEvent({
-      ...entry,
-      source: entry?.source || result.generation?.source || "ai",
-    }, index))
+    .map((entry, index) => {
+      const normalized = normalizeGeneratedEvent({
+        ...entry,
+        source: entry?.source || result.generation?.source || "ai",
+      }, index);
+      noteMalformedImpacts(receipt, entry, normalized);
+      return normalized;
+    })
     .filter(Boolean);
   // The model is shown the running timeline as context and tends to restate events
   // it already reported; each restatement gets a fresh random id, so only a
@@ -5310,6 +5448,13 @@ const applySimulationResult = async ({
   // directive in buildTemplateVariables).
   const priorEvents = normalizeEvents(baseEvents);
   const dedupedEvents = dedupeGeneratedEvents(priorEvents, generatedEvents);
+  if (dedupedEvents.length < generatedEvents.length) {
+    const fresh = new Set(dedupedEvents);
+    for (const event of generatedEvents) {
+      if (fresh.has(event)) continue;
+      noteReceipt(receipt, "withheld", `"${normalizeString(event?.title)}" — word for word an event already on the record; restating history adds nothing.`);
+    }
+  }
 
   // One curator analysis for the round's candidates and for the breadth
   // repair's supplemental ones.
@@ -5365,6 +5510,7 @@ const applySimulationResult = async ({
     analyzeBatch: curatorAnalyzeBatch,
   });
   let curatedEvents = mainCuration.events;
+  for (const row of normalizeArray(mainCuration.dropped)) noteReceipt(receipt, "withheld", describeWithheldEvent(row));
   // Canonical events the curator (and the breadth repair's own screen and
   // curator) kept off the timeline. They still happened; the board pass reads
   // them alongside the segments' screened-out ones (result.hiddenEvents).
@@ -5475,6 +5621,10 @@ const applySimulationResult = async ({
   // than putting the stale snapshot back. See the re-read before writeChatsState.
   const generatedChats = [];
 
+  // Everything that could keep an event or an operation out has now run, so what
+  // is left is what the world is about to receive.
+  tallyAppliedEvents(receipt, freshEvents);
+
   const impactMerge = applyEventImpactsToWorld({
     colors: baseColors,
     events: freshEvents,
@@ -5505,6 +5655,10 @@ const applySimulationResult = async ({
           // something to attach even after a reload — only ever non-empty on a
           // fallback turn; a normal AI turn carries nothing here.
           rawResponse: normalizeString(result.generation?.rawResponse),
+          // What became of this turn's answer, read once by the next jump
+          // (runtime/applicationReceipt.js). normalizeWorldState keeps the notes
+          // on the newest receipt only, so older turns carry their counts alone.
+          ...(receipt ? { receipt } : {}),
           round: nextGame.round,
           summary: normalizeString(result.summary),
           source: result.generation?.source || "ai",
@@ -9698,6 +9852,14 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
     }
   };
 
+  // What the engine did with the PREVIOUS turn's answer, as the first thing this
+  // one reads (runtime/applicationReceipt.js). In the user message rather than the
+  // system prompt, so the cacheable prefix is untouched, and on every segment,
+  // because each segment is a separate request that never saw the one before it.
+  // Empty on a campaign's first jump and after a turn that predates receipts, and
+  // then the message is byte-for-byte what it always was.
+  const lastTurnReceipt = renderLastTurnReceipt(normalizeWorldState(bundle.world).simulationHistory);
+
   // Starts at 0 on a fresh jump, and at the failed segment on a retry.
   let segmentIndex = state.nextSegment;
   try {
@@ -9754,6 +9916,15 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       };
       reportProgress(segmentIndex);
 
+      // What this segment's ACCEPTED answer lost or had changed on its way in, and
+      // what its rejected attempts were told (runtime/applicationReceipt.js). The
+      // validator can run several times before an answer is taken — a strict
+      // attempt, the salvaged retry, a late salvage of the first — so each run
+      // fills a draft of its own and only the run that returned clean is merged
+      // into the turn's receipt. A rejected attempt's drops never reach the record.
+      let segmentDraft = null;
+      const segmentComplaints = [];
+
       const { generation: segmentGeneration, payload } = await runJsonTask(mode === "auto" ? "autoJumpForward" : "jumpForward", {
         lookups: buildTaskLookups(segmentBundle),
         // Only a single-call jump falls back on its own. A failing SEGMENT throws
@@ -9767,7 +9938,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
         // silence, not elapsed time, so a long segment is never mistaken for a
         // stalled one (and a segmented jump gets that window per segment, since it
         // is per request). Cancel works either way.
-        userMessage: buildSegmentInstruction({
+        userMessage: [lastTurnReceipt, buildSegmentInstruction({
           mode,
           segmentIndex,
           segmentCount,
@@ -9779,8 +9950,8 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
           targetDate,
           segmentTargetDate: segmentTarget,
           priorEvents: state.generatedSoFar,
-        }),
-        validatePayload: async (candidate, { finalAttempt } = {}) => {
+        })].filter(Boolean).join("\n\n"),
+        validatePayload: withReceiptDraft(async (candidate, { finalAttempt } = {}, draft) => {
           // Shape-of-story problems (event count, stray dates) are STRICT while a
           // retry remains — the model gets the exact error and usually fixes its
           // own answer — and SALVAGED on the final attempt: a finished generation
@@ -9811,11 +9982,16 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
           if (dateError) {
             if (strict) return dateError;
             clampTimelineDates(candidate, { mode, originDate: state.segmentOrigin, targetDate: segmentTarget });
+            noteReceipt(
+              draft,
+              "adjusted",
+              `Some event dates fell outside ${state.segmentOrigin} to ${segmentTarget} and were moved inside it — ${firstComplaintLine(dateError)}`,
+            );
           }
           // The war ledger must see the sanitized impacts, so world changes go first.
-          const worldChangeError = await validateGeneratedWorldChanges(candidate, bundle.world, { strictTransfers: strict });
+          const worldChangeError = await validateGeneratedWorldChanges(candidate, bundle.world, { strictTransfers: strict, receipt: draft });
           if (worldChangeError) return worldChangeError;
-          const ledgerError = validateSegmentLedgers(candidate, { world: ledgerWorld, strict, segmentIndex });
+          const ledgerError = validateSegmentLedgers(candidate, { world: ledgerWorld, strict, segmentIndex, receipt: draft });
           if (ledgerError) return ledgerError;
           return validateSegmentStorylines(candidate, {
             world: ledgerWorld,
@@ -9827,9 +10003,20 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
             gameCountry: bundle.game.country,
             board: normalizeArray(bundle.world?.projects),
           });
-        },
+        }, {
+          onAccepted: (draft) => { segmentDraft = draft; },
+          onRejected: (complaint) => { segmentComplaints.push(complaint); },
+        }),
         variables: segmentVariables,
       });
+
+      // Only now is the answer taken, so only now does its draft count.
+      if (segmentGeneration?.source !== "fallback") {
+        mergeReceipts(state.receipt, segmentDraft);
+        for (const complaint of segmentComplaints.slice(0, 2)) {
+          noteReceipt(state.receipt, "redone", firstComplaintLine(complaint));
+        }
+      }
 
       screenSegmentPayload(payload, {
         analysis: worldInitiative.analysis,
@@ -10016,6 +10203,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
     generation: state.generation,
     hiddenEvents: state.hiddenEvents,
     boardProvisionalEventIds: state.boardProvisionalEventIds,
+    receipt: state.receipt,
   };
   const applyArgs = {
     baseActions: bundle.actions,
@@ -10135,6 +10323,11 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
     // repair pass may spend (repairSkipStorylineMotion).
     attentionStorylines: [],
     motionRepairBudget: createMotionRepairBudget(),
+    // Everything this turn's answer loses or has changed between the model and the
+    // world, told to the simulator at the top of the next jump
+    // (runtime/applicationReceipt.js). Lives on the state so a held segment's
+    // retry carries on filling the same one.
+    receipt: createApplicationReceipt(),
   };
 
   await runJumpSegments({ context: jumpContext, onProgress, signal, state: jumpState });

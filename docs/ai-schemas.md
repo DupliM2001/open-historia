@@ -101,6 +101,11 @@ The heart of the map-mutating pipeline. Attached to events (`eventSchema.impacts
 | `fromCode` | string | Previous owner polity code — lets the resolver locate the region | no |
 | `toCode` | string | New owner polity code | **yes** |
 | `note` | string | Brief reason | no |
+| `basis` | enum | **Why the land moves** — `treaty` · `annexation` · `unification` · `independence` · `occupation` move the map; `claim` · `threat` · `raid` do not. The vocabulary, its synonyms and the screen live in `runtime/territoryBasis.js`. | no |
+
+`basis` also rides on the **`control`** variant of `regionControlOpSchema` (not on `contest`, which is already the middle state, nor on `clear_contest`, which moves nothing toward anyone). It is **optional on purpose**: an older payload, the Game Master console and a lenient local backend all answer without it, and an entry with no basis is applied exactly as before. A value outside the enum fails schema validation, so the in‑turn retry can name a real one. What the engine does with a `claim` — it becomes a `regionClaims` entry — is in [AI overview](ai-overview.md#strict--salvage-validation-discipline).
+
+> **The schema has a size budget.** `projectOpSchema.test.js` holds the serialized jump tool schema under 32,000 characters, because it rides on every request. That is why the definition of `basis` is stated once (on `regionTransfers`) and the control operation only points at it, and why the long explanation is a call‑time directive (`TERRITORY_BASIS_DIRECTIVE`) rather than a field description. At 31,372 characters there are about 600 to spare: a new impact family should follow the board's example and take its own call rather than join this contract.
 
 ### 4.3 `polityChangeSchema` (`:107`)
 

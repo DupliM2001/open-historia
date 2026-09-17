@@ -1,4 +1,9 @@
 import { EVENT_TAG_ENUM, MAX_EVENT_TAGS } from "../../runtime/eventTags.js";
+import {
+  TERRITORY_BASIS_DESCRIPTION,
+  TERRITORY_BASIS_DESCRIPTION_SHORT,
+  TERRITORY_BASIS_ENUM,
+} from "../../runtime/territoryBasis.js";
 import { extractJsonArray } from "./jsonSalvage.js";
 const textSchema = (description) => ({
   type: "string",
@@ -101,6 +106,9 @@ const regionTransferSchema = {
     fromCode: textSchema("Previous owner's FULL country name (\"Spain\"), never a country code."),
     toCode: textSchema("New owner's FULL country name (\"Spain\"), never a country code such as \"ESP\"."),
     note: textSchema("Brief reason for the transfer."),
+    // Optional in the contract so an older payload still validates; the actions
+    // reference asks for it on every entry. See runtime/territoryBasis.js.
+    basis: { type: "string", enum: [...TERRITORY_BASIS_ENUM], description: TERRITORY_BASIS_DESCRIPTION },
     wholeCountry: {
       type: "boolean",
       description:
@@ -232,6 +240,7 @@ const regionControlOpSchema = {
         fromCode: nonEmptyTextSchema("Previous de-facto controller's FULL polity name."),
         toCode: nonEmptyTextSchema("New de-facto controller's FULL polity name."),
         note: textSchema("Brief reason control changed."),
+        basis: { type: "string", enum: [...TERRITORY_BASIS_ENUM], description: TERRITORY_BASIS_DESCRIPTION_SHORT },
         wholeCountry: {
           type: "boolean",
           description: "True only for a total military occupation/collapse where the new controller takes every region the previous controller still holds. fromCode is the authoritative losing/current controller and regionId must repeat that polity name, never one province/colony.",
