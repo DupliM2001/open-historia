@@ -37,11 +37,17 @@
 // `[{code:"AGO",name:"Angola"}]`; the player is implicit), so "was this polity in
 // the room?" is answerable directly, with no new data and no migration.
 //
-// DELIBERATELY IMPORT-FREE, like jsonSalvage.js / providerErrors.js: this decides
-// what one government is allowed to know about another, and promptContext.js
-// reaches the whole browser runtime and cannot be unit-tested.
+// DELIBERATELY FREE OF RUNTIME IMPORTS, like jsonSalvage.js / providerErrors.js:
+// this decides what one government is allowed to know about another, and
+// promptContext.js reaches the whole browser runtime and cannot be unit-tested.
+//
+// The rule itself now lives in audience.js, which is equally bare: "who is
+// looking" became a value that a lookup function or a report's distribution list
+// can be asked about too, rather than something only chats understood. This file
+// keeps its names, its history and its one legacy convenience — a blank polity
+// meaning the narrator — so nothing that called it had to change.
 
-const normalize = (value) => String(value ?? "").trim().toLowerCase();
+import { audienceSeesChat, normalizeAudience, polityMatches } from "./audience.js";
 
 /**
  * Does one entry in a chat's `countries` refer to `polity`?
@@ -51,14 +57,7 @@ const normalize = (value) => String(value ?? "").trim().toLowerCase();
  * runtime/gameState.js). A blank code never matches a blank polity — otherwise
  * every unnamed participant would match everything.
  */
-export const chatParticipantMatches = (country, polity) => {
-    const wanted = normalize(polity);
-    if (!wanted) return false;
-    if (!country) return false;
-    if (typeof country === "string") return normalize(country) === wanted;
-    if (typeof country !== "object") return false;
-    return normalize(country.name) === wanted || normalize(country.code) === wanted;
-};
+export const chatParticipantMatches = (country, polity) => polityMatches(country, polity);
 
 /**
  * A chat's participants with the player taken out — the invariant above, applied
@@ -81,16 +80,13 @@ export const withoutPlayerParticipant = (countries, player) =>
  * is the documented way to opt out, so callers that legitimately need everything
  * simply pass nothing.
  */
-export const isChatVisibleTo = (chat, polity) => {
-    if (!normalize(polity)) return true;
-    const countries = Array.isArray(chat?.countries) ? chat.countries : [];
+export const isChatVisibleTo = (chat, polity) =>
     // A chat with no recorded participants is NOT shown to a specific polity.
     // Failing closed is the whole point: the cost of wrongly hiding a chat is a
     // leader that forgets a conversation, which is visible and recoverable; the
     // cost of wrongly showing one is the confidentiality breach this module was
-    // written to end.
-    return countries.some((country) => chatParticipantMatches(country, polity));
-};
+    // written to end. (audience.js, rule 1.)
+    audienceSeesChat(normalizeAudience(polity), chat);
 
 /**
  * Keep only the chats `polity` was a participant in. Group chats fall out
@@ -99,6 +95,7 @@ export const isChatVisibleTo = (chat, polity) => {
  */
 export const filterChatsVisibleTo = (chats, polity) => {
     const list = Array.isArray(chats) ? chats : [];
-    if (!normalize(polity)) return list;
+    // The narrator gets the very same array back, as it always has.
+    if (!String(polity ?? "").trim()) return list;
     return list.filter((chat) => isChatVisibleTo(chat, polity));
 };

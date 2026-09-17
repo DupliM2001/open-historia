@@ -1211,7 +1211,7 @@ export const curateGeneratedEventsWithHidden = async ({
   const incoming = asArray(events);
 
   if (!shouldCurateMode(mode)) {
-    return { events: incoming, hidden: [] };
+    return { events: incoming, hidden: [], dropped: [] };
   }
 
   const eventSummaries =
@@ -1551,8 +1551,20 @@ droppedCount:
     .filter((entry) => entry.wouldAction === "DROP" && VISIBILITY_ROUTES.has(entry.route))
     .map((entry) => ({ event: entry.event, route: entry.route, reason: entry.enforcementReason }));
 
+  // Every event this pass removed, whichever kind of route removed it: `hidden`
+  // above is only the canonical ones the Board still reads. The turn's
+  // application receipt (runtime/applicationReceipt.js) tells the simulator about
+  // all of them, because none of them is in the record it is shown next turn.
+  const dropped = evaluations
+    .filter((entry) => entry.wouldAction === "DROP")
+    .map((entry) => ({
+      title: normalizeString(entry.event?.title),
+      route: entry.route,
+      reason: entry.enforcementReason,
+    }));
+
   // alright, no more training wheels.
-  return { events: keptEvents, hidden };
+  return { events: keptEvents, hidden, dropped };
 };
 
 export const getLastNativeCuratorAudit =
