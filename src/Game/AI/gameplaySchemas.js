@@ -330,6 +330,13 @@ const polityChangeSchema = {
 // WHOLE turn's structured output into a fallback simulation, which is exactly
 // the failure the note field on the spawn op was added to prevent (see its
 // comment below).
+// WHERE, in words (AI/placement.js): "Kharkiv", "near Kharkiv", "eastern Ukraine",
+// "coast of Crimea", "off Sevastopol", "Donetsk Oblast facing Russia". The engine
+// finds the point. Stated once here and explained once in the call-time
+// directive ([Placing Things]) — the jump's schema has a size budget
+// (projectOpSchema.test.js) and five copies of a grammar would spend it.
+const atSchema = { type: "string", description: "Where, in words — see [Placing Things]. Preferred to lng/lat." };
+
 const unitSchema = {
   type: "object",
   description: "A military unit to create on the map.",
@@ -357,18 +364,9 @@ const unitSchema = {
       + "2 frigates\", \"3 tank regiments\", \"two rifle divisions\". A counter with no "
       + "composition tells the player nothing.",
     ),
-    lng: {
-      type: "number",
-      description: "Longitude of the unit location.",
-      minimum: -180,
-      maximum: 180,
-    },
-    lat: {
-      type: "number",
-      description: "Latitude of the unit location.",
-      minimum: -90,
-      maximum: 90,
-    },
+    at: atSchema,
+    lng: { type: "number", description: "Only with no `at`.", minimum: -180, maximum: 180 },
+    lat: { type: "number", description: "Only with no `at`.", minimum: -90, maximum: 90 },
     regionId: textSchema("Map region identifier, when known."),
     status: {
       type: "string",
@@ -388,7 +386,7 @@ const unitSchema = {
       + "\"Patrolling the North Atlantic approaches\". Shown to the player verbatim.",
     ),
   },
-  required: ["name", "type", "ownerCode", "strength", "composition", "lng", "lat"],
+  required: ["name", "type", "ownerCode", "strength", "composition"],
   additionalProperties: false,
 };
 
@@ -416,6 +414,7 @@ const unitOpSchema = {
       properties: {
         op: { type: "string", enum: ["move"] },
         unitId: nonEmptyTextSchema("Existing unit identifier."),
+        at: atSchema,
         toLng: { type: "number", minimum: -180, maximum: 180 },
         toLat: { type: "number", minimum: -90, maximum: 90 },
         regionId: textSchema("Destination region identifier, when known."),
@@ -428,7 +427,7 @@ const unitOpSchema = {
         },
         note: textSchema("Brief explanation of the operation."),
       },
-      required: ["op", "unitId", "toLng", "toLat"],
+      required: ["op", "unitId"],
       additionalProperties: false,
     },
     {
@@ -477,22 +476,13 @@ const markerSchema = {
     kind: nonEmptyTextSchema("What the structure is, as a short lowercase noun phrase."),
     ownerCode: textSchema("Owning polity's FULL country name (\"Spain\") when owned, never a country code."),
     status: markerStatusSchema,
-    lng: {
-      type: "number",
-      description: "Longitude of the structure.",
-      minimum: -180,
-      maximum: 180,
-    },
-    lat: {
-      type: "number",
-      description: "Latitude of the structure.",
-      minimum: -90,
-      maximum: 90,
-    },
+    at: atSchema,
+    lng: { type: "number", description: "Only with no `at`.", minimum: -180, maximum: 180 },
+    lat: { type: "number", description: "Only with no `at`.", minimum: -90, maximum: 90 },
     note: textSchema("Brief description shown when the structure is inspected."),
     foundedAt: textSchema("In-game date the structure was built or founded."),
   },
-  required: ["name", "kind", "lng", "lat"],
+  required: ["name", "kind"],
   additionalProperties: false,
 };
 
@@ -541,11 +531,12 @@ const markerOpSchema = {
         kind: textSchema("What it is: city, base, bunker, silo, embassy, port."),
         ownerCode: textSchema("Owning polity's FULL country name (\"Spain\"), never a country code."),
         status: markerStatusSchema,
+        at: atSchema,
         lng: { type: "number", description: "Longitude.", minimum: -180, maximum: 180 },
         lat: { type: "number", description: "Latitude.", minimum: -90, maximum: 90 },
         note: textSchema("Brief explanation."),
       },
-      required: ["op", "name", "lng", "lat"],
+      required: ["op", "name"],
       additionalProperties: false,
     },
     {
@@ -557,8 +548,9 @@ const markerOpSchema = {
         kind: textSchema("New/current feature kind when materially changed."),
         ownerCode: textSchema("New/current operating polity's FULL country name when control or ownership changes."),
         status: markerStatusSchema,
-        lng: { type: "number", description: "New longitude only when the feature genuinely relocates.", minimum: -180, maximum: 180 },
-        lat: { type: "number", description: "New latitude only when the feature genuinely relocates.", minimum: -90, maximum: 90 },
+        at: { type: "string", description: "New place, only when it genuinely relocates." },
+        lng: { type: "number", description: "New longitude, only with no `at`.", minimum: -180, maximum: 180 },
+        lat: { type: "number", description: "New latitude, only with no `at`.", minimum: -90, maximum: 90 },
         note: textSchema("Updated brief current description after this event."),
       },
       required: ["op"],
@@ -2850,6 +2842,13 @@ const normalizeMarkerOperationShape = (entry) => {
 
   if (op === "build" || (!op && isPlainRecord(entry.marker))) {
     const source = isPlainRecord(entry.marker) ? entry.marker : entry;
+    // Where it goes: in words (`at`, or the words a model reaches for instead),
+    // or as coordinates. A coordinate that was never given is left OUT rather
+    // than written as undefined — the schema reads an undefined `lng` as "not a
+    // number" and would fail the op, and a build placed in words has none.
+    const where = firstDefinedKey(source, ["at", "place", "where", "location"]);
+    const lng = coordinateNumber(firstDefinedKey(source, ["lng", "lon", "longitude"]));
+    const lat = coordinateNumber(firstDefinedKey(source, ["lat", "latitude"]));
     const marker = {
       ...(firstDefinedKey(source, ["id", "markerId"]) ? { id: firstDefinedKey(source, ["id", "markerId"]) } : {}),
       name: firstDefinedKey(source, ["name", "title"]),
@@ -2857,8 +2856,9 @@ const normalizeMarkerOperationShape = (entry) => {
       ...(firstDefinedKey(source, ["ownerCode", "owner", "code"]) !== undefined
         ? { ownerCode: firstDefinedKey(source, ["ownerCode", "owner", "code"]) }
         : {}),
-      lng: coordinateNumber(firstDefinedKey(source, ["lng", "lon", "longitude"])),
-      lat: coordinateNumber(firstDefinedKey(source, ["lat", "latitude"])),
+      ...(typeof where === "string" && where.trim() ? { at: where } : {}),
+      ...(lng !== undefined ? { lng } : {}),
+      ...(lat !== undefined ? { lat } : {}),
       ...(firstDefinedKey(source, ["note", "description"]) !== undefined
         ? { note: firstDefinedKey(source, ["note", "description"]) }
         : entry.note !== undefined ? { note: entry.note } : {}),

@@ -1617,16 +1617,26 @@ export const loadRegionCatalog = async ({ force = false } = {}) => {
   regionCatalogPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.regions;
-      if (!layer) return [];
-
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+
+      // The stock world's regions, from the tile archive — ONE of two sources,
+      // and the optional one. This used to return an empty catalog the moment
+      // the archive could not be read, before the scenario's own regions below
+      // had been looked at: a hand-drawn map with every region named in its
+      // geojson lost all of them to a missing tile file, and with them every
+      // lookup, every place name the engine reads, and every prompt's region
+      // list. The archive is tried; the scenario's geometry is always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.regions ?? null;
+      } catch (error) {
+        console.warn("The stock region tiles could not be read; the catalog carries the scenario's own regions only.", error);
+      }
+
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
         // A few GADM regions carry the literal placeholder "NA" as their name (England

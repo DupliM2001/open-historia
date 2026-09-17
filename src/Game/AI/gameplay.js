@@ -70,7 +70,9 @@ import { SIMULATION_AUDIENCE } from "./audience.js";
 import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKernel.js";
 import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
-import { foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
+import { editDistance, foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
+import { PLACEMENT_DIRECTIVE, distanceKm as placementDistanceKm, nearestInteriorPoint, pointInGeometry, resolvePlacement } from "./placement.js";
+import { FOOTPRINT_KM, obstaclesOf, spaceOut } from "../../runtime/featureSpacing.js";
 import { LOOKUP_DIRECTIVE, LOOKUP_TOOLS, buildLookupContext, executeLookup, placesNamedIn } from "./lookupTools.js";
 import {
   BACKGROUND_REQUEST,
@@ -1458,7 +1460,7 @@ const buildTemplateVariables = async (bundle, options = {}) => {
 // full menu of world-changing levers the tool schema exposes, so the model always ends
 // its system prompt with an explicit list of what it can do and how. Injected at call
 // time so it reaches existing frozen-prompt games too.
-const ACTIONS_REFERENCE = "[Actions You Can Take]\nThis is the full menu of levers you have to change the world. Everything you change rides on an event's \"impacts\" object, except the two whole-jump levers noted at the end. Reach for the RIGHT lever, and NEVER narrate a change in an event's text without also emitting the impact that makes it real — narration and world state must always agree.\n\n• regionTransfers — Move a region to a new owner. This is the most important lever and the one most often forgotten: use it for every conquest, cession, sale, liberation, annexation, or hand-over, one entry per region. Shape: {\"regionId\":\"<exact id, or the plain region name if you don't know the id>\",\"regionName\":\"\",\"fromCode\":\"\",\"toCode\":\"<new owner code>\"}. toCode may name a polity that does not exist yet: the exact name you write founds it (a new state, a breakaway, a successor), so spell a new polity as it should appear on the map and an existing polity exactly as the map does, since a short form or translation of an existing country founds a second country beside it; add a polityChanges entry in the same event only to give the new polity a colour, aliases or a note. An event whose text says land changed hands but that carries no regionTransfers is invalid output and silently breaks the map. Transfer in order of proximity to the attacker's territory; never hand over an isolated region ringed by enemy land without a naval or airborne reason. A transfer is enacted IMMEDIATELY when the other side has agreed (a treaty, a negotiated cession, an event where they conceded) or when the ground has already been taken and held - a hand-over both sides accept needs no programme and no project. Where neither is true the land has NOT changed hands: record the claim with regionClaims instead and leave the border exactly where it is.\n\n• polityChanges — Create, rename, recolor, or re-describe a polity. One entry can do any combination: {\"code\":\"<polity code>\",\"name\":\"<new name, only if it changed>\",\"color\":\"#RRGGBB (only if it changed)\",\"aliases\":[\"...\"],\"reputation\":0-100,\"intelligence\":0-100,\"tags\":[\"...\"],\"stats\":{...},\"note\":\"<why>\"}. Create a polity by giving a new code with a name and color, or simply by handing it territory in regionTransfers or regionControlOps (it is founded under that exact name; an entry here then sets its colour, aliases and note). Change name/color when the polity's identity actually changes - a regime change, a revolution, a unification or partition, a proclaimed republic or a restored monarchy - and ALWAYS when the player has ordered it for their own polity. A mere new leader is not a rename. But a rename or recolour the player has ordered for THEIR OWN country is an administrative act of their own government: it needs no other power's consent, it cannot be refused, and it must be enacted in this jump by an event carrying polityChanges with the new name and that action's id in actionIds. Keep \"code\" as the polity's CURRENT name - the engine matches on it and then re-keys the country to the new one, so from then on the country IS the new name everywhere and the old one survives only as a former name; a change addressed to the name you are introducing lands on nothing and mints a second country beside the real one. On an ideological or alignment shift, rewrite the COMPLETE tags list (it is a full replacement, not a delta). Set reputation (0 = pariah, 100 = universally trusted) only when this turn's events actually moved a polity's standing. Set intelligence (0 = no service to speak of, 100 = the best in the world) only when something changed it: a purge or defection, a new bureau or budget, a foreign spy ring exposed, a player action that built the service up or ran it down. A SUDDEN shock — a purge, a defector, a ring rolled up — is a direct change here and takes effect at once. Building a service UP is not sudden and does not belong here: open it on the Projects board as a programme and put the new rating in that project's onComplete.polityChanges, so it arrives when the work actually finishes and the player can watch it coming, fund it, or have a rival wreck it first. Deciding to have a better service is not the same as having one. A country's national statistics move ONLY through \"stats\" here — send just the fields that changed; everything omitted keeps its prior value. That includes WHO LEADS: when a leader is overthrown, assassinated, dies, resigns or is voted out, put the successor's name in stats.leader (together with stats.government and stats.stability when those moved too). An event that narrates a leader falling but leaves stats.leader untouched leaves the OLD name standing on that country's stat sheet, so the story and the sheet disagree.\n\n• regionClaims — Mark territory CLAIMED but not held, so the map can show a dispute instead of pretending nothing happened. Use it when a polity asserts a right to land it does not control and has not been given: an irredentist declaration, a proclaimed union, a contested border, a government-in-exile's title, a player declaring a neighbour's province theirs. Shape: {\"regionId\":\"<exact id, or the plain region name>\",\"claimantCode\":\"<claiming polity's full name>\",\"note\":\"<why>\"}; add \"drop\":true to withdraw a claim that was renounced, traded away, or lost with the claimant's defeat. The region renders striped in every claimant's colour and stays that way until it is settled - by a regionTransfers entry when someone finally wins or concedes it, or by a drop. NEVER move a border for a claim alone, and never leave a claim unrecorded either: a declaration that changes nothing the player can see is a declaration they cannot tell they made.\n\n• unitOps — Move the war on the map with battalions. Four ops:\n    {\"op\":\"spawn\",\"unit\":{\"name\":\"\",\"type\":\"infantry|armor|air|naval|artillery|garrison\",\"ownerCode\":\"\",\"strength\":1-1000,\"lng\":0,\"lat\":0,\"regionId\":\"\"}}\n    {\"op\":\"move\",\"unitId\":\"<existing id>\",\"toLng\":0,\"toLat\":0,\"regionId\":\"\",\"note\":\"\"}\n    {\"op\":\"strength\",\"unitId\":\"<existing id>\",\"strength\":0-1000,\"note\":\"\"}\n    {\"op\":\"remove\",\"unitId\":\"<existing id>\",\"note\":\"\"}\n  Spawn units for mobilizations and reinforcements, move them to reflect offensives, lower their strength as they take losses, and remove them only when destroyed or disbanded. Only reference unit ids that appear in the current-units list. When a front is decisively won, pair the advance with a regionTransfers entry so the border follows the troops.\n\n• markerOps — Place, remove, rename or resize a named structure or city. Four ops:\n    {\"op\":\"build\",\"marker\":{\"name\":\"\",\"kind\":\"<lowercase, e.g. military base / port / embassy / airfield / city>\",\"ownerCode\":\"\",\"lng\":0,\"lat\":0,\"note\":\"\",\"foundedAt\":\"\"}}\n    {\"op\":\"remove\",\"name\":\"<exact existing name>\",\"note\":\"\"}\n    {\"op\":\"rename\",\"name\":\"<current name>\",\"newName\":\"<new name>\",\"note\":\"<why>\"}\n    {\"op\":\"population\",\"name\":\"<city>\",\"population\":<whole number of people>,\"note\":\"<why>\"}\n  Emit build whenever an event founds or constructs a place, remove when one is destroyed, and rename when a city or structure is renamed (rename works on existing map cities too — a city renamed after a leader or ideology, a capital re-designated, a conquered city given the conqueror's name). Structures NEVER move borders: a facility one polity builds inside another's land does not transfer the region, and ownerCode is who runs the facility, not who owns the ground. Emit population whenever an event plausibly moves how many people live somewhere - a siege, famine, epidemic, bombing or evacuation shrinking a city; an industrial boom, resettlement or refugee influx growing one - giving the new TOTAL, not the change. It works on any city on the map, whether the scenario authored it or it came with the world.\n\n• createdChats — Have another polity open a diplomatic chat with the player BECAUSE of this event (a war scare prompting mediation, a border incident prompting an ultimatum, a windfall prompting a trade delegation). Shape: {\"countries\":[\"...\"],\"title\":\"<names the purpose>\",\"speaker\":\"<the initiating polity — never the player>\",\"openingMessage\":\"<that leader's first message, in their voice>\"}. The other side always speaks first; a blank or untitled chat is invalid.\n\n• actionIds — List the ids of the player's queued actions that this event resolves, so the game can clear them from the queue.\n\nWhole-jump levers (top level of your output, NOT inside an event):\n• diplomaticOutreach — Polities reaching out to the player on their OWN initiative this period — treaty feelers, trade proposals, non-aggression pacts, mediation offers, warnings, summit invitations — not tied to any single event. Same shape as createdChats. Open one whenever a polity plausibly would, rather than defaulting to none.\n• catalyst — An interactive branching scene handed to the player when a moment genuinely demands their decision, or null when none is warranted. Shape: {\"title\":\"\",\"premise\":\"\",\"opening\":\"\",\"choices\":[\"...\", \"...\", up to 5 distinct]}.\n\nKeep the total across createdChats and diplomaticOutreach to at most 3 per jump, and only when the approach genuinely serves the sender's interests.";
+const ACTIONS_REFERENCE = "[Actions You Can Take]\nThis is the full menu of levers you have to change the world. Everything you change rides on an event's \"impacts\" object, except the two whole-jump levers noted at the end. Reach for the RIGHT lever, and NEVER narrate a change in an event's text without also emitting the impact that makes it real — narration and world state must always agree.\n\n• regionTransfers — Move a region to a new owner. This is the most important lever and the one most often forgotten: use it for every conquest, cession, sale, liberation, annexation, or hand-over, one entry per region. Shape: {\"regionId\":\"<exact id, or the plain region name if you don't know the id>\",\"regionName\":\"\",\"fromCode\":\"\",\"toCode\":\"<new owner code>\"}. toCode may name a polity that does not exist yet: the exact name you write founds it (a new state, a breakaway, a successor), so spell a new polity as it should appear on the map and an existing polity exactly as the map does, since a short form or translation of an existing country founds a second country beside it; add a polityChanges entry in the same event only to give the new polity a colour, aliases or a note. An event whose text says land changed hands but that carries no regionTransfers is invalid output and silently breaks the map. Transfer in order of proximity to the attacker's territory; never hand over an isolated region ringed by enemy land without a naval or airborne reason. A transfer is enacted IMMEDIATELY when the other side has agreed (a treaty, a negotiated cession, an event where they conceded) or when the ground has already been taken and held - a hand-over both sides accept needs no programme and no project. Where neither is true the land has NOT changed hands: record the claim with regionClaims instead and leave the border exactly where it is.\n\n• polityChanges — Create, rename, recolor, or re-describe a polity. One entry can do any combination: {\"code\":\"<polity code>\",\"name\":\"<new name, only if it changed>\",\"color\":\"#RRGGBB (only if it changed)\",\"aliases\":[\"...\"],\"reputation\":0-100,\"intelligence\":0-100,\"tags\":[\"...\"],\"stats\":{...},\"note\":\"<why>\"}. Create a polity by giving a new code with a name and color, or simply by handing it territory in regionTransfers or regionControlOps (it is founded under that exact name; an entry here then sets its colour, aliases and note). Change name/color when the polity's identity actually changes - a regime change, a revolution, a unification or partition, a proclaimed republic or a restored monarchy - and ALWAYS when the player has ordered it for their own polity. A mere new leader is not a rename. But a rename or recolour the player has ordered for THEIR OWN country is an administrative act of their own government: it needs no other power's consent, it cannot be refused, and it must be enacted in this jump by an event carrying polityChanges with the new name and that action's id in actionIds. Keep \"code\" as the polity's CURRENT name - the engine matches on it and then re-keys the country to the new one, so from then on the country IS the new name everywhere and the old one survives only as a former name; a change addressed to the name you are introducing lands on nothing and mints a second country beside the real one. On an ideological or alignment shift, rewrite the COMPLETE tags list (it is a full replacement, not a delta). Set reputation (0 = pariah, 100 = universally trusted) only when this turn's events actually moved a polity's standing. Set intelligence (0 = no service to speak of, 100 = the best in the world) only when something changed it: a purge or defection, a new bureau or budget, a foreign spy ring exposed, a player action that built the service up or ran it down. A SUDDEN shock — a purge, a defector, a ring rolled up — is a direct change here and takes effect at once. Building a service UP is not sudden and does not belong here: open it on the Projects board as a programme and put the new rating in that project's onComplete.polityChanges, so it arrives when the work actually finishes and the player can watch it coming, fund it, or have a rival wreck it first. Deciding to have a better service is not the same as having one. A country's national statistics move ONLY through \"stats\" here — send just the fields that changed; everything omitted keeps its prior value. That includes WHO LEADS: when a leader is overthrown, assassinated, dies, resigns or is voted out, put the successor's name in stats.leader (together with stats.government and stats.stability when those moved too). An event that narrates a leader falling but leaves stats.leader untouched leaves the OLD name standing on that country's stat sheet, so the story and the sheet disagree.\n\n• regionClaims — Mark territory CLAIMED but not held, so the map can show a dispute instead of pretending nothing happened. Use it when a polity asserts a right to land it does not control and has not been given: an irredentist declaration, a proclaimed union, a contested border, a government-in-exile's title, a player declaring a neighbour's province theirs. Shape: {\"regionId\":\"<exact id, or the plain region name>\",\"claimantCode\":\"<claiming polity's full name>\",\"note\":\"<why>\"}; add \"drop\":true to withdraw a claim that was renounced, traded away, or lost with the claimant's defeat. The region renders striped in every claimant's colour and stays that way until it is settled - by a regionTransfers entry when someone finally wins or concedes it, or by a drop. NEVER move a border for a claim alone, and never leave a claim unrecorded either: a declaration that changes nothing the player can see is a declaration they cannot tell they made.\n\n• unitOps — Move the war on the map with battalions. Four ops:\n    {\"op\":\"spawn\",\"unit\":{\"name\":\"\",\"type\":\"infantry|armor|air|naval|artillery|garrison\",\"ownerCode\":\"\",\"strength\":1-100,\"composition\":\"\",\"at\":\"<where, in words: near Kharkiv / eastern Ukraine / off Sevastopol>\"}}\n    {\"op\":\"move\",\"unitId\":\"<existing id>\",\"at\":\"<where, in words>\",\"posture\":\"\",\"note\":\"\"}\n    {\"op\":\"strength\",\"unitId\":\"<existing id>\",\"strength\":0-100,\"note\":\"\"}\n    {\"op\":\"remove\",\"unitId\":\"<existing id>\",\"note\":\"\"}\n  Spawn units for mobilizations and reinforcements, move them to reflect offensives, lower their strength as they take losses, and remove them only when destroyed or disbanded. Only reference unit ids that appear in the current-units list. Say WHERE with at, in words (see [Placing Things]); the engine finds the point and keeps counters off each other. Give lng/lat only for a spot no name describes. When a front is decisively won, pair the advance with a regionTransfers entry so the border follows the troops.\n\n• markerOps — Place, remove, rename or resize a named structure or city. Four ops:\n    {\"op\":\"build\",\"marker\":{\"name\":\"\",\"kind\":\"<lowercase, e.g. military base / port / embassy / airfield / city>\",\"ownerCode\":\"\",\"at\":\"<where, in words: near Odesa / coast of Crimea>\",\"note\":\"\",\"foundedAt\":\"\"}}\n    {\"op\":\"remove\",\"name\":\"<exact existing name>\",\"note\":\"\"}\n    {\"op\":\"rename\",\"name\":\"<current name>\",\"newName\":\"<new name>\",\"note\":\"<why>\"}\n    {\"op\":\"population\",\"name\":\"<city>\",\"population\":<whole number of people>,\"note\":\"<why>\"}\n  Emit build whenever an event founds or constructs a place, remove when one is destroyed, and rename when a city or structure is renamed (rename works on existing map cities too — a city renamed after a leader or ideology, a capital re-designated, a conquered city given the conqueror's name). Structures NEVER move borders: a facility one polity builds inside another's land does not transfer the region, and ownerCode is who runs the facility, not who owns the ground. Emit population whenever an event plausibly moves how many people live somewhere - a siege, famine, epidemic, bombing or evacuation shrinking a city; an industrial boom, resettlement or refugee influx growing one - giving the new TOTAL, not the change. It works on any city on the map, whether the scenario authored it or it came with the world.\n\n• createdChats — Have another polity open a diplomatic chat with the player BECAUSE of this event (a war scare prompting mediation, a border incident prompting an ultimatum, a windfall prompting a trade delegation). Shape: {\"countries\":[\"...\"],\"title\":\"<names the purpose>\",\"speaker\":\"<the initiating polity — never the player>\",\"openingMessage\":\"<that leader's first message, in their voice>\"}. The other side always speaks first; a blank or untitled chat is invalid.\n\n• actionIds — List the ids of the player's queued actions that this event resolves, so the game can clear them from the queue.\n\nWhole-jump levers (top level of your output, NOT inside an event):\n• diplomaticOutreach — Polities reaching out to the player on their OWN initiative this period — treaty feelers, trade proposals, non-aggression pacts, mediation offers, warnings, summit invitations — not tied to any single event. Same shape as createdChats. Open one whenever a polity plausibly would, rather than defaulting to none.\n• catalyst — An interactive branching scene handed to the player when a moment genuinely demands their decision, or null when none is warranted. Shape: {\"title\":\"\",\"premise\":\"\",\"opening\":\"\",\"choices\":[\"...\", \"...\", up to 5 distinct]}.\n\nKeep the total across createdChats and diplomaticOutreach to at most 3 per jump, and only when the approach genuinely serves the sender's interests.";
 
 // Written into a fallback's rawResponse when there is no model output to show.
 // Exported so the debug report (time.jsx) can tell this apart from real model
@@ -1616,6 +1618,187 @@ const placeReaderFor = (bundle) => {
   return async (text) => placesNamedIn(await context(), text);
 };
 
+// ---- Placement: `at`, and keeping things off each other ------------------------
+//
+// A unit or a structure may be placed with a phrase instead of coordinates
+// (placement.js: "near Kharkiv", "eastern Ukraine", "off Sevastopol"). This is
+// the half of that which needs the map: the gazetteer the phrases are resolved
+// against, and the pass over a payload that turns every `at` into a point and
+// then moves each newly placed thing clear of whatever already stands there
+// (runtime/featureSpacing.js), without letting it leave the region it was put in.
+//
+// It runs where region names are resolved — at validation — because the runtime
+// layer that APPLIES operations has no geometry (see buildOwnerFootprint in
+// gameState.js) and must go on receiving plain coordinates.
+const buildPlacementGazetteer = (context, world) => {
+  const fold = (value) => foldRegionKey(value);
+  const units = normalizeArray(world?.units).filter((unit) => Number.isFinite(unit?.lng) && Number.isFinite(unit?.lat));
+  const markers = normalizeArray(world?.markers).filter((marker) => Number.isFinite(marker?.lng) && Number.isFinite(marker?.lat));
+  const withGeometry = context.rows.filter((row) => row.geometry && row.bbox);
+  const asRegion = (row) => ({ id: row.id, name: row.name, geometry: row.geometry });
+
+  // `exact`: the name as the map spells it (or an alias, or "Kharkiv" for
+  // "Kharkiv Oblast") and nothing looser — the whole-phrase attempt, where a
+  // substring match would read "off Sevastopol" as the region Sevastopol.
+  const find = (name, { exact: exactOnly = false } = {}) => {
+    const key = fold(name);
+    if (!key) return null;
+    const unit = units.find((entry) => fold(entry.id) === key || fold(entry.name) === key);
+    if (unit) return { kind: "unit", name: unit.name, point: [unit.lng, unit.lat] };
+    const marker = markers.find((entry) => fold(entry.id) === key || fold(entry.name) === key);
+    if (marker) return { kind: "marker", name: marker.name, point: [marker.lng, marker.lat] };
+    const city = context.cityRows.find((entry) => fold(entry.name) === key || entry.aliases.some((alias) => fold(alias) === key));
+    if (city) return { kind: "city", name: city.name, point: city.coordinates };
+    // A country before a region: "Ukraine" is the country even where a region shares the name.
+    const owner = context.resolveOwner(name);
+    const owned = owner ? (context.ownerRows.get(owner) ?? []).filter((row) => row.geometry) : [];
+    const exact = withGeometry.find((row) => fold(row.name) === key || row.aliases.some((alias) => fold(alias) === key));
+    if (owned.length && !(exact && owned.length === 1)) return { kind: "polity", name: owner, regions: owned.map(asRegion) };
+    if (exact) return { kind: "region", name: exact.name, region: asRegion(exact) };
+    const matched = exactOnly
+      ? matchRegionName(name, withGeometry, { allowFuzzy: false, minSubstring: Infinity })
+      : matchRegionName(name, withGeometry, { maxFuzzy: 1 });
+    if (matched?.region) return { kind: "region", name: matched.region.name, region: asRegion(matched.region) };
+    if (exactOnly) return null;
+    // A city one letter out ("Kharkov" for "Kharkiv"), last: a near miss must not beat a real region.
+    const stripped = stripRegionAffixes(key) || key;
+    const close = stripped.length >= 5 && context.cityRows.find((entry) => editDistance(stripped, fold(entry.name), 1) <= 1);
+    return close ? { kind: "city", name: close.name, point: close.coordinates } : null;
+  };
+
+  const regionAt = (point) => {
+    const row = withGeometry.find((candidate) => point[0] >= candidate.bbox[0] && point[0] <= candidate.bbox[2]
+      && point[1] >= candidate.bbox[1] && point[1] <= candidate.bbox[3]
+      && pointInGeometry(point, candidate.geometry));
+    return row ? asRegion(row) : null;
+  };
+
+  // The nearest region to a point that is in none, within maxKm, and the spot
+  // inside it nearest that point: where something put in the sea comes ashore.
+  const nearestLand = (point, maxKm) => {
+    let best = null; let bestKm = maxKm;
+    for (const row of withGeometry) {
+      // The bbox first: most of the world is nowhere near.
+      const clamped = [Math.min(Math.max(point[0], row.bbox[0]), row.bbox[2]), Math.min(Math.max(point[1], row.bbox[1]), row.bbox[3])];
+      const km = placementDistanceKm(point, clamped);
+      if (km < bestKm) { bestKm = km; best = row; }
+    }
+    if (!best) return null;
+    const ashore = nearestInteriorPoint(best.geometry, point);
+    return ashore ? { point: ashore, region: asRegion(best) } : null;
+  };
+  return { find, regionAt, nearestLand };
+};
+
+const LAND_UNIT_TYPES = new Set(["infantry", "armor", "artillery", "garrison"]);
+
+// Every `at` in a list of containers ({ event, impacts, path }) becomes
+// coordinates, and every newly placed thing is spaced off the rest. Mutates the
+// operations in place, like the region resolvers beside it. `receipt` hears what
+// could not be placed; an operation that then has no coordinates at all is left
+// for the normalizer to drop, exactly as one that never had any.
+const resolvePlacements = async (containers, world, { receipt = null } = {}) => {
+  const placing = [];
+  for (const { event, impacts, path } of normalizeArray(containers)) {
+    if (!impacts || typeof impacts !== "object") continue;
+    const title = normalizeString(event?.title);
+    for (const op of normalizeArray(impacts.unitOps)) {
+      const kind = normalizeString(op?.op).toLowerCase();
+      if (kind === "spawn") {
+        const unit = op.unit && typeof op.unit === "object" ? op.unit : op;
+        placing.push({ family: "unit", target: unit, phrase: normalizeString(unit.at ?? op.at), lngKey: "lng", latKey: "lat", name: normalizeString(unit.name), id: "", raisedOnLand: LAND_UNIT_TYPES.has(normalizeString(unit.type).toLowerCase()), title, path });
+      } else if (kind === "move") {
+        placing.push({ family: "unit", target: op, phrase: normalizeString(op.at), lngKey: "toLng", latKey: "toLat", name: normalizeString(op.unitId), id: normalizeString(op.unitId), raisedOnLand: false, title, path });
+      }
+    }
+    for (const op of normalizeArray(impacts.markerOps)) {
+      const kind = normalizeString(op?.op).toLowerCase();
+      if (kind !== "build" && kind !== "found" && kind !== "update") continue;
+      const marker = op.marker && typeof op.marker === "object" ? op.marker : op;
+      const phrase = normalizeString(marker.at ?? op.at);
+      // An update that names no new place is not a placement.
+      if (kind === "update" && !phrase && !Number.isFinite(Number(marker.lng))) continue;
+      placing.push({ family: "marker", target: marker, phrase, lngKey: "lng", latKey: "lat", name: normalizeString(marker.name), id: normalizeString(op.markerId || marker.id), raisedOnLand: false, title, path });
+    }
+  }
+  if (!placing.length) return { placed: 0, spaced: 0 };
+
+  let gazetteer;
+  try {
+    gazetteer = buildPlacementGazetteer(await lazyLookupContext({ world })(), world);
+  } catch (error) {
+    console.warn("[placement] the map could not be read; operations keep the coordinates they came with.", error);
+    return { placed: 0, spaced: 0 };
+  }
+
+  // What already stands, plus each thing placed by this payload as it lands.
+  const standing = obstaclesOf(world);
+  let placed = 0; let spaced = 0;
+  for (const entry of placing) {
+    const { target, lngKey, latKey } = entry;
+    if (entry.phrase) {
+      const resolved = resolvePlacement(entry.phrase, gazetteer, { seedText: entry.name });
+      if (resolved.error) {
+        const hasCoordinates = Number.isFinite(Number(target[lngKey])) && Number.isFinite(Number(target[latKey]));
+        noteReceipt(receipt, hasCoordinates ? "adjusted" : "dropped",
+          `${entry.title ? `Event "${entry.title}": ` : ""}${entry.name || "a unit"} could not be placed at "${entry.phrase}" — ${resolved.error}. `
+          + (hasCoordinates ? "Its coordinates were used instead." : "It was left off the map. Name a city, region, structure or unit as the map spells it."));
+        if (!hasCoordinates) continue;
+      } else {
+        target[lngKey] = resolved.lng;
+        target[latKey] = resolved.lat;
+        if (entry.family === "unit" && resolved.regionId) target.regionId = resolved.regionId;
+        placed += 1;
+      }
+    }
+    delete target.at;
+    let lng = Number(target[lngKey]); let lat = Number(target[latKey]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) continue;
+
+    // An army is not raised at sea. This is what a guessed longitude looks like:
+    // a rifle division standing in the Black Sea, forty kilometres off the city
+    // it was meant for. Only a land formation being CREATED, and only close to a
+    // shore — one that moves may be at sea in transit, and a point in mid-ocean
+    // is not a near miss.
+    if (entry.raisedOnLand && !gazetteer.regionAt([lng, lat])) {
+      const ashore = gazetteer.nearestLand([lng, lat], 150);
+      if (ashore) {
+        noteReceipt(receipt, "adjusted", `${entry.title ? `Event "${entry.title}": ` : ""}${entry.name || "a land unit"} was placed in the sea and was moved ashore to ${ashore.region.name}. Place land forces with \`at\` and a place name rather than coordinates.`);
+        lng = Number(ashore.point[0].toFixed(5)); lat = Number(ashore.point[1].toFixed(5));
+        target[lngKey] = lng; target[latKey] = lat;
+        target.regionId = ashore.region.id;
+      }
+    }
+
+    // Clear of everything else — but never out of the region it was put in, and
+    // never ashore when it was put at sea.
+    const home = gazetteer.regionAt([lng, lat]);
+    const others = entry.id ? standing.filter((obstacle) => obstacle.id !== entry.id) : standing;
+    const radiusKm = entry.family === "unit" ? FOOTPRINT_KM.unit : FOOTPRINT_KM.marker;
+    const spot = spaceOut({
+      lng, lat, radiusKm, obstacles: others,
+      inside: home
+        ? (point) => gazetteer.regionAt([point.lng, point.lat])?.id === home.id
+        : (point) => !gazetteer.regionAt([point.lng, point.lat]),
+    });
+    if (spot.moved) {
+      target[lngKey] = spot.lng;
+      target[latKey] = spot.lat;
+      spaced += 1;
+    }
+    // A moved unit leaves where it stood; everything else is simply added.
+    if (entry.id) {
+      const index = standing.findIndex((obstacle) => obstacle.id === entry.id);
+      if (index >= 0) standing.splice(index, 1);
+    }
+    standing.push({ id: entry.id || `placed-${standing.length}`, lng: Number(target[lngKey]), lat: Number(target[latKey]), radiusKm });
+  }
+  if (placed || spaced) {
+    logDebugEvent("turn", `Placement: ${placed} thing(s) placed by name, ${spaced} moved clear of something already there.`, undefined, { verbose: true });
+  }
+  return { placed, spaced };
+};
+
 // The system prompt a task is sent: its template rendered with the variables,
 // then every directive that task carries at call time (they are appended here
 // rather than written into defaultPrompts.json because existing campaigns carry
@@ -1683,6 +1866,9 @@ const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null } = {}
     // re-narrated under each new turn's date) that a de-dup can't catch. Appended at
     // call time so existing frozen-prompt campaigns get it too.
     systemPrompt = `${systemPrompt}\n\n[New Developments Only]\nThe events shown to you above have ALREADY happened and appear only as context. Do NOT restate, rephrase, re-report, or re-narrate them. Emit ONLY genuinely NEW developments that occur during THIS period. If an ongoing situation (a war, a crisis, an occupation) has no new development this period, do not emit an event for it.`;
+    // Where a unit or a structure goes, in words (placement.js). Appended at call
+    // time for the same reason as the rest; the field itself ships in the live schema.
+    systemPrompt = `${systemPrompt}\n\n${PLACEMENT_DIRECTIVE}`;
     // Place renaming: appended at call time so existing frozen-prompt campaigns get it
     // too; the markerOps rename op ships via the LIVE tool schema either way.
     systemPrompt = `${systemPrompt}\n\n[Place Renaming]\nYou may rename places when the story warrants it (a city renamed after a leader or ideology, a capital re-designated, a colonial name replaced, a conquered city given the conqueror's name). Emit an impacts.markerOps entry {"op":"rename","name":"<current name>","newName":"<new name>","note":"<why>"}. This works on structures you built AND on existing map cities. Do it sparingly and only when a real event motivates it.`;
@@ -1996,6 +2182,9 @@ So use the wider picture to choose the sender and the moment — never to give t
 
   // The unit director's runtime rules travel with the call so a campaign's
   // frozen prompt pack (which predates the task) still gets the current contract.
+  if (["unitDirector", "gameMaster", "idleDiplomacy", "catalystExecutor"].includes(taskKey)) {
+    systemPrompt = `${systemPrompt}\n\n${PLACEMENT_DIRECTIVE}`;
+  }
   if (taskKey === "unitDirector") {
     const directorUnits = normalizeString(variables.unitDirectorUnits) || "[]";
     const directorCandidates = normalizeString(variables.unitDirectorCandidates) || "[]";
@@ -5115,6 +5304,12 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
   for (const entry of unresolvedControlOps) {
     noteReceipt(receipt, "dropped", describeUnresolvedTerritory(entry, "regionControlOps", titleAt(entry?.path)));
   }
+  // Units and structures placed by name (`at`), and everything placed kept clear
+  // of what already stands (resolvePlacements above). Never an error: a place
+  // that cannot be found is said in the receipt, and the operation keeps any
+  // coordinates it came with. Not on the Game Master's apply-time pass, which
+  // may not reopen the map's geometry: its preview already placed everything.
+  if (!resolvedRegionIdsOnly) await resolvePlacements(containers, world, { receipt });
   if (resolvedRegionIdsOnly) {
     const exactClaimError = validateExactApprovedRegionClaims(containers);
     if (exactClaimError) return exactClaimError;
@@ -10460,6 +10655,24 @@ const TIMELINE_CURATOR_INSTRUCTION =
   "Analyze every supplied native timeline candidate with the required curator tool. Return exactly one judgment for every candidate index.";
 
 const unitDirectorUnavailable = () => ({ eventOrders: [], summary: "Unit director unavailable; existing simulator unitOps preserved." });
+
+// The director's orders may say where in words too. Placed here, before the
+// director's own rules measure the move, because those rules read coordinates.
+const placeDirectorOrders = async (payload, world, events) => {
+  const orders = normalizeArray(payload?.eventOrders);
+  if (!orders.length) return payload;
+  const containers = orders.map((order, index) => ({
+    event: normalizeArray(events)[Number(order?.eventIndex)] ?? null,
+    impacts: { unitOps: normalizeArray(order?.unitOps) },
+    path: `$.eventOrders[${index}]`,
+  }));
+  try {
+    await resolvePlacements(containers, world, { receipt: null });
+  } catch (error) {
+    console.warn("[unit director] the orders' places could not be resolved; the orders stand as written.", error);
+  }
+  return payload;
+};
 const territoryDirectorUnavailable = () => ({
   eventOrders: [],
   summary: "Territory director unavailable; existing legal/control impacts preserved.",
@@ -10810,16 +11023,19 @@ const finishTimelineJump = async ({ context, signal, state }) => {
       game: bundle.game,
       world: bundle.world,
       analyzeBatch: review
-        ? async () => ({ payload: review.parts.units ?? unitDirectorUnavailable(), generation: { source: review.parts.units ? "ai" : "fallback" } })
-        : (input) =>
-          runJsonTask("unitDirector", {
+        ? async () => ({ payload: await placeDirectorOrders(review.parts.units ?? unitDirectorUnavailable(), bundle.world, merged.events), generation: { source: review.parts.units ? "ai" : "fallback" } })
+        : async (input) => {
+          const answer = await runJsonTask("unitDirector", {
             lookups: buildTaskLookups(bundle),
             fallback: unitDirectorUnavailable,
             signal,
             userMessage: UNIT_DIRECTOR_INSTRUCTION,
             variables: unitDirectorVariables(input, bundle.game),
             ...jumpTaskOptions(state.requests, "review"),
-          }),
+          });
+          await placeDirectorOrders(answer?.payload, bundle.world, merged.events);
+          return answer;
+        },
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -13288,6 +13504,12 @@ export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
     // --- movement ---------------------------------------------------------
     const unitOps = normalizeArray(payload.unitOps);
     if (unitOps.length > 0 && !isSimulationBusy()) {
+      // Placed by name, and kept off each other, like a turn's own ops.
+      try {
+        await resolvePlacements([{ event: null, impacts: { unitOps }, path: "$.unitOps" }], bundle.world, { receipt: null });
+      } catch (error) {
+        console.warn("[ai] idle pulse ops could not be placed by name; they stand as written.", error);
+      }
       try {
         const nextWorld = await applyIdlePulseUnitOps(bundle, unitOps);
         // Re-check immediately before the write, exactly as the chat half does:
