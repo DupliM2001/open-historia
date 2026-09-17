@@ -318,9 +318,12 @@ const translateBatch = async (strings) => {
     `- If a string is already in ${name} or is a proper name/code with no translation, return it unchanged.\n` +
     `- Never add commentary, keys, or markdown.`;
 
+  // Named, so the request count (AI/requestBudget.js) can say what these were:
+  // a first pass over a new language is dozens of requests nobody pressed a
+  // button for, and "Used today, by task" is where a player finds that out.
   const raw = await callAI(systemPrompt, [
     { role: "user", parts: [{ text: JSON.stringify(strings) }] },
-  ], { languageMode: "none" });
+  ], { languageMode: "none", logLabel: "interface translation", taskKey: "translation" });
   const translations = extractJsonArray(raw);
 
   if (!translations) {

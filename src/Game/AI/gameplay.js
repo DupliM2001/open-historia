@@ -2185,6 +2185,10 @@ const runJsonTask = async (taskKey, {
   spender = "",
   requestKind,
   onRequest,
+  // A task whose answer is worth a second request even while requests are being
+  // saved: it keeps strict-then-retry. For something asked once per campaign and
+  // built on for the rest of it, not for anything asked every turn.
+  strictFirst = false,
 }) => {
   const { prompts, promptTemplate, staticPromptPrefix, systemPrompt } = await buildTaskSystemPrompt(taskKey, { variables, lookups });
 
@@ -2277,7 +2281,7 @@ const runJsonTask = async (taskKey, {
   // made only when there is nothing usable to keep. The model still learns what
   // was dropped or changed — the jump's application receipt tells it at the top
   // of the next turn — it just does not cost the player a request to say so.
-  const salvageFirst = savingRequests();
+  const salvageFirst = savingRequests() && !strictFirst;
   // What schema salvage cut out of the answer that was finally taken.
   let removedFromAnswer = [];
 
@@ -10208,8 +10212,18 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
           // date validator below to report).
           sortTimelineEventsChronologically(candidate);
           const eventCount = normalizeArray(candidate?.events).length;
-          if (strict && mode !== "auto" && (eventCount < minEvents || eventCount > maxEvents)) {
-            return `$.events must contain between ${minEvents} and ${maxEvents} events; received ${eventCount}.`;
+          if (mode !== "auto" && (eventCount < minEvents || eventCount > maxEvents)) {
+            if (strict) return `$.events must contain between ${minEvents} and ${maxEvents} events; received ${eventCount}.`;
+            // Kept, because sending it back is a whole second request — but the
+            // model is told, at the top of its next turn, what the period asked for.
+            noteReceipt(
+              draft,
+              "short",
+              `You wrote ${eventCount} event${eventCount === 1 ? "" : "s"} for ${formatDurationLabel(spanDays)} that called for ${minEvents} to ${maxEvents}. `
+                + (eventCount < minEvents
+                  ? "A period that long holds more than that: cover the wider world as well as the player's own front."
+                  : "Fewer, weightier events serve a period better than a long list of small ones."),
+            );
           }
           // Each segment is checked against ITS OWN span, so an event dated outside
           // the segment is caught while the model can still fix it rather than at the
@@ -12978,6 +12992,10 @@ export const maybeGeneratePregameHistory = async () => {
     };
     const { payload } = await runJsonTask("pregameHistory", {
       lookups: buildTaskLookups(bundle),
+      // Asked once per campaign, and every ledger the campaign runs on is seeded
+      // from it: a bootstrap that left out a war is worth one more request to get
+      // right, where a single turn is not (requestBudget.js).
+      strictFirst: true,
       userMessage: `Write the pre-game historical timeline AND the canonical Round-One bootstrap for ${startDate} as JSON only. ` +
         "Put every war, bilateral relation, formal agreement and unresolved non-war storyline already true on the start date into canonicalUpdates with the correct kind, using ONLY the supplied current polity identities; do not invent event indexes. " +
         "Prioritise every active war and formal agreement first, then the materially important bilateral climates among the central actors. A relation or standing agreement does NOT need its own event card merely to exist; include historical events because they are important timeline anchors, not as bookkeeping padding.",

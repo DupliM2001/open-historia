@@ -27,7 +27,13 @@ export const RECEIPT_MAX_NOTES = 40;
 export const RECEIPT_NOTE_MAX_CHARS = 280;
 
 // What a note is about. The order is the order they are rendered in.
-export const RECEIPT_NOTE_KINDS = Object.freeze(["redone", "withheld", "dropped", "adjusted"]);
+//
+// "short" is what a strict retry used to say and no longer gets the chance to:
+// while requests are being saved (AI/requestBudget.js) an answer that falls short
+// of what was asked — too few events for the period — is kept rather than sent
+// back, because sending it back is a whole second request. Nothing was lost, so
+// it is none of the three kinds above it; the model is simply told, once, here.
+export const RECEIPT_NOTE_KINDS = Object.freeze(["redone", "withheld", "dropped", "adjusted", "short"]);
 
 // The impact arrays a turn can carry, in the order a reader cares about.
 const APPLIED_KEYS = Object.freeze([
@@ -225,6 +231,7 @@ const KIND_HEADINGS = Object.freeze({
   withheld: "Events you wrote that did NOT reach the timeline — the record you are shown does not contain them",
   dropped: "Operations that were NOT applied — the map and records do not show them",
   adjusted: "Operations the engine changed before applying",
+  short: "Kept exactly as you wrote it, but short of what was asked — meet it this turn",
 });
 
 // The block the next jump opens with. Empty when there was no previous turn to
