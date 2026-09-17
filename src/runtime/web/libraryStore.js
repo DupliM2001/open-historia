@@ -648,6 +648,20 @@ const runtimeValueFromRecord = (record, assetKey, scenarioScope = false) => {
   if (assetKey === "colors") return record.colors;
   if (assetKey === "flags") return record.flags;
   if (assetKey === "snapshots") return scenarioScope ? undefined : record.snapshots; // snapshots are game-only
+  // Derived, read-only: the same projection the desktop server keeps on disk.
+  if (assetKey === "snapshotsIndex") {
+    if (scenarioScope) return undefined;
+    const list = Array.isArray(record.snapshots) ? record.snapshots : [];
+    return {
+      entries: list.map((snap) => ({
+        id: snap?.id ?? "",
+        round: snap?.round ?? null,
+        fromDate: snap?.fromDate ?? "",
+        toDate: snap?.toDate ?? "",
+        capturedAt: snap?.capturedAt ?? "",
+      })),
+    };
+  }
   if (assetKey === "intercepts") return scenarioScope ? undefined : record.json?.intercepts; // spy reports: game-only, plain json slot
   if (JSON_ASSET_KEYS.includes(assetKey)) return record.json?.[assetKey];
   return undefined;

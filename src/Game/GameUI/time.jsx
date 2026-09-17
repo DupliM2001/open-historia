@@ -9,8 +9,10 @@ import {
     getPmtilesArchive,
     loadCountryNames,
     loadRegionCatalog,
+    loadRollbackSnapshotCount,
 } from "../../runtime/assets.js";
-import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplay.js";
+import { loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplayLazy.js";
+import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump } from "../AI/simulationStatus.js";
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
 import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
 import { describeUnavailable, fallbackAvailability } from "../AI/fallbackRunner.js";
@@ -2029,8 +2031,9 @@ const DateWidget = ({
     // each turn). Re-checked whenever the round changes — after a jump or undo.
     useEffect(() => {
         let active = true;
-        loadRollbackSnapshots().then((list) => {
-            if (active) setUndoCount(list.length);
+        // The index, not the snapshots: the full list carries every prior world.
+        loadRollbackSnapshotCount().then((count) => {
+            if (active) setUndoCount(count);
         });
         return () => { active = false; };
     }, [gameData?.round]);

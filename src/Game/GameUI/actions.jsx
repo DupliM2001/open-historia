@@ -4,7 +4,7 @@ import dayjs from "dayjs";
 import advancedFormat from "dayjs/plugin/advancedFormat";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
-import { generateActionSuggestions, refinePlayerAction } from "../AI/gameplay.js";
+import { generateActionSuggestions, refinePlayerAction } from "../AI/gameplayLazy.js";
 import { revertUnitOrder } from "../Map/unitsController.js";
 import {
     buildActionDisplayText,

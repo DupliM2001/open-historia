@@ -198,6 +198,19 @@ import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
+import {
+  NO_RESPONSE_BODY_NOTE,
+  beginSimulation,
+  discardPendingJumpSegment,
+  discardPendingProjectsJump,
+  endSimulation,
+  getPendingJumpSegment,
+  getPendingProjectsJump,
+  isSimulationBusy,
+  setChatGenerationInFlight,
+  setPendingJumpSegment,
+  setPendingProjectsJump,
+} from "./simulationStatus.js";
 
 const CHAT_HINT_PATTERNS = [
   /\bchat\b/i,
@@ -1369,7 +1382,7 @@ const ACTIONS_REFERENCE = "[Actions You Can Take]\nThis is the full menu of leve
 // Written into a fallback's rawResponse when there is no model output to show.
 // Exported so the debug report (time.jsx) can tell this apart from real model
 // text and label its section honestly, rather than matching on the wording.
-export const NO_RESPONSE_BODY_NOTE = "(no response body — the request failed before the model answered, so there was nothing to parse. See the failure reason above: a transport or HTTP error like this usually means the provider URL, API key or model name is wrong, not that the model misbehaved.)";
+// NO_RESPONSE_BODY_NOTE lives in simulationStatus.js and is re-exported below.
 export const EMPTY_RESPONSE_BODY_NOTE = "(the provider returned an empty response body — the request succeeded but the model produced no text)";
 
 // "Limit AI generation" (OFF by default) — the whole policy, in one place rather
@@ -2683,14 +2696,15 @@ const projectsHeldError = (cause) => {
 // ten minutes. Because nothing was written, this is the same code path as the
 // first attempt rather than a second one to keep in step.
 export const retryPendingProjectsJump = async ({ signal } = {}) => {
-  if (!pendingProjectsJump) throw new Error("There is no turn waiting on the Projects board.");
-  const { applyArgs } = pendingProjectsJump;
+  const heldProjectsJump = getPendingProjectsJump();
+  if (!heldProjectsJump) throw new Error("There is no turn waiting on the Projects board.");
+  const { applyArgs } = heldProjectsJump;
   beginSimulation();
   try {
     // Released BEFORE the attempt, so a turn can never be applied twice, and
     // re-held only if the BOARD fails again — a failure after that point is a
     // different situation and must not pretend otherwise.
-    pendingProjectsJump = null;
+    setPendingProjectsJump(null);
     // The RETRY's signal, not the held turn's — that one belongs to a request
     // that already finished, and if the player cancelled it this call would abort
     // before it started.
@@ -2703,7 +2717,7 @@ export const retryPendingProjectsJump = async ({ signal } = {}) => {
   } catch (error) {
     if (error?.projectsHeld) {
       logDebugEvent("turn", "Board retry failed; the turn is still held.", error);
-      pendingProjectsJump = { applyArgs };
+      setPendingProjectsJump({ applyArgs });
     }
     throw error;
   } finally {
@@ -2944,40 +2958,38 @@ const activeCampaignId = () => {
   }
 };
 
-let activeSimulations = 0;
-const beginSimulation = () => { activeSimulations += 1; };
-const endSimulation = () => { activeSimulations = Math.max(0, activeSimulations - 1); };
-// A turn whose events are generated and validated but NOT yet written, because
-// the Projects & Operations board could not be brought in step with them.
+// activeSimulations, pendingProjectsJump and pendingJumpSegment moved to
+// simulationStatus.js so the HUD can poll isSimulationBusy() without importing
+// this module. Reached through the accessors below; see that file for why.
 //
-// Nothing is applied while this is set. That is deliberate and is what keeps the
-// retry honest: the board's ops must ride in on the events that caused them and
-// be applied before the world is written. Holding the whole turn means the retry
-// is the SAME path as the first attempt, with no privileged bypass to add. If it
-// cannot be resolved the turn fails like any other and the player rolls back.
-let pendingProjectsJump = null;
-
-// A jump whose segments are part-generated: one segment failed, the ones before
-// it are still in hand, and NOTHING has been written. Held so the player is told
-// which segment failed and can retry just that segment or discard the turn (see
-// runJumpSegments).
-let pendingJumpSegment = null;
+// pendingProjectsJump: a turn whose events are generated and validated but NOT
+// yet written, because the Projects & Operations board could not be brought in
+// step with them. Nothing is applied while it is set. That is deliberate and is
+// what keeps the retry honest: the board's ops must ride in on the events that
+// caused them and be applied before the world is written. Holding the whole turn
+// means the retry is the SAME path as the first attempt, with no privileged
+// bypass to add. If it cannot be resolved the turn fails like any other and the
+// player rolls back.
+//
+// pendingJumpSegment: a jump whose segments are part-generated, where one
+// segment failed, the ones before it are still in hand, and NOTHING has been
+// written. Held so the player is told which segment failed and can retry just
+// that segment or discard the turn (see runJumpSegments).
 
 // Storyline motion repairs that failed, keyed by campaign and storyline id (see
 // recordMotionRepairOutcome). Memory only: it keeps a storyline that fails the
 // same way from costing a call every turn, and a reload simply forgets it.
 const motionRepairFailures = new Map();
 
-export const hasPendingJumpSegment = () => pendingJumpSegment !== null;
-
-// Abandon the held jump. Nothing was written, so there is nothing to undo — the
-// player loses the segments generated so far, as if they had cancelled.
-export const discardPendingJumpSegment = () => {
-  const had = pendingJumpSegment !== null;
-  pendingJumpSegment = null;
-  if (had) logDebugEvent("turn", "Held jump discarded; nothing was written and its finished segments are gone.");
-  return had;
-};
+export {
+  NO_RESPONSE_BODY_NOTE,
+  discardPendingJumpSegment,
+  discardPendingProjectsJump,
+  hasPendingJumpSegment,
+  hasPendingProjectsJump,
+  isChatGenerationLikely,
+  isSimulationBusy,
+} from "./simulationStatus.js";
 
 // The turn is part-generated and waiting, not lost. Flagged so the UI can tell
 // this apart from an ordinary jump failure and offer to retry the one segment
@@ -3001,11 +3013,6 @@ const segmentHeldError = ({ cause, completedSegments, segmentCount, segmentIndex
   return error;
 };
 
-// A held jump counts as busy: the idle pulse checks this before it writes, so it
-// cannot write into a world that is about to be replaced by the held turn.
-export const isSimulationBusy = () => activeSimulations > 0
-  || pendingProjectsJump !== null
-  || pendingJumpSegment !== null;
 
 // --- Batch dispatch (ported from the abdulrahman-2005 fork) -------------------
 // Tasks submitted with sync:false register here; a lazy poller asks the
@@ -3075,17 +3082,6 @@ export const pollPendingBatches = async () => {
       logDebugEvent("ai", `Batch ${customId} ("${entry.taskKey}") could not be applied: ${normalizeString(error?.message || error)}`);
     }
   }
-};
-
-export const hasPendingProjectsJump = () => pendingProjectsJump !== null;
-
-// Abandon the held turn. Nothing was written, so there is nothing to undo — the
-// player simply loses the generation, the same as cancelling a jump.
-export const discardPendingProjectsJump = () => {
-  const had = pendingProjectsJump !== null;
-  pendingProjectsJump = null;
-  if (had) logDebugEvent("turn", "Held turn discarded; the board was never updated and nothing was written.");
-  return had;
 };
 
 const resolveInvitees = async (names, world, additionalCountries = []) => {
@@ -9893,7 +9889,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
 
     // Held, not lost. state.nextSegment still points at the segment that failed,
     // so a retry resumes with exactly that one.
-    pendingJumpSegment = { context, state };
+    setPendingJumpSegment({ context, state });
     console.warn(`[ai] jump segment ${segmentIndex + 1}/${segmentCount} failed (${reason}) — the turn is held.`);
     logDebugEvent("warn", "[turn] A jump segment failed; the turn is HELD and nothing was written.", {
       completedSegments: state.segmentPayloads.length,
@@ -9923,7 +9919,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
 const finishTimelineJump = async ({ context, signal, state }) => {
   const { baseColors, bundle, mode, targetDate } = context;
   // Every segment is in hand, so there is no longer a jump to resume.
-  pendingJumpSegment = null;
+  setPendingJumpSegment(null);
 
   // One round out of every segment. applySimulationResult advances the round
   // exactly once, and the dedupeGeneratedEvents pass inside it already collapses
@@ -10039,7 +10035,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
   try {
     return await applySimulationResult(applyArgs);
   } catch (error) {
-    if (error?.projectsHeld) pendingProjectsJump = { applyArgs };
+    if (error?.projectsHeld) setPendingProjectsJump({ applyArgs });
     throw error;
   }
 };
@@ -10154,8 +10150,9 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
 // segment failed, so this is the same code path as the first attempt rather than
 // a second one to keep in step.
 export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
-  if (!pendingJumpSegment) throw new Error("There is no jump waiting on a failed segment.");
-  const { context, state } = pendingJumpSegment;
+  const heldSegment = getPendingJumpSegment();
+  if (!heldSegment) throw new Error("There is no jump waiting on a failed segment.");
+  const { context, state } = heldSegment;
   beginSimulation();
   try {
     // Re-holds itself on another failure, so the player can retry again or
@@ -12257,13 +12254,13 @@ let idleDiplomacyInFlight = false;
 // Narrower than idleDiplomacyInFlight above: true only for the half of a pulse
 // that actually asks whether a polity would send a note (allowChat). A
 // movement-only pulse sets the in-flight guard but not this.
-let idleChatPollInFlight = false;
+// idleChatPollInFlight moved to simulationStatus.js (setChatGenerationInFlight).
 
-// Whether the model is right now being asked whether a country would reach out
+// isChatGenerationLikely is re-exported from simulationStatus.js. It is true
+// only while the model is being asked whether a country would reach out
 // unprompted. Deliberately NOT true for a jump, a game-master command or an
 // advisor exchange: those take the same busy lock and MIGHT emit chats, but only
 // a poll whose entire purpose is that question is worth an indicator.
-export const isChatGenerationLikely = () => idleChatPollInFlight;
 
 // Apply a pulse's unit ops to the LIVE world. Routed through
 // applyEventImpactsToWorld with a synthetic event rather than a hand-rolled
@@ -12333,7 +12330,7 @@ export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
   // pulse.
   const allowChat = chatChance > 0 && roll < Math.min(pulseChance, chatChance);
   idleDiplomacyInFlight = true;
-  idleChatPollInFlight = allowChat;
+  setChatGenerationInFlight(allowChat);
   try {
     const bundle = await readGameStateBundle({ force: true });
     if (!normalizeString(bundle.game?.country)) return null; // no active game
@@ -12431,7 +12428,7 @@ export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
     return null; // silence is always the safe outcome
   } finally {
     idleDiplomacyInFlight = false;
-    idleChatPollInFlight = false;
+    setChatGenerationInFlight(false);
   }
 };
 

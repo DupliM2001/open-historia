@@ -26,6 +26,7 @@ import {
   updateScenarioFromBundle,
   readGameSnapshots,
   readRuntimeJsonAsset,
+  resolveRuntimeGeojsonAsset,
   removeGameAsset,
   removeScenarioAsset,
   resolveGameUploadAsset,
@@ -777,6 +778,14 @@ app.delete("/api/scenarios/:scenarioId", (req, res) => {
 
 app.get("/api/runtime/json/:assetKey", (req, res) => {
   try {
+    // Scenario geometry is served untransformed, so parsing it only to
+    // re-serialise blocked the event loop for seconds on a 55 MB file. A null
+    // sourcePath means no custom geometry: fall through to the empty payload.
+    const geojson = resolveRuntimeGeojsonAsset(req.params.assetKey);
+    if (geojson?.sourcePath) {
+      streamBinaryFile(req, res, geojson.sourcePath, geojson.contentType);
+      return;
+    }
     const asset = readRuntimeJsonAsset(req.params.assetKey);
     res.setHeader("Cache-Control", "no-store");
     res.type("application/json");

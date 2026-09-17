@@ -179,6 +179,10 @@ const pmtilesCache = new SharedPromiseCache(256);
 // "did the custom geometry resolve?" stays answerable (see loadRegionCatalog).
 const jsonLoadedUrls = new Set();
 
+// Wire-text length of the last parsed payload per URL, for warmJson's
+// display-only size. Recording the text we already read beats re-serialising.
+const jsonByteLengths = new Map();
+
 // The scenario geometry is never worth retaining: its only long-lived reader
 // keeps it in React state (Nations.jsx / Cities.jsx, both force:true), so the
 // value-cache copy is a second parsed FeatureCollection — ~190 MB on a 55 MB
@@ -212,6 +216,7 @@ const isMutableRuntimeJsonUrl = (url) =>
   url === JSON_URLS.intercepts ||
   url === JSON_URLS.prompts ||
   url === JSON_URLS.snapshots ||
+  url === JSON_URLS.snapshotsIndex ||
   url === JSON_URLS.world;
 
 const pmtilesProtocol = new Protocol();
@@ -380,6 +385,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
       // Must rotate with the URLs: a stale entry would claim the NEXT
       // generation's geometry had already resolved.
       jsonLoadedUrls.delete(url);
+      jsonByteLengths.delete(url);
       // The workers' staged copy (website) belongs to the old generation too.
       releaseWorkerFetchableUrl(url);
     }
@@ -426,6 +432,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
   JSON_URLS.game = withRuntimeToken("/api/runtime/json/game");
   JSON_URLS.prompts = withRuntimeToken("/api/runtime/json/prompts");
   JSON_URLS.snapshots = withRuntimeToken("/api/runtime/json/snapshots");
+  JSON_URLS.snapshotsIndex = withRuntimeToken("/api/runtime/json/snapshotsIndex");
   JSON_URLS.regionsGeojson = withRuntimeToken("/api/runtime/json/regionsGeojson");
   JSON_URLS.citiesGeojson = withRuntimeToken("/api/runtime/json/citiesGeojson");
   JSON_URLS.backgroundData = withRuntimeToken("/api/runtime/json/backgroundData");
@@ -904,6 +911,7 @@ export const readJson = async (url, { cache, defaultValue, force = false, signal
     // carrying a defaultValue resolves the SHARED batched promise to that
     // default on failure, so every awaiter sees a value either way.
     jsonLoadedUrls.add(url);
+    jsonByteLengths.set(url, text.length);
     if (store) jsonValueCache.set(url, data);
     return data;
   })()
@@ -925,11 +933,13 @@ export const readJson = async (url, { cache, defaultValue, force = false, signal
   return clone ? cloneJsonFor(url, value) : value;
 };
 
+// clone: false is safe because the payload is discarded here, and size reads
+// the recorded wire text. A primed or defaulted URL has none and reports 0.
 export const warmJson = async (url, options = {}) => {
-  const data = await readJson(url, options);
+  await readJson(url, { ...options, clone: false });
   return {
     kind: "json",
-    size: JSON.stringify(data).length,
+    size: jsonByteLengths.get(url) ?? 0,
     url,
   };
 };
@@ -937,6 +947,8 @@ export const warmJson = async (url, options = {}) => {
 export const primeJson = (url, data, { cache, clone = true } = {}) => {
   const store = cache === undefined ? !isNoStoreJsonUrl(url) : cache !== false;
   jsonLoadedUrls.add(url);
+  // The primed value came with no wire text, so drop the stale length.
+  jsonByteLengths.delete(url);
   jsonRequestCache.delete(url);
   if (!store) {
     // DELETE rather than merely skip: leaving an older entry behind would let
@@ -1579,6 +1591,19 @@ export const loadScenarioRegionCatalog = async ({ force = false } = {}) => {
     invalidateCatalog: false,
   });
 };
+
+// The server's derived projection of the restore points: id/round/dates only.
+// snapshots.json itself carries every prior world and hits 8+ MB late in a game.
+export const loadRollbackSnapshotIndex = async () => {
+  const data = await readJson(JSON_URLS.snapshotsIndex, {
+    defaultValue: { entries: [] },
+    force: true,
+    clone: false,
+  }).catch(() => null);
+  return Array.isArray(data?.entries) ? data.entries : [];
+};
+
+export const loadRollbackSnapshotCount = async () => (await loadRollbackSnapshotIndex()).length;
 
 export const loadRegionCatalog = async ({ force = false } = {}) => {
   // Keyed on BOTH sources: switching games/scenarios (new runtime token) must

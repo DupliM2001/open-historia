@@ -9,7 +9,7 @@ import { requestDiplomaticChat } from "../GameUI/chat.jsx";
 import GameFlagPicker from "../GameUI/GameFlagPicker.jsx";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
 import { resolvePolityIdentity } from "../../runtime/polityIdentity.js";
-import { generateCountryStats } from "../AI/gameplay.js";
+import { generateCountryStats } from "../AI/gameplayLazy.js";
 
 // Bridge: the region popup's info button opens this panel from outside React.
 let _openPanel = null;
