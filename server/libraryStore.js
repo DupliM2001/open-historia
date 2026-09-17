@@ -388,6 +388,9 @@ const OPTIONAL_JSON_ASSET_FILES = {
 // be large. Read/written only through the /api/runtime/json/snapshots endpoint.
 const RUNTIME_ONLY_JSON_ASSET_FILES = {
   snapshots: "storage/snapshots.json",
+  // Derived, read-only projection of snapshots.json: id/round/dates, no state.
+  // The undo counter polled the real thing per turn, parsing 8+ MB for a length.
+  snapshotsIndex: "storage/snapshots-index.json",
   // What the player's spies have intercepted, keyed by target polity. Its own
   // file on purpose: it is refreshed AFTER a jump's world write lands, and a
   // second writer on world.json would race it.
@@ -449,6 +452,7 @@ const JSON_ASSET_DEFAULTS = {
   prompts: {},
   world: {},
   snapshots: [],
+  snapshotsIndex: { entries: [] },
   intercepts: {},
 };
 
@@ -2808,6 +2812,47 @@ const resolveRuntimeGeojsonAsset = (assetKey) => {
   return { contentType: "application/json; charset=utf-8", sourcePath };
 };
 
+// What the rollback list shows, minus `state` (~700 KB per entry, up to 12).
+const snapshotIndexEntry = (snap) => ({
+  id: snap?.id ?? "",
+  round: snap?.round ?? null,
+  fromDate: snap?.fromDate ?? "",
+  toDate: snap?.toDate ?? "",
+  capturedAt: snap?.capturedAt ?? "",
+});
+
+const writeSnapshotIndex = (gameId, snapshots, stamp = "") => {
+  const list = Array.isArray(snapshots) ? snapshots : [];
+  const target = getGameJsonPath(gameId, "snapshotsIndex");
+  ensureDirectory(path.dirname(target));
+  writeJsonFile(target, { stamp, entries: list.map(snapshotIndexEntry) });
+};
+
+// The write path refreshes the index for free; this covers a cold index, a zip
+// import, or a file edited outside the app.
+const ensureSnapshotIndexFresh = (gameId) => {
+  const source = getGameJsonPath(gameId, "snapshots");
+  const indexPath = getGameJsonPath(gameId, "snapshotsIndex");
+  if (!fs.existsSync(source)) {
+    // The owner-rename migration deletes snapshots outright. A surviving index
+    // would advertise turns that cannot be restored, so it goes with them.
+    if (fs.existsSync(indexPath)) {
+      try { fs.rmSync(indexPath); } catch { /* best effort */ }
+    }
+    return;
+  }
+  let stamp = "";
+  try {
+    const stat = fs.statSync(source);
+    stamp = `${stat.size}:${Math.round(stat.mtimeMs)}`;
+  } catch {
+    return;
+  }
+  const cached = readJsonFile(indexPath, null);
+  if (cached?.stamp === stamp && Array.isArray(cached.entries)) return;
+  writeSnapshotIndex(gameId, readJsonFile(source, []), stamp);
+};
+
 const readRuntimeJsonAsset = (assetKey) => {
   const geojson = resolveRuntimeGeojsonAsset(assetKey);
   if (geojson) {
@@ -2822,6 +2867,8 @@ const readRuntimeJsonAsset = (assetKey) => {
   ensureGameStore();
   const activeGame = getActiveGameSummary();
   if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
+
+  if (assetKey === "snapshotsIndex" && activeGame?.id) ensureSnapshotIndexFresh(activeGame.id);
 
   // No games yet, runtime data resolves from the scenario below. activeGame is
   // resolved above so the migration hook can see it.
@@ -2939,6 +2986,10 @@ const writeRuntimeJsonAsset = (assetKey, value) => {
     throw new Error(`Unsupported JSON asset key: ${assetKey}`);
   }
 
+  if (assetKey === "snapshotsIndex") {
+    throw new Error("snapshotsIndex is derived from snapshots and cannot be written directly.");
+  }
+
   // Shape guard. The storage assets are arrays and everything else is an object.
   // The SEED path already enforces this (normalizeBaseSaveSeedAsset), but this
   // runtime path did not — so a PUT whose body never parsed, which express.json()
@@ -3013,6 +3064,15 @@ const writeRuntimeJsonAsset = (assetKey, value) => {
 
   const targetPath = getGameJsonPath(activeGameId, assetKey);
   writeJsonFile(targetPath, canonical);
+  // From the array already in hand, so a turn never reparses to stay in step.
+  if (assetKey === "snapshots") {
+    try {
+      const stat = fs.statSync(targetPath);
+      writeSnapshotIndex(activeGameId, canonical, `${stat.size}:${Math.round(stat.mtimeMs)}`);
+    } catch {
+      // A missing index just means the next read rebuilds it.
+    }
+  }
   writeGameMeta(activeGameId, {});
   return readRuntimeJsonAsset(assetKey);
 };

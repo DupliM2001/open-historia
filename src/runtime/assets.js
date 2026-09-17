@@ -216,6 +216,7 @@ const isMutableRuntimeJsonUrl = (url) =>
   url === JSON_URLS.intercepts ||
   url === JSON_URLS.prompts ||
   url === JSON_URLS.snapshots ||
+  url === JSON_URLS.snapshotsIndex ||
   url === JSON_URLS.world;
 
 const pmtilesProtocol = new Protocol();
@@ -431,6 +432,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
   JSON_URLS.game = withRuntimeToken("/api/runtime/json/game");
   JSON_URLS.prompts = withRuntimeToken("/api/runtime/json/prompts");
   JSON_URLS.snapshots = withRuntimeToken("/api/runtime/json/snapshots");
+  JSON_URLS.snapshotsIndex = withRuntimeToken("/api/runtime/json/snapshotsIndex");
   JSON_URLS.regionsGeojson = withRuntimeToken("/api/runtime/json/regionsGeojson");
   JSON_URLS.citiesGeojson = withRuntimeToken("/api/runtime/json/citiesGeojson");
   JSON_URLS.backgroundData = withRuntimeToken("/api/runtime/json/backgroundData");
@@ -1589,6 +1591,19 @@ export const loadScenarioRegionCatalog = async ({ force = false } = {}) => {
     invalidateCatalog: false,
   });
 };
+
+// The server's derived projection of the restore points: id/round/dates only.
+// snapshots.json itself carries every prior world and hits 8+ MB late in a game.
+export const loadRollbackSnapshotIndex = async () => {
+  const data = await readJson(JSON_URLS.snapshotsIndex, {
+    defaultValue: { entries: [] },
+    force: true,
+    clone: false,
+  }).catch(() => null);
+  return Array.isArray(data?.entries) ? data.entries : [];
+};
+
+export const loadRollbackSnapshotCount = async () => (await loadRollbackSnapshotIndex()).length;
 
 export const loadRegionCatalog = async ({ force = false } = {}) => {
   // Keyed on BOTH sources: switching games/scenarios (new runtime token) must
