@@ -34,6 +34,7 @@ import {
     getTaskPick,
 } from "../Game/AI/providerConfig.js";
 import { isRatingEnabled, isTelemetryEnabled } from "../Game/AI/telemetry.js";
+import { requestDay, requestSettings } from "../Game/AI/requestBudget.js";
 
 const onOff = (value) => (value ? "on" : "off");
 
@@ -114,6 +115,28 @@ registerSettingsSnapshot("AI", () => {
         ["Rate AI generations", onOff(isRatingEnabled())],
     );
     return items;
+});
+
+// The request budget (AI/requestBudget.js): the switches, and what today has
+// cost — "it ate my whole allowance" is a report, and the count by task is most
+// of the answer to it.
+registerSettingsSnapshot("AI requests", () => {
+    const day = requestDay();
+    const tasks = Object.entries(day.byTask).sort((a, b) => b[1] - a[1]).map(([task, count]) => `${task} ${count}`).join(", ");
+    return [
+        ["Save AI requests", onOff(requestSettings.saveRequests())],
+        ["Requests a day your key allows", String(day.limit)],
+        ["Background AI", onOff(requestSettings.backgroundAi())],
+        ["Background requests a day, at most", String(day.backgroundCap)],
+        ["Move units to match the events", onOff(requestSettings.reviewSection("units"))],
+        ["Mark occupied and disputed land", onOff(requestSettings.reviewSection("territory"))],
+        ["Take repeats and filler off the timeline", onOff(requestSettings.reviewSection("timeline"))],
+        ["Keep the Projects board in step", onOff(requestSettings.reviewSection("board"))],
+        ["Collect your agents' reports", onOff(requestSettings.reviewSection("spies"))],
+        ["Used today", `${day.used} of ${day.limit} (background ${day.background}, refused by rate limit ${day.refused}, failed ${day.failed})`],
+        ["Used today, by task", tasks || "nothing yet"],
+        ["Last time skip", day.lastJump ? `${day.lastJump.used} request(s)${day.lastJump.refused ? `, ${day.lastJump.refused} refused` : ""}` : "none yet"],
+    ];
 });
 
 // The server's LAN sharing, which is what lets a phone in. A request away, and

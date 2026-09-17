@@ -16,6 +16,7 @@ import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProject
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
 import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
 import { describeUnavailable, fallbackAvailability } from "../AI/fallbackRunner.js";
+import { describeJumpCost, requestDay, savingRequests } from "../AI/requestBudget.js";
 import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
@@ -815,6 +816,39 @@ const PanelChrome = ({
     );
 };
 
+// What today has cost and what the next skip will, under the skip buttons
+// (AI/requestBudget.js). A player on a free key has a few hundred requests a
+// day and, until this line, no way to see them going.
+const RequestsTodayCaption = () => {
+    const [day, setDay] = useState(() => requestDay());
+    useEffect(() => {
+        const refresh = () => setDay(requestDay());
+        window.addEventListener("ai:request-budget", refresh);
+        const timer = setInterval(refresh, 60000);
+        return () => {
+            window.removeEventListener("ai:request-budget", refresh);
+            clearInterval(timer);
+        };
+    }, []);
+    const cost = describeJumpCost({ saveRequests: savingRequests() });
+    // A long skip split into segments (Settings → AI) pays one request a segment.
+    const segmented = useMapSetting(MAP_SETTING_KEYS.chunkLongJumps);
+    const nearlyOut = day.left <= Math.max(3, Math.ceil(day.limit * 0.1));
+    return (
+        <div
+        title="Counted on this device since midnight Pacific time. Change what the game spends in Settings → AI → AI requests."
+        style={{ color: nearlyOut ? "#fbbf24" : "rgba(255,255,255,0.42)", fontSize: "0.68rem", lineHeight: 1.45, marginTop: "0.45rem", textAlign: "center", width: "12.5rem" }}
+        >
+            <span data-no-translate>{day.used}</span> of <span data-no-translate>{day.limit}</span> AI requests used today
+            <br />
+            {cost.capped
+                ? <>a skip uses <span data-no-translate>{cost.min}</span>, at most <span data-no-translate>{cost.max}</span>{segmented ? ", plus one per extra segment" : ""}</>
+                : <>a skip can use twenty or more</>}
+            {day.lastJump ? <> · the last used <span data-no-translate>{day.lastJump.used}</span></> : null}
+        </div>
+    );
+};
+
 const JumpNode = ({ isLoading, opt, onJump }) => {
     const [hovered, setHovered] = useState(false);
 
@@ -1080,6 +1114,7 @@ const TimelineSkipPanel = ({
             Lands on {customLanding}
             </div>
         )}
+        <RequestsTodayCaption />
         </div>
 
         {isLoading && (
