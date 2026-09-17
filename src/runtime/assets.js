@@ -179,6 +179,10 @@ const pmtilesCache = new SharedPromiseCache(256);
 // "did the custom geometry resolve?" stays answerable (see loadRegionCatalog).
 const jsonLoadedUrls = new Set();
 
+// Wire-text length of the last parsed payload per URL, for warmJson's
+// display-only size. Recording the text we already read beats re-serialising.
+const jsonByteLengths = new Map();
+
 // The scenario geometry is never worth retaining: its only long-lived reader
 // keeps it in React state (Nations.jsx / Cities.jsx, both force:true), so the
 // value-cache copy is a second parsed FeatureCollection — ~190 MB on a 55 MB
@@ -380,6 +384,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
       // Must rotate with the URLs: a stale entry would claim the NEXT
       // generation's geometry had already resolved.
       jsonLoadedUrls.delete(url);
+      jsonByteLengths.delete(url);
       // The workers' staged copy (website) belongs to the old generation too.
       releaseWorkerFetchableUrl(url);
     }
@@ -904,6 +909,7 @@ export const readJson = async (url, { cache, defaultValue, force = false, signal
     // carrying a defaultValue resolves the SHARED batched promise to that
     // default on failure, so every awaiter sees a value either way.
     jsonLoadedUrls.add(url);
+    jsonByteLengths.set(url, text.length);
     if (store) jsonValueCache.set(url, data);
     return data;
   })()
@@ -925,11 +931,13 @@ export const readJson = async (url, { cache, defaultValue, force = false, signal
   return clone ? cloneJsonFor(url, value) : value;
 };
 
+// clone: false is safe because the payload is discarded here, and size reads
+// the recorded wire text. A primed or defaulted URL has none and reports 0.
 export const warmJson = async (url, options = {}) => {
-  const data = await readJson(url, options);
+  await readJson(url, { ...options, clone: false });
   return {
     kind: "json",
-    size: JSON.stringify(data).length,
+    size: jsonByteLengths.get(url) ?? 0,
     url,
   };
 };
@@ -937,6 +945,8 @@ export const warmJson = async (url, options = {}) => {
 export const primeJson = (url, data, { cache, clone = true } = {}) => {
   const store = cache === undefined ? !isNoStoreJsonUrl(url) : cache !== false;
   jsonLoadedUrls.add(url);
+  // The primed value came with no wire text, so drop the stale length.
+  jsonByteLengths.delete(url);
   jsonRequestCache.delete(url);
   if (!store) {
     // DELETE rather than merely skip: leaving an older entry behind would let
