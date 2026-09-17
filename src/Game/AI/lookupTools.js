@@ -14,6 +14,14 @@
 // caller builds (lookupContext), so it runs in node tests and in the harness.
 
 import { foldRegionKey, matchRegionName, stripRegionAffixes, editDistance } from "./regionMatch.js";
+import {
+  SIMULATION_AUDIENCE,
+  audienceIncludes,
+  audienceSeesChat,
+  isSimulationAudience,
+  normalizeAudience,
+  spyAsSeenBy,
+} from "./audience.js";
 
 const clean = (value) => String(value ?? "").trim();
 const array = (value) => (Array.isArray(value) ? value : []);
@@ -306,8 +314,15 @@ const distanceSquared = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
  *   chats     the save's chats
  *   units     [{ id, name, type, ownerCode, strength, posture, regionId, lng, lat }]
  *   player    the player's polity name
+ *   audience  who is asking (audience.js). Two of these functions answer from
+ *             material a government keeps to itself — chat_history and
+ *             spy_network — and they answer only what this audience could know.
+ *             Every task that carries lookups today is the narrator, so the
+ *             default is the narrator; a surface that speaks AS a polity (a
+ *             leader, an envoy) MUST pass a viewer, or it can read the player's
+ *             letters to everyone else through a function call.
  */
-export const buildLookupContext = ({ regions = [], world = {}, cities = [], events = [], chats = [], units = [], player = "" } = {}) => {
+export const buildLookupContext = ({ regions = [], world = {}, cities = [], events = [], chats = [], units = [], player = "", audience = SIMULATION_AUDIENCE } = {}) => {
   const overrides = world?.regionOwnershipOverrides ?? {};
   const sovereignty = world?.regionSovereigntyOverrides ?? {};
   const claimants = world?.regionClaimants ?? {};
@@ -421,6 +436,7 @@ export const buildLookupContext = ({ regions = [], world = {}, cities = [], even
   return {
     rows, byId, ownerRows, resolveOwner, neighboursOf, cityRows, regionOfCity, placeCity, citiesInRegion,
     world, polities, claimants, sovereignty, events: eventList, chats: array(chats), units: array(units), player: clean(player),
+    audience: normalizeAudience(audience),
   };
 };
 
@@ -513,6 +529,21 @@ const projectBrief = (project) => {
     ...(mapEffects.length ? { onComplete: mapEffects.slice(0, 12) } : {}),
   };
 };
+// One board entry as `audience` may know it, or null. See list_projects.
+const projectAsSeenBy = (audience, project, player) => {
+  if (!project || typeof project !== "object") return null;
+  if (isSimulationAudience(audience)) return project;
+  const owner = clean(project.ownerCode || project.owner) || clean(player);
+  if (owner && audienceIncludes(audience, owner)) return project;
+  const secrecy = clean(project.secrecy).toLowerCase() || "public";
+  if (secrecy === "public") return project;
+  if (secrecy === "restricted") {
+    // Known to exist, and no more: no summary, progress, milestones or effects.
+    return { id: project.id, name: project.name, kind: project.kind, ownerCode: owner, status: project.status, secrecy };
+  }
+  return null;
+};
+
 const OPEN_PROJECT_STATUSES = new Set(["active", "planned", "stalled", "paused", "in-progress", "ongoing"]);
 const projectIsOpen = (project) => {
   const status = clean(project?.status).toLowerCase();
@@ -694,7 +725,14 @@ export const executeLookup = (context, name, args = {}) => {
       const owner = context.resolveOwner(a.with);
       if (!owner) return unknownPower(context, a.with);
       const limit = clampInt(a.limit, 1, 40, 12);
-      const chat = context.chats.find((entry) => array(entry?.countries).some((country) => clean(country?.name) === owner));
+      const audience = context.audience ?? SIMULATION_AUDIENCE;
+      // Only a conversation the asker was in. A chat it was not party to is
+      // answered exactly as one that does not exist: saying "you may not read
+      // that" would itself tell a government that the player is talking to
+      // someone, and to whom.
+      const chat = context.chats.find((entry) =>
+        array(entry?.countries).some((country) => clean(country?.name) === owner)
+        && audienceSeesChat(audience, entry, { player: context.player }));
       if (!chat) return { with: owner, messages: [], hint: "No conversation with this power yet." };
       const messages = array(chat.messages).slice(-limit).map((message) => ({
         from: clean(message?.speaker || message?.role || message?.from),
@@ -737,9 +775,16 @@ export const executeLookup = (context, name, args = {}) => {
         if (!owner) return unknownPower(context, a.owner);
       }
       const status = clean(a.status).toLowerCase() || "open";
+      const audience = context.audience ?? SIMULATION_AUDIENCE;
       const projects = array(world.projects)
         .filter((project) => !owner || foldRegionKey(project?.ownerCode || project?.owner) === foldRegionKey(owner))
-        .filter((project) => status === "all" || (status === "closed" ? !projectIsOpen(project) : projectIsOpen(project)));
+        .filter((project) => status === "all" || (status === "closed" ? !projectIsOpen(project) : projectIsOpen(project)))
+        // A programme's secrecy is a fact about who knows of it. The narrator and
+        // the owner see every entry whole; anyone else sees a public one whole, a
+        // restricted one only as the fact that it exists, and a covert one not at
+        // all. A blank ownerCode is the player's (world-state.md).
+        .map((project) => projectAsSeenBy(audience, project, context.player))
+        .filter(Boolean);
       return { ...(owner ? { owner } : {}), status, count: projects.length, projects: projects.slice(0, 60).map(projectBrief) };
     }
     case "relations_between": {
@@ -833,7 +878,14 @@ export const executeLookup = (context, name, args = {}) => {
     }
     case "spy_network": {
       const world = context.world ?? {};
-      const spies = array(world.spies);
+      const audience = context.audience ?? SIMULATION_AUDIENCE;
+      // The narrator sees every agent. Anyone else sees its own people — a turned
+      // or discovered one still reading as active, because that is what its
+      // service believes — and only the foreign agents it has actually caught
+      // (audience.js spyAsSeenBy).
+      const spies = isSimulationAudience(audience)
+        ? array(world.spies)
+        : array(world.spies).map((spy) => spyAsSeenBy(audience, spy)).filter(Boolean);
       if (clean(a.owner)) {
         const owner = context.resolveOwner(a.owner);
         if (!owner) return unknownPower(context, a.owner);

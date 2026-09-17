@@ -66,6 +66,7 @@ import {
 } from "./projectsDirective.js";
 import { extractJsonPayload, unwrapMimickedToolCall } from "./jsonSalvage.js";
 import { withoutPlayerParticipant } from "./chatVisibility.js";
+import { SIMULATION_AUDIENCE } from "./audience.js";
 import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKernel.js";
 import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
@@ -1510,7 +1511,12 @@ const abortableWait = (ms, signal) => new Promise((resolve, reject) => {
 // prompt carries the region lists and ledgers itself (buildTemplateVariables).
 const lookupFunctionsEnabled = () => getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions);
 
-const buildTaskLookups = (bundle, { maxRounds } = {}) => {
+// audience: who is asking (audience.js). Every task that carries lookups today is
+// the narrator - the jump, the directors, the game master - so that is the
+// default, and it is passed on explicitly rather than left to a blank. A surface
+// that speaks AS a polity must pass a viewer here: chat_history, spy_network and
+// list_projects answer from material a government keeps to itself.
+const buildTaskLookups = (bundle, { maxRounds, audience = SIMULATION_AUDIENCE } = {}) => {
   if (!lookupFunctionsEnabled()) return null;
   let contextPromise = null;
   const context = () => {
@@ -1555,6 +1561,7 @@ const buildTaskLookups = (bundle, { maxRounds } = {}) => {
           chats: bundle?.chats,
           units: normalizeArray(world.units),
           player: normalizeString(bundle?.game?.country),
+          audience,
         });
       })();
     }
