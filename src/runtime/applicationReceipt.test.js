@@ -270,3 +270,27 @@ test("a fallback jump is reported even though it carries no receipt", () => {
   const block = renderLastTurnReceipt([{ mode: "auto", source: "fallback", fallbackReason: "timed out" }]);
   assert.match(block, /could not be used \(timed out\)/);
 });
+
+// While requests are being saved a thin answer is kept rather than sent back —
+// sending it back is a whole second request — so this is the only place the
+// model hears that the period asked for more.
+test("an answer kept although it fell short is said so, last, and without the warning that is about lost work", () => {
+  const receipt = createApplicationReceipt();
+  receipt.applied.events = 2;
+  noteReceipt(receipt, "short", "You wrote 2 events for 1 month that called for 5 to 9.");
+  const block = renderApplicationReceipt(receipt, { fromDate: "1936-03-01", toDate: "1936-04-01" });
+  assert.match(block, /Applied: 2 events\./);
+  assert.match(block, /Kept exactly as you wrote it, but short of what was asked — meet it this turn:\n- You wrote 2 events for 1 month that called for 5 to 9\./);
+  // Nothing was dropped or withheld, so nothing is "not established".
+  assert.doesNotMatch(block, /Do not build on anything listed above/);
+
+  noteReceipt(receipt, "dropped", "a transfer of \"Atlantis\" was dropped.");
+  const both = renderApplicationReceipt(receipt);
+  assert.ok(both.indexOf("Operations that were NOT applied") < both.indexOf("Kept exactly as you wrote it"), "what was lost comes before what merely fell short");
+  assert.match(both, /Do not build on anything listed above/);
+});
+
+test("a short note survives the save: it is a kind the normalizer knows", () => {
+  const stored = normalizeApplicationReceipt({ applied: { events: 1 }, notes: [{ kind: "short", text: "You wrote 1 event." }, { kind: "gossip", text: "ignored" }] });
+  assert.deepEqual(stored.notes, [{ kind: "short", text: "You wrote 1 event." }]);
+});
