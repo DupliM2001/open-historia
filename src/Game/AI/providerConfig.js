@@ -525,6 +525,57 @@ export function fillFallbackList(connectionIds, models) {
     return added.length;
 }
 
+// The start-of-game prompt's one-step setup (GameUI/apiSetupPrompt.jsx): a
+// provider, its key or endpoint, an optional model — saved so the very next
+// call can go out. A Connection for that provider that lacks exactly what was
+// typed (the migrated Gemini connection with no key, say) is completed rather
+// than duplicated; otherwise a new Connection is added. Its entry goes to the
+// TOP of the list, so what was just set up answers first instead of waiting
+// behind an entry that could not. A typed model replaces the entry's; a blank
+// one keeps it. Throws when the provider's requirement is missing. Returns
+// { connectionId, entryId }.
+export function applyQuickAiSetup({ provider, apiKey = "", endpoint = "", model = "" } = {}) {
+    const normalized = normalizeProvider(provider);
+    const requirement = providerSetupRequirement(normalized);
+    const key = String(apiKey ?? "").trim();
+    const url = String(endpoint ?? "").trim();
+    const modelName = String(model ?? "").trim();
+    if (requirement === "endpoint" ? !url : !key) {
+        throw new Error(requirement === "endpoint" ? "Enter the server endpoint first." : "Paste an API key first.");
+    }
+    const connections = getConnections();
+    const list = getFallbackList();
+    const lacks = (connection) => !String(connection?.[requirement] ?? "").trim();
+    const top = connections.find((connection) => connection.id === list[0]?.connectionId);
+    const target = (top && top.provider === normalized && lacks(top) ? top : null)
+        ?? connections.find((connection) => connection.provider === normalized && lacks(connection))
+        ?? null;
+    let connectionId;
+    if (target) {
+        updateConnection(target.id, {
+            apiKey: key || target.apiKey,
+            endpoint: url || target.endpoint,
+            suggestedModel: modelName || target.suggestedModel,
+        });
+        connectionId = target.id;
+    } else {
+        connectionId = addConnection({ provider: normalized, apiKey: key, endpoint: url, suggestedModel: modelName });
+    }
+    const existing = getFallbackList().find((entry) => entry.connectionId === connectionId);
+    let entryId;
+    if (existing) {
+        entryId = existing.id;
+        if (modelName && existing.model.trim() !== modelName) updateEntry(existing.id, { model: modelName });
+    } else {
+        entryId = addEntry({ connectionId, model: modelName });
+    }
+    if (getFallbackList().findIndex((entry) => entry.id === entryId) > 0) moveEntry(entryId, 0);
+    logDebugEvent("setting", `Quick AI setup: ${getProviderMeta(normalized).label} ${requirement === "endpoint" ? "endpoint" : "key"} saved from the start-of-game prompt.`, {
+        model: modelName || "(unchanged)",
+    });
+    return { connectionId, entryId };
+}
+
 // --- Entry states: Spent, Unusable, busy, last answered ---
 //
 // Kept under their own key, apart from the list, so that marking an entry never

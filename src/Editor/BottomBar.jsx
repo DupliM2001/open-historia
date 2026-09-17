@@ -44,6 +44,7 @@ const Chip = ({ icon, label, active, onClick }) => (
 const BottomBar = ({
   counts,
   polityCount = 0,
+  clipboardCount = 0,
   basemap,
   hasCustomBackground,
   onOpenBasemaps,
@@ -80,6 +81,7 @@ const BottomBar = ({
       <Chip icon="image" label="Import Map" active={openPanel === "province-import"} onClick={() => onOpenPanel("province-import")} />
       <Chip icon="pin" label={`Features: ${counts.features}`} active={openPanel === "features"} onClick={() => onOpenPanel("features")} />
       <Chip icon="unit" label={`Units: ${counts.units ?? 0}`} active={openPanel === "units"} onClick={() => onOpenPanel("units")} />
+      <Chip icon="copy" label={`Clipboard: ${clipboardCount}`} active={openPanel === "clipboard"} onClick={() => onOpenPanel("clipboard")} />
       <Chip icon="types" label={`Types: ${counts.types}`} active={openPanel === "types"} onClick={() => onOpenPanel("types")} />
       <Chip icon="layers" label="Layers" active={openPanel === "layers"} onClick={() => onOpenPanel("layers")} />
       <Chip icon="image" label="Reference" active={openPanel === "reference"} onClick={() => onOpenPanel("reference")} />
