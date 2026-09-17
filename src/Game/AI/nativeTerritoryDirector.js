@@ -339,6 +339,63 @@ const publishDiagnostics = ({ candidates = [], analysis = null, eventOrders = []
 
 publishDiagnostics();
 
+// What the analyzer is shown of the map.
+//
+// It used to be the three stores whole. regionSovereigntyOverrides and
+// regionClaimants are sparse — a row only where a region is occupied or disputed —
+// but regionOwnershipOverrides is not: on a hand-drawn world EVERY region carries
+// an override, and the built-in scenario is a hand-drawn world. A live 30-day jump
+// on it sent this narrow pass 215,000 characters, five times over (each lookup
+// round re-sends the request): about a million characters, 40% of everything that
+// jump spent, on 4,848 rows of `"2014": "Ukraine"` — a numeric id and an owner, no
+// region name, nothing a model can reason from.
+//
+// What the pass actually needs is the map's NON-NORMAL state: where the controller
+// is not the lawful sovereign, and where there are claimants. So the two sparse
+// stores go whole, and of the ownership store only the rows for THOSE regions.
+// Any other region's controller is one lookup away (find_region, region_info), and
+// the event's own operations already name the losing side in fromCode.
+//
+// Bounded all the same: a world war on a large map can dispute hundreds of
+// regions. Rows that involve a power the candidate events name come first, so the
+// cap never hides the front being reconciled, and what it leaves out is counted.
+export const TERRITORIAL_STATE_ROW_CAP = 400;
+
+export const summarizeTerritorialState = (world, candidates = []) => {
+  const control = world?.regionOwnershipOverrides && typeof world.regionOwnershipOverrides === "object" ? world.regionOwnershipOverrides : {};
+  const sovereignty = world?.regionSovereigntyOverrides && typeof world.regionSovereigntyOverrides === "object" ? world.regionSovereigntyOverrides : {};
+  const claimants = world?.regionClaimants && typeof world.regionClaimants === "object" ? world.regionClaimants : {};
+
+  const text = normalizeArray(candidates)
+    .map((candidate) => `${normalizeString(candidate?.title)} ${normalizeString(candidate?.description)} ${JSON.stringify(candidate?.existingLegalTransfers ?? [])} ${JSON.stringify(candidate?.existingControlOps ?? [])}`)
+    .join(" ")
+    .toLowerCase();
+  const namedInCandidates = (regionId) => {
+    const powers = [control[regionId], sovereignty[regionId], ...normalizeArray(claimants[regionId])];
+    return powers.some((power) => {
+      const name = normalizeString(power).toLowerCase();
+      return name.length > 2 && text.includes(name);
+    });
+  };
+
+  const regionIds = [...new Set([...Object.keys(sovereignty), ...Object.keys(claimants)])];
+  // Stable within each group, so the same world produces the same prompt.
+  const ordered = [
+    ...regionIds.filter((regionId) => namedInCandidates(regionId)),
+    ...regionIds.filter((regionId) => !namedInCandidates(regionId)),
+  ];
+  const kept = ordered.slice(0, TERRITORIAL_STATE_ROW_CAP);
+  const pick = (store) => Object.fromEntries(kept.filter((regionId) => regionId in store).map((regionId) => [regionId, cloneValue(store[regionId])]));
+
+  return {
+    scope: "Occupied and disputed regions only. Every other region is held by its lawful owner; find its controller with find_region or region_info.",
+    regionOwnershipOverrides: pick(control),
+    regionSovereigntyOverrides: pick(sovereignty),
+    regionClaimants: pick(claimants),
+    ...(ordered.length > kept.length ? { omittedRegions: ordered.length - kept.length } : {}),
+  };
+};
+
 export const directGeneratedTerritoryOps = async ({
   events = [],
   world = {},
@@ -369,21 +426,18 @@ export const directGeneratedTerritoryOps = async ({
 
   let analysis = null;
   try {
+    const candidateRows = candidates.map(({ event, index }) => ({
+      eventIndex: index,
+      date: normalizeString(event?.date),
+      title: normalizeString(event?.title),
+      description: normalizeString(event?.description),
+      existingLegalTransfers: cloneValue(normalizeArray(event?.impacts?.regionTransfers)),
+      existingControlOps: cloneValue(normalizeArray(event?.impacts?.regionControlOps)),
+      unitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
+    }));
     analysis = await analyzeBatch({
-      candidates: candidates.map(({ event, index }) => ({
-        eventIndex: index,
-        date: normalizeString(event?.date),
-        title: normalizeString(event?.title),
-        description: normalizeString(event?.description),
-        existingLegalTransfers: cloneValue(normalizeArray(event?.impacts?.regionTransfers)),
-        existingControlOps: cloneValue(normalizeArray(event?.impacts?.regionControlOps)),
-        unitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
-      })),
-      territorialState: {
-        regionOwnershipOverrides: cloneValue(world?.regionOwnershipOverrides || {}),
-        regionSovereigntyOverrides: cloneValue(world?.regionSovereigntyOverrides || {}),
-        regionClaimants: cloneValue(world?.regionClaimants || {}),
-      },
+      candidates: candidateRows,
+      territorialState: summarizeTerritorialState(world, candidateRows),
     });
   } catch (error) {
     console.warn("[territory director] analysis failed; preserving existing territory state changes.", error);

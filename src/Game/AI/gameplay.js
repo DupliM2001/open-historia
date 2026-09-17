@@ -10177,7 +10177,10 @@ const finishTimelineJump = async ({ context, signal, state }) => {
             "Reconcile the supplied events with de-facto territorial control. Add only control/contest/clear operations that the event itself supports; never invent a legal sovereignty transfer. Return JSON only.",
           variables: {
             territoryDirectorCandidates: JSON.stringify(candidates, null, 2),
-            territoryDirectorState: JSON.stringify(territorialState, null, 2),
+            // Compact on purpose, and already cut down to the occupied and disputed
+            // regions (nativeTerritoryDirector.js summarizeTerritorialState): this
+            // request is re-sent on every lookup round.
+            territoryDirectorState: JSON.stringify(territorialState),
             territorialControlContext: await buildTerritorialControlContext(bundle.world),
           },
         }),
