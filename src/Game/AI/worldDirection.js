@@ -1,0 +1,106 @@
+/*! Open Historia — world direction: a scenario author's settings, read and enforced by the engine © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
+// A scenario can already tell the simulator how to run its world in prose (the
+// simulation rules, the prompt editor). Prose is a request. This is the other
+// half: a few settings an author sets as NUMBERS, which the engine applies to
+// what the simulator is asked for and counts on what it answers
+// (server/gameFeatures.js "worldDirection"; the scenario's value, a game's
+// override).
+//
+// None of it costs a request. Each setting shapes the one request a time skip
+// already makes, and where the answer falls short it is KEPT — sending it back
+// is a whole second request, on a key that may allow a few hundred a day
+// (requestBudget.js) — and the simulator is told at the top of its next turn
+// (runtime/applicationReceipt.js, the "short" note).
+//
+// DELIBERATELY IMPORT-FREE: gameplay.js hands in the resolved settings.
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+const asText = (value) => String(value ?? "").trim();
+
+// --- Pace ---
+//
+// Scales the event count a period is asked for. The floor is one event, the
+// upper end never falls below the lower, and a range that was a single number
+// (a skip of a few hours is exactly one event) stays a single number: pace is
+// about how crowded a month is, not about whether an afternoon happened.
+export const scaleEventRange = (range, pacePercent = 100) => {
+    const [min, max] = asArray(range).map((value) => Math.max(0, Math.round(Number(value) || 0)));
+    // Number(null) is 0, and a pace of nothing is not a pace: both are the built-in one.
+    const pace = pacePercent === null || pacePercent === undefined ? 100 : Number(pacePercent);
+    if (!Number.isFinite(pace) || pace <= 0 || pace === 100 || !(min > 0) || min === max) return [min || 1, Math.max(min || 1, max || 1)];
+    const scaledMin = Math.max(1, Math.round((min * pace) / 100));
+    const scaledMax = Math.max(scaledMin, Math.round((max * pace) / 100));
+    return [scaledMin, scaledMax];
+};
+
+// --- The world's share ---
+//
+// An event is the player's when the simulator says so (playerRelated) or when
+// its own words name the player's polity: a model that under-declares cannot
+// talk its way past the count. Whole words, case folded; a short name ("Ob") is
+// matched the same way and simply matches rarely.
+const fold = (value) => ` ${String(value ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+
+export const eventConcernsPlayer = (event, playerNames = []) => {
+    if (event?.playerRelated === true) return true;
+    const text = fold(`${asText(event?.title)} ${asText(event?.description)}`);
+    return asArray(playerNames).some((name) => {
+        const needle = fold(name);
+        // Three letters at least: " ob " is in half the paragraphs ever written.
+        return needle.trim().length >= 3 && text.includes(needle);
+    });
+};
+
+// Below this many events a share is not a meaningful thing to ask for.
+export const WORLD_SHARE_MIN_EVENTS = 3;
+
+// null when the floor is met (or does not apply); otherwise what to say.
+export const worldShareShortfall = (events, floorPercent, { playerNames = [] } = {}) => {
+    const list = asArray(events);
+    const floor = Number(floorPercent);
+    if (!(floor > 0) || list.length < WORLD_SHARE_MIN_EVENTS) return null;
+    const needed = Math.ceil((list.length * Math.min(100, floor)) / 100);
+    const world = list.filter((event) => !eventConcernsPlayer(event, playerNames)).length;
+    if (world >= needed) return null;
+    const player = asText(asArray(playerNames)[0]) || "the player's polity";
+    return {
+        total: list.length,
+        world,
+        needed,
+        text: `${world} of your ${list.length} events ${world === 1 ? "was" : "were"} about the world beyond ${player}; this scenario asks for at least ${needed} (${Math.round(floor)}%). `
+            + `Other powers act on each other whether or not ${player} is watching: give them events of their own, in theatres ${player} is not in.`,
+    };
+};
+
+// --- What the simulator is told ---
+//
+// Written LAST in the jump's instructions, where a long prompt is followed best,
+// and marked as the author's. The priority rules say in so many words that they
+// outrank the defaults and the field descriptions of the output function —
+// without that, a rule like "no nuclear weapons before 1945" loses to a field
+// description that lists nuclear programmes as a thing a polity can start.
+export const PRIORITY_RULES_HEADING = "[PRIORITY RULES — set by this scenario's author]";
+
+export const buildWorldDirectionDirective = (direction, { playerPolity = "" } = {}) => {
+    if (!direction) return "";
+    const player = asText(playerPolity) || "the player's polity";
+    const parts = [];
+    const share = Number(direction.worldShare);
+    if (share > 0) {
+        parts.push(
+            "[The World's Share — counted by the engine]\n"
+            + `At least ${Math.round(share)}% of this period's events must be developments that do not involve ${player} at all: other powers acting on each other, in theatres ${player} is not in. `
+            + `An event that names ${player}, or that you mark playerRelated, counts as ${player}'s. The engine counts this on every answer and tells you when you fall short.`,
+        );
+    }
+    const rules = asText(direction.priorityRules);
+    if (rules) {
+        parts.push(
+            `${PRIORITY_RULES_HEADING}\n`
+            + "These rules outrank everything else you have been told: the default guidance above, the simulation rules, and anything a field description of the output function suggests is possible. "
+            + "Where a rule and a default disagree, the rule wins, without exception and without comment in the events.\n"
+            + rules,
+        );
+    }
+    return parts.join("\n\n");
+};

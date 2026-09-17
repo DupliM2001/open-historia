@@ -17,10 +17,13 @@
 // otherwise segment two treats segment one's events as things the player saw and
 // failed to answer, and punishes them for a silence they had no chance to break.
 //
-// Kept import-free and separate from gameplay.js (which pulls in the whole
-// browser runtime and cannot be unit-tested) for the same reason as
+// Kept free of the game and separate from gameplay.js (which pulls in the whole
+// browser runtime and cannot be unit-tested) — its one import, worldDirection.js,
+// imports nothing, so this still runs under bare node — for the same reason as
 // jsonSalvage.js, providerErrors.js and geminiSchema.js — the arithmetic and the
 // merge rules are exactly what wants direct tests.
+
+import { scaleEventRange } from "./worldDirection.js";
 
 const normalizeString = (value) => String(value ?? "").trim();
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -81,8 +84,12 @@ export const formatDurationLabel = (days) => {
 // queued order to resolve into; split across segments it becomes each segment's
 // share, so fourteen queued orders raise the floor once across the jump instead
 // of demanding fourteen events three times over.
-export const segmentEventRange = (spanDays, plannedActionShare) => {
-  let [minEvents, maxEvents] = eventCountRangeForDays(spanDays);
+//
+// `pace` is the scenario author's setting (worldDirection.js scaleEventRange): it
+// scales how crowded a period is, BEFORE the queued orders raise the floor — an
+// author who wants a sparse chronicle still owes the player a slot per order.
+export const segmentEventRange = (spanDays, plannedActionShare, { pace = 100 } = {}) => {
+  let [minEvents, maxEvents] = scaleEventRange(eventCountRangeForDays(spanDays), pace);
   if (plannedActionShare > minEvents) {
     minEvents = Math.min(plannedActionShare, 37);
     maxEvents = Math.max(maxEvents, minEvents + 3);
