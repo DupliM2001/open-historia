@@ -130,20 +130,24 @@ Not a single object: an `anyOf` of four shapes discriminated by `op`. Each branc
 | `op` | Required fields | Payload |
 |---|---|---|
 | `spawn` | `op`, `unit` | full `unitSchema` object |
-| `move` | `op`, `unitId`, `toLng`, `toLat` | + optional `regionId`, `note` |
-| `strength` | `op`, `unitId`, `strength` | `strength` integer 0–1000 |
+| `move` | `op`, `unitId` | `at` **or** `toLng`+`toLat`; + optional `regionId`, `posture`, `note` |
+| `strength` | `op`, `unitId`, `strength` | `strength` integer 0–100 |
 | `remove` | `op`, `unitId` | + optional `note` |
 
-`unitSchema` (`:136`) fields: `id`, `name`* (nonempty), `type`* (enum: `infantry|armor|air|naval|artillery|garrison`), `ownerCode`* (nonempty), `strength`* (integer 1–1000), `lng`* (−180..180), `lat`* (−90..90), `regionId`, `status` (enum `idle|moving|engaged|pending`), `note`. (\* = required.)
+`unitSchema` fields: `id`, `name`* (nonempty), `type`* (enum: `infantry|armor|air|naval|artillery|garrison`), `ownerCode`* (nonempty), `strength`* (integer 1–100, a percentage of established strength), `composition`* (nonempty), `at` (where, in words), `lng` (−180..180), `lat` (−90..90), `regionId`, `status` (enum `idle|moving|engaged|pending`), `posture`, `note`. (\* = required.)
+
+**`at` — where, in words** (`atSchema`, shared by a spawn, a move, a build and an update). A phrase naming places the map knows — "near Kharkiv", "eastern Ukraine", "off Sevastopol", "Donetsk Oblast facing Russia" — resolved to a point at validation by `src/Game/AI/placement.js` (see [placing things by name](ai-overview.md#placing-things-by-name-and-keeping-them-apart)). It is why `lng`/`lat` are no longer required on a spawn or a build: a model that guesses a longitude puts an army in the sea, and a model that names a place does not. When both are given, `at` wins; an operation left with neither is dropped by the normalizer exactly as one that never had coordinates. The phrase is described once, in the schema's one-line field description, and explained once, in the `[Placing Things]` directive — the jump's schema has a size budget (`projectOpSchema.test.js`), and five copies of a grammar would spend it.
 
 ### 4.5 `markerOpSchema` — `anyOf` on `op` (`:256`)
 
 | `op` | Required | Payload |
 |---|---|---|
 | `build` | `op`, `marker` | full `markerSchema` |
+| `build` (flat) | `op`, `name` | the structure's fields beside `op` — the shape models write most, accepted rather than failing the turn |
+| `update` | `op` | `markerId` (preferred) or `name`; `kind`, `ownerCode`, `status`, `note`; `at` or `lng`+`lat` only when it genuinely relocates |
 | `remove` | `op`, `name` | + optional `markerId`, `note` |
 
-`markerSchema` (`:227`) fields: `id`, `name`* (nonempty), `kind`* (nonempty free-form lowercase noun — city/base/silo/embassy…), `ownerCode`, `lng`* (−180..180), `lat`* (−90..90), `note`, `foundedAt`.
+`markerSchema` fields: `id`, `name`* (nonempty), `kind`* (nonempty free-form lowercase noun — city/base/silo/embassy…), `ownerCode`, `status`, `at` (where, in words — see §4.4), `lng` (−180..180), `lat` (−90..90), `note`, `foundedAt`. `normalizeMarkerOperationShape` carries `at` (also read from `place`/`where`/`location`) through to validation and omits `lng`/`lat` it was not given, so a build placed by name is not refused for the coordinates it does not have yet.
 
 > **Note:** `validateGeneratedWorldChanges` (Layer 2) also accepts `op: "found"` as an alias of `build` and `op: "destroy"` as an alias of `remove` (`gameplay.js:1095`, `:1105`), and for a build reads coordinates from `operation.marker ?? operation`. The **schema itself only declares `build`/`remove`** — the aliases pass Layer 1 only because `unitOp`/`markerOp` schemas validate loosely (see the caveat in §6).
 
