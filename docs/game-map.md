@@ -23,12 +23,12 @@ Everything below is in `src/Game/Map/` unless noted.
 
 | Hook | File | What it provides |
 |---|---|---|
-| `useWorldState()` | `useWorldState.js` | Singleton 5s poll of `world.json`; one poll shared by all consumers |
+| `useWorldState()` | `useWorldState.js` | Singleton store of `world.json`, shared by all consumers, fed by canonical write events |
 | `useCustomBackground()` | `useCustomBackground.js` | Resolves a scenario's uploaded image/vector basemap from `world.background` |
 | `useMapSetting(key)` | `../../runtime/mapSettings.js` | Reactive localStorage map toggles (`hideCountryLabels`, `disableIdleRotation`) |
-| `unitsController` | `unitsController.js` | Separate 5s poll of `world.units` + player order mutations |
+| `unitsController` | `unitsController.js` | Separate store of `world.units` + player order mutations |
 
-`useWorldState` is a module-level singleton: `startPolling()` fires one `setInterval(poll, 5000)` reading `JSON_URLS.world`, and all mounted consumers subscribe. It returns a **stable object identity** across polls when nothing it exposes changed (deep/shallow compares each field — arrays like `markers`/`regionClaimants` are `JSON.stringify`-compared) so React children don't re-render on every 5s tick. See [World state](world-state.md) for the `world.json` schema.
+`useWorldState` is a module-level singleton: it bootstraps `JSON_URLS.world` once and thereafter updates from the `oh:world-updated` event that every canonical write dispatches, so there is no poll. It returns a **stable object identity** when nothing it exposes changed (each field is compared by content, not reference) so React children don't re-render on an unrelated world write. See [World state §9](world-state.md#9-state-distribution-three-stores-no-panel-polls).
 
 Fields `useWorldState` derives from `world.json`:
 
@@ -365,7 +365,7 @@ world.json ──(useWorldState, 5s)──► customRegions, regionOwnershipOver
    │
    ├─► useCustomBackground ──► buildWorldStyle (image/vector/placeholder/ESRI)
    ├─► MarkersLayer ──► markers-source
-   └─► unitsController (own 5s poll of world.units) ──► Units.jsx / popups
+   └─► unitsController (own store of world.units) ──► Units.jsx / popups
 
 colors.json ──(getNationColors, oh:colors-updated event)──► colorMap
    └─► resolveOwnerRgb ──► every fill / stripe / label / marker / unit colour
@@ -375,7 +375,7 @@ countries.pmtiles / regions.pmtiles / cities.pmtiles ──► stock tile geomet
    └─► countryLabels.js (z0 countries tile) ──► point + curved stock labels
 ```
 
-Every owner recolour, label rebuild, and unit/marker update is a consequence of a `world.json` (or `colors.json`) change surfacing through the 5s polls — there is no push channel; the map is a pure function of that polled state plus the static per-scenario geometry.
+Every owner recolour, label rebuild, and unit/marker update is a consequence of a `world.json` (or `colors.json`) change surfacing through the store's write events. The map is a pure function of that state plus the static per-scenario geometry.
 
 ### Cross-references
 

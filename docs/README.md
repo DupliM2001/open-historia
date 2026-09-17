@@ -17,7 +17,7 @@ New to the codebase? Read **[Architecture Overview](architecture.md)** first —
 ### Game
 - [Game Map & Rendering](game-map.md) — In-game MapLibre rendering: region/country layers, owner colouring, disputed stripes, labels, cities/markers/units, the decorative globe, and `world.json` data flow.
 - [In-Game UI (HUD, Panels & Buttons)](game-ui.md) — Complete HUD/panels/buttons reference: shell, z-index ladder, main menu, and every panel with its state/props and map/AI/server data flow.
-- [World State & Turn Model](world-state.md) — The `world.json`/`game.json` schema, normalizers, AI impact application, the 5s poll, units peer-poll, country tags, and games-vs-scenarios storage.
+- [World State & Turn Model](world-state.md) — The `world.json`/`game.json` schema, normalizers, AI impact application, state distribution, country tags, and games-vs-scenarios storage.
 
 ### AI & Prompts
 - [AI System Overview](ai-overview.md) — Transport/provider dispatch, key/relay security, streaming vs buffered, token caps, and the `runJsonTask` strict/salvage task pipeline.

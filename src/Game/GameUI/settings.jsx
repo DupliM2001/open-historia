@@ -581,7 +581,10 @@ const useFallbackView = () => {
     useEffect(() => {
         const refresh = () => setView(readFallbackView());
         window.addEventListener("ai:fallback-changed", refresh);
-        const timer = setInterval(refresh, 15000);
+        // The countdown only has to tick for someone watching it.
+        const timer = setInterval(() => {
+            if (document.visibilityState !== "hidden") refresh();
+        }, 15000);
         return () => {
             window.removeEventListener("ai:fallback-changed", refresh);
             clearInterval(timer);

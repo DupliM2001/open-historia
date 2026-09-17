@@ -209,6 +209,7 @@ const isMutableRuntimeJsonUrl = (url) =>
   url === JSON_URLS.tags ||
   url === JSON_URLS.events ||
   url === JSON_URLS.game ||
+  url === JSON_URLS.intercepts ||
   url === JSON_URLS.prompts ||
   url === JSON_URLS.snapshots ||
   url === JSON_URLS.world;

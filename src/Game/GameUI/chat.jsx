@@ -19,17 +19,24 @@ import {
     getNationColors,
     getNationFlags,
     loadCountryNames as loadCachedCountryNames,
-    readJson,
 } from "../../runtime/assets.js";
 import { flagEmojiFromGid, flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
 import { fetchCommunityFlags, loadCommunityFlagDataUrl } from "../../runtime/communityFlags.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { readChatsState, writeChatsState, readInterceptsState, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
+import { readChatsState, writeChatsState, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import { formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
+import { refreshRuntimeState, subscribeRuntime } from "../../runtime/runtimeStore.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
+
+// Who the player is and when it is: all this panel reads of game.json.
+const selectGameIdentity = (game) => ({
+    country: game?.country || "",
+    gameDate: game?.gameDate || "",
+});
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
@@ -1498,19 +1505,14 @@ const InterceptView = ({ target, exchange, clarity, seal, onBack }) => {
 };
 
 const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
-    const [world, setWorld]           = useState(null);
-    const [intercepts, setIntercepts] = useState({});
+    const world                       = useRuntimeState("world");
+    const intercepts                  = useRuntimeState("intercepts", normalizeIntercepts);
     const [open, setOpen]             = useState(null); // { target, exchange }
     const [choosing, setChoosing]     = useState(false);
     const [error, setError]           = useState("");
 
-    const refresh = async () => {
-        try {
-            const [w, i] = await Promise.all([readWorldState({ force: true }), readInterceptsState({ force: true })]);
-            setWorld(w); setIntercepts(normalizeIntercepts(i));
-        } catch { /* keep what we have */ }
-    };
-    useEffect(() => { refresh(); const iv = setInterval(refresh, 5000); return () => clearInterval(iv); }, []);
+    // Opening the tab is when these have to be current; the store does the rest.
+    useEffect(() => { void refreshRuntimeState(["world", "intercepts"]); }, []);
     // Opening the tab is the first time most players meet their own service, and
     // sending an agent the first time they meet another's: each gets its stat
     // sheet and a first intelligence reading then (gameplay.js ensureCountryAssessed)
@@ -1548,8 +1550,8 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
                 world: committed,
             }).world
             : committed;
+        // Canonical, so the store republishes the saved world to this view.
         await writeWorldState(toWrite);
-        await refresh();
     };
 
     const handleExpel = async (spy) => {
@@ -1905,37 +1907,23 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
         return () => { cancelled = true; };
     }, [hasLoadedInitialData, isOpen]);
 
+    const identity = useRuntimeState("game", selectGameIdentity);
     useEffect(() => {
         if (!isOpen) return;
-
-        let cancelled = false;
-        const go = () => readJson(JSON_URLS.game, { defaultValue: {}, force: true })
-        .then((data) => {
-            if (cancelled) return;
-            if (data.country) setPlayerCountry(data.country);
-            if (data.gameDate) setGameDate(data.gameDate);
-        })
-        .catch(() => {});
-
-        go();
-        const iv = setInterval(go, 5000);
-        return () => {
-            cancelled = true;
-            clearInterval(iv);
-        };
-    }, [isOpen]);
+        if (identity.country) setPlayerCountry(identity.country);
+        if (identity.gameDate) setGameDate(identity.gameDate);
+    }, [isOpen, identity]);
 
     // Chats created OUTSIDE this panel — a jump's diplomatic invitations, the
     // idle outreach drip — used to be invisible until a full page reload (the
-    // list loaded exactly once). Poll the stored list while the panel is open
-    // and merge additions/updates in; the active conversation object is left
-    // alone so an in-flight exchange is never clobbered mid-reply.
+    // list loaded exactly once). The store publishes the stored list while the
+    // panel is open and additions are merged in; the active conversation object
+    // is left alone so an in-flight exchange is never clobbered mid-reply.
     useEffect(() => {
         if (!isOpen || !hasLoadedInitialData) return;
 
         let cancelled = false;
-        const sync = () => loadAllChats({ force: true })
-        .then((saved) => {
+        const sync = (saved) => {
             if (cancelled) return;
             if (!Array.isArray(saved)) { setFreshSinceOpen(true); return; }
             setChats((prev) => {
@@ -1953,19 +1941,15 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
             // Batched with the setChats above, so the snapshot effect first runs
             // against the list this read produced, never the one it replaced.
             setFreshSinceOpen(true);
-        })
-        // A failed read must not wedge the panel on "waiting for fresh data" —
-        // fall back to whatever is in hand and let the next tick try again.
-        .catch(() => { if (!cancelled) setFreshSinceOpen(true); });
+        };
 
-        // Run now, not in 5s: opening the panel is exactly the moment the list
-        // has to be current, and a player who opens and closes inside the
-        // interval would otherwise never see a read at all.
-        sync();
-        const iv = setInterval(sync, 5000);
+        const unsubscribe = subscribeRuntime("chat", sync);
+        // Opening the panel is when the list has to be current, and a failed
+        // read must not wedge it on "waiting for fresh data".
+        refreshRuntimeState(["chat"]).finally(() => { if (!cancelled) setFreshSinceOpen(true); });
         return () => {
             cancelled = true;
-            clearInterval(iv);
+            unsubscribe();
         };
     }, [isOpen, hasLoadedInitialData]);
 
