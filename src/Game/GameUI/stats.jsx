@@ -10,7 +10,8 @@ import { intelligenceOf } from "../../runtime/spycraft.js";
 import { flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import COUNTRY_NAMES from "../../runtime/generated/countryNames.js";
 import { setRegionClickObserver } from "../Selection/Regions.jsx";
-import { ensureIntelligenceRated, generateCountryStatSheet, isSimulationBusy } from "../AI/gameplay.js";
+import { ensureIntelligenceRated, generateCountryStatSheet } from "../AI/gameplayLazy.js";
+import { isSimulationBusy } from "../AI/simulationStatus.js";
 import { validateGameplayPayload } from "../AI/gameplaySchemas.js";
 import {
     appendCountryStatHistorySample,

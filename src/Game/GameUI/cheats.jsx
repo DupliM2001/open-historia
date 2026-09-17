@@ -20,7 +20,7 @@ import {
 } from "../../runtime/gameState.js";
 import COUNTRY_NAMES from "../../runtime/generated/countryNames.js";
 import { DIFFICULTY_LEVELS, normalizeDifficulty } from "../../runtime/difficulty.js";
-import { applyGameMasterPreview, consolidateHistoryNow, previewGameMasterCommand } from "../AI/gameplay.js";
+import { applyGameMasterPreview, consolidateHistoryNow, previewGameMasterCommand } from "../AI/gameplayLazy.js";
 import { HISTORY_CONSOLIDATION, countWords, describeHistoryConsolidation, planHistoryConsolidation } from "../AI/historyConsolidation.js";
 import { setRegionClickInterceptor } from "../Selection/Regions.jsx";
 import { compareGameDates, isGameDate } from "../../runtime/gameDates.js";
