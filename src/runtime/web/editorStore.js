@@ -72,7 +72,9 @@ const createDocument = async (body = {}) => {
     const order = current && Array.isArray(current.order) ? current.order.filter((entry) => entry !== id) : [];
     return { version: 1, order: [id, ...order] };
   }, { version: 1, order: [] });
-  return doc;
+  // The summary, mirroring the desktop store: the editor reads only `id`, and a
+  // document can be tens of MB.
+  return summarize(doc);
 };
 
 const updateDocument = async (id, updates = {}) => {
@@ -91,7 +93,7 @@ const updateDocument = async (id, updates = {}) => {
     const order = current && Array.isArray(current.order) ? current.order : [];
     return order.includes(id) ? { version: 1, order } : { version: 1, order: [...order, id] };
   }, { version: 1, order: [id] });
-  return next;
+  return summarize(next);
 };
 
 const deleteDocument = async (id) => {
