@@ -353,15 +353,32 @@ publishDiagnostics();
 // What the pass actually needs is the map's NON-NORMAL state: where the controller
 // is not the lawful sovereign, and where there are claimants. So the two sparse
 // stores go whole, and of the ownership store only the rows for THOSE regions.
-// Any other region's controller is one lookup away (find_region, region_info), and
-// the event's own operations already name the losing side in fromCode.
+//
+// And it needs the controller of every place the events NAME, because that is
+// what it writes into fromCode. This used to be left to a lookup ("find its
+// controller with find_region"), which saved characters and cost a request — the
+// wrong way round on a free key, where a lookup round re-sends the whole prompt
+// and requests are what run out (requestBudget.js). The caller now reads the
+// events for place names and hands each one over with its controller
+// (`placesNamed`, from lookupTools.js placesNamedIn), so nothing has to be asked.
 //
 // Bounded all the same: a world war on a large map can dispute hundreds of
 // regions. Rows that involve a power the candidate events name come first, so the
 // cap never hides the front being reconciled, and what it leaves out is counted.
 export const TERRITORIAL_STATE_ROW_CAP = 400;
 
-export const summarizeTerritorialState = (world, candidates = []) => {
+// The text a caller reads for place names: the candidates' own words, and the
+// places their existing operations already point at.
+export const territoryCandidateText = (candidates = []) => normalizeArray(candidates)
+  .map((candidate) => [
+    normalizeString(candidate?.title),
+    normalizeString(candidate?.description),
+    ...normalizeArray(candidate?.existingLegalTransfers).flatMap((op) => [op?.regionId, op?.regionName]),
+    ...normalizeArray(candidate?.existingControlOps).flatMap((op) => [op?.regionId, op?.regionName]),
+  ].map(normalizeString).filter(Boolean).join(". "))
+  .join("\n");
+
+export const summarizeTerritorialState = (world, candidates = [], { placesNamed = null } = {}) => {
   const control = world?.regionOwnershipOverrides && typeof world.regionOwnershipOverrides === "object" ? world.regionOwnershipOverrides : {};
   const sovereignty = world?.regionSovereigntyOverrides && typeof world.regionSovereigntyOverrides === "object" ? world.regionSovereigntyOverrides : {};
   const claimants = world?.regionClaimants && typeof world.regionClaimants === "object" ? world.regionClaimants : {};
@@ -387,8 +404,12 @@ export const summarizeTerritorialState = (world, candidates = []) => {
   const kept = ordered.slice(0, TERRITORIAL_STATE_ROW_CAP);
   const pick = (store) => Object.fromEntries(kept.filter((regionId) => regionId in store).map((regionId) => [regionId, cloneValue(store[regionId])]));
 
+  const places = Array.isArray(placesNamed) ? placesNamed : null;
   return {
-    scope: "Occupied and disputed regions only. Every other region is held by its lawful owner; find its controller with find_region or region_info.",
+    scope: places
+      ? "The occupied and disputed regions, and every place the events name with who controls it now. Any other region is held by its lawful owner."
+      : "Occupied and disputed regions only. Every other region is held by its lawful owner.",
+    ...(places ? { placesTheseEventsName: cloneValue(places) } : {}),
     regionOwnershipOverrides: pick(control),
     regionSovereigntyOverrides: pick(sovereignty),
     regionClaimants: pick(claimants),
@@ -396,10 +417,50 @@ export const summarizeTerritorialState = (world, candidates = []) => {
   };
 };
 
+// Which events the director would be asked about and what it would be shown of
+// them, or null when none is territorial. Its own function so the turn review
+// (gameplay.js runTurnReview) can tell beforehand whether there is anything to
+// ask, and ask it as one job among several, with exactly this input.
+// `findPlaces(text)` is the caller's place-name reader; without one the state
+// goes out as it always did.
+const territoryCandidateRows = (sourceEvents) => sourceEvents
+  .map((event, index) => ({ event, index }))
+  .filter(({ event }) => hasTerritorialContent(event))
+  .map(({ event, index }) => ({
+    eventIndex: index,
+    date: normalizeString(event?.date),
+    title: normalizeString(event?.title),
+    description: normalizeString(event?.description),
+    existingLegalTransfers: cloneValue(normalizeArray(event?.impacts?.regionTransfers)),
+    existingControlOps: cloneValue(normalizeArray(event?.impacts?.regionControlOps)),
+    unitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
+  }));
+
+const territoryAnalyzerInput = async (candidateRows, world, findPlaces) => {
+  let placesNamed = null;
+  if (typeof findPlaces === "function") {
+    try {
+      placesNamed = await findPlaces(territoryCandidateText(candidateRows));
+    } catch (error) {
+      console.warn("[territory director] the events' place names could not be read; sending the state without them.", error);
+    }
+  }
+  return {
+    candidates: candidateRows,
+    territorialState: summarizeTerritorialState(world, candidateRows, { placesNamed }),
+  };
+};
+
+export const buildTerritoryDirectorInput = async ({ events = [], world = {}, findPlaces = null } = {}) => {
+  const candidateRows = territoryCandidateRows(convertLegacyWartimeTransfers(events).events);
+  return candidateRows.length ? territoryAnalyzerInput(candidateRows, world, findPlaces) : null;
+};
+
 export const directGeneratedTerritoryOps = async ({
   events = [],
   world = {},
   analyzeBatch,
+  findPlaces = null,
 } = {}) => {
   const converted = convertLegacyWartimeTransfers(events);
   const sourceEvents = converted.events;
@@ -426,19 +487,7 @@ export const directGeneratedTerritoryOps = async ({
 
   let analysis = null;
   try {
-    const candidateRows = candidates.map(({ event, index }) => ({
-      eventIndex: index,
-      date: normalizeString(event?.date),
-      title: normalizeString(event?.title),
-      description: normalizeString(event?.description),
-      existingLegalTransfers: cloneValue(normalizeArray(event?.impacts?.regionTransfers)),
-      existingControlOps: cloneValue(normalizeArray(event?.impacts?.regionControlOps)),
-      unitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
-    }));
-    analysis = await analyzeBatch({
-      candidates: candidateRows,
-      territorialState: summarizeTerritorialState(world, candidateRows),
-    });
+    analysis = await analyzeBatch(await territoryAnalyzerInput(territoryCandidateRows(sourceEvents), world, findPlaces));
   } catch (error) {
     console.warn("[territory director] analysis failed; preserving existing territory state changes.", error);
     return sourceEvents;

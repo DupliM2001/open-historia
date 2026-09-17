@@ -441,6 +441,87 @@ export const buildLookupContext = ({ regions = [], world = {}, cities = [], even
 };
 
 // ---------------------------------------------------------------------------
+// Places a text names — answered before anyone asks
+// ---------------------------------------------------------------------------
+//
+// A lookup function lets the model ask who holds Mariupol. But asking is a round
+// trip: the whole prompt goes out again, and on a free key requests are what run
+// out (requestBudget.js). For a task whose input is a handful of finished events,
+// the question can be answered beforehand — the events already name the places
+// they are about — so placesNamedIn reads the text the way a reader would and
+// hands over each named region and city with who controls it now, who lawfully
+// owns it where that differs, and who claims it.
+//
+// Whole words only, accents and case folded, and a name of three letters or
+// fewer is skipped: a region called "Ob" or "Aa" is in half the words of any
+// paragraph. A city answers with the region it stands in. Longest names first,
+// so "South Ossetia" is not also reported as "Ossetia".
+
+const foldForSearch = (value) => String(value ?? "")
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+
+const MIN_PLACE_NAME_CHARS = 4;
+export const PLACES_NAMED_LIMIT = 40;
+
+export const placesNamedIn = (context, textValue, { limit = PLACES_NAMED_LIMIT } = {}) => {
+  const haystack = ` ${foldForSearch(textValue)} `;
+  if (haystack.length < MIN_PLACE_NAME_CHARS + 2 || !context) return [];
+
+  const candidates = [];
+  for (const row of array(context.rows)) {
+    for (const name of [row.name, ...array(row.aliases)]) {
+      const folded = foldForSearch(name);
+      if (folded.length >= MIN_PLACE_NAME_CHARS) candidates.push({ folded, label: clean(name), kind: "region", row });
+    }
+  }
+  for (const city of array(context.cityRows)) {
+    for (const name of [city.name, ...array(city.aliases)]) {
+      const folded = foldForSearch(name);
+      if (folded.length >= MIN_PLACE_NAME_CHARS) candidates.push({ folded, label: clean(name), kind: "city", city });
+    }
+  }
+  candidates.sort((a, b) => b.folded.length - a.folded.length || a.folded.localeCompare(b.folded));
+
+  // Text already accounted for by a longer name is blanked, so a shorter name
+  // inside it does not match a second time.
+  let remaining = haystack;
+  const found = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const needle = ` ${candidate.folded} `;
+    const at = remaining.indexOf(needle);
+    if (at < 0) continue;
+    remaining = remaining.split(needle).join(` ${"#".repeat(candidate.folded.length)} `);
+    const row = candidate.kind === "region" ? candidate.row : context.regionOfCity?.(candidate.city) ?? null;
+    const key = `${candidate.kind}|${candidate.label.toLowerCase()}|${row?.id ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const claimants = row ? array(context.claimants?.[row.id]).map(clean).filter(Boolean) : [];
+    found.push({
+      at,
+      place: candidate.label,
+      kind: candidate.kind,
+      ...(row ? {
+        regionId: row.id,
+        ...(candidate.kind === "city" || row.name !== candidate.label ? { region: row.name } : {}),
+        controller: row.owner || "unowned",
+        ...(row.sovereign && row.sovereign !== row.owner ? { lawfulOwner: row.sovereign } : {}),
+        ...(claimants.length ? { claimants } : {}),
+      } : { region: "not on this map" }),
+    });
+  }
+  // In the order the text names them, which is the order a reader meets them in.
+  return found
+    .sort((a, b) => a.at - b.at)
+    .slice(0, Math.max(0, limit))
+    .map(({ at: _at, ...place }) => place);
+};
+
+// ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
 
