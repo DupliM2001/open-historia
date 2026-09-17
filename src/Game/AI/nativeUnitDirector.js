@@ -260,6 +260,31 @@ const publishDirectorDiagnostics = ({ candidates = [], units = [], analysis = nu
   }
 };
 
+// Which events the director would be asked about, and what it would be shown of
+// them and of the order of battle. Its own function so the turn review
+// (gameplay.js runTurnReview) can tell beforehand whether there is anything to
+// ask, and ask it as one job among several, with exactly this input.
+const selectUnitDirectorCandidates = (events) => normalizeArray(events)
+  .map((event, index) => ({ event, index }))
+  .filter(({ event }) => hasMilitaryContent(event) && eventNeedsNativeUnitDirector(event));
+
+const unitDirectorAnalyzerInput = (candidates, units) => ({
+  candidates: candidates.map(({ event, index }) => ({
+    eventIndex: index,
+    date: normalizeString(event?.date),
+    title: normalizeString(event?.title),
+    description: normalizeString(event?.description),
+    existingUnitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
+  })),
+  units: units.map(summarizeUnit),
+});
+
+// null when no event needs the director.
+export const buildUnitDirectorInput = ({ events = [], world = {} } = {}) => {
+  const candidates = selectUnitDirectorCandidates(events);
+  return candidates.length ? unitDirectorAnalyzerInput(candidates, normalizeUnits(world?.units)) : null;
+};
+
 export const directGeneratedUnitOps = async ({
   events = [],
   game = {},
@@ -267,9 +292,7 @@ export const directGeneratedUnitOps = async ({
   analyzeBatch,
 } = {}) => {
   const sourceEvents = normalizeArray(events);
-  const candidates = sourceEvents
-    .map((event, index) => ({ event, index }))
-    .filter(({ event }) => hasMilitaryContent(event) && eventNeedsNativeUnitDirector(event));
+  const candidates = selectUnitDirectorCandidates(sourceEvents);
 
   const units = normalizeUnits(world?.units);
 
@@ -287,16 +310,7 @@ export const directGeneratedUnitOps = async ({
   let analysis = null;
 
   try {
-    analysis = await analyzeBatch({
-      candidates: candidates.map(({ event, index }) => ({
-        eventIndex: index,
-        date: normalizeString(event?.date),
-        title: normalizeString(event?.title),
-        description: normalizeString(event?.description),
-        existingUnitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
-      })),
-      units: units.map(summarizeUnit),
-    });
+    analysis = await analyzeBatch(unitDirectorAnalyzerInput(candidates, units));
   } catch (error) {
     console.warn("[unit director] analysis failed; preserving simulator unitOps unchanged.", error);
     return sourceEvents;

@@ -34,6 +34,7 @@ import {
     updateEntry,
 } from "../AI/providerConfig.js";
 import { formatResetTime } from "../AI/fallbackRunner.js";
+import { REVIEW_SECTIONS, announceRequestBudgetChange, describeJumpCost, requestDay, requestSettings } from "../AI/requestBudget.js";
 import {
     isRatingEnabled,
     isTelemetryEnabled,
@@ -998,6 +999,161 @@ const ReasoningSection = () => {
     );
 };
 
+// The request budget (AI/requestBudget.js): what today has cost, and the
+// switches that decide what a time skip and an idle minute may spend. Its own
+// storage and its own change event, so it sits outside mapSettings.
+const REVIEW_SECTION_LABELS = {
+    units: ["Move units to match the events", "Armies advance, retreat and take losses where the events say they did."],
+    territory: ["Mark occupied and disputed land", "Captured towns change hands on the map; contested ones are striped."],
+    timeline: ["Take repeats and filler off the timeline", "Events that restate the record, or report a meeting with no outcome, are left out."],
+    board: ["Keep the Projects board in step", "Progress, stalls and new long-term efforts follow from what happened."],
+    spies: ["Collect your agents' reports", "Each agent files what it intercepted, at least every third skip."],
+};
+
+const useRequestDay = () => {
+    const [day, setDay] = useState(() => requestDay());
+    useEffect(() => {
+        const refresh = () => setDay(requestDay());
+        window.addEventListener("ai:request-budget", refresh);
+        // The day turns over at midnight Pacific whether or not anything is sent.
+        const timer = setInterval(refresh, 60000);
+        return () => {
+            window.removeEventListener("ai:request-budget", refresh);
+            clearInterval(timer);
+        };
+    }, []);
+    return day;
+};
+
+const RequestBudgetSection = () => {
+    const day = useRequestDay();
+    const [saving, setSaving] = useState(() => requestSettings.saveRequests());
+    const [background, setBackground] = useState(() => requestSettings.backgroundAi());
+    const [dailyLimit, setDailyLimit] = useState(() => String(requestSettings.dailyLimit()));
+    const [backgroundCap, setBackgroundCap] = useState(() => String(requestSettings.backgroundDailyCap()));
+    const [sections, setSections] = useState(() => Object.fromEntries(REVIEW_SECTIONS.map((section) => [section, requestSettings.reviewSection(section)])));
+
+    const apply = (message, write) => {
+        write();
+        logDebugEvent("setting", message);
+        announceRequestBudgetChange();
+    };
+    const cost = describeJumpCost({ saveRequests: saving });
+    const share = day.limit > 0 ? Math.min(1, day.used / day.limit) : 0;
+    const barColor = share >= 0.9 ? "#f87171" : share >= 0.7 ? "#fbbf24" : "#60a5fa";
+
+    return (
+        <SettingsSection
+        title="AI requests"
+        description="A free key allows a few hundred requests a day. These settings decide how many the game spends, and on what."
+        >
+            <div style={{ marginBottom: "0.95rem" }}>
+                <div style={{ alignItems: "baseline", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+                    <div style={{ color: "rgba(255,255,255,0.92)", fontSize: "0.82rem", fontWeight: 800 }}>
+                        <span data-no-translate>{day.used}</span> of <span data-no-translate>{day.limit}</span> used today
+                    </div>
+                    <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.64rem" }}>
+                        resets at <span data-no-translate>{formatResetTime(day.resetAt)}</span>
+                    </div>
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.07)", borderRadius: "999px", height: "6px", marginTop: "0.4rem", overflow: "hidden" }}>
+                    <div style={{ background: barColor, height: "100%", width: `${Math.round(share * 100)}%` }} />
+                </div>
+                <div style={{ ...helperStyle, marginTop: "0.4rem" }}>
+                    {day.lastJump ? <>Your last time skip used <span data-no-translate>{day.lastJump.used}</span>. </> : null}
+                    {day.background > 0 ? <>Background AI has used <span data-no-translate>{day.background}</span> of its <span data-no-translate>{day.backgroundCap}</span>. </> : null}
+                    {day.refused > 0 ? <>The provider turned away <span data-no-translate>{day.refused}</span> for coming too fast; those cost a wait, not allowance. </> : null}
+                    Counted on this device, from midnight Pacific time, which is when a Gemini key&apos;s day begins.
+                </div>
+            </div>
+
+            <Toggle
+            label="Save AI requests"
+            enabled={saving}
+            onToggle={() => {
+                const next = !saving;
+                setSaving(next);
+                apply(`Save AI requests turned ${next ? "on" : "off"}.`, () => requestSettings.setSaveRequests(next));
+            }}
+            />
+            <div style={settingsHelper}>
+                {saving
+                    ? <>On (default): a time skip is one request, two when there is something to check afterwards, and never more than <span data-no-translate>{cost.max}</span>. The model is handed the names it needs instead of looking them up, a small mistake in its answer is cut out rather than asked for again, and the checks below go out together.</>
+                    : <>Off: the most thorough turns, for a key with no daily limit. Every check after a skip makes its own request, the model may look things up (up to three extra requests per task), and a flawed answer is sent back to be redone. A busy skip can use twenty requests or more.</>}
+            </div>
+
+            <div style={fieldGroupStyle}>
+                <label style={labelStyle} htmlFor="ai-daily-request-limit">Requests a day your key allows</label>
+                <input
+                id="ai-daily-request-limit"
+                data-no-translate
+                inputMode="numeric"
+                style={{ ...inputStyle, maxWidth: "9rem" }}
+                value={dailyLimit}
+                onChange={(event) => setDailyLimit(event.target.value.replace(/[^\d]/g, ""))}
+                onBlur={() => {
+                    apply(`Daily request limit set to ${dailyLimit || "the default"}.`, () => requestSettings.setDailyLimit(dailyLimit));
+                    setDailyLimit(String(requestSettings.dailyLimit()));
+                }}
+                />
+                <div style={helperStyle}>Only used for the count above and to keep background AI from spending the end of your day. The game never stops you at the limit; your provider does.</div>
+            </div>
+
+            <Toggle
+            label="Background AI"
+            enabled={background}
+            onToggle={() => {
+                const next = !background;
+                setBackground(next);
+                apply(`Background AI turned ${next ? "on" : "off"}.`, () => requestSettings.setBackgroundAi(next));
+            }}
+            />
+            <div style={settingsHelper}>
+                Off (default): the game only calls the model when you do something. On: while you are not skipping time, countries may write to you unprompted, forces may reposition, agents may file extra reports, and a country you look at gets its first intelligence reading — each of those is a request nobody pressed a button for.
+            </div>
+            {background && (
+                <div style={fieldGroupStyle}>
+                    <label style={labelStyle} htmlFor="ai-background-daily-cap">Background requests a day, at most</label>
+                    <input
+                    id="ai-background-daily-cap"
+                    data-no-translate
+                    inputMode="numeric"
+                    style={{ ...inputStyle, maxWidth: "9rem" }}
+                    value={backgroundCap}
+                    onChange={(event) => setBackgroundCap(event.target.value.replace(/[^\d]/g, ""))}
+                    onBlur={() => {
+                        apply(`Background AI daily cap set to ${backgroundCap || "the default"}.`, () => requestSettings.setBackgroundDailyCap(backgroundCap));
+                        setBackgroundCap(String(requestSettings.backgroundDailyCap()));
+                    }}
+                    />
+                    <div style={helperStyle}>It also stops by itself once less than a tenth of your day is left.</div>
+                </div>
+            )}
+
+            <div style={{ color: "rgba(255,255,255,0.78)", fontSize: "0.74rem", fontWeight: 800, margin: "0.4rem 0 0.2rem" }}>Checks after a time skip</div>
+            <div style={{ ...helperStyle, marginBottom: "0.7rem" }}>
+                {saving
+                    ? "All of these share ONE request, and only when the skip gave them something to look at. Turning one off never saves a request unless it was the only one with work to do; it does make that request smaller."
+                    : "With Save AI requests off, each of these is its own request after every skip and these switches are not used."}
+            </div>
+            {REVIEW_SECTIONS.map((section, index) => (
+                <React.Fragment key={section}>
+                    <Toggle
+                    label={REVIEW_SECTION_LABELS[section][0]}
+                    enabled={sections[section]}
+                    onToggle={() => {
+                        const next = !sections[section];
+                        setSections((current) => ({ ...current, [section]: next }));
+                        apply(`After-skip check "${REVIEW_SECTION_LABELS[section][0]}" turned ${next ? "on" : "off"}.`, () => requestSettings.setReviewSection(section, next));
+                    }}
+                    />
+                    <div style={{ ...settingsHelper, ...(index === REVIEW_SECTIONS.length - 1 ? { marginBottom: 0 } : {}) }}>{REVIEW_SECTION_LABELS[section][1]}</div>
+                </React.Fragment>
+            ))}
+        </SettingsSection>
+    );
+};
+
 const SocialLinks = ({ discordUrl, redditUrl, githubUrl }) => {
     const links = [
         discordUrl ? { label: "Discord", href: discordUrl } : null,
@@ -1806,6 +1962,7 @@ const SettingsWorkspace = ({
                 <FallbackListSection />
                 <ConnectionsSection />
                 <ReasoningSection />
+                <RequestBudgetSection />
                 <SettingsSection title="Generation behavior" description="Bound model waiting behavior without changing the deterministic fallback path.">
                     <Toggle label="Limit AI generation" enabled={mapSettings.limitAiGeneration} onToggle={() => updateMapSetting("limitAiGeneration", MAP_SETTING_KEYS.limitAiGeneration, !mapSettings.limitAiGeneration)} />
                     <div style={settingsHelper}>
@@ -1817,7 +1974,7 @@ const SettingsWorkspace = ({
                     </div>
                     <Toggle label="AI lookup functions" enabled={mapSettings.lookupFunctions} onToggle={() => updateMapSetting("lookupFunctions", MAP_SETTING_KEYS.lookupFunctions, !mapSettings.lookupFunctions)} />
                     <div style={settingsHelper}>
-                    On (default): before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
+                    Only used while Save AI requests (above) is off, because every lookup is a whole extra request. On: before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
                     </div>
                     <Toggle label="Batch background AI tasks" enabled={mapSettings.batchBackgroundTasks} onToggle={() => updateMapSetting("batchBackgroundTasks", MAP_SETTING_KEYS.batchBackgroundTasks, !mapSettings.batchBackgroundTasks)} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
