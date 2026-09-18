@@ -38,6 +38,9 @@ export const maybeGeneratePregameHistory = async (...args) => (await gameplay())
 // --- Rollback ---------------------------------------------------------------
 export const loadRollbackSnapshots = async (...args) => (await gameplay()).loadRollbackSnapshots(...args);
 export const rollBackToSnapshot = async (...args) => (await gameplay()).rollBackToSnapshot(...args);
+// Intervene: stop the last turn after the events revealed so far (intervene.js).
+export const canInterveneInLastTurn = async (...args) => (await gameplay()).canInterveneInLastTurn(...args);
+export const interveneAfterEvent = async (...args) => (await gameplay()).interveneAfterEvent(...args);
 
 // --- Chat and diplomacy -----------------------------------------------------
 export const chooseNextDiplomaticSpeaker = async (...args) => (await gameplay()).chooseNextDiplomaticSpeaker(...args);

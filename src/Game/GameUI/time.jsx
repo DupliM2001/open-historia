@@ -11,7 +11,7 @@ import {
     loadRegionCatalog,
     loadRollbackSnapshotCount,
 } from "../../runtime/assets.js";
-import { loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplayLazy.js";
+import { canInterveneInLastTurn, interveneAfterEvent, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplayLazy.js";
 import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump } from "../AI/simulationStatus.js";
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
 import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
@@ -1397,6 +1397,8 @@ const TimelineHistoryPanel = ({
     canRollbackTurn,
     buildDebugIncident,
     onRollbackTurn,
+    canIntervene = false,
+    onIntervene = null,
     record,
     topOffset,
     visibleEventCount,
@@ -1437,6 +1439,24 @@ const TimelineHistoryPanel = ({
     // idle | working — the undo runs without switching panels, so this button is
     // the only place the player can see that anything is happening.
     const [rollbackState, setRollbackState] = useState("idle");
+    // Intervene (AI/intervene.js): idle | asking | working. Asking is the one
+    // confirmation — the events not yet revealed are discarded for good — and
+    // it is keyed to the record so a new turn never opens on a stale question.
+    const [interveneState, setInterveneState] = useState({ recordId: null, state: "idle" });
+    const intervening = record && interveneState.recordId === record.id ? interveneState.state : "idle";
+    const handleInterveneClick = async () => {
+        if (!record || intervening === "working" || !canIntervene || typeof onIntervene !== "function") return;
+        if (intervening !== "asking") {
+            setInterveneState({ recordId: record.id, state: "asking" });
+            return;
+        }
+        setInterveneState({ recordId: record.id, state: "working" });
+        try {
+            await onIntervene();
+        } finally {
+            setInterveneState({ recordId: record.id, state: "idle" });
+        }
+    };
     const handleRollbackClick = async () => {
         if (rollbackState === "working" || !canRollbackTurn || typeof onRollbackTurn !== "function") return;
         setRollbackState("working");
@@ -1613,6 +1633,67 @@ const TimelineHistoryPanel = ({
                 >
                 <span>Skip to end ({totalEvents - visibleEvents.length} more)</span>
                 </button>
+                {/* Intervene: stop the round HERE. The revealed events are canon,
+                    the rest never happened, and the game's date is the last
+                    revealed event's — so the player's orders go out before what
+                    came next. Costs no request (AI/intervene.js). Only offered
+                    with no category filter on: the count is by reveal order. */}
+                {canIntervene && !categoryFilter && typeof onIntervene === "function" && (
+                    intervening === "asking" ? (
+                        <div
+                        style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.4rem",
+                            padding: "0.6rem 0.7rem",
+                            borderRadius: "0.6rem",
+                            border: "1px solid rgba(251,191,36,0.55)",
+                            background: "rgba(251,191,36,0.10)",
+                            fontSize: "0.78rem",
+                            lineHeight: 1.4,
+                        }}
+                        >
+                        <span>
+                            Stop the round after <strong>{visibleEvents[visibleEvents.length - 1]?.title}</strong>? The
+                            {" "}{totalEvents - visibleEvents.length} event{totalEvents - visibleEvents.length === 1 ? "" : "s"} not yet revealed
+                            will be discarded — they never happen — and the date becomes {visibleEvents[visibleEvents.length - 1]?.date}.
+                            You can still undo the round afterwards.
+                        </span>
+                        <div style={{ display: "flex", gap: "0.4rem" }}>
+                            <button
+                            type="button"
+                            onClick={handleInterveneClick}
+                            style={{ ...ghostButtonStyle, flex: 1, minHeight: "2rem", border: "1px solid rgba(251,191,36,0.8)", background: "rgba(251,191,36,0.22)" }}
+                            >
+                            <span>Stop here</span>
+                            </button>
+                            <button
+                            type="button"
+                            onClick={() => setInterveneState({ recordId: record.id, state: "idle" })}
+                            style={{ ...ghostButtonStyle, flex: 1, minHeight: "2rem", opacity: 0.8 }}
+                            >
+                            <span>Keep going</span>
+                            </button>
+                        </div>
+                        </div>
+                    ) : (
+                        <button
+                        type="button"
+                        onClick={handleInterveneClick}
+                        disabled={intervening === "working"}
+                        title="Stop the round here: what is revealed happened, what is not never does, and you act before it."
+                        style={{
+                            ...ghostButtonStyle,
+                            minHeight: "1.9rem",
+                            opacity: intervening === "working" ? 0.7 : 0.9,
+                            width: "100%",
+                            cursor: intervening === "working" ? "default" : "pointer",
+                        }}
+                        >
+                        <span>{intervening === "working" ? "Stopping the round…" : "✋ Intervene here"}</span>
+                        </button>
+                    )
+                )}
                 </>
             )}
             </div>
@@ -2114,6 +2195,53 @@ const DateWidget = ({
         return false;
     };
 
+    // Intervene (AI/intervene.js): whether the newest turn carries the journal
+    // it needs, re-checked with the round like the undo count. Cleared while a
+    // jump runs so a half-revealed turn is never stopped under a new one.
+    const [canInterveneTurn, setCanInterveneTurn] = useState(false);
+    const latestTurnDate = worldState?.simulationHistory?.[0]?.date ?? "";
+    useEffect(() => {
+        let active = true;
+        canInterveneInLastTurn()
+            .then((can) => { if (active) setCanInterveneTurn(Boolean(can)); })
+            .catch(() => { if (active) setCanInterveneTurn(false); });
+        return () => { active = false; };
+    }, [gameData?.round, latestTurnDate]);
+
+    // Stop the round after the events revealed so far. The engine rolls back to
+    // the turn's snapshot and applies the kept prefix again, without a request;
+    // the panel then shows the shorter turn, fully revealed.
+    const runIntervene = async () => {
+        const keep = Math.max(1, visibleEventCount);
+        if (isLoading || !canInterveneTurn) return false;
+        setIsLoading(true);
+        setError("");
+        setFallbackWarning("");
+        logDebugEvent("turn", `Intervening after event ${keep} of the last turn.`, { round: gameData?.round ?? 0 });
+        try {
+            const result = await interveneAfterEvent(keep);
+            if (result) {
+                logDebugEvent("turn", `Intervention complete — the round now stops on ${result.closingDate}.`, {
+                    kept: result.kept,
+                    dropped: result.dropped,
+                });
+                setGameData(result.bundle.game);
+                setEvents(result.bundle.events);
+                setWorldState(result.bundle.world);
+                setVisibleEventCount(result.kept);
+                setPanel("history");
+                return true;
+            }
+            setError("There was nothing to stop: the round has no events after the ones revealed.");
+        } catch (interveneError) {
+            console.error("Failed to intervene:", interveneError);
+            setError(interveneError.message || "Failed to stop the round.");
+        } finally {
+            setIsLoading(false);
+        }
+        return false;
+    };
+
     // Display-name lookups for the timeline's own labels, off the same catalogs
     // the camera resolves places from.
     const polityLookup = useMemo(
@@ -2444,6 +2572,8 @@ const DateWidget = ({
         // the trip. Same restore point, same code path.
         canRollbackTurn={undoCount > 0 && !isLoading}
         onRollbackTurn={() => runUndo({ stayOnHistory: true })}
+        canIntervene={canInterveneTurn && undoCount > 0 && !isLoading}
+        onIntervene={runIntervene}
         record={latestTurnRecord}
         topOffset={topOffset}
         visibleEventCount={visibleEventCount}

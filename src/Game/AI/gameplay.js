@@ -230,6 +230,7 @@ import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
+import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
 import {
   applyTerritoryTempo,
   buildScriptedEventsInstruction,
@@ -5642,7 +5643,10 @@ const MAX_ROLLBACK_SNAPSHOTS = 12;
 // A dedicated per-game runtime asset (storage/snapshots.json) — never bundled with
 // a scenario or dragged through the 5s poll — capped so a long game can't grow it
 // without bound. Purely best-effort: a snapshot failure must never break a turn.
-const captureRollbackSnapshot = async ({ round, fromDate, toDate, game, world, events, actions, chat, colors }) => {
+// `turn` is the journal of what the turn APPLIED (intervene.js journalTurn):
+// with the pre-turn state beside it, the turn can be applied again from any
+// point the player chooses — Intervene (interveneAfterEvent below).
+const captureRollbackSnapshot = async ({ round, fromDate, toDate, game, world, events, actions, chat, colors, turn = null }) => {
   try {
     const prior = await readJson(JSON_URLS.snapshots, { defaultValue: [], force: true }).catch(() => []);
     const list = Array.isArray(prior) ? prior : [];
@@ -5660,6 +5664,7 @@ const captureRollbackSnapshot = async ({ round, fromDate, toDate, game, world, e
         chat: cloneValue(chat),
         colors: cloneValue(colors),
       },
+      ...(turn ? { turn: cloneValue(turn) } : {}),
     };
     await writeJson(JSON_URLS.snapshots, [snapshot, ...list].slice(0, MAX_ROLLBACK_SNAPSHOTS));
   } catch (error) {
@@ -5710,6 +5715,77 @@ export const rollBackToSnapshot = async (index = 0) => {
     // and the panel stayed pinned on the undone turn until the app restarted.
     if (typeof window !== "undefined") window.dispatchEvent(new Event("oh:rolled-back"));
     return { bundle, round: snap.round, remaining: snapshots.length - (index + 1) };
+  } finally {
+    endSimulation();
+  }
+};
+
+// Whether the last turn can be stopped part-way: a time skip whose journal the
+// newest snapshot carries, with more than one event in it.
+export const canInterveneInLastTurn = async () => {
+  const snapshots = await loadRollbackSnapshots();
+  return normalizeArray(snapshots[0]?.turn?.events).length > 1;
+};
+
+// Intervene (intervene.js): stop the last turn after its `keptCount`-th event —
+// the events revealed so far. The game rolls back to the turn's snapshot and the
+// kept prefix of the journal is applied again through the very path the turn
+// took, with every check that would ask a model switched off: the events were
+// checked when they were made, and stopping a round must cost no request.
+// The discarded events never happened; the game's date is the last kept
+// event's; the next turn's receipt says so. Returns null when there is nothing
+// to stop (no journal, or nothing after the kept events).
+export const interveneAfterEvent = async (keptCount) => {
+  beginSimulation();
+  try {
+    const snapshots = await loadRollbackSnapshots();
+    const snap = snapshots[0];
+    const journal = snap?.turn;
+    if (!normalizeArray(journal?.events).length) return null;
+    const originDate = normalizeString(snap.state?.game?.gameDate);
+    const minimumDate = (originDate && addIsoDays(originDate, 1)) || originDate;
+    const { result: truncated, kept, dropped, closingDate } = truncateTurn(journal, keptCount, { originDate, minimumDate });
+    if (!dropped.length) return null;
+
+    // Back to the moment before the turn, then forward again with only what the
+    // player let happen. The rollback drops this snapshot; the apply captures a
+    // fresh one of the same moment with the shorter journal, so undo still works
+    // and the round can be stopped earlier still.
+    const restored = await rollBackToSnapshot(0);
+    if (!restored) return null;
+    const { bundle } = restored;
+    const baseColors = await readJson(JSON_URLS.colors, { defaultValue: {}, force: true });
+    const receipt = mergeReceipts(createApplicationReceipt(), journal.receipt ?? null);
+    noteReceipt(receipt, "withheld", describeIntervention({ kept, dropped, closingDate }));
+    // A budget with nothing left: history consolidation, the tracked stats and
+    // every other optional pass ask it first and stand down.
+    const requests = createJumpBudget({ cap: 1 });
+    requests.take("intervene");
+    const applied = await applySimulationResult({
+      baseActions: bundle.actions,
+      baseChats: bundle.chats,
+      baseColors,
+      baseEvents: bundle.events,
+      baseGame: bundle.game,
+      baseWorld: bundle.world,
+      campaignId: activeCampaignId(),
+      result: {
+        ...truncated,
+        generation: { source: "ai", fallbackReason: "" },
+        receipt,
+        hiddenEvents: [],
+        boardProvisionalEventIds: [],
+      },
+      // An empty review: every director finds its part missing and keeps the
+      // events as written, and the board does not move — it moved when the
+      // turn was first applied, and the kept events carry their own ops.
+      projects: { bundle, signal: null, review: { parts: {}, agentReports: [] }, requests },
+    });
+    logDebugEvent("turn", `Intervene: the round stopped after "${normalizeString(kept.at(-1)?.title)}" on ${closingDate}; ${dropped.length} event${dropped.length === 1 ? "" : "s"} discarded, no request made.`, {
+      kept: kept.map((event) => event.title),
+      dropped: dropped.map((event) => event.title),
+    });
+    return { bundle: applied, kept: kept.length, dropped: dropped.length, closingDate };
   } finally {
     endSimulation();
   }
@@ -6584,7 +6660,10 @@ const applySimulationResult = async ({
   if (review) await fileReviewedAgentReports(review);
   else if (!savingRequests()) await refreshSpyIntercepts();
 
-  // Snapshot the state we just replaced so it can be rolled back to (best-effort).
+  // Snapshot the state we just replaced so it can be rolled back to (best-effort),
+  // with what this turn applied beside it, in the order the reveal shows it, so
+  // the player can stop the round part-way (Intervene). Only a time skip is
+  // worth stopping: a resolved catalyst or a game-master command is one moment.
   await captureRollbackSnapshot({
     round: baseGame.round || 1,
     fromDate: baseGame.gameDate || baseGame.startDate || "",
@@ -6595,6 +6674,23 @@ const applySimulationResult = async ({
     actions: baseActions,
     chat: baseChats,
     colors: baseColors,
+    turn: result.mode === "jump" || result.mode === "auto"
+      ? journalTurn({
+        events: freshEvents,
+        excludeEventIds: espionageEventIds,
+        warUpdates,
+        relationUpdates,
+        agreementUpdates,
+        storylineUpdates,
+        stopDate: nextGame.gameDate,
+        summary: result.summary,
+        catalyst: result.catalyst,
+        outreach: result.outreach,
+        clearActions: result.clearActions,
+        mode: result.mode,
+        receipt,
+      })
+      : null,
   });
 
   return {
