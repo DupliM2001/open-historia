@@ -11865,10 +11865,10 @@ const runJumpSegments = async ({ context, onEvents, onProgress, signal, state })
     if (segmentCount <= 1) {
       console.warn(`[ai] the jump failed (${reason}) — falling back for the whole period.`);
       logDebugEvent("warn", "[turn] The jump failed; it falls back.", { reason });
-      // Off the panel now, so the player is not reading events already thrown away.
-      showEvents?.([]);
       state.segmentPayloads.length = 0;
-      state.segmentPayloads.push(await fallbackJumpSimulation({ bundle, days: dateStep || 1, mode, targetDate }));
+      const canned = await fallbackJumpSimulation({ bundle, days: dateStep || 1, mode, targetDate });
+      state.segmentPayloads.push(canned);
+      showEvents?.(normalizeArray(canned?.events));
       state.nextSegment = segmentCount;
       state.generation = {
         source: "fallback",
