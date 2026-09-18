@@ -1,6 +1,14 @@
 /*! Open Historia — portions (mobile search layout) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import React, { memo, useEffect, useRef, useState } from "react";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
+import { BESIDE_DOCK_LEFT, DOCK_BOTTOM_REM, DOCK_BUTTON_BOTTOM, DOCK_HEIGHT_REM, DOCK_LEFT_REM } from "./hudDock.js";
+
+// A small magnifier beside the launcher dock, not a fifth launcher: smaller
+// than the dock's buttons and sitting on the same baseline as their bottoms.
+// Open on a phone it becomes a full-width bar, and a finger needs the extra
+// height there.
+const COMPACT_SIZE = "2.4rem";
+const PHONE_BAR_SIZE = "3rem";
 
 const SEARCH_HEADERS = { "Accept-Language": "en, *;q=0.5" };
 const SEARCH_RESULT_CACHE = new Map();
@@ -268,28 +276,29 @@ const Search = memo(({ mapRef }) => {
   };
 
   const hasSuggestions = expanded && suggestions.length > 0;
+  const phoneBar = expanded && isMobile;
+  const size = phoneBar ? PHONE_BAR_SIZE : COMPACT_SIZE;
 
   return (
     <div
       style={{
         position: "fixed",
-        // Desktop: sits right of the bottom toolbar and expands rightward.
-        // Phones: the expanded box wouldn't fit there, so it opens as a
-        // full-width bar just above the toolbar instead.
-        bottom: expanded && isMobile ? "5rem" : "1rem",
-        // Clear of the bottom toolbar (0.5rem left + 12.8rem wide + 0.5rem gap).
-        // Keep this in step with the pill's width in chat.jsx — it grew when the
-        // Projects launcher became its third button.
-        left: expanded && isMobile ? "0.5rem" : "13.8rem",
-        height: "3rem",
-        width: expanded ? (isMobile ? "calc(100vw - 1rem)" : "17rem") : "3rem",
+        // Desktop: sits right of the launcher dock, level with the bottoms of
+        // its buttons, and expands rightward. Phones: the expanded box wouldn't
+        // fit there, so it opens as a full-width bar just above the dock.
+        bottom: phoneBar ? `${DOCK_BOTTOM_REM + DOCK_HEIGHT_REM + 0.5}rem` : DOCK_BUTTON_BOTTOM,
+        // hudDock.js derives this from the dock's launcher count, so a new
+        // launcher can't end up underneath it.
+        left: phoneBar ? `${DOCK_LEFT_REM}rem` : BESIDE_DOCK_LEFT,
+        height: size,
+        width: expanded ? (isMobile ? "calc(100vw - 1rem)" : "17rem") : size,
         overflow: "visible",
         transition: "width 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
         cursor: expanded ? "default" : "pointer",
         display: "flex",
         alignItems: "center",
         zIndex: 9999,
-        borderRadius: hasSuggestions ? "0 0 12px 12px" : "12px",
+        borderRadius: hasSuggestions ? "0 0 10px 10px" : "10px",
         backgroundColor: "var(--oh-hud-bg)",
         backdropFilter: "var(--oh-hud-blur)",
         border: "1px solid var(--oh-hud-border)",
@@ -304,7 +313,7 @@ const Search = memo(({ mapRef }) => {
           display: "flex",
           alignItems: "center",
           width: "100%",
-          height: "3rem",
+          height: size,
           overflow: "hidden",
         }}
       >
@@ -314,8 +323,8 @@ const Search = memo(({ mapRef }) => {
             background: "none",
             border: "none",
             cursor: "pointer",
-            width: "3rem",
-            height: "3rem",
+            width: size,
+            height: size,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -327,7 +336,7 @@ const Search = memo(({ mapRef }) => {
           title={expanded ? "Close" : "Search place"}
         >
           {status === "loading" ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
               <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round">
                 <animateTransform
@@ -341,12 +350,12 @@ const Search = memo(({ mapRef }) => {
               </path>
             </svg>
           ) : expanded ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <circle cx="11" cy="11" r="7" />
               <line x1="16.5" y1="16.5" x2="22" y2="22" />
             </svg>
@@ -384,7 +393,7 @@ const Search = memo(({ mapRef }) => {
               border: "none",
               cursor: "pointer",
               padding: "0 0.6rem",
-              height: "3rem",
+              height: size,
               color: query.trim() ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.2)",
               display: "flex",
               alignItems: "center",
@@ -405,12 +414,12 @@ const Search = memo(({ mapRef }) => {
         <div
           style={{
             position: "absolute",
-            bottom: "calc(3rem - 1px)",
+            bottom: `calc(${size} - 1px)`,
             left: "-1px",
             right: "-1px",
             backgroundColor: "var(--oh-hud-bg-strong)",
             backdropFilter: "var(--oh-hud-blur)",
-            borderRadius: "12px 12px 0 0",
+            borderRadius: "10px 10px 0 0",
             border: "1px solid var(--oh-hud-border)",
             borderBottom: "none",
             boxShadow: "0 -6px 16px rgba(0,0,0,0.3)",
