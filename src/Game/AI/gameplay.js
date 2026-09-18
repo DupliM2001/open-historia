@@ -5365,7 +5365,9 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         const chatError = validateChatOpener(createdChat, `${path}.createdChats[${index}]`);
         if (chatError) return chatError;
       }
-      keptChats.push(createdChat);
+      // The model names its participants; what is kept on the event is the
+      // resolved {code, name} list every reader of a stored chat expects.
+      keptChats.push({ ...createdChat, countries });
     }
     if (impacts && Array.isArray(impacts.createdChats)) impacts.createdChats = keptChats;
 
@@ -5500,7 +5502,7 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         const chatError = validateChatOpener(candidate.diplomaticOutreach[index], `$.diplomaticOutreach[${index}]`);
         if (chatError) return chatError;
       }
-      keptOutreach.push(candidate.diplomaticOutreach[index]);
+      keptOutreach.push({ ...candidate.diplomaticOutreach[index], countries });
     }
     candidate.diplomaticOutreach = keptOutreach;
   }

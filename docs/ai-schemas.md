@@ -187,24 +187,21 @@ Required: `op` and `name`. `eventIndex` says which of the events this op follows
 
 The **game master keeps the full `impactsSchema`**, board included: it is a single call with no second pass to hand the work to.
 
-Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It has grown again since with what beta added to the jump (30,441 at this commit); the figures are there for the reduction each change bought, not for the absolute number, which every new branch moves.
+Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It grew again with what beta added to the jump (31,720 once `at` joined), and the **description audit** brought it to **24,915**: every field description says what the field *is* in a line, because the levers are explained at length in the actions reference and the call-time directives the jump is always given — a paragraph in a field description was the same paragraph a third time. The guard in `projectOpSchema.test.js` is now 26,000. It is a prompt-size guard, not a provider limit: a new impact family that saves a *request* (reports, a chat continuation — see the tooling audit in the plan) may raise it, on purpose.
 
-### 4.6 `createdChatSchema` (`:57`)
+### 4.6 `createdChatSchema`
 
 The initiating polity always speaks first — a blank untitled chat tells the player nothing.
 
 | Field | Type | Meaning | Req? |
 |---|---|---|---|
-| `id` | string | Stable chat id | no |
 | `title` | string (nonempty) | Purpose (e.g. "French mediation offer") | **yes** |
-| `countries` | array (`minItems: 1`) of `chatCountrySchema` | Participants | **yes** |
-| `messages` | `chatMessageSchema[]` | Messages the chat begins with | no |
+| `countries` | array (`minItems: 1`) of polity **names** | The other side; never the player | **yes** |
 | `openingMessage` | string (nonempty) | Initiator's first message, in leader's voice; never the player | **yes** |
 | `speaker` | string (nonempty) | Name of the polity sending the opener; never the player | **yes** |
 | `linkedEventId` | string | Optional cause link | no |
-| `source`, `status` | string | Optional labels | no |
 
-`chatCountrySchema` (`:32`): `code`, `name`* (nonempty). `chatMessageSchema` (`:43`): `code`, `role`, `speaker`, `text`* (nonempty? — only `text` required), `time`.
+`countries` are plain names — what the actions reference has always shown (`{"countries":["..."]}`) and what `resolveInvitees` (gameplay.js) has always read. The schema used to demand `{code, name}` objects, so a model that followed the prose failed the schema; `normalizeChatShape` (gameplaySchemas.js) still folds an object to its name for a campaign whose frozen prompt shows the old shape, on the jump, the idle pulse and the GM transport alike. At validation the resolved `{code, name}` list replaces the names on the kept event, so everything that reads a *stored* chat's participants sees the shape it always did. The message list, `source` and `status` the schema once carried were never taught and are the engine's to fill (`buildGeneratedChat`).
 
 ### 4.7 Jump payload — `JUMP_FORWARD_SCHEMA` (`:399`)
 

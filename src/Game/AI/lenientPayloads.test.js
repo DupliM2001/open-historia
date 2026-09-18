@@ -132,10 +132,36 @@ test("idle diplomacy: silence written as a sentence reads as silence", () => {
 });
 
 test("idle diplomacy: a real note is untouched, and its unit ops get the same leniency", () => {
-  const note = { speaker: "Japan", title: "A word", openingMessage: "Hello.", countries: [{ name: "Japan" }] };
+  const note = { speaker: "Japan", title: "A word", openingMessage: "Hello.", countries: ["Japan"] };
   const normalized = normalizeGameplayPayload("idleDiplomacy", pulse({ chat: note, unitOps: [spawnedCarrier({ status: "exercise" })] }));
   assert.deepEqual(normalized.chat, note);
+  assert.equal(validateGameplayPayload("idleDiplomacy", normalized).valid, true);
   assert.equal(normalized.unitOps[0].unit.posture, "exercise");
+});
+
+// A chat's participants are names, as the actions reference has always shown
+// them. The schema once demanded {code, name} objects — so a model that followed
+// the prose failed the schema — and a campaign whose frozen prompt still shows
+// that shape must go on working: an object reads as its name.
+test("a chat's countries are names; {name} and {code} objects from older prompts read as names", () => {
+  const chat = (countries) => ({ title: "Mediation", speaker: "France", openingMessage: "We propose talks.", countries });
+  const named = jumpWith([]);
+  named.events[0].impacts.createdChats = [chat(["France", "Germany"])];
+  named.diplomaticOutreach = [chat(["Italy"])];
+  assert.equal(validateGameplayPayload("jumpForward", normalizeGameplayPayload("jumpForward", named)).valid, true);
+
+  const objects = jumpWith([]);
+  objects.events[0].impacts.createdChats = [chat([{ name: "France" }, { code: "Germany" }, { name: "" }])];
+  objects.diplomaticOutreach = [chat([{ code: "ITA", name: "Italy" }])];
+  assert.equal(validateGameplayPayload("jumpForward", objects).valid, false, "the raw shape is the one the schema refuses");
+  const normalized = normalizeGameplayPayload("jumpForward", objects);
+  assert.deepEqual(normalized.events[0].impacts.createdChats[0].countries, ["France", "Germany"]);
+  assert.deepEqual(normalized.diplomaticOutreach[0].countries, ["Italy"]);
+  assert.equal(validateGameplayPayload("jumpForward", normalized).valid, true);
+
+  const pulseNote = normalizeGameplayPayload("idleDiplomacy", pulse({ chat: chat([{ name: "Japan" }]) }));
+  assert.deepEqual(pulseNote.chat.countries, ["Japan"]);
+  assert.equal(validateGameplayPayload("idleDiplomacy", pulseNote).valid, true);
 });
 
 test("countryStatSheet: a missing, null or zero statsSchemaVersion is filled before validation", () => {

@@ -526,7 +526,7 @@ export const deriveEventFocusBounds = (event, context) => {
     ]),
     () => (impacts.createdChats ?? []).flatMap((chat) =>
       (chat?.countries ?? []).map((country) =>
-        resolvePolityBounds(country?.code || country?.name, context))),
+        resolvePolityBounds(typeof country === "string" ? country : country?.code || country?.name, context))),
   ];
 
   for (const tier of tiers) {
