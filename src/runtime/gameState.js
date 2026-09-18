@@ -13,6 +13,7 @@ import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
 import { normalizeGmChanges, normalizeReminders } from "./gmChanges.js";
 import { normalizePlayerGoals } from "./playerGoal.js";
+import { normalizeInteractiveOffer } from "./interactiveOffer.js";
 import { normalizeSpyOp } from "./spycraft.js";
 import { normalizeChatEvents, projectChatThread, withUnloggedMessages } from "./chatThreads.js";
 import { latestTurnEventIds, unseenEvents, withoutUnseenChats, withoutUnseenEvents, withoutUnseenReports } from "./unseenEvents.js";
@@ -39,7 +40,14 @@ export const GAME_DEFAULTS = {
 
 export const WORLD_DEFAULTS = {
   actionSuggestions: [],
-  activeCatalyst: null,
+  // The interactive event being played, a scene of beats (AI/interactiveRewind.js).
+  activeInteractive: null,
+  // The event the last time skip offered to be played out as an interactive
+  // event, { eventId, round }, until it is taken up, let pass or replaced by the
+  // next skip's; and the round of the last offer made, which keeps offers rare
+  // (interactiveOffer.js).
+  interactiveOffer: null,
+  lastInteractiveOfferRound: 0,
   consolidatedHistory: [],
   // The living history document the AI is shown in place of the folded events
   // (AI/historyConsolidation.js); null until the first consolidation pass.
@@ -426,7 +434,7 @@ export const normalizeActions = (actions) =>
     .map((entry, index) => normalizeActionEntry(entry, index))
     .filter(Boolean);
 
-const normalizeCatalystChoice = (entry, index = 0) => {
+const normalizeInteractiveChoice = (entry, index = 0) => {
   if (typeof entry === "string") {
     const text = normalizeString(entry);
     if (!text) {
@@ -434,7 +442,7 @@ const normalizeCatalystChoice = (entry, index = 0) => {
     }
 
     return {
-      id: generateId(`catalyst-choice-${index}`),
+      id: generateId(`interactive-choice-${index}`),
       result: "",
       text,
     };
@@ -451,13 +459,13 @@ const normalizeCatalystChoice = (entry, index = 0) => {
 
   return {
     ...cloneValue(entry),
-    id: normalizeOptionalString(entry.id) || generateId(`catalyst-choice-${index}`),
+    id: normalizeOptionalString(entry.id) || generateId(`interactive-choice-${index}`),
     result: normalizeTextLike(entry.result || entry.summary || entry.outcome || entry.effect || entry.description),
     text,
   };
 };
 
-const normalizeCatalystHistoryEntry = (entry, index = 0) => {
+const normalizeInteractiveHistoryEntry = (entry, index = 0) => {
   if (typeof entry === "string") {
     const summary = normalizeString(entry);
     if (!summary) {
@@ -488,7 +496,7 @@ const normalizeCatalystHistoryEntry = (entry, index = 0) => {
   };
 };
 
-const normalizeCatalyst = (value) => {
+const normalizeInteractive = (value) => {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -497,10 +505,10 @@ const normalizeCatalyst = (value) => {
   const premise = normalizeTextLike(value.premise || value.summary || value.description);
   const opening = normalizeTextLike(value.opening || value.text || premise);
   const choices = normalizeArray(value.choices)
-    .map((entry, index) => normalizeCatalystChoice(entry, index))
+    .map((entry, index) => normalizeInteractiveChoice(entry, index))
     .filter(Boolean);
   const history = normalizeArray(value.history)
-    .map((entry, index) => normalizeCatalystHistoryEntry(entry, index))
+    .map((entry, index) => normalizeInteractiveHistoryEntry(entry, index))
     .filter(Boolean);
 
   if (!title && !premise && !opening && choices.length === 0 && history.length === 0) {
@@ -2842,6 +2850,13 @@ const normalizeEventImpacts = (value) => {
   };
 };
 
+// An event's kind and a turn record's mode. A played-out scene was "catalyst"
+// in both until interactive events were renamed (18 September 2026).
+const normalizeRenamedKind = (value) => {
+  const text = normalizeOptionalString(value);
+  return text === "catalyst" ? "interactive" : text;
+};
+
 export const normalizeEventEntry = (entry, index = 0) => {
   if (typeof entry === "string") {
     const title = normalizeString(entry);
@@ -2885,7 +2900,7 @@ export const normalizeEventEntry = (entry, index = 0) => {
     id: normalizeOptionalString(entry.id) || generateId(`event-${index}`),
     impacts: normalizeEventImpacts(entry.impacts),
     importance: normalizeOptionalString(entry.importance) || "minor",
-    kind: normalizeOptionalString(entry.kind) || "world",
+    kind: normalizeRenamedKind(entry.kind) || "world",
     // Category tags for the timeline's filter chips (runtime/eventTags.js).
     tags: normalizeEventTags(entry.tags),
     notable: Boolean(entry.notable),
@@ -3292,8 +3307,17 @@ const normalizeWorldAgreements = (value, identityWorld) => {
     .slice(0, MAX_WORLD_AGREEMENTS);
 };
 
+// Interactive events were called catalysts until 18 September 2026. A save
+// from before keeps its scene under the old key; it is read from there and
+// never written back under it.
+const withFormerSceneKeyMoved = (world) => {
+  if (!("activeCatalyst" in world)) return world;
+  const { activeCatalyst: formerScene, ...rest } = world;
+  return { ...rest, activeInteractive: rest.activeInteractive ?? formerScene };
+};
+
 export const normalizeWorldState = (world) => {
-  const nextWorld = world && typeof world === "object" ? world : {};
+  const nextWorld = withFormerSceneKeyMoved(world && typeof world === "object" ? world : {});
   const polityOverrides = Object.fromEntries(
     Object.entries(nextWorld.polityOverrides ?? {})
       .map(([key, value]) => [key, normalizePolityOverride(key, value)])
@@ -3407,7 +3431,11 @@ export const normalizeWorldState = (world) => {
     countryTags,
     countryStats,
     actionSuggestions: normalizeActionSuggestions(nextWorld.actionSuggestions),
-    activeCatalyst: normalizeCatalyst(nextWorld.activeCatalyst),
+    activeInteractive: normalizeInteractive(nextWorld.activeInteractive),
+    interactiveOffer: normalizeInteractiveOffer(nextWorld.interactiveOffer),
+    lastInteractiveOfferRound: Number.isFinite(Number(nextWorld.lastInteractiveOfferRound))
+      ? Math.max(0, Math.trunc(Number(nextWorld.lastInteractiveOfferRound)))
+      : 0,
     consolidatedHistory: normalizeConsolidatedHistory(nextWorld.consolidatedHistory),
     historyDocument: normalizeHistoryDocument(nextWorld.historyDocument),
     internationalReputation,
@@ -3446,22 +3474,23 @@ export const normalizeWorldState = (world) => {
         // Only the newest receipt keeps its notes — they are read once, by the next
         // jump — so this polled file never carries more than one receipt's text.
         // "Newest receipt", not "newest entry": a Game Master intervention or a
-        // resolved catalyst is recorded here too and carries none, and it must not
+        // resolved interactive event is recorded here too and carries none, and it must not
         // cost the simulator what it was about to be told.
         const newestReceiptIndex = entries.findIndex((candidate) => candidate && typeof candidate === "object" && candidate.receipt);
         const receipt = normalizeApplicationReceipt(entry.receipt, { keepNotes: index === newestReceiptIndex });
-        // Taken out of the spread so a malformed receipt is dropped, not kept raw.
-        const { receipt: _storedReceipt, ...rest } = cloneValue(entry);
+        // Taken out of the spread so a malformed receipt is dropped, not kept raw;
+        // and the scene a time skip used to propose (under either name), which
+        // nothing reads since skips stopped proposing them.
+        const { receipt: _storedReceipt, interactive: _scene, catalyst: _formerScene, ...rest } = cloneValue(entry);
 
         return {
           ...rest,
           ...(receipt ? { receipt } : {}),
-          catalyst: normalizeCatalyst(entry.catalyst),
           date: normalizeOptionalString(entry.date),
           eventIds: normalizeActionParticipants(entry.eventIds),
           fallbackReason: normalizeOptionalString(entry.fallbackReason),
           fromDate: normalizeOptionalString(entry.fromDate || entry.startDate),
-          mode: normalizeOptionalString(entry.mode),
+          mode: normalizeRenamedKind(entry.mode),
           plannedActions: normalizeActions(entry.plannedActions || entry.actions),
           // The raw model response a fallback turn failed to parse — empty on a
           // normal AI turn. See gameplay.js's runJsonTask/applySimulationResult.
