@@ -100,6 +100,11 @@ export const WORLD_DEFAULTS = {
   // (impacts.reports); read by an audience through visibleTo. Listed in the
   // normalizeWorldState return too, for the reason given elsewhere here.
   reports: [],
+  // How far each polity has been shown of each OTHER thread it is party to
+  // (AI/crossChatKnowledge.js): "<threadId>|<polity>" -> the last message id it
+  // was shown. Keeps a leader from being handed the same exchange twice, and a
+  // long campaign from growing the chat prompt without bound.
+  chatKnowledgeCursors: {},
   // Real-time grace-period queue for optional Event Editor -> NPC diplomatic
   // reactions. Pending evaluations only, never chats: the conversation itself
   // is created later through the normal chat merge seam.
@@ -3413,6 +3418,16 @@ export const normalizeWorldState = (world) => {
       .filter(Boolean),
     markers: normalizeMarkers(nextWorld.markers),
     reports: normalizeReports(nextWorld.reports),
+    chatKnowledgeCursors: (() => {
+      const source = nextWorld.chatKnowledgeCursors;
+      if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+      const cursors = {};
+      for (const [key, value] of Object.entries(source)) {
+        const id = normalizeOptionalString(value);
+        if (normalizeOptionalString(key) && id) cursors[key] = id;
+      }
+      return cursors;
+    })(),
     pendingEventOutreach: normalizePendingEventOutreach(nextWorld.pendingEventOutreach),
     // Explicit (not via the ...WORLD_DEFAULTS spread) so these new fields survive every
     // write path — the documented new-world-field trap.

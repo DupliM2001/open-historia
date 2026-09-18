@@ -3,7 +3,8 @@ import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { dedupeByName } from "../../runtime/countryList.js";
 import ReactDOM from "react-dom";
 import { sendDiplomaticMessage, startDiplomaticChat, loadDiplomaticHistory } from "../AI/main.jsx";
-import { chooseNextDiplomaticSpeaker, ensureCountryAssessed, processPendingEventOutreach } from "../AI/gameplayLazy.js";
+import { chooseNextDiplomaticSpeaker, ensureCountryAssessed, processPendingEventOutreach, runChatActionBatch } from "../AI/gameplayLazy.js";
+import { projectChatThread } from "../../runtime/chatThreads.js";
 import { isChatGenerationLikely } from "../AI/simulationStatus.js";
 import {
     MAX_ACTIVE_SPIES, activeSpies, deploySpy, expelSpy, foreignSpies, intelligenceOf, normalizeIntercepts, normalizeSpies,
@@ -46,6 +47,16 @@ const saveAllChats = async (chats) => {
     try {
         await writeChatsState(chats);
     } catch (err) { console.error("Failed to save chats:", err); }
+};
+
+// How far each leader has been shown of its other threads
+// (AI/crossChatKnowledge.js). Written straight to world state, merged rather
+// than replaced: a turn in one chat must not forget what another chat showed.
+const saveChatKnowledgeCursors = async (cursors) => {
+    try {
+        const world = await readWorldState({ force: true });
+        await writeWorldState({ ...world, chatKnowledgeCursors: { ...(world?.chatKnowledgeCursors ?? {}), ...cursors } });
+    } catch (err) { console.error("Failed to save what each leader has been shown:", err); }
 };
 
 const loadAllChats = async ({ force = false } = {}) => {
@@ -612,7 +623,7 @@ const CountrySelectorModal = ({
 // 12rem at the default 16px root, matching the composer's max-height below.
 const COMPOSER_MAX_HEIGHT = 192;
 
-const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onMessagesUpdate, unread = false, onToggleRead, draft = "", onDraftApplied }) => {
+const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onMessagesUpdate, onThreadUpdate, unread = false, onToggleRead, draft = "", onDraftApplied }) => {
     // Two-step delete, matching the list row. Disarms on blur so a half-pressed
     // delete never sits waiting to catch a later click.
     const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -635,6 +646,10 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
 
     const nextSpeakerIdx    = useRef(0);
     const lastPlayerMessage = useRef("");
+    // What the last batch got wrong, told to the next one (AI/chatActions.js
+    // describeChatActionFeedback). Kept on the view: it is about the exchange,
+    // not the saved thread.
+    const actionFeedbackRef = useRef("");
     const messagesEndRef    = useRef(null);
     const messagesRef       = useRef(chat.messages ?? []);
     const composerRef       = useRef(null);
@@ -821,6 +836,48 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             setPhase("pending");
         };
 
+        // A GROUP turn in one request (AI/chatActions.js): every AI participant
+        // acts in a single answer — who speaks, who only reacts, who brings
+        // someone in, who calls a vote — instead of one request to pick the
+        // speaker and one per leader after it. A failure falls back to the
+        // rotation below, which is the behaviour this replaces.
+        const runGroupTurn = async (text, nextMessages) => {
+            setIsLoading(true);
+            try {
+                const outcome = await runChatActionBatch({
+                    chat: { ...chat, messages: nextMessages, actionFeedback: actionFeedbackRef.current },
+                    playerMessage: text,
+                    playerCountry,
+                });
+                const spoken = (outcome?.newEvents ?? []).filter((event) => event.kind === "message");
+                if (!spoken.length && !(outcome?.newEvents ?? []).length) return false;
+                actionFeedbackRef.current = outcome?.feedback ?? "";
+                const projected = projectChatThread(outcome.events);
+                // The projection carries the reactions, the roster and the polls
+                // this turn changed; the panel renders messages, so hand it those
+                // and let the stored thread keep the rest.
+                pushMessages(projected.messages.map((message) => ({
+                    id: message.id,
+                    role: message.role,
+                    speaker: message.speaker,
+                    code: message.code,
+                    text: message.text,
+                    time: message.time,
+                    reactions: message.reactions,
+                    ...(message.memorySummary ? { memorySummary: message.memorySummary } : {}),
+                })));
+                onThreadUpdate?.(chat.id, { events: outcome.events, countries: projected.countries, title: projected.title, polls: projected.polls, cursors: outcome.cursors });
+                setPhase("player");
+                return true;
+            } catch (error) {
+                logDebugEvent("diplomacy", `The one-request chat turn failed in chat #${chat.id}; falling back to the rotation.`, error, { problem: true });
+                return false;
+            } finally {
+                setIsLoading(false);
+                setSpeakingCountry(null);
+            }
+        };
+
         const handlePlayerSubmit = async () => {
             const text = playerInput.trim();
             if (!text || isLoading) return;
@@ -828,6 +885,10 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             const nextMessages = [...messagesRef.current, { role: "user", speaker: playerCountry, text, time: gameDate }];
             pushMessages(nextMessages);
             setPlayerInput("");
+            // One request for the whole table. Only for a group: a one-on-one
+            // chat is already a single request, and its streaming reply is what
+            // the player watches arrive.
+            if (isGroup && await runGroupTurn(text, nextMessages)) return;
             const queue = await buildResponsiveQueue(nextMessages);
             // Who was asked, and in what order. A group chat sends the same
             // message to each leader in turn, so "France answered as if it had
@@ -1970,6 +2031,22 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
         });
     };
 
+    // What the one-request turn changed beyond the messages: the event log
+    // itself (the truth of the thread), the roster after a join or a departure,
+    // the title, the polls, and each speaker's cross-chat cursors. The cursors
+    // live in world state, so they are written there rather than on the chat.
+    const handleThreadUpdate = (chatId, { events, countries, title, polls, cursors }) => {
+        setChats((prev) => {
+            const updated = prev.map((c) => (c.id === chatId
+                ? { ...c, events, countries: countries ?? c.countries, title: title || c.title, polls: polls ?? c.polls }
+                : c));
+            saveAllChats(updated);
+            setActiveChat((ac) => (ac?.id === chatId ? updated.find((c) => c.id === chatId) ?? ac : ac));
+            return updated;
+        });
+        if (cursors && Object.keys(cursors).length) void saveChatKnowledgeCursors(cursors);
+    };
+
     const handleStartChat = (selected) => {
         const newChat = { id: Date.now(), countries: selected, messages: [], status: "open" };
         setChats(prev => { const u = [newChat, ...prev]; saveAllChats(u); return u; });
@@ -2068,7 +2145,7 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
             <Presence open={showSelector}><CountrySelectorModal countries={availableCountries} loading={loadingCountries} onStart={handleStartChat} onCancel={() => setShowSelector(false)} /></Presence>
 
             {activeChat && Array.isArray(activeChat.countries) && activeChat.countries.length > 0 ? (
-                <ConversationView chat={activeChat} playerCountry={playerCountry} gameDate={gameDate} onDelete={() => handleDeleteChat(activeChat.id)} onBack={() => setActiveChat(null)} onMessagesUpdate={handleMessagesUpdate}
+                <ConversationView chat={activeChat} playerCountry={playerCountry} gameDate={gameDate} onDelete={() => handleDeleteChat(activeChat.id)} onBack={() => setActiveChat(null)} onMessagesUpdate={handleMessagesUpdate} onThreadUpdate={handleThreadUpdate}
                 unread={unreadIds.has(String(activeChat.id))} onToggleRead={() => toggleActiveChatRead(activeChat)}
                 draft={composerDraft?.chatId === activeChat.id ? composerDraft.text : ""}
                 onDraftApplied={() => setComposerDraft(null)} />
