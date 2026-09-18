@@ -354,3 +354,59 @@ test("a Spent entry on another provider gets one try an hour later", async () =>
     await runWithFallback({ entries, store, now: () => 60 * 60 * 1000, attempt: anHourOn.attempt });
     assert.deepEqual(anHourOn.tried, ["a"], "the top entry is tried again, and answers");
 });
+
+// --- the context preflight (contextWindow.js) ---
+
+test("an entry the request cannot fit is passed over without a request, and is not marked", async () => {
+    const store = createMemoryStateStore();
+    const entries = [entry("small", "openai"), entry("big")];
+    const { attempt, tried } = scripted({});
+    const marks = [];
+    const outcome = await runWithFallback({
+        entries, store, now: () => 0, attempt,
+        canAttempt: (candidate) => (candidate.id === "small" ? "this request is about 47K tokens and the model's window is 33K" : ""),
+        onMark: (mark) => marks.push(mark),
+    });
+    assert.equal(outcome.entry.id, "big");
+    assert.deepEqual(tried, ["big"], "nothing was sent to the small model");
+    assert.equal(entryStatus(store.get("small"), 1).status, "ready", "the entry is fine; the request was the problem");
+    assert.equal(marks.length, 1);
+    assert.equal(marks[0].failure.kind, "tooBig");
+    assert.equal(marks[0].state, null);
+});
+
+test("when no entry can fit the request, the call fails before anything is sent", async () => {
+    const { attempt, tried } = scripted({});
+    const switches = [];
+    await assert.rejects(
+        runWithFallback({
+            entries: [entry("a", "openai"), entry("b", "openai")],
+            store: createMemoryStateStore(), now: () => 0, attempt,
+            canAttempt: () => "too big",
+            tooBigError: (refused) => new Error(`nothing fits: ${refused.map((r) => r.entry.id).join(",")}`),
+            onSwitch: (detail) => switches.push(detail),
+        }),
+        /nothing fits: a,b/,
+    );
+    assert.deepEqual(tried, [], "not one request was spent");
+    assert.equal(switches.length, 1);
+    assert.equal(switches[0].to, null);
+});
+
+test("a model that refuses the request as too big is passed over for the next entry, with the entry left unmarked", async () => {
+    const store = createMemoryStateStore();
+    const entries = [entry("small", "openai"), entry("big")];
+    const { attempt, tried } = scripted({ small: fail("tooBig", { reason: "maximum context length is 32768 tokens" }) });
+    const outcome = await runWithFallback({ entries, store, now: () => 0, attempt });
+    assert.equal(outcome.entry.id, "big");
+    assert.deepEqual(tried, ["small", "big"]);
+    assert.equal(entryStatus(store.get("small"), 1).status, "ready");
+});
+
+test("a request every model refused as too big fails with the last model's own words", async () => {
+    const { attempt } = scripted({ a: fail("tooBig", { reason: "too big for a" }), b: fail("tooBig", { reason: "too big for b" }) });
+    await assert.rejects(
+        runWithFallback({ entries: [entry("a", "openai"), entry("b", "openai")], store: createMemoryStateStore(), now: () => 0, attempt }),
+        /tooBig failure/,
+    );
+});

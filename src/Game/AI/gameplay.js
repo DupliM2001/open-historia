@@ -2476,6 +2476,9 @@ const runJsonTask = async (taskKey, {
   // and the salvage pass below the loop.
   let firstFailureReason = "";
   let salvageCandidate = null;
+  // The call found no model whose context window takes this request
+  // (contextWindow.js): kept so a time skip can refuse rather than go canned.
+  let tooBigForEveryModel = null;
   // While requests are being saved (requestBudget.js) the FIRST answer is judged
   // the way the last one always was: the task validator repairs it in place
   // instead of sending it back, and a fault the schema names is cut out
@@ -2905,6 +2908,7 @@ const runJsonTask = async (taskKey, {
     }
   } catch (error) {
     const actualError = controller.signal.aborted ? controller.signal.reason : error;
+    if (actualError?.providerFailure?.kind === "tooBig") tooBigForEveryModel = actualError;
     const transportReason = normalizeString(actualError?.message || actualError);
     // The retry dying in transport used to ERASE why the first answer was
     // rejected, so the debug report the player copies out read "Internal server
@@ -2931,6 +2935,15 @@ const runJsonTask = async (taskKey, {
     throw signal.reason instanceof Error
       ? signal.reason
       : new DOMException("Timeline jump cancelled.", "AbortError");
+  }
+
+  // The request does not fit any model the player has (contextWindow.js). A
+  // canned turn would hide that behind fallback events skip after skip, and
+  // write them into the game's history; the time skip refuses instead, and the
+  // message says which model to pick. Every other task keeps its harmless
+  // "unavailable" fallback.
+  if (tooBigForEveryModel && ["jumpForward", "autoJumpForward"].includes(taskKey)) {
+    throw tooBigForEveryModel;
   }
 
   // Last chance before the canned fallback. An earlier answer that cleared the
@@ -10543,6 +10556,14 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
     // A deliberate cancel must still cancel.
     if (signal?.aborted || error?.name === "AbortError") throw error;
     const reason = normalizeString(error?.message) || `AI task "jumpForward" failed.`;
+
+    // The request fits no model the player has (contextWindow.js): canned events
+    // would hide that, skip after skip. The turn refuses instead, with the
+    // message that says which model to pick. Nothing was written.
+    if (error?.providerFailure?.kind === "tooBig" && segmentCount <= 1) {
+      logDebugEvent("warn", "[turn] The jump was refused: the request fits no model in the Fallback list. Nothing was written.", { reason });
+      throw error;
+    }
 
     // A single call reaching here has already exhausted its own fallback, so there
     // is no other segment to keep and nothing to retry piecemeal: it falls back

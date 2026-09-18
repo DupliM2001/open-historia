@@ -133,17 +133,18 @@ export const isQuotaExhaustedPayload = (error) => {
 // The Fallback list (fallbackRunner.js) moves a call down to the next entry
 // only for failures that say something about the ENTRY: its allowance is Spent,
 // it is Unusable (a bad key, a model the provider does not know), or it is
-// Rate limited or busy for the moment. Everything else is "other" and is never
-// a reason to change model: a context-window error or a malformed answer would
-// fail the same way on the next entry, and a bad answer is the task runner's
+// Rate limited or busy for the moment — and for one that says something about
+// the REQUEST: it is too big for this model's context window ("tooBig"), which
+// the next entry's larger window may take. Everything else is "other" and is
+// never a reason to change model: a malformed answer is the task runner's
 // business, not the list's.
 export const classifyProviderFailure = ({ status, payload } = {}) => {
     const code = Number(status) || 0;
     const error = payload?.error ?? payload;
     const text = errorPayloadText(error) || String(payload?.rawText ?? "");
-    // First, because nothing about it is the entry's fault: the same prompt is
-    // too big for the next model too, or needs a bigger one the player picks.
-    if (isContextWindowErrorPayload(error)) return { kind: "other", reason: text };
+    // First: it is not the entry's fault, and the next entry may fit it. The
+    // wording is kept — contextWindow.js reads the numbers out of it.
+    if (isContextWindowErrorPayload(error)) return { kind: "tooBig", reason: text };
     if (isQuotaExhaustedPayload(payload)) return { kind: "spent", reason: "used today's allowance" };
     if (code === 429) return { kind: "rateLimited", reason: "rate limited", waitMs: retryDelayMsFromPayload(payload) };
     if (code === 401 || code === 403 || BAD_KEY_TEXT.test(text)) return { kind: "unusable", reason: `key rejected (${code || "no status"})` };
