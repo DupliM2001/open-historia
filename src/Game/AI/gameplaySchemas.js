@@ -163,6 +163,7 @@ const statsUpdateSchema = {
     stability: statPct("National stability 0-100."),
     indices: {
       type: "object",
+      description: "Strategic indices for the standard Stats sheet. Custom full-sheet scenarios use customStats instead.",
       properties: {
         sovereignty: statPct("Practical political sovereignty."),
         foodAutonomy: statPct("Domestic food autonomy."),
@@ -171,7 +172,14 @@ const statsUpdateSchema = {
         internalSecurity: statPct("Internal security."),
         internationalReputation: statPct("International reputation / standing."),
       },
-      additionalProperties: false,
+      maxProperties: 12,
+      additionalProperties: statPct("A scenario-defined strategic index, 0-100."),
+    },
+    customStats: {
+      type: "object",
+      description: "Scenario-defined full-sheet numeric Stats updates. The live tool declaration supplies the exact allowed keys and ranges.",
+      maxProperties: 60,
+      additionalProperties: { type: "number" },
     },
     economy: {
       type: "object",
@@ -1621,6 +1629,12 @@ const gmCountryStatPatchSchema = {
           },
           additionalProperties: false,
         },
+        customStats: {
+          type: "object",
+          description: "Scenario-defined full-sheet numeric Stats corrections. Live tool declaration supplies the exact allowed keys and ranges.",
+          maxProperties: 60,
+          additionalProperties: { type: "number" },
+        },
         economy: {
           type: "object",
           properties: {
@@ -2143,6 +2157,7 @@ export const COUNTRY_STAT_GENERATION_SCHEMA = {
     stability: percentageSchema("National stability from 0 to 100."),
     indices: {
       type: "object",
+      description: "Complete strategic index sheet. A scenario may replace the stock keys with its own live Stats definition; values remain integers from 0 to 100.",
       properties: {
         sovereignty: percentageSchema("Practical political sovereignty."),
         foodAutonomy: percentageSchema("Domestic food autonomy."),
@@ -2151,8 +2166,9 @@ export const COUNTRY_STAT_GENERATION_SCHEMA = {
         internalSecurity: percentageSchema("Internal security."),
         internationalReputation: percentageSchema("International reputation / standing (0-100)."),
       },
-      required: ["sovereignty", "foodAutonomy", "energyAutonomy", "economicIndependence", "internalSecurity", "internationalReputation"],
-      additionalProperties: false,
+      minProperties: 1,
+      maxProperties: 12,
+      additionalProperties: percentageSchema("A scenario-defined strategic index value (0-100)."),
     },
     populationCalibration: {
       type: "object",
@@ -2346,6 +2362,7 @@ export const COUNTRY_STAT_SHEET_SCHEMA = {
     stability: percentageSchema("National stability from 0 to 100."),
     indices: {
       type: "object",
+      description: "Persistent strategic indices. Scenario-defined keys are validated against the live Stats definition before this sheet is accepted.",
       properties: {
         sovereignty: percentageSchema("Practical political sovereignty."),
         foodAutonomy: percentageSchema("Domestic food autonomy."),
@@ -2354,8 +2371,9 @@ export const COUNTRY_STAT_SHEET_SCHEMA = {
         internalSecurity: percentageSchema("Internal security."),
         internationalReputation: percentageSchema("International reputation / standing (0-100)."),
       },
-      required: ["sovereignty", "foodAutonomy", "energyAutonomy", "economicIndependence", "internalSecurity", "internationalReputation"],
-      additionalProperties: false,
+      minProperties: 1,
+      maxProperties: 12,
+      additionalProperties: percentageSchema("A scenario-defined strategic index value (0-100)."),
     },
     territorialScope: {
       type: "string",
@@ -2686,6 +2704,176 @@ export const GAMEPLAY_TOOLS = Object.freeze({
 
 export const getGameplayTool = (taskKey) => GAMEPLAY_TOOLS[taskKey] ?? null;
 
+const STOCK_STAT_INDEX_KEYS = new Set([
+  "sovereignty",
+  "foodAutonomy",
+  "energyAutonomy",
+  "economicIndependence",
+  "internalSecurity",
+  "internationalReputation",
+]);
+
+const looksLikeStatIndicesSchema = (schema) => {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema) || schema.type !== "object") return false;
+  const propertyKeys = Object.keys(schema.properties || {});
+  return propertyKeys.some((key) => STOCK_STAT_INDEX_KEYS.has(key)) || /strategic index/i.test(String(schema.description || ""));
+};
+
+// Gemini strips JSON Schema's additionalProperties because its function declaration
+// dialect does not support it. For a custom scenario, therefore, an "open" indices
+// object is not enough: Gemini would only see the stock six. This produces a
+// per-call tool clone whose declared properties are the scenario's exact keys.
+// The static schema remains open for provider-agnostic validation; this helper is
+// transport guidance, not a second source of truth.
+export const getGameplayToolForStatIndices = (taskKey, rows, { custom = false } = {}) => {
+  const tool = getGameplayTool(taskKey);
+  if (!tool || !custom || !Array.isArray(rows) || !rows.length) return tool;
+
+  const statProperties = Object.fromEntries(rows.map((row) => [String(row?.key || "").trim(), {
+    type: "integer",
+    minimum: 0,
+    maximum: 100,
+    description: String(row?.description || row?.label || "Scenario-defined strategic index").trim(),
+  }]).filter(([key]) => key));
+  const statKeys = Object.keys(statProperties);
+  if (!statKeys.length) return tool;
+  const complete = taskKey === "countryStatSheet";
+
+  const rewrite = (value, parentKey = "") => {
+    if (Array.isArray(value)) return value.map((entry) => rewrite(entry));
+    if (!value || typeof value !== "object") return value;
+
+    if (parentKey === "indices" && looksLikeStatIndicesSchema(value)) {
+      return {
+        ...value,
+        properties: statProperties,
+        ...(complete ? { required: statKeys } : { required: undefined }),
+        additionalProperties: false,
+        minProperties: complete ? statKeys.length : value.minProperties,
+        maxProperties: statKeys.length,
+      };
+    }
+
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, rewrite(entry, key)]));
+  };
+
+  const schema = rewrite(tool.schema);
+  return { ...tool, schema };
+};
+
+const statSchemaForDefinition = (row) => {
+  const kind = String(row?.kind || "number").trim().toLowerCase();
+  const schema = {
+    type: kind === "index" && Number(row?.decimals || 0) === 0 ? "integer" : "number",
+    description: String(row?.description || row?.label || "Scenario-defined statistic").trim(),
+  };
+  if (Number.isFinite(Number(row?.minimum))) schema.minimum = Number(row.minimum);
+  if (Number.isFinite(Number(row?.maximum))) schema.maximum = Number(row.maximum);
+  if (kind === "index") {
+    schema.minimum = 0;
+    schema.maximum = 100;
+  }
+  return schema;
+};
+
+const customStatsProperties = (rows) => Object.fromEntries(
+  (Array.isArray(rows) ? rows : [])
+    .map((row) => [String(row?.key || "").trim(), statSchemaForDefinition(row)])
+    .filter(([key]) => key),
+);
+
+const looksLikeStatsUpdateSchema = (schema) => Boolean(
+  schema && typeof schema === "object" && !Array.isArray(schema) && schema.type === "object"
+  && schema.properties && (schema.properties.indices || schema.properties.economy || schema.properties.stability)
+);
+
+// Full custom sheets are intentionally distinct from the standard modern Stats
+// schema. They expose only generic numeric values defined by the scenario, so a
+// medieval/custom setting is not forced to generate GDP, unemployment, debt, or
+// any other modern field merely because those exist in the stock UI.
+export const getGameplayToolForCustomStatSheet = (taskKey, rows, { custom = false } = {}) => {
+  const tool = getGameplayTool(taskKey);
+  if (!tool || !custom || !Array.isArray(rows) || !rows.length) return tool;
+
+  const properties = customStatsProperties(rows);
+  const keys = Object.keys(properties);
+  if (!keys.length) return tool;
+
+  if (taskKey === "countryStatSheet") {
+    return {
+      ...tool,
+      description: "Submit the complete scenario-defined National Stats sheet. These are generic persistent numeric values; the scenario, not the modern economy schema, defines what they mean.",
+      schema: {
+        type: "object",
+        properties: {
+          customStats: {
+            type: "object",
+            description: "Complete scenario-defined Stats values using exactly the supplied machine keys.",
+            properties,
+            required: keys,
+            minProperties: keys.length,
+            maxProperties: keys.length,
+            additionalProperties: false,
+          },
+        },
+        required: ["customStats"],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  const rewrite = (value, parentKey = "") => {
+    if (Array.isArray(value)) return value.map((entry) => rewrite(entry));
+    if (!value || typeof value !== "object") return value;
+
+    if (parentKey === "customStats") {
+      return {
+        ...value,
+        properties,
+        additionalProperties: false,
+        maxProperties: keys.length,
+      };
+    }
+
+    // Ordinary turn/event Stats patches on a custom sheet retain only identity
+    // metadata plus customStats. This keeps hidden modern economy/index fields
+    // out of the model's tool vocabulary instead of generating unused state.
+    if (parentKey === "stats" && looksLikeStatsUpdateSchema(value)) {
+      const keep = {};
+      for (const key of ["capital", "continent", "government", "leader"]) {
+        if (value.properties?.[key]) keep[key] = rewrite(value.properties[key], key);
+      }
+      keep.customStats = {
+        type: "object",
+        description: "Only scenario-defined values that actually changed this period. Values are absolute, not deltas.",
+        properties,
+        additionalProperties: false,
+        maxProperties: keys.length,
+      };
+      return { ...value, properties: keep, additionalProperties: false };
+    }
+
+    if (parentKey === "patch" && looksLikeStatsUpdateSchema(value)) {
+      const keep = {};
+      for (const key of ["capital", "continent", "government", "leader"]) {
+        if (value.properties?.[key]) keep[key] = rewrite(value.properties[key], key);
+      }
+      keep.customStats = {
+        type: "object",
+        description: "Scenario-defined Stats corrections using only exact live keys.",
+        properties,
+        additionalProperties: false,
+        maxProperties: keys.length,
+      };
+      return { ...value, properties: keep, additionalProperties: false };
+    }
+
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, rewrite(entry, key)]));
+  };
+
+  return { ...tool, schema: rewrite(tool.schema) };
+};
+
 const valueType = (value) => {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
@@ -2746,6 +2934,13 @@ const validateAgainstSchema = (schema, value, path) => {
 
   if (schema.type === "object") {
     const properties = schema.properties ?? {};
+    const propertyCount = Object.keys(value).length;
+    if (Number.isFinite(schema.minProperties) && propertyCount < schema.minProperties) {
+      return `${path} must contain at least ${schema.minProperties} propert${schema.minProperties === 1 ? "y" : "ies"}.`;
+    }
+    if (Number.isFinite(schema.maxProperties) && propertyCount > schema.maxProperties) {
+      return `${path} must contain at most ${schema.maxProperties} properties.`;
+    }
 
     for (const key of schema.required ?? []) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) {
@@ -2758,6 +2953,10 @@ const validateAgainstSchema = (schema, value, path) => {
       if (!childSchema) {
         if (schema.additionalProperties === false) {
           return `${propertyPath(path, key)} is not allowed.`;
+        }
+        if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+          const error = validateAgainstSchema(schema.additionalProperties, entry, propertyPath(path, key));
+          if (error) return error;
         }
         continue;
       }

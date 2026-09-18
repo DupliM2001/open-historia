@@ -45,6 +45,7 @@ export const BORDER_CLEANUP = Object.freeze({
 });
 
 const count = (value) => Number(value) || 0;
+const formatCount = (value) => count(value).toLocaleString("en-US");
 
 // A square grid over the map's extent, sized so a cell holds roughly
 // targetRegionsPerChunk regions. Returns null for nothing to chunk.
@@ -103,7 +104,7 @@ export const yieldToBrowser = () =>
     }
   });
 
-const plural = (n, word) => `${count(n).toLocaleString()} ${word}${count(n) === 1 ? "" : word.endsWith("s") ? "es" : "s"}`;
+const plural = (n, word) => `${formatCount(n)} ${word}${count(n) === 1 ? "" : word.endsWith("s") ? "es" : "s"}`;
 
 // The one-line result shown after the save (and inside the loading screen
 // while the scenario is being written).
@@ -144,7 +145,7 @@ export const describeCleanupProgress = (state) => {
       return {
         fraction: 0.25 + 0.5 * share(count(state.regionsChecked), regions),
         headline: `${passLabel}looking for thin slivers where regions overlap`,
-        detail: `${count(state.regionsChecked).toLocaleString()} of ${plural(regions, "region")} checked · ${plural(state.overlapsFound, "sliver")} so far · ${plural(state.gapsFound, "crack")} found`,
+        detail: `${formatCount(state.regionsChecked)} of ${plural(regions, "region")} checked · ${plural(state.overlapsFound, "sliver")} so far · ${plural(state.gapsFound, "crack")} found`,
       };
     case "apply": {
       const total = count(state.repairCount);
@@ -152,7 +153,7 @@ export const describeCleanupProgress = (state) => {
         fraction: 0.75 + 0.2 * share(count(state.repairsDone), total),
         headline: total ? `${passLabel}repairing` : `${passLabel}nothing to repair`,
         detail: total
-          ? `${count(state.repairsDone).toLocaleString()} of ${plural(total, "repair")} this pass · ${plural(state.gapsFilled, "crack")} filled, ${plural(state.overlapsTrimmed, "sliver")} trimmed so far`
+          ? `${formatCount(state.repairsDone)} of ${plural(total, "repair")} this pass · ${plural(state.gapsFilled, "crack")} filled, ${plural(state.overlapsTrimmed, "sliver")} trimmed so far`
           : "",
       };
     }

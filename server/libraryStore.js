@@ -75,6 +75,7 @@ const BUILT_IN_SEED_FILES = [
 const BUILT_IN_RESET_STALE_FILES = [
   "flags.json",
   "tags.json",
+  "stats.json",
   "background.json",
   "regions.coarse.geojson",
   "regions.coarse.geojson.stamp",
@@ -379,6 +380,8 @@ const OPTIONAL_JSON_ASSET_FILES = {
   // 5s poll has no business carrying. These are the starting tags — the AI's own
   // changes accumulate in world.countryTags and are merged over these on read.
   tags: "tags.json",
+  // Scenario-defined National Stats sheet used by the persistent Stats system.
+  stats: "stats.json",
 };
 
 // Roll-back restore points, captured client-side each turn (see the "Roll back
@@ -450,6 +453,7 @@ const JSON_ASSET_DEFAULTS = {
   events: [],
   game: {},
   prompts: {},
+  stats: {},
   world: {},
   snapshots: [],
   snapshotsIndex: { entries: [] },
@@ -872,11 +876,21 @@ const copyGameOptionalAssets = (targetGameId, sourceGameId) => {
 // the scenario with a one-entry partial file.
 const copyScenarioOptionalJsonAssetsToGame = (gameId, scenarioId) => {
   for (const [assetKey] of Object.entries(OPTIONAL_JSON_ASSET_FILES)) {
-    copyJsonFile(
-      getScenarioJsonPath(scenarioId, assetKey),
-      getGameJsonPath(gameId, assetKey),
-      {},
-    );
+    const sourcePath = getScenarioJsonPath(scenarioId, assetKey);
+    const targetPath = getGameJsonPath(gameId, assetKey);
+
+    // stats.json is a scenario-authored DEFINITION, not an ordinary mutable
+    // campaign map like colors/flags/tags. Do not manufacture an empty {} copy
+    // when a scenario does not define one: that empty game file would shadow a
+    // sheet added to the scenario later and make /api/runtime/json/stats look as
+    // though the campaign explicitly chose the standard sheet.
+    if (assetKey === "stats") {
+      if (fs.existsSync(sourcePath)) copyFileIfPresent(sourcePath, targetPath);
+      else removeFileIfPresent(targetPath);
+      continue;
+    }
+
+    copyJsonFile(sourcePath, targetPath, {});
   }
 };
 
@@ -2870,22 +2884,47 @@ const readRuntimeJsonAsset = (assetKey) => {
 
   if (assetKey === "snapshotsIndex" && activeGame?.id) ensureSnapshotIndexFresh(activeGame.id);
 
+  const scenario = getActiveRuntimeScenarioSummary();
+
+  // The Stats SHEET is authored by the scenario. A game's countryStats/customStats
+  // values are campaign state, but the definition that says which rows exist is
+  // not. Early builds copied stats.json into every game and the generic runtime
+  // resolver then preferred that copy over the scenario. The first campaign
+  // snapshot therefore shadowed later scenario edits forever - exactly the
+  // opposite of the Scenario Editor's ownership model.
+  //
+  // While the linked scenario still exists, it is the canonical definition. A
+  // game-level stats.json remains only as a portability/orphan fallback for an
+  // imported campaign whose source scenario is genuinely missing. Missing stats
+  // on an existing scenario intentionally means "use the standard sheet" and
+  // must NOT resurrect a stale game copy.
+  if (assetKey === "stats" && scenario && !scenario.missing) {
+    const canonicalStatsPath = getScenarioJsonPath(scenario.id, "stats");
+    const hasCanonicalStats = fs.existsSync(canonicalStatsPath);
+    return {
+      contentType: "application/json; charset=utf-8",
+      data: hasCanonicalStats ? readJsonFile(canonicalStatsPath, {}) : {},
+      sourcePath: hasCanonicalStats ? canonicalStatsPath : null,
+    };
+  }
+
   // No games yet, runtime data resolves from the scenario below. activeGame is
   // resolved above so the migration hook can see it.
+
   const gamePath =
   activeGame && (Object.hasOwn(JSON_ASSET_FILES, assetKey) || Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey) || Object.hasOwn(RUNTIME_ONLY_JSON_ASSET_FILES, assetKey))
   ? getGameJsonPath(activeGame.id, assetKey)
   : null;
 
   if (gamePath && fs.existsSync(gamePath)) {
+    const gameValue = readJsonFile(gamePath, JSON_ASSET_DEFAULTS[assetKey] ?? {});
     return {
       contentType: "application/json; charset=utf-8",
-      data: normalizeRuntimeWorld(assetKey, readJsonFile(gamePath, JSON_ASSET_DEFAULTS[assetKey] ?? {})),
+      data: normalizeRuntimeWorld(assetKey, gameValue),
       sourcePath: gamePath,
     };
   }
 
-  const scenario = getActiveRuntimeScenarioSummary();
   const scenarioPath =
   Object.hasOwn(JSON_ASSET_FILES, assetKey) || Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey)
   ? getScenarioJsonPath(scenario.id, assetKey)
@@ -3196,6 +3235,7 @@ const exportScenarioBundle = (scenarioId) => {
       // characterisation of every country and the model reads them as context, so a
       // shared map that loses them plays differently than its author intended.
       tags: buildScenarioBundleAsset(scenarioId, "tags"),
+      stats: buildScenarioBundleAsset(scenarioId, "stats"),
       countries: buildScenarioBundleAsset(scenarioId, "countries"),
       regions: buildScenarioBundleAsset(scenarioId, "regions"),
       regionsGeojson: buildScenarioBundleAsset(scenarioId, "regionsGeojson"),
@@ -3422,13 +3462,14 @@ const GAME_BUNDLE_DATA_KEYS = [
   "colors",
   "flags",
   "tags",
+  "stats",
   "intercepts",
 ];
 
 // Keys whose file is legitimately absent on a game that never had one. Writing
 // an empty one on import is harmless but noisy, and `flags: {}` is not the same
 // statement as "this game has no flags file".
-const OPTIONAL_GAME_BUNDLE_KEYS = new Set(["colors", "flags", "tags", "intercepts"]);
+const OPTIONAL_GAME_BUNDLE_KEYS = new Set(["colors", "flags", "tags", "stats", "intercepts"]);
 
 // Scenarios every install already has, so a game played on one never needs to
 // carry a map. CLASSIC_SCENARIO_ID is where campaigns started on the older
@@ -3471,6 +3512,16 @@ const exportGameBundle = (gameId) => {
       getGameJsonPath(gameId, assetKey),
       cloneJson(JSON_ASSET_DEFAULTS[assetKey] ?? {}),
     );
+  }
+
+  // Stats definitions are scenario-authored while the source scenario exists.
+  // Export the canonical current definition, not the game's stale portability
+  // snapshot. If the scenario intentionally uses the standard sheet, omit the
+  // optional asset so an imported orphan also uses the standard sheet.
+  if (!scenario?.missing) {
+    const statsPath = getScenarioJsonPath(game.scenarioId, "stats");
+    if (fs.existsSync(statsPath)) data.stats = readJsonFile(statsPath, {});
+    else delete data.stats;
   }
 
   return {
