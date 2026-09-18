@@ -33,9 +33,9 @@
 // nobody has mentioned in three rounds) is computed here from the game clock by
 // runtime/projects.js, NOT read off what the model last wrote. That is what keeps
 // the board honest between AI turns.
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 
-import { JSON_URLS, getNationFlags, readJson } from "../../runtime/assets.js";
+import { getNationFlags } from "../../runtime/assets.js";
 import { flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import {
   PROJECT_BOARD_LIMIT,
@@ -46,6 +46,8 @@ import {
   writeWorldState,
 } from "../../runtime/gameState.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
+import { refreshRuntimeState } from "../../runtime/runtimeStore.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
 import {
   PROJECT_SORTS,
   collectProjectTags,
@@ -694,19 +696,40 @@ const ProjectCard = memo(({ project, gameDate, round, eventTitles, expanded, bus
 
 // ---- the panel -------------------------------------------------------------
 
+// Store slices, so a world write that touched neither the board nor the polity
+// registry never reaches this panel.
+const selectProjects = (world) => (Array.isArray(world?.projects) ? world.projects : []);
+const selectPolities = (world) => world?.polityOverrides ?? {};
+const selectGameStamp = (game) => ({
+  country: game?.country || "",
+  gameDate: String(game?.gameDate ?? ""),
+  round: Number(game?.round) || 0,
+});
+
 const ProjectsPanel = ({ isOpen, onClose, onOpenAdvisor, mapRef }) => {
-  const [projects, setProjects] = useState([]);
-  const [gameDate, setGameDate] = useState("");
-  const [round, setRound] = useState(0);
-  const [playerCountry, setPlayerCountry] = useState("");
+  const projects = useRuntimeState("world", selectProjects);
+  const polityOverrides = useRuntimeState("world", selectPolities);
+  const { country, gameDate, round } = useRuntimeState("game", selectGameStamp);
   const [eventTitles, setEventTitles] = useState(() => new Map());
   const [hasLoaded, setHasLoaded] = useState(false);
   // Everything the owner badge needs: the scenario's uploaded flags (a static
   // asset, read once) and the live polity registry, which carries both a custom
   // flag and the era display name. Held together so a card can resolve an owner
   // without three lookups of its own.
-  const [ownerFlags, setOwnerFlags] = useState(() => ({ custom: {}, polities: {} }));
-  const [ownerNames, setOwnerNames] = useState(() => ({}));
+  const [customFlags, setCustomFlags] = useState(() => ({}));
+  const ownerFlags = useMemo(
+    () => ({ custom: customFlags, polities: polityOverrides }),
+    [customFlags, polityOverrides],
+  );
+  const ownerNames = useMemo(() => Object.fromEntries(
+    Object.entries(polityOverrides)
+      .map(([code, polity]) => [code, String(polity?.name || "").trim()])
+      .filter(([, name]) => name),
+  ), [polityOverrides]);
+  // Canonicalised here, not in projects.js, which is deliberately import-free.
+  // game.country is the picker's `code` ("GBR" on a stock scenario); every
+  // project's ownerCode has been through toCountryName ("United Kingdom").
+  const playerCountry = useMemo(() => toCountryName(String(country ?? "")), [country]);
   // Is the PLAYER stateless? A landless player's name may still resolve to a real
   // country, but they are not it — a government-in-exile is not the government —
   // so their own cards must show neutral initials rather than borrow that
@@ -714,7 +737,11 @@ const ProjectsPanel = ({ isOpen, onClose, onOpenAdvisor, mapRef }) => {
   // (see isPolityLandless, which exists for exactly these resolvers). Only the
   // player's own entries: a FOREIGN owner that resolves to a country genuinely is
   // that country as far as this board knows.
-  const [playerLandless, setPlayerLandless] = useState(false);
+  const playerLandless = useRuntimeState(
+    "world",
+    (world) => isPolityLandless(world, playerCountry),
+    playerCountry,
+  );
 
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState("updated");
@@ -731,12 +758,6 @@ const ProjectsPanel = ({ isOpen, onClose, onOpenAdvisor, mapRef }) => {
   const [pendingId, setPendingId] = useState("");
 
   const isMobile = useIsMobile();
-  // The signature the 5s poll compares against, so a poll that changed nothing
-  // does not re-render the list under the player's cursor.
-  const signatureRef = useRef("");
-  // The same trick for the polity registry, which rides the same read but changes
-  // far less often than the board does. Mirrors Units.jsx's polityFlagSignatureRef.
-  const polityRef = useRef("");
 
   // Author-set flags (the scenario's flags.json), fetched once. Not in the poll:
   // it is a static asset, and getNationFlags memoizes it anyway.
@@ -746,72 +767,22 @@ const ProjectsPanel = ({ isOpen, onClose, onOpenAdvisor, mapRef }) => {
     getNationFlags()
       .then((flags) => {
         if (cancelled) return;
-        setOwnerFlags((current) => ({ ...current, custom: flags || {} }));
+        setCustomFlags(flags || {});
       })
       .catch(() => { /* the badges fall back to the ISO flag, then to initials */ });
     return () => { cancelled = true; };
   }, [isOpen]);
 
-  // 5-second poll, the cadence every other panel uses (Chat, Actions, Stats,
-  // DateWidget each run their own). Only while open: a closed panel has nothing
-  // to show and world.json is already being force-read twice over by the map.
+  // Opening the board is when it has to be current, so read now rather than
+  // waiting out the store's next tick. Later changes arrive through the slices.
   useEffect(() => {
     if (!isOpen) return undefined;
-
     let cancelled = false;
-    const refresh = async () => {
-      try {
-        const [world, game] = await Promise.all([
-          readWorldState({ force: true }),
-          readJson(JSON_URLS.game, { defaultValue: {} }),
-        ]);
-        if (cancelled) return;
-
-        const nextProjects = Array.isArray(world?.projects) ? world.projects : [];
-        const signature = JSON.stringify(nextProjects) + `|${game?.gameDate}|${game?.round}`;
-        if (signature !== signatureRef.current) {
-          signatureRef.current = signature;
-          setProjects(nextProjects);
-        }
-        setGameDate(String(game?.gameDate ?? ""));
-        setRound(Number(game?.round) || 0);
-        // Canonicalised here, not in projects.js, which is deliberately
-        // import-free. game.country is written from the country picker's option
-        // `code`, which on a stock scenario is a bare GADM code ("GBR"), while
-        // every project's ownerCode has been through toCountryName ("United
-        // Kingdom") — so comparing them raw filed the player's own programmes
-        // under Foreign.
-        const player = toCountryName(String(game?.country ?? ""));
-        setPlayerCountry(player);
-        setPlayerLandless(isPolityLandless(world, player));
-        // Cheap: polityOverrides is a handful of entries and world was read above
-        // anyway. Written through a signature so a poll that changed nothing does
-        // not hand every card a new object and re-run its <img>.
-        const polities = world?.polityOverrides ?? {};
-        const polityFlagSignature = Object.entries(polities)
-          .map(([code, polity]) => `${code}:${polity?.flag || ""}:${polity?.name || ""}`)
-          .sort()
-          .join("|");
-        if (polityFlagSignature !== polityRef.current) {
-          polityRef.current = polityFlagSignature;
-          setOwnerFlags((current) => ({ ...current, polities }));
-          setOwnerNames(Object.fromEntries(
-            Object.entries(polities)
-              .map(([code, polity]) => [code, String(polity?.name || "").trim()])
-              .filter(([, name]) => name),
-          ));
-        }
-        setHasLoaded(true);
-      } catch {
-        // A failed read leaves the last good board on screen rather than
-        // blanking it — the same choice every other panel's poll makes.
-        if (!cancelled) setHasLoaded(true);
-      }
-    };
-
-    refresh();
-    const timer = setInterval(refresh, 5000);
-    return () => { cancelled = true; clearInterval(timer); };
+    // Settled, not resolved: a failed read leaves the last good board up.
+    refreshRuntimeState(["world", "game"]).finally(() => {
+      if (!cancelled) setHasLoaded(true);
+    });
+    return () => { cancelled = true; };
   }, [isOpen]);
 
   // Event titles for the activity feed, fetched only once a card is actually
@@ -958,15 +929,11 @@ const ProjectsPanel = ({ isOpen, onClose, onOpenAdvisor, mapRef }) => {
     // normalizes, and so does the door, so the two sides compare exactly.
     if (refusedProjectIds.length > 0
       && JSON.stringify(nextWorld.projects) === JSON.stringify(world.projects)) {
-      signatureRef.current = "";
       return;
     }
+    // The write re-renders the board: it is canonical, so the store publishes
+    // the saved projects to this panel and every other.
     await writeWorldState(nextWorld);
-    setProjects(nextWorld.projects);
-    // Force the next poll to re-render from disk instead of comparing against
-    // this optimistic value: a jump may have committed while the write was in
-    // flight, and the poll is what repairs the difference.
-    signatureRef.current = "";
   }, [gameDate, playerCountry, round]);
 
   const setPriority = useCallback(async (project, priority) => {

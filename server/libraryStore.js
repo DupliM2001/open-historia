@@ -391,6 +391,9 @@ const OPTIONAL_JSON_ASSET_FILES = {
 // be large. Read/written only through the /api/runtime/json/snapshots endpoint.
 const RUNTIME_ONLY_JSON_ASSET_FILES = {
   snapshots: "storage/snapshots.json",
+  // Derived, read-only projection of snapshots.json: id/round/dates, no state.
+  // The undo counter polled the real thing per turn, parsing 8+ MB for a length.
+  snapshotsIndex: "storage/snapshots-index.json",
   // What the player's spies have intercepted, keyed by target polity. Its own
   // file on purpose: it is refreshed AFTER a jump's world write lands, and a
   // second writer on world.json would race it.
@@ -453,6 +456,7 @@ const JSON_ASSET_DEFAULTS = {
   stats: {},
   world: {},
   snapshots: [],
+  snapshotsIndex: { entries: [] },
   intercepts: {},
 };
 
@@ -2782,47 +2786,103 @@ const ensureGameOwnerSchema = (gameId) => {
   }
 };
 
-const readRuntimeJsonAsset = (assetKey) => {
+// Resolves the source file WITHOUT reading it, so the GET route can stream it.
+// Null for every other key, which is what keeps `world` on normalizeRuntimeWorld.
+const resolveRuntimeGeojsonAsset = (assetKey) => {
+  // Custom region/city geometry is scenario-scoped (static map data). Resolve it
+  // from the active game's scenario, mirroring how pmtiles overrides resolve.
+  if (!Object.hasOwn(SCENARIO_GEOJSON_ASSET_FILES, assetKey)) return null;
+
   ensureGameStore();
-  // Above the geojson branch deliberately: that branch returns before anything
-  // else runs, and it is the branch that serves the file `owner` lives in.
+  // Before the scenario resolution: this branch serves the file `owner` lives in.
   const activeGame = getActiveGameSummary();
   if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
 
-  // Custom region/city geometry is scenario-scoped (static map data). Resolve it
-  // from the active game's scenario, mirroring how pmtiles overrides resolve.
-  if (Object.hasOwn(SCENARIO_GEOJSON_ASSET_FILES, assetKey)) {
-    const scenario = getActiveRuntimeScenarioSummary();
-    ensureScenarioOwnerSchema(scenario.id);
-    let sourcePath = getScenarioUploadPath(scenario.id, assetKey);
-    if (!fs.existsSync(sourcePath)) {
-      sourcePath = null;
-      // Scenarios without a map of their own render on the STOCK world (the
-      // hub's re-ownership presets key their ownership by its GADM ids), so
-      // EVERY scenario renders with the custom map style (the scenario's
-      // ownership overrides still recolor it). Not the built-in scenario's own
-      // map: since Modern Day was redrawn that is a different world, and a
-      // scenario CREATED from it carries its own copy (createScenario). Cities
-      // stay absent unless the scenario ships its own set.
-      if (assetKey === "regionsGeojson" && scenario.id !== DEFAULT_SCENARIO_ID) {
-        const stockPath = resolveStockRegionsPath();
-        if (stockPath) {
-          // An install that still keeps the stock world as the built-in's file
-          // migrates it as DEFAULT'S record, not this scenario's: the file's
-          // owners live in default's owner-space, so resolving them against this
-          // scenario's polities would name Russia after whatever this world
-          // calls that token. The stock map's own home needs no migration.
-          if (stockPath !== STOCK_REGIONS_PATH) ensureScenarioOwnerSchema(DEFAULT_SCENARIO_ID);
-          sourcePath = stockPath;
-        }
+  const scenario = getActiveRuntimeScenarioSummary();
+  ensureScenarioOwnerSchema(scenario.id);
+  let sourcePath = getScenarioUploadPath(scenario.id, assetKey);
+  if (!fs.existsSync(sourcePath)) {
+    sourcePath = null;
+    // Scenarios without a map of their own render on the STOCK world (the
+    // hub's re-ownership presets key their ownership by its GADM ids), so
+    // EVERY scenario renders with the custom map style (the scenario's
+    // ownership overrides still recolor it). Not the built-in scenario's own
+    // map: since Modern Day was redrawn that is a different world, and a
+    // scenario CREATED from it carries its own copy (createScenario). Cities
+    // stay absent unless the scenario ships its own set.
+    if (assetKey === "regionsGeojson" && scenario.id !== DEFAULT_SCENARIO_ID) {
+      const stockPath = resolveStockRegionsPath();
+      if (stockPath) {
+        // An install that still keeps the stock world as the built-in's file
+        // migrates it as DEFAULT'S record, not this scenario's: the file's
+        // owners live in default's owner-space, so resolving them against this
+        // scenario's polities would name Russia after whatever this world
+        // calls that token. The stock map's own home needs no migration.
+        if (stockPath !== STOCK_REGIONS_PATH) ensureScenarioOwnerSchema(DEFAULT_SCENARIO_ID);
+        sourcePath = stockPath;
       }
     }
+  }
+  return { contentType: "application/json; charset=utf-8", sourcePath };
+};
+
+// What the rollback list shows, minus `state` (~700 KB per entry, up to 12).
+const snapshotIndexEntry = (snap) => ({
+  id: snap?.id ?? "",
+  round: snap?.round ?? null,
+  fromDate: snap?.fromDate ?? "",
+  toDate: snap?.toDate ?? "",
+  capturedAt: snap?.capturedAt ?? "",
+});
+
+const writeSnapshotIndex = (gameId, snapshots, stamp = "") => {
+  const list = Array.isArray(snapshots) ? snapshots : [];
+  const target = getGameJsonPath(gameId, "snapshotsIndex");
+  ensureDirectory(path.dirname(target));
+  writeJsonFile(target, { stamp, entries: list.map(snapshotIndexEntry) });
+};
+
+// The write path refreshes the index for free; this covers a cold index, a zip
+// import, or a file edited outside the app.
+const ensureSnapshotIndexFresh = (gameId) => {
+  const source = getGameJsonPath(gameId, "snapshots");
+  const indexPath = getGameJsonPath(gameId, "snapshotsIndex");
+  if (!fs.existsSync(source)) {
+    // The owner-rename migration deletes snapshots outright. A surviving index
+    // would advertise turns that cannot be restored, so it goes with them.
+    if (fs.existsSync(indexPath)) {
+      try { fs.rmSync(indexPath); } catch { /* best effort */ }
+    }
+    return;
+  }
+  let stamp = "";
+  try {
+    const stat = fs.statSync(source);
+    stamp = `${stat.size}:${Math.round(stat.mtimeMs)}`;
+  } catch {
+    return;
+  }
+  const cached = readJsonFile(indexPath, null);
+  if (cached?.stamp === stamp && Array.isArray(cached.entries)) return;
+  writeSnapshotIndex(gameId, readJsonFile(source, []), stamp);
+};
+
+const readRuntimeJsonAsset = (assetKey) => {
+  const geojson = resolveRuntimeGeojsonAsset(assetKey);
+  if (geojson) {
     return {
-      contentType: "application/json; charset=utf-8",
-      data: sourcePath ? readJsonFile(sourcePath, EMPTY_FEATURE_COLLECTION) : cloneJson(EMPTY_FEATURE_COLLECTION),
-      sourcePath,
+      ...geojson,
+      data: geojson.sourcePath
+        ? readJsonFile(geojson.sourcePath, EMPTY_FEATURE_COLLECTION)
+        : cloneJson(EMPTY_FEATURE_COLLECTION),
     };
   }
+
+  ensureGameStore();
+  const activeGame = getActiveGameSummary();
+  if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
+
+  if (assetKey === "snapshotsIndex" && activeGame?.id) ensureSnapshotIndexFresh(activeGame.id);
 
   const scenario = getActiveRuntimeScenarioSummary();
 
@@ -2840,18 +2900,17 @@ const readRuntimeJsonAsset = (assetKey) => {
   // must NOT resurrect a stale game copy.
   if (assetKey === "stats" && scenario && !scenario.missing) {
     const canonicalStatsPath = getScenarioJsonPath(scenario.id, "stats");
+    const hasCanonicalStats = fs.existsSync(canonicalStatsPath);
     return {
       contentType: "application/json; charset=utf-8",
-      data: fs.existsSync(canonicalStatsPath)
-        ? readJsonFile(canonicalStatsPath, {})
-        : {},
-      sourcePath: fs.existsSync(canonicalStatsPath) ? canonicalStatsPath : null,
+      data: hasCanonicalStats ? readJsonFile(canonicalStatsPath, {}) : {},
+      sourcePath: hasCanonicalStats ? canonicalStatsPath : null,
     };
   }
 
-  // No games yet - runtime data resolves from the scenario below. (activeGame is
-  // resolved at the top of this function, above the geojson branch, so the
-  // migration hook can see it.)
+  // No games yet, runtime data resolves from the scenario below. activeGame is
+  // resolved above so the migration hook can see it.
+
   const gamePath =
   activeGame && (Object.hasOwn(JSON_ASSET_FILES, assetKey) || Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey) || Object.hasOwn(RUNTIME_ONLY_JSON_ASSET_FILES, assetKey))
   ? getGameJsonPath(activeGame.id, assetKey)
@@ -2966,6 +3025,10 @@ const writeRuntimeJsonAsset = (assetKey, value) => {
     throw new Error(`Unsupported JSON asset key: ${assetKey}`);
   }
 
+  if (assetKey === "snapshotsIndex") {
+    throw new Error("snapshotsIndex is derived from snapshots and cannot be written directly.");
+  }
+
   // Shape guard. The storage assets are arrays and everything else is an object.
   // The SEED path already enforces this (normalizeBaseSaveSeedAsset), but this
   // runtime path did not — so a PUT whose body never parsed, which express.json()
@@ -3040,6 +3103,15 @@ const writeRuntimeJsonAsset = (assetKey, value) => {
 
   const targetPath = getGameJsonPath(activeGameId, assetKey);
   writeJsonFile(targetPath, canonical);
+  // From the array already in hand, so a turn never reparses to stay in step.
+  if (assetKey === "snapshots") {
+    try {
+      const stat = fs.statSync(targetPath);
+      writeSnapshotIndex(activeGameId, canonical, `${stat.size}:${Math.round(stat.mtimeMs)}`);
+    } catch {
+      // A missing index just means the next read rebuilds it.
+    }
+  }
   writeGameMeta(activeGameId, {});
   return readRuntimeJsonAsset(assetKey);
 };
@@ -3630,6 +3702,7 @@ export {
   updateScenarioFromBundle,
   readGameSnapshots,
   readRuntimeJsonAsset,
+  resolveRuntimeGeojsonAsset,
   removeGameAsset,
   removeScenarioAsset,
   resolveGameUploadAsset,

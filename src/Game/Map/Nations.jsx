@@ -450,6 +450,11 @@ const buildPaxPoliticalFillOpacity = (hiddenExpression = null) => [
 ];
 
 const PAX_POLITICAL_FILL_OPACITY = buildPaxPoliticalFillOpacity();
+// What fillStyle returns when the stock-countries layer cannot be shown.
+const HIDDEN_COUNTRIES_FILL_PAINT = {
+  "fill-color": NEUTRAL_LAND_COLOR,
+  "fill-opacity": 0,
+};
 const DISPUTED_STRIPE_OPACITY = 0.22;
 
 // Experiment F: stop drawing the stock GeoJSON fallback and the stock vector
@@ -541,6 +546,10 @@ const WorldMap = ({ isGlobe = false }) => {
   const ownershipPresentationHoldCountsRef = useRef(new Map());
   const [ownershipPresentationHoldEpoch, setOwnershipPresentationHoldEpoch] = useState(0);
   const appliedCustomFillStateRef = useRef(new Map());
+  // The desired region -> fill map is a pure function of the two inputs cached
+  // beside it, and a hold/release epoch changes neither. Keyed on identity so an
+  // epoch bump mid-sweep reuses it instead of recolouring every region again.
+  const ownershipFillTargetRef = useRef({ overrides: null, colorCss: null, fills: null });
   const appliedTileFillStateRef = useRef(new Map());
   const ownershipSweepRef = useRef({
     active: false,
@@ -1241,8 +1250,12 @@ const WorldMap = ({ isGlobe = false }) => {
   // world-war-ii-1939-copy with its colour (#c0507a) only in polityOverrides.
   // Resolving the name but not the colour painted those regions a muddy
   // procedural fallback, which reads to a player as "the map didn't annex it".
-  const resolveOwnerRgb = useCallback(
-    (rawOwner) => {
+  // Memoised per owner: callers resolve one colour per REGION (3,662 in a played
+  // save) across only ~231 owners, and a fold-fallback miss is O(colorMap) with
+  // an allocation. The cache is rebuilt with the closure, so it cannot go stale.
+  const resolveOwnerRgb = useMemo(() => {
+    const cache = new Map();
+    const resolve = (rawOwner) => {
       if (!rawOwner) return null;
       // Canonicalize an owner CODE ("ESP" from a transfer override) to the NAME the palette
       // is keyed by ("Spain") so a captured region takes its true owner's colour.
@@ -1266,9 +1279,17 @@ const WorldMap = ({ isGlobe = false }) => {
         }
       }
       return fallbackRgbFromOwner(owner);
-    },
-    [colorMap, polityOverrides],
-  );
+    };
+
+    return (rawOwner) => {
+      if (!rawOwner) return null;
+      const key = String(rawOwner);
+      if (cache.has(key)) return cache.get(key);
+      const rgb = resolve(rawOwner);
+      cache.set(key, rgb);
+      return rgb;
+    };
+  }, [colorMap, polityOverrides]);
 
   const ownerColorCss = useCallback(
     (owner) => {
@@ -2067,6 +2088,11 @@ const WorldMap = ({ isGlobe = false }) => {
   // The layer that DOES paint the political map (stockRegionsFillPaint) matches
   // GID_1 — a region id, not a country — and needs no bridge at all.
   const fillStyle = useMemo(() => {
+    // Its only consumer is the stock-countries layer, which showStockCountries
+    // pins to zero opacity whenever customFlag is set. Gated on the FLAG for the
+    // same reason that is: customActive additionally waits for geometry.
+    if (customFlag) return HIDDEN_COUNTRIES_FILL_PAINT;
+
     const stops = Object.entries(colorMap).flatMap(([owner, rgb]) => {
       const displayRgb = normalizePoliticalRgb(rgb);
       return [owner, `rgb(${displayRgb[0]}, ${displayRgb[1]}, ${displayRgb[2]})`];
@@ -2090,7 +2116,7 @@ const WorldMap = ({ isGlobe = false }) => {
         : fallback,
       "fill-opacity": PAX_POLITICAL_FILL_OPACITY,
     };
-  }, [colorMap, regionOwnershipOverrides, ownerColorCss]);
+  }, [colorMap, customFlag, regionOwnershipOverrides, ownerColorCss]);
 
   const enrichedDisputedRegionData = useMemo(() => {
     if (!disputedRegionData?.features?.length) return EMPTY_FEATURE_COLLECTION;
@@ -2276,9 +2302,24 @@ const WorldMap = ({ isGlobe = false }) => {
       }
 
       const syncStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const next = new Map();
-      for (const [regionId, owner] of Object.entries(regionOwnershipOverrides)) {
-        next.set(String(regionId), ownerColorCss(owner));
+      const cachedTarget = ownershipFillTargetRef.current;
+      let next = cachedTarget.fills;
+      if (
+        !next
+        || cachedTarget.overrides !== regionOwnershipOverrides
+        || cachedTarget.colorCss !== ownerColorCss
+      ) {
+        next = new Map();
+        for (const [regionId, owner] of Object.entries(regionOwnershipOverrides)) {
+          next.set(String(regionId), ownerColorCss(owner));
+        }
+        // Read-only below: the diff never writes to it, appliedAfterSync is its
+        // own Map. Anything that starts mutating it must drop the cache too.
+        ownershipFillTargetRef.current = {
+          overrides: regionOwnershipOverrides,
+          colorCss: ownerColorCss,
+          fills: next,
+        };
       }
       const applied = appliedCustomFillStateRef.current;
       const held = ownershipPresentationHoldCountsRef.current;

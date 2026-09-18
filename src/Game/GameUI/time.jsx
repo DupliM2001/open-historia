@@ -9,21 +9,20 @@ import {
     getPmtilesArchive,
     loadCountryNames,
     loadRegionCatalog,
+    loadRollbackSnapshotCount,
 } from "../../runtime/assets.js";
-import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplay.js";
+import { loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplayLazy.js";
+import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump } from "../AI/simulationStatus.js";
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
 import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
 import { describeUnavailable, fallbackAvailability } from "../AI/fallbackRunner.js";
 import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
-import { isMainMenuOpen } from "./libraryBar";
+import { isMainMenuOpen, useMainMenuOpen } from "./libraryBar";
 import {
     applyEventImpactsToWorld,
     normalizeActions,
-    readEventsState,
-    readGameData,
-    readWorldState,
 } from "../../runtime/gameState.js";
 import {
     buildFocusContext,
@@ -35,6 +34,8 @@ import {
 import { setWorldStateOverride } from "../Map/useWorldState.js";
 import { getUnitById, setUnitsOverride } from "../Map/unitsController.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
+import { primeRuntimeValue } from "../../runtime/runtimeStore.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
 import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
 import { formatGameDateReadable, isGameDate, normalizeGameDate } from "../../runtime/gameDates.js";
 import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
@@ -1593,9 +1594,13 @@ const DateWidget = ({
     dockStyle = null,
     topOffset = "0.5rem",
 }) => {
-    const [gameData, setGameData] = useState(null);
-    const [events, setEvents] = useState([]);
-    const [worldState, setWorldState] = useState(null);
+    // Shared store rather than three local copies on a 5s poll of their own.
+    const gameData = useRuntimeState("game");
+    const events = useRuntimeState("events");
+    const worldState = useRuntimeState("world");
+    const setGameData = (game) => primeRuntimeValue("game", game);
+    const setEvents = (next) => primeRuntimeValue("events", next);
+    const setWorldState = (world) => primeRuntimeValue("world", world);
     const [countryBounds, setCountryBounds] = useState(new Map());
     const [countryCatalog, setCountryCatalog] = useState([]);
     const [regionBounds, setRegionBounds] = useState(new Map());
@@ -1634,12 +1639,6 @@ const DateWidget = ({
     const [modeSuggestion, setModeSuggestion] = useState(null);
     // Holds the in-flight jump's AbortController so the Cancel button can stop it.
     const jumpAbortRef = React.useRef(null);
-    // Mirrors the latest applied turn (round + date) so the 5s refresh poll can tell a
-    // stale read from a genuinely newer one — and never revert a just-completed jump.
-    const gameStampRef = React.useRef({ round: 0, date: "" });
-    React.useEffect(() => {
-        gameStampRef.current = { round: Number(gameData?.round) || 0, date: gameData?.gameDate || "" };
-    }, [gameData]);
     const [visibleEventCount, setVisibleEventCount] = useState(1);
     const [undoCount, setUndoCount] = useState(0);
     const openPanel = typeof onSetPanel === "function" ? activePanel : localOpenPanel;
@@ -1684,77 +1683,27 @@ const DateWidget = ({
         };
     }, []);
 
+    // The store owns the refresh and the never-move-the-clock-backwards guard.
+    // Left here is the panel's own reaction to an undone turn: the live warning
+    // belongs to the discarded turn, and the event reel folds back to one card.
     useEffect(() => {
-        let cancelled = false;
-
-        const loadState = async () => {
-            try {
-                const [game, nextEvents, world] = await Promise.all([
-                    readGameData({ force: true }),
-                                                                    readEventsState({ force: true }),
-                                                                    readWorldState({ force: true }),
-                ]);
-
-                if (cancelled) {
-                    return;
-                }
-
-                // Never let this background poll overwrite a fresher turn with an older
-                // read. A jump advances the round (and date); if the store read comes
-                // back behind what's already on screen — a write still settling, an
-                // eventually-consistent read, a poll that fired mid-jump — applying it
-                // would revert the date and wipe the just-generated events. Skip it.
-                const local = gameStampRef.current;
-                const polledRound = Number(game?.round) || 0;
-                const polledDate = game?.gameDate || "";
-                if (polledRound < local.round || (polledRound === local.round && polledDate < local.date)) {
-                    return;
-                }
-
-                setGameData(game);
-                setEvents(nextEvents);
-                setWorldState(world);
-            } catch (loadError) {
-                if (!cancelled) {
-                    console.error("Failed to load timeline state:", loadError);
-                }
-            }
-        };
-
-        loadState();
-        const interval = setInterval(loadState, 5000);
-
-        // The staleness guard above cannot tell a stale read from a rollback — both
-        // arrive as "older than what is on screen" — so it rejected the restored
-        // state too, and the panel kept showing the undone turn's date, its events
-        // and its fallback warning until the app was restarted. rollBackToSnapshot
-        // announces itself (gameplay.js); clearing the stamp lets the restored read
-        // through, and reloading now means the player doesn't wait out the 5s tick.
         const handleRolledBack = () => {
-            gameStampRef.current = { round: 0, date: "" };
             setVisibleEventCount(1);
-            // The live warning belongs to the turn that just got undone. The
-            // persisted one clears itself, since it is derived from the restored
-            // simulationHistory that loadState is about to pull in.
             setFallbackWarning("");
-            loadState();
         };
         window.addEventListener("oh:rolled-back", handleRolledBack);
-
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-            window.removeEventListener("oh:rolled-back", handleRolledBack);
-        };
+        return () => window.removeEventListener("oh:rolled-back", handleRolledBack);
     }, []);
 
     // Pre-game history: a fresh game (round 1, no events, no turns) whose
     // scenario wrote a "World Before Round One" briefing gets its backstory
     // generated once, the first time the player actually enters it. Waits out
-    // the main menu (the poll re-runs this every 5s) so tokens are never spent
-    // on a game the player is only hovering past; every other guard — busy
-    // lock, still-the-same-game check, the done-marker — lives in
-    // maybeGeneratePregameHistory itself.
+    // the main menu so tokens are never spent on a game the player is only
+    // hovering past; every other guard (busy lock, still-the-same-game check,
+    // the done-marker) lives in maybeGeneratePregameHistory itself. The menu
+    // state is a dependency because nothing else re-renders this when the
+    // player finally enters the game.
+    const mainMenuOpen = useMainMenuOpen();
     const pregameAttemptedRef = React.useRef(false);
     useEffect(() => {
         if (pregameAttemptedRef.current || !gameData || !worldState) {
@@ -1772,7 +1721,7 @@ const DateWidget = ({
         }
         pregameAttemptedRef.current = true;
         maybeGeneratePregameHistory().catch(() => {});
-    }, [gameData, worldState, events]);
+    }, [gameData, worldState, events, mainMenuOpen]);
 
     function setPanel(panelName) {
         // Where the player was looking, in detailed mode. On its own a panel
@@ -2082,8 +2031,9 @@ const DateWidget = ({
     // each turn). Re-checked whenever the round changes — after a jump or undo.
     useEffect(() => {
         let active = true;
-        loadRollbackSnapshots().then((list) => {
-            if (active) setUndoCount(list.length);
+        // The index, not the snapshots: the full list carries every prior world.
+        loadRollbackSnapshotCount().then((count) => {
+            if (active) setUndoCount(count);
         });
         return () => { active = false; };
     }, [gameData?.round]);
@@ -2273,10 +2223,10 @@ const DateWidget = ({
     }), [countryBounds, countryCatalog, regionBounds, regionCatalog]);
 
     // The other half is the live world (era polities, who owns what), which the
-    // 5s poll replaces wholesale. Reading it through a ref keeps that poll from
-    // re-running the camera effect — which would re-fly to the event already on
-    // screen every few seconds — and the finished context is cached so it is
-    // rebuilt only when an event is actually revealed against a newer world.
+    // store replaces wholesale. Reading it through a ref keeps a world update
+    // from re-running the camera effect, which would re-fly to the event already
+    // on screen, and the finished context is cached so it is rebuilt only when
+    // an event is actually revealed against a newer world.
     const focusWorldRef = React.useRef(null);
     const focusContextRef = React.useRef({ catalog: null, context: null, world: null });
 

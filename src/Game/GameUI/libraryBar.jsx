@@ -4,6 +4,7 @@ import { Presence } from "./presence.jsx";
 import {
   PROMPT_EDITOR_SECTIONS,
   PROMPT_GUIDANCE_DEFAULTS,
+  materializePromptPack,
   normalizePromptPack,
   serializePromptPack,
 } from "../AI/gameplayPrompts.js";
@@ -2029,10 +2030,10 @@ const LibraryTopBar = () => {
     const scenario = editorDetails.scenario;
     const bundle = {
       schema: "open-historia-prompt-pack",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       scenario: { id: scenario.id, name: scenario.name },
-      prompts: serializePromptPack(editorState.prompts),
+      prompts: materializePromptPack(editorState.prompts),
     };
     saveGameZipToDisk(
       new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }),

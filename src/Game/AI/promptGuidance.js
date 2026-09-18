@@ -285,6 +285,25 @@ export const normalizePackGuidance = (rawPack, guidanceDefaults = null) => {
   };
 };
 
+// Materialize every editable passage for an explicit transfer/export. Stored
+// scenario packs stay sparse via normalizePackGuidance; this helper is only for
+// moving the complete author-editable layer between scenarios/files.
+export const materializePackGuidance = (rawPack, guidanceDefaults = null) => {
+  const defaults = isRecord(guidanceDefaults) ? guidanceDefaults : {};
+  const overrides = normalizePackGuidance(rawPack, guidanceDefaults);
+  const defaultTasks = isRecord(defaults.tasks) ? defaults.tasks : {};
+  return {
+    advisor: { ...(isRecord(defaults.advisor) ? defaults.advisor : {}), ...overrides.advisor },
+    leader: { ...(isRecord(defaults.leader) ? defaults.leader : {}), ...overrides.leader },
+    tasks: Object.fromEntries(
+      Object.keys(PROMPT_GUIDANCE.tasks).map((key) => [
+        key,
+        { ...(isRecord(defaultTasks[key]) ? defaultTasks[key] : {}), ...(overrides.tasks?.[key] ?? {}) },
+      ]),
+    ),
+  };
+};
+
 // The prompt the game runs: the default text with each segment's default
 // replaced by the author's text where one was written.
 export const composePrompt = (sectionKey, defaultText, guidance) => {

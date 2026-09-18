@@ -2,20 +2,27 @@
 import React from "react";
 import dayjs from "dayjs";
 import advancedFormat from "dayjs/plugin/advancedFormat";
-import { JSON_URLS, readJson } from "../../runtime/assets.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
-import { generateActionSuggestions, refinePlayerAction } from "../AI/gameplay.js";
+import { generateActionSuggestions, refinePlayerAction } from "../AI/gameplayLazy.js";
 import { revertUnitOrder } from "../Map/unitsController.js";
 import {
     buildActionDisplayText,
     normalizeActionEntry,
-    readActionsState,
     writeActionsState,
 } from "../../runtime/gameState.js";
 import { formatGameDateReadable } from "../../runtime/gameDates.js";
+import { refreshRuntimeState, subscribeRuntime } from "../../runtime/runtimeStore.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
 
 dayjs.extend(advancedFormat);
+
+// The only fields this panel reads, so nothing else in game.json re-renders it.
+const selectGameHeader = (game) => ({
+    country: game?.country || "",
+    gameDate: game?.gameDate || "",
+    round: Number(game?.round) || 0,
+});
 
 const ACTIONS_STYLE_ID = "actions-style";
 
@@ -83,7 +90,6 @@ const SpinnerRing = ({ size = 14, tone = "rgba(255,255,255,0.88)" }) => {
 };
 
 const saveActions = async (actions) => writeActionsState(actions);
-const loadActions = async () => readActionsState();
 
 const createManualAction = (input) =>
 normalizeActionEntry({
@@ -233,10 +239,13 @@ const SuggestionCard = ({ topic, onQueue, queuedIds }) => (
 const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
     const [actions, setActions] = React.useState([]);
     const [inputValue, setInputValue] = React.useState("");
-    const [country, setCountry] = React.useState("your nation");
+    const game = useRuntimeState("game", selectGameHeader);
+    const country = game.country || "your nation";
     // Full display name for the header, never the code.
     const countryDisplayName = useCountryDisplayName(country);
-    const [gameDate, setGameDate] = React.useState("the current date");
+    const gameDate = game.gameDate
+        ? formatGameDateReadable(game.gameDate, "MMMM Do, YYYY") || dayjs(game.gameDate).format("MMMM Do, YYYY")
+        : "the current date";
     const [suggestions, setSuggestions] = React.useState([]);
     const [queuedSuggestionIds, setQueuedSuggestionIds] = React.useState(() => new Set());
     const [hasRequestedSuggestions, setHasRequestedSuggestions] = React.useState(false);
@@ -259,68 +268,33 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         setSuggestions([]);
         setHasRequestedSuggestions(false);
 
-        loadActions().then((saved) => {
-            if (!cancelled) {
-                setActions(saved);
-            }
-        });
-
-        const fetchGameData = () => {
-            readJson(JSON_URLS.game, { defaultValue: {}, force: true })
-            .then((data) => {
-                if (cancelled) {
-                    return;
-                }
-
-                if (data.country) {
-                    setCountry(data.country);
-                }
-
-                if (data.gameDate) {
-                    setGameDate(formatGameDateReadable(data.gameDate, "MMMM Do, YYYY") || dayjs(data.gameDate).format("MMMM Do, YYYY"));
-                }
-
-                // After a jump, applySimulationResult re-marks last round's actions
-                // "resolved" (submittedActions filters those out) — but this panel never
-                // re-read the store, so they lingered. Reload when the round advances so
-                // the previous turn's actions clear automatically. First tick just seeds
-                // the ref (no spurious reload); a freshly queued next-turn action is
-                // already persisted, so the reload keeps it.
-                if (typeof data.round === "number") {
-                    if (lastRoundRef.current !== null && data.round !== lastRoundRef.current) {
-                        loadActions().then((saved) => { if (!cancelled) setActions(saved); });
-                    }
-                    lastRoundRef.current = data.round;
-                }
-            })
-            .catch(() => {});
-        };
-
         // Actions created/edited from OUTSIDE this panel (the advisor, chatting in
         // its own drawer) used to be invisible here until the panel was closed and
-        // reopened. Poll and merge in additions — signature-gated so a tick with no
-        // actual change doesn't re-render/reset hover state on every row.
+        // reopened. The store publishes those writes. Signature-gated so a
+        // republish with no real change doesn't reset hover state on every row.
         const actionsSignature = (list) => list.map((a) => `${a.id}:${a.title}:${a.text}:${a.status}`).join("|");
-        const syncActions = () => {
-            readActionsState({ force: true })
-            .then((saved) => {
-                if (cancelled) return;
-                setActions((prev) => (actionsSignature(saved) === actionsSignature(prev) ? prev : saved));
-            })
-            .catch(() => {});
-        };
-
-        fetchGameData();
-        syncActions();
-        const interval = setInterval(fetchGameData, 5000);
-        const actionsInterval = setInterval(syncActions, 5000);
+        const unsubscribe = subscribeRuntime("actions", (saved) => {
+            if (cancelled || !Array.isArray(saved)) return;
+            setActions((prev) => (actionsSignature(saved) === actionsSignature(prev) ? prev : saved));
+        });
 
         return () => {
             cancelled = true;
-            clearInterval(interval);
-            clearInterval(actionsInterval);
+            unsubscribe();
         };
     }, [isOpen]);
+
+    // After a jump, applySimulationResult re-marks last round's actions
+    // "resolved" (submittedActions filters those out). The first value only
+    // seeds the ref; a freshly queued next-turn action is already persisted, so
+    // the reload keeps it.
+    React.useEffect(() => {
+        if (!isOpen || !game.round) return;
+        if (lastRoundRef.current !== null && game.round !== lastRoundRef.current) {
+            void refreshRuntimeState(["actions"]);
+        }
+        lastRoundRef.current = game.round;
+    }, [isOpen, game.round]);
 
     const persistActions = async (nextActions) => {
         setActions(nextActions);

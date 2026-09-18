@@ -7,6 +7,7 @@ export const renderGlobeLightingPixels = ({
   pixelWidth,
   pixelHeight,
   opacity,
+  terrainRadii = 0,
   outputPixels,
 }) => {
   const sphereRadius = 1;
@@ -72,6 +73,33 @@ export const renderGlobeLightingPixels = ({
   const cameraDotStep = cameraX * stepX + cameraY * stepY + cameraZ * stepZ;
   const stepLengthSquared = stepX * stepX + stepY * stepY + stepZ * stepZ;
   const quadraticA = cameraDotStep * cameraDotStep - stepLengthSquared * cameraTerm;
+  // The canvas is upscaled, so the filter reaches a pixel past the silhouette.
+  const edgePlateauPixels = 1.1;
+  const edgeFadePixels = 0.6;
+  // The tint falls off from the silhouette itself, so it barely reaches space.
+  const tintFadePixels = 0.75;
+  const centerRayX = inverse[12] - cameraX * inverse[15];
+  const centerRayY = inverse[13] - cameraY * inverse[15];
+  const centerRayZ = inverse[14] - cameraZ * inverse[15];
+  const centerLengthSquared = centerRayX * centerRayX
+    + centerRayY * centerRayY
+    + centerRayZ * centerRayZ;
+  const crossX = centerRayY * stepZ - centerRayZ * stepY;
+  const crossY = centerRayZ * stepX - centerRayX * stepZ;
+  const crossZ = centerRayX * stepY - centerRayY * stepX;
+  // One render pixel, in discriminant/directionLengthSquared units.
+  const pixelAngle = centerLengthSquared > 0
+    ? Math.sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ) / centerLengthSquared
+    : 0;
+  const gapPerPixel = 2 * Math.sqrt(Math.max(0, cameraTerm)) * pixelAngle;
+  // Terrain pushes the surface out, capped short of the camera's own clearance.
+  const terrainGap = gapPerPixel > 0 && terrainRadii > 0
+    ? Math.min(terrainRadii * (2 + terrainRadii), cameraTerm * 0.5)
+    : 0;
+  const tintFadeGap = gapPerPixel * tintFadePixels;
+  const alphaPlateauGap = terrainGap + gapPerPixel * edgePlateauPixels;
+  const alphaFadeGap = alphaPlateauGap + gapPerPixel * edgeFadePixels;
+  const expandedA = quadraticA + alphaFadeGap * stepLengthSquared;
 
   for (let y = 0; y < pixelHeight; y += 1) {
     const clipY = 1 - ((y + 0.5) / pixelHeight) * 2;
@@ -84,11 +112,15 @@ export const renderGlobeLightingPixels = ({
     const baseLengthSquared = baseX * baseX + baseY * baseY + baseZ * baseZ;
     const quadraticB = 2 * (cameraDotBase * cameraDotStep - baseDotStep * cameraTerm);
     const quadraticC = cameraDotBase * cameraDotBase - baseLengthSquared * cameraTerm;
-    const rootDiscriminant = quadraticB * quadraticB - 4 * quadraticA * quadraticC;
-    if (rootDiscriminant <= 0 || Math.abs(quadraticA) < 1e-20) continue;
+    // Scan to the feathered edge, not the silhouette.
+    const expandedB = quadraticB + alphaFadeGap * 2 * baseDotStep;
+    const expandedC = quadraticC + alphaFadeGap * baseLengthSquared;
+    const rootDiscriminant = expandedB * expandedB - 4 * expandedA * expandedC;
+    // Non-negative opens the parabola upward, which inverts the span.
+    if (rootDiscriminant <= 0 || expandedA > -1e-20) continue;
     const rootScale = Math.sqrt(rootDiscriminant);
-    const firstRoot = (-quadraticB - rootScale) / (2 * quadraticA);
-    const secondRoot = (-quadraticB + rootScale) / (2 * quadraticA);
+    const firstRoot = (-expandedB - rootScale) / (2 * expandedA);
+    const secondRoot = (-expandedB + rootScale) / (2 * expandedA);
     const startX = Math.max(0, Math.ceil(Math.min(firstRoot, secondRoot)));
     const endX = Math.min(pixelWidth - 1, Math.floor(Math.max(firstRoot, secondRoot)));
     if (startX > endX) continue;
@@ -110,13 +142,39 @@ export const renderGlobeLightingPixels = ({
       const cameraDotDirection = cameraX * currentDirectionX
         + cameraY * currentDirectionY
         + cameraZ * currentDirectionZ;
+      if (directionLengthSquared <= 0) continue;
       const discriminant = cameraDotDirection * cameraDotDirection - directionLengthSquared * cameraTerm;
-      if (discriminant <= 0 || directionLengthSquared <= 0) continue;
-      const distance = (-cameraDotDirection - Math.sqrt(discriminant)) / directionLengthSquared;
-      if (distance <= 0) continue;
-      const normalX = (cameraX + currentDirectionX * distance) / sphereRadius;
-      const normalY = (cameraY + currentDirectionY * distance) / sphereRadius;
-      const normalZ = (cameraZ + currentDirectionZ * distance) / sphereRadius;
+      let normalX;
+      let normalY;
+      let normalZ;
+      let coverage;
+      let tintCoverage;
+      if (discriminant >= 0) {
+        const distance = (-cameraDotDirection - Math.sqrt(discriminant)) / directionLengthSquared;
+        if (distance <= 0) continue;
+        normalX = (cameraX + currentDirectionX * distance) / sphereRadius;
+        normalY = (cameraY + currentDirectionY * distance) / sphereRadius;
+        normalZ = (cameraZ + currentDirectionZ * distance) / sphereRadius;
+        coverage = 1;
+        tintCoverage = 1;
+      } else {
+        const gap = discriminant / directionLengthSquared;
+        if (gap <= -alphaFadeGap) continue;
+        // Ray misses: shade from the nearest silhouette point.
+        const approach = -cameraDotDirection / directionLengthSquared;
+        if (approach <= 0) continue;
+        const nearX = cameraX + currentDirectionX * approach;
+        const nearY = cameraY + currentDirectionY * approach;
+        const nearZ = cameraZ + currentDirectionZ * approach;
+        const nearLength = Math.sqrt(nearX * nearX + nearY * nearY + nearZ * nearZ);
+        if (nearLength <= 0) continue;
+        normalX = nearX / nearLength;
+        normalY = nearY / nearLength;
+        normalZ = nearZ / nearLength;
+        coverage = smoothstep(-alphaFadeGap, -alphaPlateauGap, gap);
+        if (coverage <= 0) continue;
+        tintCoverage = smoothstep(-tintFadeGap, 0, gap);
+      }
       const sunDot = normalX * sunDirection[0] + normalY * sunDirection[1] + normalZ * sunDirection[2];
       const night = 1 - smoothstep(-0.1, 0.08, sunDot);
       const dusk = smoothstep(-0.18, -0.02, sunDot) * (1 - smoothstep(0.03, 0.2, sunDot));
@@ -126,11 +184,12 @@ export const renderGlobeLightingPixels = ({
       const dayAlpha = daylight * 0.045;
       const weight = nightAlpha + duskAlpha + dayAlpha;
       if (weight < 0.002) continue;
-      const edgeAlpha = smoothstep(0, 0.0025, discriminant / directionLengthSquared);
-      const alpha = Math.min(0.76, weight) * opacity * edgeAlpha;
-      pixels[offset] = Math.round((3 * nightAlpha + 240 * duskAlpha + 255 * dayAlpha) / weight);
-      pixels[offset + 1] = Math.round((7 * nightAlpha + 83 * duskAlpha + 178 * dayAlpha) / weight);
-      pixels[offset + 2] = Math.round((24 * nightAlpha + 35 * duskAlpha + 95 * dayAlpha) / weight);
+      const alpha = Math.min(0.76, weight) * opacity * coverage;
+      // Tint fades too, so the tail over empty space stays black.
+      const tint = tintCoverage / weight;
+      pixels[offset] = Math.round((3 * nightAlpha + 240 * duskAlpha + 255 * dayAlpha) * tint);
+      pixels[offset + 1] = Math.round((7 * nightAlpha + 83 * duskAlpha + 178 * dayAlpha) * tint);
+      pixels[offset + 2] = Math.round((24 * nightAlpha + 35 * duskAlpha + 95 * dayAlpha) * tint);
       pixels[offset + 3] = Math.round(alpha * 255);
     }
   }

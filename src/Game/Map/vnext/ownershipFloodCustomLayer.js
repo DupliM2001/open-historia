@@ -32,12 +32,89 @@ const createProgram = (gl, vertexSource, fragmentSource) => {
   return program;
 };
 
-const matrixFromRenderArgs = (args) => {
-  if (args?.defaultProjectionData?.mainMatrix) return args.defaultProjectionData.mainMatrix;
-  if (args?.modelViewProjectionMatrix) return args.modelViewProjectionMatrix;
-  if (Array.isArray(args) || ArrayBuffer.isView(args)) return args;
-  return null;
+// --- Globe projection ---------------------------------------------------------
+// `gl_Position = u_matrix * vec4(a_pos, 0, 1)` is mercator-only: under the globe
+// that matrix expects the shader to have already mapped mercator onto the
+// sphere, so the flood drew nothing and the animation vanished on the globe.
+// MapLibre v5 injects a prelude defining projectTile(), which is correct under
+// both projections and across the globe<->mercator transition. Vertex data is
+// mercator [0,1] (ownershipTransitionWorker's mercatorPoint), which is what
+// projectTile() takes, so only the shader changes.
+
+// Pre-v5 MapLibre had no prelude, only a mercator matrix. Keep that working.
+const LEGACY_SHADER_DATA = Object.freeze({
+  variantName: "legacy-mercator",
+  define: "",
+  vertexShaderPrelude: `uniform mat4 u_projection_matrix;
+vec4 projectTile(vec2 p) {
+  return u_projection_matrix * vec4(p, 0.0, 1.0);
+}`,
+});
+
+const shaderDataFromRenderArgs = (args) => {
+  const shaderData = args?.shaderData;
+  if (typeof shaderData?.vertexShaderPrelude === "string" && shaderData.variantName) {
+    return { define: "", ...shaderData };
+  }
+  return LEGACY_SHADER_DATA;
 };
+
+const projectionDataFromRenderArgs = (args) => {
+  const data = args?.defaultProjectionData;
+  if (data?.mainMatrix) return data;
+  const mainMatrix = args?.modelViewProjectionMatrix
+    ?? (Array.isArray(args) || ArrayBuffer.isView(args) ? args : null);
+  if (!mainMatrix) return null;
+  return {
+    mainMatrix,
+    fallbackMatrix: mainMatrix,
+    tileMercatorCoords: [0, 0, 1, 1],
+    clippingPlane: [0, 0, 0, 0],
+    projectionTransition: 0,
+  };
+};
+
+// MapLibre hands custom layers 64-bit matrices to preserve CPU-side precision.
+// uniformMatrix4fv wants Float32Array, and coercing a Float64Array every frame
+// allocates, so convert into a buffer the layer owns.
+const writeFloat32Matrix = (matrix, target) => {
+  if (!matrix) return null;
+  if (matrix instanceof Float32Array) return matrix;
+  for (let index = 0; index < 16; index += 1) target[index] = Number(matrix[index]) || 0;
+  return target;
+};
+
+// Under mercator only u_projection_matrix exists; the rest resolve to null
+// locations, which WebGL treats as no-ops.
+const applyProjectionUniforms = (gl, locations, projection, buffers) => {
+  if (locations.matrix) {
+    gl.uniformMatrix4fv(locations.matrix, false, writeFloat32Matrix(projection.mainMatrix, buffers.main));
+  }
+  if (locations.tileMercatorCoords) {
+    gl.uniform4fv(locations.tileMercatorCoords, projection.tileMercatorCoords ?? [0, 0, 1, 1]);
+  }
+  if (locations.clippingPlane) {
+    gl.uniform4fv(locations.clippingPlane, projection.clippingPlane ?? [0, 0, 0, 0]);
+  }
+  if (locations.transition) {
+    gl.uniform1f(locations.transition, Number(projection.projectionTransition ?? 0));
+  }
+  if (locations.fallbackMatrix) {
+    gl.uniformMatrix4fv(
+      locations.fallbackMatrix,
+      false,
+      writeFloat32Matrix(projection.fallbackMatrix ?? projection.mainMatrix, buffers.fallback),
+    );
+  }
+};
+
+const projectionUniformLocations = (gl, program) => ({
+  matrix: gl.getUniformLocation(program, "u_projection_matrix"),
+  tileMercatorCoords: gl.getUniformLocation(program, "u_projection_tile_mercator_coords"),
+  clippingPlane: gl.getUniformLocation(program, "u_projection_clipping_plane"),
+  transition: gl.getUniformLocation(program, "u_projection_transition"),
+  fallbackMatrix: gl.getUniformLocation(program, "u_projection_fallback_matrix"),
+});
 
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 const easeOutMild = (value) => {
@@ -159,7 +236,13 @@ export const createOwnershipFloodCustomLayer = ({
   _map: null,
   _gl: null,
   _program: null,
+  _programVariant: "",
+  _failedProgramVariant: "",
+  _fragmentSource: "",
+  _onError: onError,
   _locations: null,
+  // Reused so the per-frame Float64 -> Float32 matrix conversion never allocates.
+  _matrixBuffers: { main: new Float32Array(16), fallback: new Float32Array(16) },
   _fields: [],
   _pendingPayload: null,
   _startedAt: 0,
@@ -171,17 +254,6 @@ export const createOwnershipFloodCustomLayer = ({
   onAdd(map, gl) {
     this._map = map;
     this._gl = gl;
-    const vertexSource = `#version 300 es
-      precision highp float;
-      uniform mat4 u_matrix;
-      in vec2 a_pos;
-      in vec2 a_uv;
-      out vec2 v_uv;
-      void main() {
-        v_uv = a_uv;
-        gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
-      }
-    `;
     const fragmentSource = `#version 300 es
       precision mediump float;
       uniform sampler2D u_field;
@@ -205,22 +277,53 @@ export const createOwnershipFloodCustomLayer = ({
         fragColor = vec4(color, edgeAlpha * u_opacity);
       }
     `;
+    this._fragmentSource = fragmentSource;
+    // Compile the mercator variant now so Nations' `_program` readiness check
+    // passes; render() swaps in the real prelude on the first frame.
+    this._ensureProgram(gl, LEGACY_SHADER_DATA, onError);
+  },
+
+  _ensureProgram(gl, shaderData, onError = null) {
+    if (this._program && this._programVariant === shaderData.variantName) return true;
+    if (this._failedProgramVariant === shaderData.variantName) return false;
+
+    const vertexSource = `#version 300 es
+precision highp float;
+${shaderData.vertexShaderPrelude}
+${shaderData.define}
+in vec2 a_pos;
+in vec2 a_uv;
+out vec2 v_uv;
+void main() {
+  v_uv = a_uv;
+  gl_Position = projectTile(a_pos);
+}
+`;
+    let program = null;
     try {
-      this._program = createProgram(gl, vertexSource, fragmentSource);
-      this._locations = {
-        matrix: gl.getUniformLocation(this._program, "u_matrix"),
-        field: gl.getUniformLocation(this._program, "u_field"),
-        fromColor: gl.getUniformLocation(this._program, "u_fromColor"),
-        toColor: gl.getUniformLocation(this._program, "u_toColor"),
-        progress: gl.getUniformLocation(this._program, "u_progress"),
-        feather: gl.getUniformLocation(this._program, "u_feather"),
-        opacity: gl.getUniformLocation(this._program, "u_opacity"),
-        position: gl.getAttribLocation(this._program, "a_pos"),
-        uv: gl.getAttribLocation(this._program, "a_uv"),
-      };
+      program = createProgram(gl, vertexSource, this._fragmentSource);
     } catch (error) {
-      onError?.(error);
+      // Keep whatever already linked rather than losing the layer outright.
+      this._failedProgramVariant = shaderData.variantName;
+      (onError ?? this._onError)?.(error);
+      return Boolean(this._program);
     }
+
+    try { if (this._program) gl.deleteProgram(this._program); } catch {}
+    this._program = program;
+    this._programVariant = shaderData.variantName;
+    this._locations = {
+      ...projectionUniformLocations(gl, program),
+      field: gl.getUniformLocation(program, "u_field"),
+      fromColor: gl.getUniformLocation(program, "u_fromColor"),
+      toColor: gl.getUniformLocation(program, "u_toColor"),
+      progress: gl.getUniformLocation(program, "u_progress"),
+      feather: gl.getUniformLocation(program, "u_feather"),
+      opacity: gl.getUniformLocation(program, "u_opacity"),
+      position: gl.getAttribLocation(program, "a_pos"),
+      uv: gl.getAttribLocation(program, "a_uv"),
+    };
+    return true;
   },
 
   startTransition(payload, callbacks = {}) {
@@ -277,8 +380,11 @@ export const createOwnershipFloodCustomLayer = ({
   },
 
   render(gl, args) {
-    const matrix = matrixFromRenderArgs(args);
-    if (!matrix || !this._program || !this._locations) return;
+    const projection = projectionDataFromRenderArgs(args);
+    if (!projection) return;
+    // The prelude changes when the projection does, so recompile on the frame
+    // the globe turns on rather than drawing mercator geometry onto a sphere.
+    if (!this._ensureProgram(gl, shaderDataFromRenderArgs(args)) || !this._locations) return;
     if (this._pendingPayload) this._materializePending();
     if (!this._fields.length) return;
 
@@ -307,7 +413,7 @@ export const createOwnershipFloodCustomLayer = ({
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.CULL_FACE);
       gl.useProgram(this._program);
-      gl.uniformMatrix4fv(this._locations.matrix, false, matrix);
+      applyProjectionUniforms(gl, this._locations, projection, this._matrixBuffers);
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(this._locations.field, 0);
       gl.enableVertexAttribArray(this._locations.position);
@@ -357,6 +463,8 @@ export const createOwnershipFloodCustomLayer = ({
     this.clearTransition();
     try { if (this._program) gl.deleteProgram(this._program); } catch {}
     this._program = null;
+    this._programVariant = "";
+    this._failedProgramVariant = "";
     this._locations = null;
     this._map = null;
     this._gl = null;

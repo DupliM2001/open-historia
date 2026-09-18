@@ -1,8 +1,8 @@
 # World State & Turn Model
 
-Open Historia keeps a running game in five plain-JSON documents served from a per-scenario/per-game runtime endpoint. The largest and most important is **`world.json`** — the political map plus everything the AI has changed since the scenario began (region ownership, polities, colors, tags, reputation, units, structures, catalyst, history). The **turn loop** is a "time jump": the AI returns a batch of `events`, each carrying machine-readable `impacts`, and `applyEventImpactsToWorld` folds those impacts into world state before it is persisted; the map re-renders because `useWorldState` polls `world.json` every 5 seconds.
+Open Historia keeps a running game in five plain-JSON documents served from a per-scenario/per-game runtime endpoint. The largest and most important is **`world.json`** — the political map plus everything the AI has changed since the scenario began (region ownership, polities, colors, tags, reputation, units, structures, catalyst, history). The **turn loop** is a "time jump": the AI returns a batch of `events`, each carrying machine-readable `impacts`, and `applyEventImpactsToWorld` folds those impacts into world state before it is persisted; the map re-renders because the write announces itself and `useWorldState` is listening.
 
-Core files: `src/runtime/gameState.js` (state shape, normalizers, impact application), `src/Game/Map/useWorldState.js` (the poll), `src/Game/Map/unitsController.js` (the units peer-poll), `src/runtime/countryTags.js` (tag rules), `src/runtime/assets.js` (read/write/cache plumbing), `src/Game/AI/gameplay.js` (`applySimulationResult`, the turn writer).
+Core files: `src/runtime/gameState.js` (state shape, normalizers, impact application), `src/Game/Map/useWorldState.js` (the map store), `src/runtime/runtimeStore.js` (the HUD store), `src/Game/Map/unitsController.js` (the units store), `src/runtime/countryTags.js` (tag rules), `src/runtime/assets.js` (read/write/cache plumbing), `src/Game/AI/gameplay.js` (`applySimulationResult`, the turn writer).
 
 Related pages: [Country tags](country-tags.md) · [Map rendering & Nations layer](nations-layer.md) · [Units & combat](units.md) · [AI turn / time jump](ai-turn.md) · [Scenario library](library.md).
 
@@ -372,32 +372,62 @@ Colors live in a separate asset (`code → [r,g,b]`), not inside `world.json`. `
 
 ---
 
-## 9. The 5-second poll — `useWorldState`
+## 9. State distribution: three stores, no panel polls
 
-`src/Game/Map/useWorldState.js` is a **singleton** poll shared by all map consumers (it replaced 4 redundant `world.json` requests).
+No panel fetches a runtime document on its own timer any more. Three stores hold the live state, and all three are driven by the canonical write events `writeJson` dispatches (`assets.js:1039`-`:1048`): `oh:world-updated`, `oh:game-updated`, and `oh:runtime-json-updated` for every mutable runtime asset. Updates are pushed, not polled. The one remaining timer is a 60-second backstop for a writer no event can reach.
+
+### The map store: `src/Game/Map/useWorldState.js`
+
+A singleton that holds `world.json` for all map consumers. It bootstraps once from the already-warmed asset cache and updates only when a canonical write announces itself. The 90-second safety poll it used to run was removed because it could interrupt otherwise idle map interaction.
 
 | Piece | Location | Behavior |
 |---|---|---|
-| `POLL_MS` | `:7` | 5000 ms interval. |
-| `sharedState` / `pollTimer` / `subscribers` | `:8`–`:10` | One interval, one result set, a `Set` of subscriber callbacks. |
-| `poll()` | `:31` | `readJson(JSON_URLS.world, { defaultValue:{}, force:true })`, then notifies subscribers. `force:true` bypasses the value cache; concurrent forced reads to the same URL are still batched into one fetch (`assets.js:560`). On error → `{}`. |
-| `startPolling` / `stopPolling` | `:40`,`:46` | First subscriber starts the timer (immediate `poll()` then interval); last unsubscribe clears it (`:79`). |
-| `overrideState` / `setWorldStateOverride` | `:17`,`:25` | Staged-reveal override. `effectiveState() = overrideState ?? sharedState` (`:19`). The poll keeps running underneath — `world.json` stays authoritative — and clearing to `null` snaps consumers back to live state. |
-| `getWorldStateSnapshot` | `:23` | Read-only accessor of the effective state (peer of `unitsController.getUnits`). |
+| `sharedState` / `publishedState` / `subscribers` | `:16`-`:20` | One world object, one derived object, a `Set` of subscriber callbacks. |
+| `bootstrap()` | `:227` | `readJson(JSON_URLS.world, { force: false, clone: false })` on first subscribe. On error it publishes `{}` rather than leaving consumers unpainted. |
+| `onWorldUpdated` | `:251` | `oh:world-updated` carries the saved world in `event.detail.world`; the store adopts that object directly, with no read. |
+| `onActiveGameChanged` | `:267` | A save switch drops `sharedState`, the override and the published object, then bootstraps again from the new save's `world.json`. |
+| `overrideState` / `setWorldStateOverride` | `:21`,`:221` | Staged-reveal override. `effectiveState() = overrideState ?? sharedState` (`:23`). Canonical updates keep landing underneath, and clearing to `null` snaps consumers back to live state. |
+| `getWorldStateSnapshot` | `:219` | Read-only accessor of the effective state (peer of `unitsController.getUnits`). |
 
-### Content-compare / referential-identity guard (`:83`–`:124`)
+### The HUD store: `src/runtime/runtimeStore.js`
 
-`useWorldState` derives a small object of the fields the map cares about (`worldState`, `worldKnown`, `customRegions`, `customCities`, `basemap`, `background`, `regionOwnershipOverrides`, `regionClaimants`, `polityOverrides`, `markers`, `labelFont`, `labelHaloColor`, `labelTextColor`) and, if it is **content-equal** to the previous derived object, RETURNS THE PREVIOUS OBJECT REFERENCE. This keeps `useMemo`/`useEffect` consumers from re-running every 5 seconds when nothing meaningful changed. Comparison strategy:
+One store and one subscription list for all six mutable runtime documents: `game`, `world`, `events`, `actions`, `chat`, `intercepts`. It replaced ten independent 5-second `force: true` intervals across `time.jsx`, `actions.jsx`, `chat.jsx`, `projects.jsx` and `settings.jsx`.
 
-- Scalars (`basemap`, `background`, label config, booleans): `===`.
-- `regionOwnershipOverrides`, `polityOverrides`: `areEqualShallow` (`:56`) — key count + per-key `===` (values are strings/stable object refs).
-- `regionClaimants` and `markers`: `JSON.stringify` content-compare (`:113`,`:115`) — their values are fresh arrays/objects every poll, so reference equality would churn every 5 s; the payloads are tiny. `EMPTY_MARKERS` (`:54`) is a stable `[]` so a marker-less world never churns the memo.
+| Piece | Location | Behavior |
+|---|---|---|
+| `SOURCES` | `:34` | Per key: the `gameState.js` reader and the matching normalizer. The store always holds normalized documents. |
+| `subscribeRuntime(key, fn, { select, seed })` | `:254` | Adds a subscriber. With `select`, `fn` is called only when that selector's output changes, compared with `deepEqual` (`:59`). Without one, only when the document's own reference changes. `seed` is the slice the caller last rendered, so a change landing between a render and its subscription is not swallowed. |
+| `applyValue` | `:111` | Normalizes, deep-compares against the current document, and publishes only on a real difference. A poll that found nothing new notifies nobody. |
+| `openChannel` | `:186` | A `BroadcastChannel` carrying **only the key** of a document this tab wrote. Other tabs of the origin share one save and see no `window` event from it; posting the value instead would structured-clone a multi-megabyte world into every listening tab on every write. A receiving tab marks that key `stale` and re-reads it, or defers if it is hidden or has nobody subscribed. |
+| `tick` / `syncTimer` | `:154`,`:167` | The 60-second backstop (`RUNTIME_BACKSTOP_MS`), running only while at least one key has subscribers and the tab is visible. A tick reads only the keys that are marked stale or whose last write is older than the backstop, so in an ordinary session it finds nothing and issues nothing. It exists for a writer no event reaches: a save edited on disk while the app runs. |
+| `onRuntimeJsonUpdated` | `:200` | A same-tab write is authoritative on arrival: the store takes `event.detail.value` and marks that key fresh, so the next tick skips it. In an ordinary session almost every update arrives this way and costs no request. |
+| `isStaleGameRead` | `:88` | A read that comes back behind the published `(round, gameDate)` is refused, and the whole batch with it, since world and events belong to that same stale turn. `game` therefore rides along with every batch (`:162`). This is the invariant that used to live in `time.jsx`'s `gameStampRef`. |
+| `onRolledBack` | `:210` | A rollback is the one write that legitimately moves the clock backwards, so `oh:rolled-back` (dispatched by `rollBackToSnapshot`) clears the stamp and re-reads. |
+| `onActiveGameChanged` | `:215` | Same reset as the map store: every document is dropped and re-read for the new save. |
+| `primeRuntimeValue(key, value)` | `:280` | Publishes state the caller already holds (a finished turn, a restored bundle) without a round trip. `time.jsx` uses it where it used to call `setGameData` / `setEvents` / `setWorldState`. |
+| `refreshRuntimeState(keys)` | `:286` | An explicit read, for the moment a panel opens. |
 
-`worldState` itself is the raw polled object (still replaced each poll), but the sibling derived fields drive the map layers and are identity-stable.
+`countryStats` and `countryStatsHistory` are the one exception to all of this: the stats worker writes `world.json` from off-thread and `primeCountryStatsWorkerCommit` patches the same-tab caches narrowly rather than re-broadcasting the world, so those two fields only become current here on a backstop read. Read them through `readCountryStatsBundle`.
 
-### Units peer-poll — `unitsController.js`
+React consumers use `useRuntimeState(key, select, depsKey)` (`src/runtime/useRuntimeState.js`). Pass `depsKey` when the selector closes over something that can change without the document changing, as `projects.jsx` does for `isPolityLandless(world, playerCountry)`.
 
-`src/Game/Map/unitsController.js` runs its OWN 5-second `setInterval` (`startUnitsSync`, `:90`) that force-reads `world.json` + `game.json` and republishes `world.units` to a pub/sub (`:70`). The player's only mutations are **deploy**, **disband** and **request orders** — manual movement and manual combat were removed, so where forces go and what happens when they meet belongs to the AI and to `advanceStandingOrders`. `deployUnit` and `removeUnit` apply optimistically in memory and `commit` does a read-modify-write of `world.units` **preserving the rest of world state** (`{ ...world, units: nextUnits }`), guarded by a `busy` flag so the poll doesn't clobber a mid-commit write. A deploy and a `requestUnitOrders` both `queueOrder` (an action) so the AI adjudicates them on the next jump; a deploy carries a `unitRevert` describing how to undo it if the player deletes the action first (`normalizeUnitRevert` in `gameState.js`). `revertUnitOrder` keeps its `lng`/`lat`/`status`/`pendingOrderId` branches for actions queued by the old manual-order UI that are still sitting in existing saves. It exposes its own `setUnitsOverride`/`getUnits` (`:53`,`:58`) mirroring the world-state override for staged reveals.
+The practical rule for a new panel: subscribe to the narrowest slice you can name. `actions.jsx` takes `{ country, gameDate, round }` off `game.json` and re-renders for nothing else; `projects.jsx` takes `world.projects` and `world.polityOverrides` separately, so a unit move does not touch the board.
+
+### Content-compare / referential-identity guard (`useWorldState.js:143`-`:190`)
+
+`useWorldState` derives a small object of the fields the map cares about (`worldState`, `worldKnown`, `customRegions`, `customCities`, `basemap`, `background`, `regionOwnershipOverrides`, `regionClaimants`, `polityOverrides`, `markers`, `cityRenames`, `cityPopulations`, `labelFont`, `labelHaloColor`, `labelTextColor`) and, if it is **content-equal** to the previous derived object, RETURNS THE PREVIOUS OBJECT REFERENCE. This keeps `useMemo`/`useEffect` consumers from re-running when nothing meaningful changed. Comparison strategy:
+
+- Scalars (`basemap`, label config, booleans): `===`.
+- `regionOwnershipOverrides`: `areEqualShallow` (`:25`), key count plus per-key `===` (values are strings).
+- `background`, `regionClaimants`, `polityOverrides`, `markers`, `cityRenames`, `cityPopulations`: `areEqualStructured` (`:37`), a recursive content compare. Their values are fresh arrays/objects on every canonical update, so reference equality would churn; the payloads are small. `EMPTY_MARKERS` (`:14`) is a stable `[]` so a marker-less world never churns the memo.
+
+`worldState` itself is the raw world object (replaced whenever a write lands), but the sibling derived fields drive the map layers and are identity-stable.
+
+### The units store: `unitsController.js`
+
+`src/Game/Map/unitsController.js` is the third store and follows the same shape: `startUnitsSync` (`:256`) ref-counts subscribers, bootstraps once, and then listens for `oh:world-updated` and `oh:game-updated` (`:242`), republishing `world.units` to its own pub/sub (`:39`). Its own 5-second `world.json` + `game.json` poll is gone.
+
+The player's only mutations are **deploy**, **disband** and **request orders**. Manual movement and manual combat were removed, so where forces go and what happens when they meet belongs to the AI and to `advanceStandingOrders`. `deployUnit` and `removeUnit` apply optimistically in memory and `commit` does a read-modify-write of `world.units` **preserving the rest of world state** (`{ ...world, units: nextUnits }`), guarded by a `busy` flag (`:36`) so an incoming update does not clobber a mid-commit write. A deploy and a `requestUnitOrders` both `queueOrder` (an action) so the AI adjudicates them on the next jump; a deploy carries a `unitRevert` describing how to undo it if the player deletes the action first (`normalizeUnitRevert` in `gameState.js`). `revertUnitOrder` keeps its `lng`/`lat`/`status`/`pendingOrderId` branches for actions queued by the old manual-order UI that are still sitting in existing saves. It exposes its own `setUnitsOverride`/`getUnits` (`:58`,`:63`) mirroring the world-state override for staged reveals.
 
 ---
 

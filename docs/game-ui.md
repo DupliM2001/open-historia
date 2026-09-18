@@ -423,7 +423,7 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 ## 14. Shared conventions
 
 - **Surface styling**: most HUD elements share a `baseStyle`/`surface` object — `rgba(17,24,39,0.9)` bg, `backdrop-filter: blur`, 12px radius, subtle border/shadow. The main menu/editor use `surfaceStyle` (darker gradient + heavier blur).
-- **5-second polling**: Chat, Actions, Stats, `Other`, and `DateWidget` each run their own `setInterval(refresh, 5000)` against the runtime stores rather than sharing a subscription — the map's own poll then repaints ownership within ~5 s of any cheat/edit.
+- **Runtime state**: panels do not poll. They subscribe to a slice of the shared store (`src/runtime/runtimeStore.js`, usually via `useRuntimeState`), which is pushed by canonical write events (same-tab, and cross-tab over a `BroadcastChannel`) rather than polled, and wakes a panel only when its own slice changed. A 60-second backstop read covers writers no event reaches. See [World state §9](world-state.md#9-state-distribution-three-stores-no-panel-polls).
 - **`data-no-translate`**: player-typed text, economic figures, and raw dropdown values are marked so the UI translator ([i18n](i18n.md)) leaves them verbatim.
 - **Mobile branching**: `useIsMobile()` (`src/runtime/useIsMobile.js`) reshapes the search box, the date/country row, the exit cluster, and menu paddings. The advisor drawer and bottom panels clamp to `calc(100vw − …)`.
 - **Lazy chunks**: advisor (Chart.js + markdown), cheats, community hub, the map editor, and the OpenLayers country picker are all `React.lazy` — none are in the first paint.
