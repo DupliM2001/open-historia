@@ -91,6 +91,7 @@ The heart of the map-mutating pipeline. Attached to events (`eventSchema.impacts
 | `regionClaims` | `regionClaimSchema[]` | **Territory claimed but not held.** Marks a region disputed (striped) *without* moving the border — an irredentist declaration, a proclaimed union, a contested frontier. `drop: true` withdraws a claim | no |
 | `unitOps` | `unitOpSchema[]` | Military unit mutations | no |
 | `markerOps` | `markerOpSchema[]` | Structures built/destroyed on the map | no |
+| `reports` | `reportOpSchema[]` | **Documents only some governments hold** — `create` (title, body, `visibleTo` of full polity names, optional `reportId`/`dateline`) or `share` (`reportId`, `visibleTo`). Never carries impacts: what moved the map stays in the public event. See [reports](ai-overview.md#reports-what-only-some-governments-know) | no |
 
 ### 4.2 `regionTransferSchema` (`:90`)
 
@@ -187,7 +188,7 @@ Required: `op` and `name`. `eventIndex` says which of the events this op follows
 
 The **game master keeps the full `impactsSchema`**, board included: it is a single call with no second pass to hand the work to.
 
-Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It grew again with what beta added to the jump (31,720 once `at` joined), and the **description audit** brought it to **24,915**: every field description says what the field *is* in a line, because the levers are explained at length in the actions reference and the call-time directives the jump is always given — a paragraph in a field description was the same paragraph a third time. The guard in `projectOpSchema.test.js` is now 26,000. It is a prompt-size guard, not a provider limit: a new impact family that saves a *request* (reports, a chat continuation — see the tooling audit in the plan) may raise it, on purpose.
+Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It grew again with what beta added to the jump (31,720 once `at` joined), and the **description audit** brought it to **24,915**: every field description says what the field *is* in a line, because the levers are explained at length in the actions reference and the call-time directives the jump is always given — a paragraph in a field description was the same paragraph a third time. The guard in `projectOpSchema.test.js` is now **28,000**, raised on purpose when `impacts.reports` landed (26,363 chars; ~1,450 for the family). It is a prompt-size guard, not a provider limit: an impact family that saves a *request* may raise it — reports inside the jump cost ~1,450 characters instead of a whole request a turn, which is the trade the budget asks for.
 
 ### 4.6 `createdChatSchema`
 

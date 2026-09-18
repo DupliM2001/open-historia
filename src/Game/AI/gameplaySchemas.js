@@ -417,6 +417,38 @@ const spyOpSchema = {
   additionalProperties: false,
 };
 
+// A document held by the governments it was addressed to (runtime/reports.js).
+// It rides in the jump's own answer — a report costs no request of its own —
+// and it never carries impacts: what moved the map is public.
+const reportOpSchema = {
+  description: "create a document, or share an existing one with more polities.",
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        op: { type: "string", enum: ["create"] },
+        reportId: textSchema("A short stable id you choose, to share it later."),
+        title: nonEmptyTextSchema("The document's own heading."),
+        body: nonEmptyTextSchema("The document itself, in its own voice — see [Reports]. Markdown."),
+        visibleTo: stringArraySchema("The polities that hold it, by FULL name. Empty only for a document published to all."),
+        dateline: textSchema("Its date (YYYY-MM-DD), when it carries one."),
+      },
+      required: ["op", "title", "body", "visibleTo"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        op: { type: "string", enum: ["share"] },
+        reportId: nonEmptyTextSchema("The existing report's id, or its exact title."),
+        visibleTo: stringArraySchema("The polities that now hold it too, by FULL name."),
+      },
+      required: ["op", "reportId", "visibleTo"],
+      additionalProperties: false,
+    },
+  ],
+};
+
 const markerOpSchema = {
   description: "build a genuinely new structure; update or rename an existing one; remove only when it ceases to exist; population when a city's population changes.",
   anyOf: [
@@ -811,6 +843,13 @@ const impactsSchema = {
       type: "array",
       description: "The player's own espionage orders this event executes (deploy or recall an agent), only when their queued actions or chat ordered it; never for other powers.",
       items: spyOpSchema,
+    },
+    reports: {
+      type: "array",
+      description:
+        "Documents this event produces — a secret protocol, a private letter, an intelligence assessment, a treaty's articles — held only by the polities named in each one. See [Reports]. "
+        + "Most events have none; never restate the public event as a report.",
+      items: reportOpSchema,
     },
     regionClaims: {
       type: "array",

@@ -144,8 +144,10 @@ test("the board no longer costs the jump anything", () => {
   // A regression here means someone re-embedded projectSchema, put the board
   // back in the jump, or wrote a paragraph into a field. The guard is a
   // prompt-size guard, not a provider limit: a new impact family that saves a
-  // REQUEST (reports, a chat continuation) may raise it, on purpose, here.
-  assert.ok(jumpChars < 26000, `the jump schema grew back to ${jumpChars} chars`);
+  // REQUEST may raise it, on purpose, here — which is what reports did
+  // (26,363: ~1,450 chars for impacts.reports, against a whole request per turn
+  // if documents had taken a call of their own, as the board did).
+  assert.ok(jumpChars < 28000, `the jump schema grew back to ${jumpChars} chars`);
 
   // ...and the game master, which has no second pass to hand the board to, keeps
   // it on its authored events (the provider sees a shallow transport; the
