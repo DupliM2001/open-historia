@@ -19,7 +19,7 @@ import { OWNER_SCHEMA } from "./ownerMigration.js";
 
 // A complete configuration carries every feature; these tests are about the two
 // named in them, so the director rides along at its defaults.
-const WORLD_DIRECTION_DEFAULTS = { enabled: true, eventPace: 100, worldShare: 35, priorityRules: "" };
+const WORLD_DIRECTION_DEFAULTS = { enabled: true, eventPace: 100, worldShare: 35, priorityRules: "", scriptedEvents: "", territoryTempo: 0 };
 
 const SERVER_DIR = path.dirname(url.fileURLToPath(import.meta.url));
 const STORE_URL = url.pathToFileURL(path.join(SERVER_DIR, "libraryStore.js")).href;

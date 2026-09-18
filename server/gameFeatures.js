@@ -72,6 +72,25 @@ export const FEATURE_DEFINITIONS = Object.freeze([
         defaultValue: "",
         description: "Rules for this scenario that outrank every default the simulator is given, written last in its instructions and marked as such. Keep them few and absolute: \"No power may field nuclear weapons before 1945.\" \"The Ottoman Empire cannot collapse before 1918.\"",
       }),
+      Object.freeze({
+        key: "scriptedEvents",
+        type: "text",
+        label: "Scripted events",
+        maxLength: 8000,
+        rows: 8,
+        defaultValue: "",
+        description: "History that happens on its date whatever else the players do: one event per line, the date first (YYYY-MM-DD, a year before AD 1 with a leading minus), then what happens in your own words. The time skip that covers the date is asked to write it; if it does not, the engine writes it for you. \"1914-06-28 Archduke Franz Ferdinand is assassinated in Sarajevo.\"",
+      }),
+      Object.freeze({
+        key: "territoryTempo",
+        label: "The map's tempo",
+        unit: "regions per 30 days, at most (0 = no ceiling)",
+        min: 0,
+        max: 60,
+        step: 1,
+        defaultValue: 0,
+        description: "How fast borders may move. The engine counts a skip's transfers and captures in event order and withholds any beyond the ceiling for the period, telling the simulator to carry the front on next time. Set it for a slow war of attrition; leave it at 0 for the built-in behaviour.",
+      }),
     ]),
   }),
 ]);
@@ -172,6 +191,8 @@ export const worldDirectionOf = (features) => {
     eventPace: percent(direction.eventPace, 100),
     worldShare: percent(direction.worldShare, 35),
     priorityRules: typeof direction.priorityRules === "string" ? direction.priorityRules.trim() : "",
+    scriptedEvents: typeof direction.scriptedEvents === "string" ? direction.scriptedEvents.trim() : "",
+    territoryTempo: percent(direction.territoryTempo, 0),
   };
 };
 

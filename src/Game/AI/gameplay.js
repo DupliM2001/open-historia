@@ -230,7 +230,16 @@ import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
-import { buildWorldDirectionDirective, worldShareShortfall } from "./worldDirection.js";
+import {
+  applyTerritoryTempo,
+  buildScriptedEventsInstruction,
+  buildWorldDirectionDirective,
+  dateKey,
+  ensureScriptedEvents,
+  parseScriptedEvents,
+  scriptedBeatsInSpan,
+  worldShareShortfall,
+} from "./worldDirection.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 import {
   NO_RESPONSE_BODY_NOTE,
@@ -2351,6 +2360,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   if (["jumpForward", "autoJumpForward"].includes(taskKey)) {
     const directionDirective = buildWorldDirectionDirective(getActiveWorldDirection(), {
       playerPolity: normalizeString(variables?.playerPolity),
+      spanDays: computeSimulatedDays(variables) || 30,
     });
     if (directionDirective) systemPrompt = `${systemPrompt}\n\n${directionDirective}`;
   }
@@ -10341,9 +10351,20 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       // The scenario author's settings (worldDirection.js): the pace scales what
       // the period is asked for here, and the world's share is counted below.
       const direction = getActiveWorldDirection();
-      const [minEvents, maxEvents] = segmentCount > 1
+      // The author's scripted events that fall in this span (worldDirection.js):
+      // asked for by name, and each one a slot of its own on top of the range.
+      // The game's first skip covers its origin day too; after that the origin
+      // day belongs to the period before.
+      const scriptedBeats = scriptedBeatsInSpan(parseScriptedEvents(direction?.scriptedEvents), {
+        originDate: state.segmentOrigin,
+        targetDate: segmentTarget,
+        includeOrigin: normalizeArray(bundle.world?.simulationHistory).length === 0 && segmentIndex === 0,
+      });
+      const [pacedMin, pacedMax] = segmentCount > 1
         ? segmentEventRange(spanDays, plannedActionShare, { pace: direction?.eventPace })
         : segmentEventRange(safeDays, plannedActionCount, { pace: direction?.eventPace });
+      const minEvents = Math.max(pacedMin, scriptedBeats.length);
+      const maxEvents = Math.max(pacedMax, scriptedBeats.length + 1);
       // targetDate reaches only these two variables (promptContext.js), so the
       // expensive context — region catalog, city seed, territory index — is built
       // once for the whole jump and only the dates move per segment.
@@ -10422,7 +10443,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
           targetDate,
           segmentTargetDate: segmentTarget,
           priorEvents: state.generatedSoFar,
-        })].filter(Boolean).join("\n\n"),
+        }), buildScriptedEventsInstruction(scriptedBeats)].filter(Boolean).join("\n\n"),
         validatePayload: withReceiptDraft(async (candidate, { finalAttempt } = {}, draft) => {
           // Shape-of-story problems (event count, stray dates) are STRICT while a
           // retry remains — the model gets the exact error and usually fixes its
@@ -10478,6 +10499,38 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
               "adjusted",
               `Some event dates fell outside ${state.segmentOrigin} to ${segmentTarget} and were moved inside it — ${firstComplaintLine(dateError)}`,
             );
+          }
+          // The map's tempo, an author's ceiling on how many regions change hands
+          // in a period (worldDirection.js): counted in event order, before the
+          // resolver spends anything on entries the period cannot carry. Never a
+          // rejection — the front simply moves this far, and the model is told.
+          if (direction?.territoryTempo > 0) {
+            const tempo = applyTerritoryTempo(candidate?.events, { ceilingPerMonth: direction.territoryTempo, spanDays });
+            if (tempo.withheld > 0) {
+              candidate.events = tempo.events;
+              noteReceipt(
+                draft,
+                "withheld",
+                `${tempo.withheld} territorial change${tempo.withheld === 1 ? " was" : "s were"} withheld: this scenario's map moves no faster than ${Math.round(direction.territoryTempo)} region${Math.round(direction.territoryTempo) === 1 ? "" : "s"} per thirty days (${tempo.allowance} this period), counted in event order. `
+                  + "Carry the rest of that advance into the next period, or write the front as holding.",
+              );
+            }
+          }
+          // The author's scripted events (worldDirection.js): one the answer left
+          // out is written by the engine, in the author's words, and the model is
+          // told so it carries the consequences. An auto jump that stopped short
+          // owes only the beats up to where it stopped.
+          if (scriptedBeats.length) {
+            const stopKey = mode === "auto" ? dateKey(candidate?.stopDate) : null;
+            const due = stopKey === null ? scriptedBeats : scriptedBeats.filter((beat) => dateKey(beat.date) <= stopKey);
+            const scripted = ensureScriptedEvents(candidate?.events, due);
+            if (scripted.inserted.length) {
+              candidate.events = scripted.events;
+              sortTimelineEventsChronologically(candidate);
+              for (const beat of scripted.inserted) {
+                noteReceipt(draft, "adjusted", `The scripted event of ${beat.date} — "${beat.title}" — was not in your answer, so the engine wrote it in the author's words, with no impacts. It is history in this world: its consequences are yours to carry forward.`);
+              }
+            }
           }
           // The war ledger must see the sanitized impacts, so world changes go first.
           const worldChangeError = await validateGeneratedWorldChanges(candidate, bundle.world, {
