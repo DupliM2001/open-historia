@@ -65,12 +65,9 @@ export const MAP_SETTING_KEYS = {
     // provider handles tool calls badly, or who wants the single cheaper
     // request per task, turns them off from Settings → AI.
     lookupFunctions: "ai_lookup_functions",
-    // A time skip's events on the Events panel as the model writes them
-    // (AI/streamedEvents.js). ON by default, read with getMapSettingDefaultOn.
-    // Off puts the skip back behind the Timeline panel's spinner, which is what
-    // a player wants if the live panel distracts or costs frames on a weak
-    // machine. Providers that hand their tool call over whole, Gemini among
-    // them, arrive together either way.
+    // A skip's events on the Events panel as the model writes them
+    // (AI/streamedEvents.js). ON by default; off leaves the skip behind the
+    // Timeline panel's spinner.
     liveSkipEvents: "ai_live_skip_events",
 };
 

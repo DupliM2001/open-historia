@@ -1987,7 +1987,7 @@ const SettingsWorkspace = ({
                     </div>
                     <Toggle label="Show time skip events as they are written" enabled={mapSettings.liveSkipEvents} onToggle={() => updateMapSetting("liveSkipEvents", MAP_SETTING_KEYS.liveSkipEvents, !mapSettings.liveSkipEvents)} />
                     <div style={settingsHelper}>
-                    On (default): a time skip opens the Events panel and fills it as the model writes, one card at a time, with the spinner and Cancel underneath. Reveal them with Next event as they arrive; wherever you get to is kept when the turn lands. Off: the skip stays behind the Timeline panel's spinner and the whole round appears at the end, as it did before. Nothing about the turn itself changes either way. Providers that hand their answer over whole rather than in pieces, Gemini among them, arrive all at once regardless.
+                    On (default): a skip opens the Events panel and fills it as the model writes, with the spinner and Cancel underneath. Reveal with Next event as they arrive, and the map and camera follow; wherever you get to is kept when the turn lands. Off: the skip stays behind the Timeline panel's spinner and the round appears at the end. The turn itself is the same either way, and Gemini arrives all at once regardless.
                     </div>
                     <Toggle label="Batch background AI tasks" enabled={mapSettings.batchBackgroundTasks} onToggle={() => updateMapSetting("batchBackgroundTasks", MAP_SETTING_KEYS.batchBackgroundTasks, !mapSettings.batchBackgroundTasks)} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>

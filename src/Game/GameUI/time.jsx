@@ -551,6 +551,17 @@ const buildTurnRecord = ({ entry, index, history, eventLookup, game, lookups }) 
 // the skip: the panel keys its filter and its scroll on it.
 const LIVE_TURN_RECORD_ID = "live-turn";
 
+// A copy, because this is the running game's own world and
+// applyEventImpactsToWorld is handed a snapshot everywhere else.
+const cloneWorldForStaging = (world) => {
+    if (!world || typeof world !== "object") return null;
+    try {
+        return typeof structuredClone === "function" ? structuredClone(world) : JSON.parse(JSON.stringify(world));
+    } catch {
+        return null;
+    }
+};
+
 // A field on the shape that is rarely read, computed the first time it is.
 const onFirstRead = (target, key, compute) => {
     let value;
@@ -580,12 +591,30 @@ const onFirstRead = (target, key, compute) => {
 const liveEventCards = new WeakMap();
 let liveEventSeq = 0;
 
+// The lists the cards, the camera and the map staging walk. A streamed event's
+// are whatever the model typed, and `?? []` does not save an iteration from a
+// non-array: that throws in a render and blanks the panel. Dropped here once.
+const LIVE_EVENT_LISTS = [
+    "regionTransfers", "regionControlOps", "regionClaims", "polityChanges",
+    "unitOps", "markerOps", "createdChats", "projectOps",
+];
+
 const liveEventCard = (event) => {
     if (!event || typeof event !== "object") return event;
     let card = liveEventCards.get(event);
     if (!card) {
         liveEventSeq += 1;
         card = { ...event, id: `${LIVE_TURN_RECORD_ID}-${liveEventSeq}` };
+        for (const key of ["tags", "combatants"]) {
+            if (card[key] !== undefined && !Array.isArray(card[key])) card[key] = [];
+        }
+        const impacts = card.impacts && typeof card.impacts === "object" && !Array.isArray(card.impacts)
+            ? { ...card.impacts }
+            : {};
+        for (const key of LIVE_EVENT_LISTS) {
+            if (impacts[key] !== undefined && !Array.isArray(impacts[key])) impacts[key] = [];
+        }
+        card.impacts = impacts;
         liveEventCards.set(event, card);
     }
     return card;
@@ -1966,6 +1995,8 @@ const DateWidget = ({
     const [skipInFlight, setSkipInFlight] = useState(false);
     // The span being written, for the panel's subtitle. Set when the skip starts.
     const [liveRange, setLiveRange] = useState({ from: "", to: "" });
+    // The pre-jump world the live reveal stages onto. Null when no skip is running.
+    const [liveStageBase, setLiveStageBase] = useState(null);
     // Cards the player has opened, by headline, so one opened mid-skip survives
     // the validated turn replacing the preview.
     const [openMapChanges, setOpenMapChanges] = useState(() => new Set());
@@ -2148,8 +2179,7 @@ const DateWidget = ({
         // Worked out before the flag goes up: only the finally lowers it, so a
         // throw before the try would leave the panel live for good.
         const landingDate = mode === "auto" ? "" : jumpTargetDate(currentDate, days);
-        // Settings, AI: off puts the skip back behind the Timeline panel's
-        // spinner, with the whole round appearing when it lands.
+        // Settings, AI: off leaves the skip behind the Timeline panel's spinner.
         const live = getMapSettingDefaultOn(MAP_SETTING_KEYS.liveSkipEvents);
 
         // Watched from the Events panel, which fills as the model writes and
@@ -2165,13 +2195,12 @@ const DateWidget = ({
         revealCarryRef.current = null;
         if (live) {
             setOpenMapChanges(new Set());
-            // Revealed exactly like a written turn, and where the player gets to
-            // is carried onto the turn that lands so nothing is uncovered twice.
-            // Only when live: with the panel behind the spinner the reveal
-            // effect never re-runs, so a failed skip would leave the previous
-            // turn collapsed to its first event.
+            // Only when live: behind the spinner the reveal effect never re-runs,
+            // so a failed skip would leave the previous turn collapsed to one event.
             setVisibleEventCount(1);
             setLiveRange({ from: currentDate, to: landingDate });
+            // Nothing is written yet, so the world on screen is the base.
+            setLiveStageBase(cloneWorldForStaging(worldState));
         }
         setError("");
         setFallbackWarning("");
@@ -2195,8 +2224,7 @@ const DateWidget = ({
         const controller = new AbortController();
         jumpAbortRef.current = controller;
         try {
-            // No onEvents with the setting off: nothing streams to the panel,
-            // and the skip runs exactly as it did before it could.
+            // No onEvents with the setting off: nothing streams anywhere.
             const onEvents = live ? showStreamedEvents : undefined;
             const result = mode === "auto"
             ? await simulateAutoJump({ days, signal: controller.signal, onProgress: showSkipPhase, onEvents })
@@ -2298,6 +2326,7 @@ const DateWidget = ({
             setSkipInFlight(false);
             setJumpProgress("");
             setStreamedEvents([]);
+            setLiveStageBase(null);
             // Between turns, never during one. If the ladder has learned
             // something consistent about this endpoint, offer it now.
             setModeSuggestion(getStructuredModeSuggestion());
@@ -2366,6 +2395,7 @@ const DateWidget = ({
             setVisibleEventCount(1);
             // The finished segments are in hand; the retry writes the rest.
             setLiveRange({ from: currentDate, to: "" });
+            setLiveStageBase(cloneWorldForStaging(worldState));
             setPanel("history");
         }
         const startedAt = Date.now();
@@ -2415,6 +2445,7 @@ const DateWidget = ({
             setSkipInFlight(false);
             setJumpProgress("");
             setStreamedEvents([]);
+            setLiveStageBase(null);
         }
     };
 
@@ -2590,10 +2621,10 @@ const DateWidget = ({
         : null), [skipInFlight, streamedEvents, liveRange.from, liveRange.to, gameData?.round, lookups]);
     const displayRecord = liveTurnRecord ?? latestTurnRecord;
     const totalVisibleEvents = displayRecord?.events?.length || 0;
-    // The world has not moved, so the camera has nowhere real to fly: it waits
-    // for the turn to land and picks up where the player had reached.
+    // The newest revealed event, written turn or not: the camera follows the
+    // live reveal for the same reason the map stages along with it.
     const activeVisibleEvent =
-    openPanel === "history" && !liveTurnRecord && totalVisibleEvents > 0
+    openPanel === "history" && totalVisibleEvents > 0
     ? displayRecord.events[Math.min(Math.max(visibleEventCount, 1), totalVisibleEvents) - 1]
     : null;
 
@@ -2840,7 +2871,12 @@ const DateWidget = ({
             return;
         }
 
-        focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, currentFocusContext()));
+        try {
+            focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, currentFocusContext()));
+        } catch (error) {
+            // Unvalidated impacts, so this can fail where a written turn's never does.
+            console.warn("[OH event camera] could not place this event; the camera stays put.", error);
+        }
     }, [activeVisibleEvent, disableEventCamera, currentFocusContext, mapRef]);
 
     // Each step of the reveal is remembered (runtime/unseenEvents.js): what it
@@ -2918,6 +2954,32 @@ const DateWidget = ({
     }, [latestTurnRecord?.id, openPanel, skipInFlight, stagedBase.recordId]);
 
     useEffect(() => {
+        // No snapshot needed while the skip writes: the world has not moved, so
+        // it is already the pre-jump base. Without this the map sits still all
+        // round, since the reveal now happens during the skip and the turn lands
+        // fully revealed, the one state the staging below never covers.
+        if (liveTurnRecord) {
+            const revealedLive = liveTurnRecord.events.slice(0, Math.max(1, visibleEventCount));
+            if (openPanel === "history" && liveStageBase && revealedLive.length) {
+                try {
+                    const { world: livePreview } = applyEventImpactsToWorld({
+                        colors: {},
+                        events: revealedLive,
+                        motion: { originDate: liveTurnRecord.fromDate || "", round: liveTurnRecord.round || 0, tick: 0 },
+                        world: liveStageBase,
+                    });
+                    setWorldStateOverride(livePreview);
+                    setUnitsOverride(livePreview.units ?? []);
+                    return;
+                } catch (error) {
+                    // Unvalidated impacts again: the map waits rather than taking the panel.
+                    console.warn("[OH staged reveal] the live preview could not be applied; the map waits for the turn.", error);
+                }
+            }
+            setWorldStateOverride(null);
+            setUnitsOverride(null);
+            return;
+        }
         const record = latestTurnRecord;
         const stagingActive =
             !skipInFlight &&
@@ -2953,7 +3015,7 @@ const DateWidget = ({
         });
         setWorldStateOverride(stagedWorld);
         setUnitsOverride(stagedWorld.units ?? []);
-    }, [latestTurnRecord, openPanel, skipInFlight, stagedBase, totalVisibleEvents, visibleEventCount]);
+    }, [latestTurnRecord, liveStageBase, liveTurnRecord, openPanel, skipInFlight, stagedBase, totalVisibleEvents, visibleEventCount]);
 
     // Never leave a stale override behind when this widget unmounts.
     useEffect(
