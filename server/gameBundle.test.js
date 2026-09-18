@@ -31,6 +31,7 @@ const SERVER_DIR = path.dirname(url.fileURLToPath(import.meta.url));
 const STORE_URL = url.pathToFileURL(path.join(SERVER_DIR, "libraryStore.js")).href;
 
 const roots = [];
+const TEST_STATS_DEFINITION = { version: 2, sections: [{ key: "resources", label: "Resources", icon: "🧰", stats: [{ key: "timber", label: "Timber", kind: "number", icon: "🪵", color: "#22c55e", description: "Usable timber supply.", prefix: "", suffix: "tonnes", decimals: 0, compact: true, minimum: 0 }] }] };
 const writeJson = (file, value) => {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(value), "utf-8");
@@ -62,6 +63,7 @@ const buildDataDir = ({
     });
     writeJson(path.join(dir, "world.json"), { ownerSchema: OWNER_SCHEMA });
     writeJson(path.join(dir, "game.json"), {});
+    writeJson(path.join(dir, "stats.json"), TEST_STATS_DEFINITION);
     for (const key of ["actions", "advisor", "chat", "events"]) {
       writeJson(path.join(dir, "storage", `${key}.json`), []);
     }
@@ -94,6 +96,7 @@ const buildDataDir = ({
       round: 10,
     });
     writeJson(path.join(dir, "colors.json"), { Testland: [1, 2, 3] });
+    writeJson(path.join(dir, "stats.json"), TEST_STATS_DEFINITION);
     writeJson(path.join(dir, "prompts.json"), { gameMaster: "be terse" });
     for (const key of ["actions", "advisor", "chat", "events"]) {
       writeJson(path.join(dir, "storage", `${key}.json`), [{ id: `${key}-1` }]);
@@ -128,12 +131,18 @@ test("everything a game holds survives the round trip, and the copy is a new, in
     const imported = store.importGameBundle(bundle);
     const details = store.getGameDetails(imported.game.id);
     const catalog = store.getGameCatalog();
+    const bundleStats = bundle.data.stats;
+    store.setActiveGame(imported.game.id);
+    const importedStats = store.readRuntimeJsonAsset("stats").data;
+    store.setActiveGame("test-campaign");
     ${report(`{
       schema: bundle.schema,
       sameId: imported.game.id === "test-campaign",
       name: imported.game.name,
       activeGameId: catalog.activeGameId,
       gameCount: catalog.games.length,
+      bundleStats,
+      importedStats,
       data: details.data,
       world: details.data.world,
     }`)}
@@ -151,6 +160,9 @@ test("everything a game holds survives the round trip, and the copy is a new, in
   assert.equal(result.data.game.difficulty, "hard");
   assert.equal(result.data.game.round, 10);
   assert.equal(result.data.prompts.gameMaster, "be terse");
+  const expectedStats = TEST_STATS_DEFINITION;
+  assert.deepEqual(result.bundleStats, expectedStats, "custom Stats definitions travel inside the game bundle");
+  assert.deepEqual(result.importedStats, expectedStats, "the imported campaign serves its frozen Stats definition at runtime");
   assert.deepEqual(result.data.events, [{ id: "events-1" }]);
   assert.deepEqual(result.world.countryTags, { Testland: ["socialist"] });
 });

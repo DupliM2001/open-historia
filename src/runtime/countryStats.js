@@ -1,4 +1,5 @@
 import { astronomicalYear, compareGameDates, isGameDate, parseGameDate } from "./gameDates.js";
+import { DEFAULT_STAT_INDEX_KEYS, MAX_STAT_INDICES, STAT_INDEX_KEY_PATTERN } from "./statIndexDefinitions.js";
 
 /*! Open Historia — native persistent country statistics and economic aggregation. */
 
@@ -22,14 +23,7 @@ export const COUNTRY_STATS_TERRITORIAL_SCOPES = Object.freeze([
 
 const COMPONENT_GROUP_SET = new Set(COUNTRY_STATS_COMPONENT_GROUPS);
 const TERRITORIAL_SCOPE_SET = new Set(COUNTRY_STATS_TERRITORIAL_SCOPES);
-const INDEX_KEYS = Object.freeze([
-  "sovereignty",
-  "foodAutonomy",
-  "energyAutonomy",
-  "economicIndependence",
-  "internalSecurity",
-  "internationalReputation",
-]);
+const INDEX_KEYS = DEFAULT_STAT_INDEX_KEYS;
 const ECONOMY_NUMERIC_KEYS = Object.freeze([
   "gdp",
   "gdpPerCapita",
@@ -45,6 +39,21 @@ const ECONOMY_NUMERIC_KEYS = Object.freeze([
 const clean = (value) => String(value ?? "").trim();
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const finite = (value) => Number.isFinite(Number(value));
+
+const MAX_CUSTOM_STATS_VALUES = 60;
+export const normalizeCustomCountryStats = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = clean(rawKey);
+    if (!/^[A-Za-z][A-Za-z0-9]{0,39}$/.test(key)) continue;
+    const number = parseStatNumber(rawValue);
+    if (!Number.isFinite(number)) continue;
+    out[key] = Math.max(-1e18, Math.min(1e18, number));
+    if (Object.keys(out).length >= MAX_CUSTOM_STATS_VALUES) break;
+  }
+  return Object.keys(out).length ? out : undefined;
+};
 
 export const countryStatsTrackingIntervalLabel = (months) => {
   const numeric = Math.max(0, Math.trunc(Number(months) || 0));
@@ -245,14 +254,34 @@ export const aggregateTerritorialEconomy = (componentsInput) => {
   };
 };
 
-const normalizeIndices = (value) => {
+export const normalizeCountryStatIndices = (value, { allowedKeys = INDEX_KEYS } = {}) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const allowed = Array.isArray(allowedKeys)
+    ? new Set(allowedKeys.map((key) => clean(key)).filter((key) => STAT_INDEX_KEY_PATTERN.test(key)))
+    : null;
   const out = {};
-  for (const key of INDEX_KEYS) {
-    const normalized = normalizePercent(value[key]);
+  for (const [key, raw] of Object.entries(value)) {
+    if (Object.keys(out).length >= MAX_STAT_INDICES) break;
+    if (!STAT_INDEX_KEY_PATTERN.test(key) || (allowed && !allowed.has(key))) continue;
+    const normalized = normalizePercent(raw);
     if (normalized != null) out[key] = Math.round(normalized);
   }
   return Object.keys(out).length ? out : undefined;
+};
+
+const normalizeIndexKeys = (value) => {
+  if (!Array.isArray(value)) return undefined;
+  const out = [];
+  const seen = new Set();
+  for (const raw of value) {
+    const key = clean(raw);
+    const token = key.toLowerCase();
+    if (!STAT_INDEX_KEY_PATTERN.test(key) || seen.has(token)) continue;
+    seen.add(token);
+    out.push(key);
+    if (out.length >= MAX_STAT_INDICES) break;
+  }
+  return out.length ? out : undefined;
 };
 
 const normalizeBreakdown = (value) => {
@@ -391,7 +420,7 @@ const copyTextField = (source, target, key) => {
   if (text) target[key] = text;
 };
 
-export const normalizeCountryStatSheet = (value) => {
+export const normalizeCountryStatSheet = (value, { indexKeys: expectedIndexKeys } = {}) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 
   const out = {};
@@ -402,8 +431,13 @@ export const normalizeCountryStatSheet = (value) => {
   const stability = normalizePercent(value.stability);
   if (stability != null) out.stability = Math.round(stability);
 
-  const indices = normalizeIndices(value.indices);
+  const customStats = normalizeCustomCountryStats(value.customStats);
+  if (customStats) out.customStats = customStats;
+
+  const indexKeys = normalizeIndexKeys(value.indexKeys);
+  const indices = normalizeCountryStatIndices(value.indices, { allowedKeys: normalizeIndexKeys(expectedIndexKeys) || indexKeys || INDEX_KEYS });
   if (indices) out.indices = indices;
+  if (indexKeys) out.indexKeys = indexKeys;
 
   const economy = normalizeEconomy(value.economy);
   if (economy) out.economy = economy;
@@ -438,7 +472,7 @@ export const normalizeCountryStatSheet = (value) => {
   return out;
 };
 
-export const finalizeCountryStatSheet = (value) => {
+export const finalizeCountryStatSheet = (value, { indexKeys: expectedIndexKeys } = {}) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
 
   // Start with normalized legacy-compatible fields without recursively invoking
@@ -449,8 +483,13 @@ export const finalizeCountryStatSheet = (value) => {
   const stability = normalizePercent(value.stability);
   if (stability != null) out.stability = Math.round(stability);
 
-  const indices = normalizeIndices(value.indices);
+  const customStats = normalizeCustomCountryStats(value.customStats);
+  if (customStats) out.customStats = customStats;
+
+  const indexKeys = normalizeIndexKeys(value.indexKeys);
+  const indices = normalizeCountryStatIndices(value.indices, { allowedKeys: normalizeIndexKeys(expectedIndexKeys) || indexKeys || INDEX_KEYS });
   if (indices) out.indices = indices;
+  if (indexKeys) out.indexKeys = indexKeys;
 
   const breakdown = normalizeBreakdown(value.gdpBreakdown);
   if (breakdown) out.gdpBreakdown = breakdown;
@@ -933,12 +972,27 @@ export const mergeCountryStatPatch = (
   const stability = normalizePercent(patch.stability);
   if (stability != null) merged.stability = Math.round(stability);
 
+  const customStatsPatch = normalizeCustomCountryStats(patch.customStats);
+  if (customStatsPatch) {
+    merged.customStats = {
+      ...(base.customStats || {}),
+      ...customStatsPatch,
+    };
+  }
+
+  // Full native Stats generation attaches the scenario's exact index key list.
+  // Preserve that metadata on first persistence so completeness checks do not
+  // silently fall back to the stock modern six for custom-era scenarios. It also
+  // scopes the patch normalizer: ordinary/default sheets still reject stray keys.
+  const patchIndexKeys = normalizeIndexKeys(patch.indexKeys);
+  const expectedIndexKeys = patchIndexKeys || normalizeIndexKeys(base.indexKeys) || INDEX_KEYS;
   if (patch.indices && typeof patch.indices === "object" && !Array.isArray(patch.indices)) {
     merged.indices = {
       ...(base.indices || {}),
-      ...(normalizeIndices(patch.indices) || {}),
+      ...(normalizeCountryStatIndices(patch.indices, { allowedKeys: expectedIndexKeys }) || {}),
     };
   }
+  if (patchIndexKeys) merged.indexKeys = patchIndexKeys;
 
   if (patch.gdpBreakdown && typeof patch.gdpBreakdown === "object" && !Array.isArray(patch.gdpBreakdown)) {
     merged.gdpBreakdown = normalizeBreakdown({
@@ -1107,11 +1161,15 @@ export const normalizeCountryStatHistorySample = (value) => {
 
   copyNumber("stability");
   for (const key of HISTORY_INDEX_KEYS) copyNumber(key);
+  const indices = normalizeCountryStatIndices(value.indices, { allowedKeys: null });
+  if (indices) out.indices = indices;
   copyNumber("population");
   copyNumber("corePopulation");
   copyNumber("otherPopulation");
   for (const key of HISTORY_ECONOMY_KEYS) copyNumber(key);
   for (const key of HISTORY_BREAKDOWN_KEYS) copyNumber(key);
+  const customStats = normalizeCustomCountryStats(value.customStats);
+  if (customStats) out.customStats = customStats;
 
   return Object.keys(out).length > 3 ? out : null;
 };
@@ -1127,6 +1185,7 @@ export const buildCountryStatHistorySample = (sheetInput, { date = "", round = 0
     date: sampleDate,
     round,
     stability: sheet.stability,
+    indices: sheet.indices,
     sovereignty: sheet.indices?.sovereignty,
     foodAutonomy: sheet.indices?.foodAutonomy,
     energyAutonomy: sheet.indices?.energyAutonomy,
@@ -1146,6 +1205,7 @@ export const buildCountryStatHistorySample = (sheetInput, { date = "", round = 0
     agriculture: sheet.gdpBreakdown?.agriculture,
     industry: sheet.gdpBreakdown?.industry,
     services: sheet.gdpBreakdown?.services,
+    customStats: sheet.customStats,
   });
 };
 
@@ -1227,7 +1287,8 @@ export const isCompleteCountryStatSheet = (value) => {
   if (!sheet || sheet.statsSchemaVersion !== COUNTRY_STATS_SCHEMA_VERSION) return false;
   if (!["capital", "continent", "government", "leader"].every((key) => clean(sheet[key]))) return false;
   if (!Number.isFinite(Number(sheet.stability))) return false;
-  if (!INDEX_KEYS.every((key) => Number.isFinite(Number(sheet.indices?.[key])))) return false;
+  const expectedIndexKeys = normalizeIndexKeys(sheet.indexKeys) || INDEX_KEYS;
+  if (!expectedIndexKeys.length || !expectedIndexKeys.every((key) => Number.isFinite(Number(sheet.indices?.[key])))) return false;
   if (!Array.isArray(sheet.territorialComponents)) return false;
   const nonterritorial = sheet.territorialScope === "nonterritorial";
   if (!nonterritorial && sheet.territorialComponents.length < 1) return false;
@@ -1240,6 +1301,13 @@ export const isCompleteCountryStatSheet = (value) => {
   const breakdown = sheet.gdpBreakdown;
   if (!breakdown || breakdown.agriculture + breakdown.industry + breakdown.services !== 100) return false;
   return true;
+};
+
+export const isCompleteCustomCountryStatSheet = (value, expectedKeys = []) => {
+  const sheet = normalizeCountryStatSheet(value);
+  if (!sheet || !sheet.customStats) return false;
+  const keys = (Array.isArray(expectedKeys) ? expectedKeys : []).map(clean).filter(Boolean);
+  return keys.length > 0 && keys.every((key) => Number.isFinite(Number(sheet.customStats?.[key])));
 };
 
 export const buildEconomicConditionSummary = (value) => {

@@ -56,7 +56,14 @@ import {
 import { extractJsonPayload, unwrapMimickedToolCall } from "./jsonSalvage.js";
 import { withoutPlayerParticipant } from "./chatVisibility.js";
 import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKernel.js";
-import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
+import {
+  decodeGameMasterTransportPayload,
+  getGameplayTool,
+  getGameplayToolForCustomStatSheet,
+  getGameplayToolForStatIndices,
+  normalizeGameplayPayload,
+  validateGameplayPayload,
+} from "./gameplaySchemas.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
 import { foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
 import { LOOKUP_DIRECTIVE, LOOKUP_TOOLS, buildLookupContext, executeLookup } from "./lookupTools.js";
@@ -181,12 +188,23 @@ import {
   finalizeCountryStatSheet,
   guardCountryStatContinuity,
   isCompleteCountryStatSheet,
+  isCompleteCustomCountryStatSheet,
   mergeCountryStatPatch,
   normalizeCountryStatSheet,
   normalizeCountryStatsTracking,
   decodeTerritorialComponentSplit,
   expandTerritorialMacroEstimates,
 } from "../../runtime/countryStats.js";
+import {
+  DEFAULT_STAT_INDEX_ROWS,
+  describeStatIndexRows,
+  describeStatSheetDefinition,
+  flattenStatSheetRows,
+  loadStatIndexDefinition,
+  loadStatSheetDefinition,
+  normalizeCustomStatValues,
+  statSheetKeys,
+} from "../../runtime/statsSheet.js";
 import { beginTurnPerfStage, endTurnPerfStage, measureTurnPerfStage, recordTurnPerfAiAttempt } from "../../runtime/turnPerf.js";
 import { difficultyDirective } from "../../runtime/difficulty.js";
 import { MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn } from "../../runtime/mapSettings.js";
@@ -1045,6 +1063,73 @@ const decodeCountryStatMacroEstimates = (value, macroPlan = []) => {
 
 const STATS_ACCOUNTING_BASE_YEAR = 2026;
 
+// The model owns the relative productivity story across native macro/components,
+// but tiny arithmetic misses just outside the historical-scale guard should not
+// burn both structured-output attempts and leave the Stats pane unusable. When a
+// historical-start answer cites NO canonical divergence and lands within 10% of
+// the guard boundary, preserve its relative regional pattern and nudge the whole
+// component ledger only to that boundary. Larger departures still fail closed.
+const normalizeNearBoundaryHistoricalNominalScale = ({ calibration, components, currentDate } = {}) => {
+  const rows = normalizeArray(components);
+  if (!rows.length || !calibration || typeof calibration !== "object" || Array.isArray(calibration)) {
+    return { components: rows, adjusted: false };
+  }
+
+  const mode = normalizeString(calibration?.mode);
+  const divergenceEventIds = normalizeArray(calibration?.divergenceEventIds)
+    .map(normalizeString)
+    .filter(Boolean);
+  const anchorYear = Math.trunc(Number(calibration?.anchorYear));
+  const rebasedGdpPerCapita = Number(calibration?.rebasedGdpPerCapita2026Eur);
+  if (mode !== "historical_start" || divergenceEventIds.length || !Number.isInteger(anchorYear) || !(rebasedGdpPerCapita > 0)) {
+    return { components: rows, adjusted: false };
+  }
+
+  const totalPopulation = rows.reduce(
+    (sum, component) => sum + Math.max(0, Number(component?.population) || 0),
+    0,
+  );
+  const totalGdp = rows.reduce(
+    (sum, component) =>
+      sum +
+      Math.max(0, Number(component?.population) || 0) *
+        Math.max(0, Number(component?.gdpPerCapita) || 0),
+    0,
+  );
+  const generatedGdpPerCapita = totalPopulation > 0 ? totalGdp / totalPopulation : 0;
+  if (!(generatedGdpPerCapita > 0)) return { components: rows, adjusted: false };
+
+  const currentYear = parseIsoDate(currentDate)?.year;
+  const elapsedYears = Number.isInteger(currentYear) ? Math.max(0, currentYear - anchorYear) : 0;
+  const noEvidenceMultiplier = Math.min(2, 1.35 + elapsedYears * 0.08);
+  const lowerBound = 1 / noEvidenceMultiplier;
+  const upperBound = noEvidenceMultiplier;
+  const scaleRatio = generatedGdpPerCapita / rebasedGdpPerCapita;
+  if (scaleRatio >= lowerBound && scaleRatio <= upperBound) {
+    return { components: rows, adjusted: false };
+  }
+
+  const nearLowerBoundary = scaleRatio < lowerBound && scaleRatio >= lowerBound * 0.9;
+  const nearUpperBoundary = scaleRatio > upperBound && scaleRatio <= upperBound * 1.1;
+  if (!nearLowerBoundary && !nearUpperBoundary) {
+    return { components: rows, adjusted: false };
+  }
+
+  const targetRatio = nearLowerBoundary ? lowerBound : upperBound;
+  const factor = targetRatio / scaleRatio;
+  const adjustedComponents = rows.map((component) => ({
+    ...component,
+    gdpPerCapita: Math.max(1, Math.round((Number(component?.gdpPerCapita) || 0) * factor * 100) / 100),
+  }));
+  return {
+    components: adjustedComponents,
+    adjusted: true,
+    beforeRatio: scaleRatio,
+    afterRatio: targetRatio,
+    factor,
+  };
+};
+
 const validateNativeEconomicCalibration = ({
   calibration,
   populationCalibration,
@@ -1494,6 +1579,42 @@ const buildTaskLookups = (bundle, { maxRounds } = {}) => {
   };
 };
 
+const STAT_INDEX_CONTEXT_TASKS = new Set(["jumpForward", "autoJumpForward", "gameMaster", "countryStatSheet"]);
+
+const validateTaskStatIndexKeys = (taskKey, payload, expectedRows) => {
+  const expected = normalizeArray(expectedRows).map((row) => normalizeString(row?.key)).filter(Boolean);
+  if (!expected.length || !payload || typeof payload !== "object") return "";
+  const allowed = new Set(expected);
+  const validateIndices = (indices, path, { complete = false } = {}) => {
+    if (indices == null) return complete ? `${path} is required.` : "";
+    if (!indices || typeof indices !== "object" || Array.isArray(indices)) return `${path} must be an object.`;
+    const keys = Object.keys(indices);
+    const unexpected = keys.filter((key) => !allowed.has(key));
+    if (unexpected.length) return `${path} contains index key(s) not defined by this scenario: ${unexpected.join(", ")}.`;
+    if (complete) {
+      const missing = expected.filter((key) => !Object.prototype.hasOwnProperty.call(indices, key));
+      if (missing.length) return `${path} is missing scenario index key(s): ${missing.join(", ")}.`;
+    }
+    return "";
+  };
+
+  if (taskKey === "countryStatSheet") return validateIndices(payload.indices, "$.indices", { complete: true });
+  if (taskKey === "gameMaster") {
+    for (let patchIndex = 0; patchIndex < normalizeArray(payload.countryStatPatches).length; patchIndex += 1) {
+      const error = validateIndices(payload.countryStatPatches[patchIndex]?.patch?.indices, `$.countryStatPatches[${patchIndex}].patch.indices`);
+      if (error) return error;
+    }
+  }
+  for (let eventIndex = 0; eventIndex < normalizeArray(payload.events).length; eventIndex += 1) {
+    const changes = normalizeArray(payload.events[eventIndex]?.impacts?.polityChanges);
+    for (let changeIndex = 0; changeIndex < changes.length; changeIndex += 1) {
+      const error = validateIndices(changes[changeIndex]?.stats?.indices, `$.events[${eventIndex}].impacts.polityChanges[${changeIndex}].stats.indices`);
+      if (error) return error;
+    }
+  }
+  return "";
+};
+
 const runJsonTask = async (taskKey, {
   fallback,
   signal,
@@ -1515,6 +1636,22 @@ const runJsonTask = async (taskKey, {
   lookups = null,
 }) => {
   const prompts = await loadPromptCatalog();
+  const statSheetDefinition = STAT_INDEX_CONTEXT_TASKS.has(taskKey)
+    ? await loadStatSheetDefinition().catch(() => ({ custom: false, sections: [] }))
+    : null;
+  const customFullStatSheet = Boolean(statSheetDefinition?.custom);
+  const customStatRows = customFullStatSheet ? flattenStatSheetRows(statSheetDefinition) : [];
+  const customStatKeys = customStatRows.map((row) => normalizeString(row?.key)).filter(Boolean);
+  const statIndexDefinition = STAT_INDEX_CONTEXT_TASKS.has(taskKey) && !customFullStatSheet
+    ? await loadStatIndexDefinition().catch(() => ({ custom: false, rows: DEFAULT_STAT_INDEX_ROWS }))
+    : null;
+  const statIndexRows = customFullStatSheet
+    ? customStatRows.filter((row) => row.kind === "index")
+    : (normalizeArray(statIndexDefinition?.rows).length
+      ? normalizeArray(statIndexDefinition.rows)
+      : (STAT_INDEX_CONTEXT_TASKS.has(taskKey) ? DEFAULT_STAT_INDEX_ROWS : []));
+  const statIndexKeys = statIndexRows.map((row) => normalizeString(row?.key)).filter(Boolean);
+  const customStatIndices = Boolean(!customFullStatSheet && statIndexDefinition?.custom && statIndexKeys.length);
   // The GM operational contract is native behaviour: a campaign's frozen
   // gameMaster prompt would silently roll the transaction semantics back.
   const promptTemplate = taskKey === "gameMaster" ? NATIVE_GAME_MASTER_PROMPT : prompts.tasks[taskKey];
@@ -1912,7 +2049,25 @@ So use the wider picture to choose the sender and the moment — never to give t
     }
   }
 
-  if (taskKey === "countryStatSheet") {
+  if (customFullStatSheet) {
+    systemPrompt = `${systemPrompt}
+
+[Scenario National Stats Sheet — LIVE]
+This scenario REPLACES Open Historia's standard modern National Stats sheet with a scenario-defined sheet. Do not invent or maintain hidden modern GDP, unemployment, debt, population, stability, or strategic-index fields unless they are explicitly defined below. Every listed value is persistent campaign canon and uses its exact machine key. Values are ABSOLUTE, never deltas. On ordinary turns update only values that genuinely changed; for the countryStatSheet task return every defined value.
+
+${describeStatSheetDefinition(statSheetDefinition)}
+
+Formatting prefixes/suffixes are display metadata only; return plain JSON numbers. Respect each value's declared min/max range and meaning.`;
+  } else if (customStatIndices) {
+    systemPrompt = `${systemPrompt}
+
+[Scenario Strategic Indices — LIVE]
+This scenario replaces the standard strategic indices with EXACTLY these indices, each as an integer from 0 to 100:
+${describeStatIndexRows(statIndexRows)}
+Use these exact machine keys whenever you author stats.indices. Do not invent default modern indices that are not listed here, and do not invent extra keys.`;
+  }
+
+  if (taskKey === "countryStatSheet" && !customFullStatSheet) {
     systemPrompt = `${systemPrompt}
 
 [Native Country Stats — LIVE 7A.2 / 8B.2.18.1]
@@ -2044,7 +2199,9 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   // Batch routing (see the parameter): a deferred task leaves here with no
   // answer and no attempt loop; its result arrives through pollPendingBatches.
   if (!sync && typeof onBatchResult === "function" && batchBackgroundTasksEnabled()) {
-    const batchTool = getGameplayTool(taskKey);
+    const batchTool = customFullStatSheet
+      ? getGameplayToolForCustomStatSheet(taskKey, customStatRows, { custom: true })
+      : getGameplayToolForStatIndices(taskKey, statIndexRows, { custom: customStatIndices });
     if (batchTool && providerSupportsBatch(taskKey)) {
       const customId = `oh_${taskKey}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
       const submitted = await submitAIBatch({
@@ -2082,7 +2239,9 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     { idleMs, firstByteMs: idleMs ? AI_FIRST_BYTE_TIMEOUT_MS : 0 },
     () => controller.abort(timeoutError),
   );
-  const tool = getGameplayTool(taskKey);
+  const tool = customFullStatSheet
+    ? getGameplayToolForCustomStatSheet(taskKey, customStatRows, { custom: true })
+    : getGameplayToolForStatIndices(taskKey, statIndexRows, { custom: customStatIndices });
   const history = [{ role: "user", parts: [{ text: userMessage }] }];
   // Detailed mode follows every AI task, not only the ones that fail. Sizes and
   // shapes, never the prompt itself: a jump's system prompt is tens of thousands
@@ -2277,7 +2436,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       let statsCalibrationError = "";
       let statsEconomicCalibrationError = "";
       let statsSplitError = "";
-      if (taskKey === "countryStatSheet" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if (taskKey === "countryStatSheet" && !customFullStatSheet && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const macroPlan = normalizeArray(variables?.statsTerritorialMacroPlan);
         const decoded = decodeCountryStatMacroEstimates(
           parsed.territorialMacroComponentsText ?? parsed.territorialComponentsText,
@@ -2355,6 +2514,20 @@ This live instruction supersedes older frozen country-stat prompts and all earli
         const economicCalibrationRequested = Boolean(variables?.statsEconomicCalibrationRequested);
         const economicCalibration = parsed.economicCalibration;
         if (economicCalibrationRequested && !statsCoverageError) {
+          const nominalScaleNormalization = normalizeNearBoundaryHistoricalNominalScale({
+            calibration: economicCalibration,
+            components,
+            currentDate: variables?.statsEconomicCalibrationCurrentDate,
+          });
+          if (nominalScaleNormalization.adjusted) {
+            components = nominalScaleNormalization.components;
+            console.warn(
+              `[stats nominal baseline] ${normalizeString(variables?.statsCalibrationTargetName) || "polity"}: ` +
+                `normalized near-boundary historical GDP/capita drift from ${nominalScaleNormalization.beforeRatio.toFixed(2)}x to ` +
+                `${nominalScaleNormalization.afterRatio.toFixed(2)}x of the audited nominal anchor ` +
+                `(uniform component factor ${nominalScaleNormalization.factor.toFixed(3)}x).`,
+            );
+          }
           statsEconomicCalibrationError = validateNativeEconomicCalibration({
             calibration: economicCalibration,
             populationCalibration: calibration,
@@ -2404,7 +2577,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
           ...statFields,
           territorialScope,
           territorialComponents: components,
-        });
+        }, customStatIndices ? { indexKeys: statIndexKeys } : undefined);
         // Keyed by the payload itself: the answer runJsonTask returns may be an
         // earlier attempt's (the salvage pass), and only that answer's split counts.
         variables?.statsComponentSplitOutcome?.set?.(parsed, splitGeographies);
@@ -2416,8 +2589,63 @@ This live instruction supersedes older frozen country-stat prompts and all earli
         }
       }
       let validation = parsed
-        ? validateGameplayPayload(taskKey, parsed)
+        ? (taskKey === "countryStatSheet" && customFullStatSheet
+          ? { valid: true, error: "" }
+          : validateGameplayPayload(taskKey, parsed))
         : { valid: false, error: "Response did not contain parseable JSON or tool arguments." };
+      if (validation.valid && customFullStatSheet) {
+        const validateCustomObject = (customStats, path, { complete = false } = {}) => {
+          if (customStats == null) return complete ? `${path} is required.` : "";
+          if (!customStats || typeof customStats !== "object" || Array.isArray(customStats)) return `${path} must be an object.`;
+          const allowed = new Set(customStatKeys);
+          const unexpected = Object.keys(customStats).filter((key) => !allowed.has(key));
+          if (unexpected.length) return `${path} contains stat key(s) not defined by this scenario: ${unexpected.join(", ")}.`;
+          if (complete) {
+            const missing = customStatKeys.filter((key) => !Object.prototype.hasOwnProperty.call(customStats, key));
+            if (missing.length) return `${path} is missing scenario stat key(s): ${missing.join(", ")}.`;
+          }
+          const normalized = normalizeCustomStatValues(customStats, statSheetDefinition, { partial: !complete });
+          for (const [key, raw] of Object.entries(customStats)) {
+            if (!Number.isFinite(Number(raw))) return `${path}.${key} must be a finite number.`;
+            if (!Object.prototype.hasOwnProperty.call(normalized, key)) return `${path}.${key} is outside this scenario's allowed stat contract.`;
+            customStats[key] = normalized[key];
+          }
+          return "";
+        };
+        let customError = "";
+        if (taskKey === "countryStatSheet") customError = validateCustomObject(parsed.customStats, "$.customStats", { complete: true });
+        if (!customError && taskKey === "gameMaster") {
+          for (let patchIndex = 0; patchIndex < normalizeArray(parsed.countryStatPatches).length; patchIndex += 1) {
+            const patch = parsed.countryStatPatches[patchIndex]?.patch;
+            if (patch?.indices || patch?.economy || patch?.population || patch?.gdpBreakdown || patch?.stability != null) {
+              customError = `$.countryStatPatches[${patchIndex}].patch uses standard modern Stats fields in a custom-sheet scenario; use customStats only.`;
+              break;
+            }
+            customError = validateCustomObject(patch?.customStats, `$.countryStatPatches[${patchIndex}].patch.customStats`);
+            if (customError) break;
+          }
+        }
+        if (!customError && taskKey !== "countryStatSheet") {
+          for (let eventIndex = 0; eventIndex < normalizeArray(parsed.events).length; eventIndex += 1) {
+            const changes = normalizeArray(parsed.events[eventIndex]?.impacts?.polityChanges);
+            for (let changeIndex = 0; changeIndex < changes.length; changeIndex += 1) {
+              const stats = changes[changeIndex]?.stats;
+              if (!stats) continue;
+              if (stats.indices || stats.economy || stats.population || stats.gdpBreakdown || stats.stability != null) {
+                customError = `$.events[${eventIndex}].impacts.polityChanges[${changeIndex}].stats uses standard modern Stats fields in a custom-sheet scenario; use customStats only.`;
+                break;
+              }
+              customError = validateCustomObject(stats.customStats, `$.events[${eventIndex}].impacts.polityChanges[${changeIndex}].stats.customStats`);
+              if (customError) break;
+            }
+            if (customError) break;
+          }
+        }
+        if (customError) validation = { valid: false, error: customError };
+      } else if (validation.valid && statIndexRows.length) {
+        const statIndexError = validateTaskStatIndexKeys(taskKey, parsed, statIndexRows);
+        if (statIndexError) validation = { valid: false, error: statIndexError };
+      }
       if (validation.valid && (statsCoverageError || statsCalibrationError || statsEconomicCalibrationError || statsSplitError)) {
         validation = {
           valid: false,
@@ -2453,6 +2681,14 @@ This live instruction supersedes older frozen country-stat prompts and all earli
       }
 
       if (validation.valid) {
+        // Native-only metadata: custom scenario sheets need to remember which
+        // strategic indices constitute a complete sheet. Attach this only AFTER
+        // provider/schema/task validation so the model never authors or alters it.
+        // Mutate the accepted object rather than cloning it because Country Stats
+        // uses the payload object as a WeakMap key for component-split outcomes.
+        if (taskKey === "countryStatSheet" && customStatIndices && parsed && typeof parsed === "object") {
+          parsed.indexKeys = [...statIndexKeys];
+        }
         attachAttemptOutcome(attemptSink.record, { ok: true, parsedSummary: normalizeParsedSummary(taskKey, parsed) });
         logDebugEvent("ai", `Task "${taskKey}" succeeded on attempt ${outputAttempt} in ${Math.round((Date.now() - taskStartedAt) / 1000)}s.`, undefined, { verbose: true });
         // The payload that was ACCEPTED, not only the ones that were rejected.
@@ -7909,19 +8145,19 @@ const TRACKED_STATS_BATCH_VERSION = "8B.3.1";
 const TRACKED_STATS_RECENT_EVENT_LIMIT = 8;
 const TRACKED_STATS_SCAN_LIMIT = 80;
 
-const compactTrackedStatsSheet = (sheetInput) => {
+const compactTrackedStatsSheet = (sheetInput, statIndexRows = DEFAULT_STAT_INDEX_ROWS) => {
   const sheet = finalizeCountryStatSheet(sheetInput);
   if (!sheet) return null;
+  const indices = Object.fromEntries(
+    normalizeArray(statIndexRows)
+      .map((row) => normalizeString(row?.key))
+      .filter(Boolean)
+      .map((key) => [key, Number(sheet.indices?.[key])])
+      .filter(([, value]) => Number.isFinite(value)),
+  );
   return {
     stability: Number(sheet.stability),
-    indices: {
-      sovereignty: Number(sheet.indices?.sovereignty),
-      foodAutonomy: Number(sheet.indices?.foodAutonomy),
-      energyAutonomy: Number(sheet.indices?.energyAutonomy),
-      economicIndependence: Number(sheet.indices?.economicIndependence),
-      internalSecurity: Number(sheet.indices?.internalSecurity),
-      internationalReputation: Number(sheet.indices?.internationalReputation),
-    },
+    indices,
     population: {
       total: Number(sheet.population?.total),
       coreIntegrated: Number(sheet.population?.coreIntegrated),
@@ -7984,7 +8220,7 @@ const trackedStatsLatestHistoryDate = (world, polity) => {
     .at(-1) || "";
 };
 
-const sanitizeTrackedStatsPatch = (value) => {
+const sanitizeTrackedStatsPatch = (value, statIndexRows = DEFAULT_STAT_INDEX_ROWS) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 
   const percent = (raw) => {
@@ -8005,7 +8241,9 @@ const sanitizeTrackedStatsPatch = (value) => {
   if (stability != null) patch.stability = stability;
 
   const indices = {};
-  for (const key of ["sovereignty", "foodAutonomy", "energyAutonomy", "economicIndependence", "internalSecurity", "internationalReputation"]) {
+  for (const row of normalizeArray(statIndexRows)) {
+    const key = normalizeString(row?.key);
+    if (!key) continue;
     const number = percent(value?.indices?.[key]);
     if (number != null) indices[key] = number;
   }
@@ -8037,6 +8275,138 @@ const sanitizeTrackedStatsPatch = (value) => {
   return Object.keys(patch).length ? patch : null;
 };
 
+const refreshTrackedCustomStatsIfDue = async ({ bundle, signal, definition } = {}) => {
+  const game = normalizeGameData(bundle?.game);
+  let world = normalizeWorldState(bundle?.world);
+  const currentDate = normalizeString(game?.gameDate || game?.startDate);
+  if (!parseIsoDate(currentDate)) return world;
+
+  const keys = statSheetKeys(definition);
+  const rows = flattenStatSheetRows(definition);
+  if (!keys.length) return world;
+
+  const tracking = normalizeCountryStatsTracking(world?.countryStatsTracking, { playerCountry: game?.country });
+  const intervalMonths = Number(tracking.intervalMonths) || 0;
+  if (!intervalMonths || !tracking.trackedPolities.length) {
+    if (world?.countryStatsTracking) world.countryStatsTracking = tracking;
+    return world;
+  }
+
+  const due = [];
+  const pendingBaseline = [];
+  for (const rawPolity of tracking.trackedPolities.slice(0, COUNTRY_STATS_TRACKING_MAX_POLITIES)) {
+    const polity = canonicalStatsPolity(rawPolity, world) || normalizeString(rawPolity);
+    const previous = normalizeCountryStatSheet(world?.countryStats?.[polity]);
+    if (!previous || !isCompleteCustomCountryStatSheet(previous, keys)) {
+      pendingBaseline.push(polity);
+      continue;
+    }
+    const lastAuto = normalizeString(tracking.lastAutoRefreshByPolity?.[polity]);
+    const baselineDate =
+      (parseIsoDate(lastAuto) && lastAuto) ||
+      (parseIsoDate(previous?.continuity?.assessedDate) && normalizeString(previous.continuity.assessedDate)) ||
+      trackedStatsLatestHistoryDate(world, polity) ||
+      normalizeString(game?.startDate);
+    const elapsedMonths = countryStatsTrackingMonthsElapsed(baselineDate, currentDate);
+    if (elapsedMonths < intervalMonths) continue;
+    due.push({
+      polity,
+      previous,
+      baselineDate,
+      elapsedMonths,
+      narrative: buildTrackedStatsNarrativeEvidence({ bundle, statCode: polity, normalizedWorld: world }),
+    });
+  }
+
+  world.countryStatsTracking = normalizeCountryStatsTracking({
+    ...tracking,
+    pendingBaselinePolities: pendingBaseline,
+  }, { playerCountry: game?.country });
+  if (!due.length) return world;
+
+  const systemPrompt = `You are Open Historia's bounded periodic scenario-defined National Stats auditor.
+
+The scenario owns the entire Stats vocabulary. The current values are campaign canon. Update conservatively from that baseline using ONLY supplied campaign evidence and the exact machine keys below. Absence of evidence means continuity. Values are absolute, not deltas. Never invent hidden modern GDP, unemployment, debt, population, or strategic-index fields that the scenario did not define. Return plain JSON numbers; prefixes/suffixes are display metadata.
+
+SCENARIO STATS:
+${describeStatSheetDefinition(definition)}
+
+Return exactly one JSON object and no markdown:
+{"updates":[{"country":"exact supplied canonical key","customStats":{"oneDefinedKey":0}}]}
+
+For each country include only values that genuinely changed.`;
+
+  const userMessage = [
+    `Campaign date: ${currentDate}`,
+    `Periodic Stats batch version: ${TRACKED_STATS_BATCH_VERSION}-custom`,
+    "",
+    ...due.flatMap((entry, index) => [
+      `=== COUNTRY ${index + 1}: ${entry.polity} ===`,
+      `Elapsed since last dedicated Stats audit: ${entry.elapsedMonths} month(s) (baseline ${entry.baselineDate || "unknown"}).`,
+      `CURRENT CANONICAL CUSTOM STATS:`,
+      JSON.stringify(normalizeCustomStatValues(entry.previous?.customStats, definition, { partial: true })),
+      `RECENT RELEVANT CAMPAIGN CONTEXT:`,
+      normalizeString(entry.narrative) || "None.",
+      "",
+    ]),
+  ].join("\n");
+
+  try {
+    const response = await callAI(
+      systemPrompt,
+      [{ role: "user", parts: [{ text: userMessage }] }],
+      {
+        signal,
+        reasoningEnabled: false,
+        taskKey: "countryStatSheet",
+        ...(getMapSetting(MAP_SETTING_KEYS.limitAiGeneration) ? { deadline: Date.now() + 90000 } : {}),
+      },
+    );
+    const rawText = typeof response === "string" ? response : normalizeString(response?.rawText);
+    const parsed = response?.toolInput ?? extractJsonPayload(rawText);
+    const updates = normalizeArray(parsed?.updates);
+    const dueByKey = new Map(due.map((entry) => [entry.polity.toLocaleLowerCase(), entry]));
+    const refreshed = { ...(tracking.lastAutoRefreshByPolity || {}) };
+    let applied = 0;
+
+    for (const update of updates) {
+      const polity = canonicalStatsPolity(update?.country, world) || normalizeString(update?.country);
+      const entry = dueByKey.get(polity.toLocaleLowerCase());
+      if (!entry) continue;
+      const patchValues = normalizeCustomStatValues(update?.customStats, definition, { partial: true });
+      if (!Object.keys(patchValues).length) continue;
+      const unknown = Object.keys(update?.customStats || {}).filter((key) => !keys.includes(key));
+      if (unknown.length) continue;
+      const merged = mergeCountryStatPatch(entry.previous, { customStats: patchValues }, {
+        continuity: {
+          assessedDate: currentDate,
+          assessedRound: Math.max(0, Math.trunc(Number(game?.round) || 0)),
+        },
+      });
+      if (!isCompleteCustomCountryStatSheet(merged, keys)) continue;
+      world.countryStats = { ...(world.countryStats || {}), [entry.polity]: merged };
+      refreshed[entry.polity] = currentDate;
+      applied += 1;
+    }
+
+    world.countryStatsTracking = normalizeCountryStatsTracking({
+      ...tracking,
+      lastAutoRefreshByPolity: refreshed,
+      pendingBaselinePolities: pendingBaseline,
+      lastBatchDate: applied > 0 ? currentDate : tracking.lastBatchDate,
+    }, { playerCountry: game?.country });
+
+    if (applied > 0) {
+      console.info(`[stats auto ${TRACKED_STATS_BATCH_VERSION}-custom] refreshed ${applied}/${due.length} due tracked countries in one AI batch.`);
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn(`[stats auto ${TRACKED_STATS_BATCH_VERSION}-custom] refresh failed; completed world turn is preserved.`, error);
+  }
+
+  return world;
+};
+
 const refreshTrackedCountryStatsIfDue = async ({
   bundle,
   signal,
@@ -8045,6 +8415,17 @@ const refreshTrackedCountryStatsIfDue = async ({
   let world = normalizeWorldState(bundle?.world);
   const currentDate = normalizeString(game?.gameDate || game?.startDate);
   if (!parseIsoDate(currentDate)) return world;
+  const statSheetDefinition = await loadStatSheetDefinition().catch(() => ({ custom: false, sections: [] }));
+  if (statSheetDefinition.custom) {
+    return refreshTrackedCustomStatsIfDue({ bundle, signal, definition: statSheetDefinition });
+  }
+  const statIndexDefinition = await loadStatIndexDefinition().catch(() => ({ custom: false, rows: DEFAULT_STAT_INDEX_ROWS }));
+  const statIndexRows = normalizeArray(statIndexDefinition?.rows).length
+    ? normalizeArray(statIndexDefinition.rows)
+    : DEFAULT_STAT_INDEX_ROWS;
+  const statIndexExample = Object.fromEntries(
+    statIndexRows.map((row) => normalizeString(row?.key)).filter(Boolean).map((key) => [key, 0]),
+  );
 
   const tracking = normalizeCountryStatsTracking(world?.countryStatsTracking, {
     playerCountry: game?.country,
@@ -8114,7 +8495,12 @@ RULES:
 - Current sheets may already include explicit event stat patches from this same turn. Do not double-apply those effects.
 - Population and GDP should evolve plausibly over the elapsed interval. Keep GDP, population, GDP/capita, growth, inflation, unemployment, debt and budget balance mutually coherent.
 - Strategic indices are 0..100 and should normally move gradually unless evidence clearly supports a shock.
+- Use ONLY the scenario's exact strategic-index keys listed below; do not substitute modern defaults or invent extras.
+- Resource-like indices are broad availability/autonomy pressures, not literal stockpile quantities.
 - GDP sector shares must sum to 100 if supplied.
+
+SCENARIO STRATEGIC INDICES:
+${describeStatIndexRows(statIndexRows)}
 - Do not invent territorial changes. This lightweight periodic audit deliberately preserves the existing territorial component ledger.
 - Return exactly one JSON object and no markdown/prose outside it.
 
@@ -8124,14 +8510,7 @@ OUTPUT:
     {
       "country": "exact supplied canonical key",
       "stability": 0,
-      "indices": {
-        "sovereignty": 0,
-        "foodAutonomy": 0,
-        "energyAutonomy": 0,
-        "economicIndependence": 0,
-        "internalSecurity": 0,
-        "internationalReputation": 0
-      },
+      "indices": ${JSON.stringify(statIndexExample)},
       "population": { "total": 0 },
       "economy": {
         "gdp": 0,
@@ -8157,7 +8536,7 @@ You may omit a field when the existing value should remain exactly unchanged.`;
       `=== COUNTRY ${index + 1}: ${entry.polity} ===`,
       `Elapsed since last dedicated Stats audit: ${entry.elapsedMonths} month(s) (baseline ${entry.baselineDate || "unknown"}).`,
       `CURRENT CANONICAL SHEET:`,
-      JSON.stringify(compactTrackedStatsSheet(entry.previous)),
+      JSON.stringify(compactTrackedStatsSheet(entry.previous, statIndexRows)),
       `FRESH TARGET-SPECIFIC ECONOMIC EVIDENCE:`,
       normalizeString(entry.economic?.text) || "None.",
       `RECENT RELEVANT CAMPAIGN CONTEXT:`,
@@ -8194,7 +8573,7 @@ You may omit a field when the existing value should remain exactly unchanged.`;
       const entry = dueByKey.get(polity.toLocaleLowerCase());
       if (!entry) continue;
 
-      const patch = sanitizeTrackedStatsPatch(update);
+      const patch = sanitizeTrackedStatsPatch(update, statIndexRows);
       if (!patch) continue;
 
       const merged = mergeCountryStatPatch(entry.previous, patch, {
@@ -8760,9 +9139,15 @@ export const ensureIntelligenceRated = (target, { reason = "" } = {}) =>
 
 export const ensureCountryStatSheet = (target, { reason = "" } = {}) =>
   firstReading("stat sheet", target, reason, async (name) => {
-    const world = normalizeWorldState(await readWorldState({ force: false }));
+    const [world, definition] = await Promise.all([
+      readWorldState({ force: false }).then(normalizeWorldState),
+      loadStatSheetDefinition().catch(() => ({ custom: false, sections: [] })),
+    ]);
     const persisted = normalizeCountryStatSheet(world.countryStats?.[name]);
-    if (isCompleteCountryStatSheet(persisted)) return persisted;
+    const complete = definition.custom
+      ? isCompleteCustomCountryStatSheet(persisted, statSheetKeys(definition))
+      : isCompleteCountryStatSheet(persisted);
+    if (complete) return persisted;
     await waitForSimulationIdle();
     return generateCountryStatSheet({ code: name, name });
   });
@@ -8771,6 +9156,105 @@ export const ensureCountryStatSheet = (target, { reason = "" } = {}) =>
 // so the service reading can see the numbers it rests on.
 export const ensureCountryAssessed = (target, options = {}) =>
   ensureCountryStatSheet(target, options).then(() => ensureIntelligenceRated(target, options));
+
+const generateScenarioCustomStatSheet = async ({
+  bundle,
+  definition,
+  statCode,
+  target,
+  worldAtStart,
+  signal,
+} = {}) => {
+  const currentDate = normalizeString(bundle?.game?.gameDate || bundle?.game?.startDate);
+  const currentRound = Math.max(0, Math.trunc(Number(bundle?.game?.round) || 0));
+  const previous = normalizeCountryStatSheet(worldAtStart?.countryStats?.[statCode]);
+  const previousValues = normalizeCustomStatValues(previous?.customStats, definition, { partial: true });
+  const dossier = await buildTargetDossier(bundle, target, worldAtStart);
+  const variables = await buildTemplateVariables(bundle, {
+    lookups: true,
+    taskKey: "countryStatSheet",
+    requiredKeys: ["date", "playerPolity", "language", "simulationRules", "worldSummary", "recentEvents"],
+  });
+
+  const { payload } = await runJsonTask("countryStatSheet", {
+    lookups: buildTaskLookups(bundle),
+    signal,
+    userMessage: [
+      `Compile the complete scenario-defined National Stats sheet for ${target}${statCode ? ` (canonical polity ${statCode})` : ""}.`,
+      normalizeString(bundle?.world?.simulationRules) ? `ERA & WORLD RULES:
+${normalizeString(bundle.world.simulationRules).slice(0, 1800)}` : "",
+      `TARGET DOSSIER:
+${dossier || "(nothing recorded)"}`,
+      Object.keys(previousValues).length
+        ? `PREVIOUS PERSISTENT CUSTOM STATS (campaign canon; preserve continuity unless supplied events justify change):
+${JSON.stringify(previousValues)}`
+        : "No previous custom Stats baseline exists; establish scenario-appropriate initial values from the supplied canon.",
+    ].filter(Boolean).join("\n\n"),
+    variables,
+  });
+
+  throwIfAborted(signal);
+  const customStats = normalizeCustomStatValues(payload?.customStats, definition);
+  const expectedKeys = statSheetKeys(definition);
+  const missing = expectedKeys.filter((key) => !Object.prototype.hasOwnProperty.call(customStats, key));
+  if (missing.length) {
+    throw new Error(`Scenario Stats generation omitted required value(s): ${missing.join(", ")}.`);
+  }
+
+  const sheet = mergeCountryStatPatch(previous, { customStats }, {
+    continuity: {
+      assessedDate: currentDate,
+      assessedRound: currentRound,
+    },
+  });
+
+  if (!statCode || !sheet) return sheet;
+
+  try {
+    const persisted = await persistCountryStatsBackground({
+      code: statCode,
+      sheet,
+      continuity: { assessedDate: currentDate, assessedRound: currentRound },
+      date: currentDate,
+      round: currentRound,
+      signal,
+    });
+    if (persisted?.sheet) {
+      await primeCountryStatsWorkerCommit({
+        country: statCode,
+        sheet: persisted.sheet,
+        historySeries: persisted.historySeries,
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("oh:country-stats-updated", {
+          detail: { country: statCode, sheet: persisted.sheet, source: "scenario-custom-stats-worker-persist" },
+        }));
+      }
+      return persisted.sheet;
+    }
+  } catch (workerPersistError) {
+    if (signal?.aborted || workerPersistError?.name === "AbortError") throw workerPersistError;
+    console.warn("[stats custom] worker persistence failed; using canonical main-thread fallback.", workerPersistError);
+  }
+
+  const world = await readWorldState({ force: false });
+  const nextSheet = applyCountryStatPatchToWorld(world, statCode, sheet, {
+    continuity: { assessedDate: currentDate, assessedRound: currentRound },
+  });
+  world.countryStatsHistory = appendCountryStatHistorySample(
+    world.countryStatsHistory,
+    statCode,
+    nextSheet,
+    { date: currentDate, round: currentRound },
+  );
+  await writeWorldState(world, { emitEvents: false });
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("oh:country-stats-updated", {
+      detail: { country: statCode, sheet: nextSheet, source: "scenario-custom-stats-main-thread-persist" },
+    }));
+  }
+  return nextSheet;
+};
 
 // Structured national stat sheet for the Stats tab, grounded in the same
 // campaign context as the intelligence briefing.
@@ -8794,6 +9278,17 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
   const worldAtStart = bundle.world;
   const statCode = canonicalStatsPolity(code, worldAtStart) || normalizeString(code);
   const target = name || statCode || code || "the polity";
+  const statSheetDefinition = await loadStatSheetDefinition().catch(() => ({ custom: false, sections: [] }));
+  if (statSheetDefinition.custom) {
+    return generateScenarioCustomStatSheet({
+      bundle,
+      definition: statSheetDefinition,
+      statCode,
+      target,
+      worldAtStart,
+      signal,
+    });
+  }
 
   // R2.35: territorial accounting and dossier construction run in an ACTUAL worker
   // thread. Waiting is allowed; stealing map/input frames is not.

@@ -62,6 +62,7 @@ const PolitiesPanel = ({
   upsertPolity,
   renamePolity,
   removePolity,
+  removePolities,
   importPolityRoster,
   setColorOverride,
   setTags,
@@ -71,6 +72,7 @@ const PolitiesPanel = ({
 }) => {
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
+  const [bulkSelected, setBulkSelected] = useState(() => new Set());
   const [draftName, setDraftName] = useState("");
   const [newName, setNewName] = useState("");
   const [transferFrom, setTransferFrom] = useState("");
@@ -115,6 +117,18 @@ const PolitiesPanel = ({
       .sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
   }, [polities, usage, query]);
 
+  const allFilteredSelected = rows.length > 0 && rows.every((row) => bulkSelected.has(row.key));
+  const selectedBulkRows = useMemo(() => {
+    const allKeys = new Set([...Object.keys(polities || {}), ...usage.keys()]);
+    return [...bulkSelected]
+      .filter((key) => allKeys.has(key))
+      .map((key) => {
+        const record = polities?.[key] || null;
+        const counts = usage.get(key) || { regionCount: 0, claimantCount: 0 };
+        return { key, name: clean(record?.name) || key, regionCount: counts.regionCount || 0, claimantCount: counts.claimantCount || 0 };
+      });
+  }, [bulkSelected, polities, usage]);
+
   const current = selectedKey
     ? rows.find((row) => row.key === selectedKey) || {
         key: selectedKey,
@@ -158,6 +172,48 @@ const PolitiesPanel = ({
     setNewName("");
   };
 
+  const toggleBulkKey = (key) => {
+    setBulkSelected((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleFiltered = () => {
+    setBulkSelected((previous) => {
+      const next = new Set(previous);
+      if (allFilteredSelected) rows.forEach((row) => next.delete(row.key));
+      else rows.forEach((row) => next.add(row.key));
+      return next;
+    });
+  };
+
+  const removeManyFromMap = () => {
+    const targets = selectedBulkRows;
+    if (!targets.length) return;
+    const keys = targets.map((row) => row.key);
+    const regionCount = targets.reduce((sum, row) => sum + row.regionCount, 0);
+    const claimCount = targets.reduce((sum, row) => sum + row.claimantCount, 0);
+    const consequences = [
+      regionCount ? `${regionCount.toLocaleString()} owned region(s) become unowned` : "",
+      claimCount ? `${claimCount.toLocaleString()} territorial claim(s) are removed` : "",
+    ].filter(Boolean).join(" and ");
+    const ok = window.confirm(
+      `Delete ${targets.length.toLocaleString()} selected countries?` +
+      `${consequences ? `\n\n${consequences}.` : ""}` +
+      "\n\nTheir country records, colours, flags and tags will also be deleted.",
+    );
+    if (!ok) return;
+    api?.removeOwners?.(keys);
+    if (removePolities) removePolities(keys);
+    else keys.forEach((key) => removePolity?.(key));
+    if (keys.includes(selectedKey)) setSelectedKey("");
+    setBulkSelected(new Set());
+    setRefreshNonce((n) => n + 1);
+  };
+
   // Removing a polity is a map operation: its regions become unowned, the
   // claims in its name are dropped, and the record (with its colour, flag and
   // tags) goes with them. Deleting only the record used to leave the regions
@@ -173,13 +229,17 @@ const PolitiesPanel = ({
       disputed.length ? `${disputed.length} claim(s) are dropped` : "",
     ].filter(Boolean).join(" and ");
     if (!window.confirm(`Remove “${current.name}” from the map?${summary ? ` ${summary};` : ""} its colour, flag and tags go with it.`)) return;
-    if (owned.length) api?.setRegionAttrs?.(owned, { owner: null });
-    for (const feature of disputed) {
-      const id = String(feature?.properties?.id ?? feature?.id ?? "");
-      if (!id) continue;
-      api?.setRegionAttrs?.([id], { claimants: feature.properties.claimants.filter((claimant) => claimant !== key) });
+    if (api?.removeOwners) api.removeOwners([key]);
+    else {
+      if (owned.length) api?.setRegionAttrs?.(owned, { owner: null });
+      for (const feature of disputed) {
+        const id = String(feature?.properties?.id ?? feature?.id ?? "");
+        if (!id) continue;
+        api?.setRegionAttrs?.([id], { claimants: feature.properties.claimants.filter((claimant) => claimant !== key) });
+      }
     }
     removePolity?.(key);
+    setBulkSelected((previous) => { const next = new Set(previous); next.delete(key); return next; });
     setSelectedKey("");
     setRefreshNonce((n) => n + 1);
   };
@@ -360,47 +420,73 @@ const PolitiesPanel = ({
         style={inputStyle}
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, maxHeight: 230, overflowY: "auto" }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" style={pillButton(false)} disabled={!rows.length} onClick={toggleFiltered}>
+          {allFilteredSelected ? "Unselect filtered" : `Select filtered (${rows.length})`}
+        </button>
+        <button type="button" style={pillButton(false)} disabled={!bulkSelected.size} onClick={() => setBulkSelected(new Set())}>
+          Clear selection
+        </button>
+        <button type="button" style={pillButton(true)} disabled={!selectedBulkRows.length} onClick={removeManyFromMap}>
+          Delete selected ({selectedBulkRows.length})
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gap: 6, maxHeight: 230, overflowY: "auto" }}>
         {rows.map((row) => {
           const active = row.key === selectedKey;
+          const checked = bulkSelected.has(row.key);
           return (
-            <button
-              key={row.key}
-              type="button"
-              onClick={() => { setSelectedKey(row.key); api?.selectOwner?.(row.key, { zoom: true }); }}
-              style={{
-                gridColumn: "1 / -1",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                textAlign: "left",
-                padding: "7px 9px",
-                borderRadius: 8,
-                border: active ? "1px solid rgba(59,130,246,0.8)" : "1px solid rgba(255,255,255,0.08)",
-                background: active ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.035)",
-                color: "white",
-                cursor: "pointer",
-              }}
-            >
-              <span
+            <div key={row.key} style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
+              <label
+                title={`Include ${row.name} in bulk actions`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, flex: "0 0 30px", borderRadius: 8, border: checked ? "1px solid rgba(239,68,68,0.65)" : "1px solid rgba(255,255,255,0.08)", background: checked ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.025)", cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleBulkKey(row.key)}
+                  aria-label={`Select ${row.name} for bulk actions`}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => { setSelectedKey(row.key); api?.selectOwner?.(row.key, { zoom: true }); }}
                 style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 4,
-                  flex: "0 0 auto",
-                  background: colors?.[row.key] ? `rgb(${colors[row.key].join(",")})` : "rgba(255,255,255,0.18)",
-                  border: "1px solid rgba(255,255,255,0.25)",
+                  flex: 1,
+                  minWidth: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  textAlign: "left",
+                  padding: "7px 9px",
+                  borderRadius: 8,
+                  border: active ? "1px solid rgba(59,130,246,0.8)" : "1px solid rgba(255,255,255,0.08)",
+                  background: active ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.035)",
+                  color: "white",
+                  cursor: "pointer",
                 }}
-              />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {row.name}
-                </div>
-                <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {row.regionCount ? `${row.regionCount} regions` : "registered, no regions yet"}{row.claimantCount ? ` · ${row.claimantCount} claims` : ""}{Array.isArray(polities?.[row.key]?.formerNames) && polities[row.key].formerNames.length ? ` · formerly ${polities[row.key].formerNames.join(", ")}` : ""}
-                </div>
-              </span>
-            </button>
+              >
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: 4,
+                    flex: "0 0 auto",
+                    background: colors?.[row.key] ? `rgb(${colors[row.key].join(",")})` : "rgba(255,255,255,0.18)",
+                    border: "1px solid rgba(255,255,255,0.25)",
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {row.name}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.48)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {row.regionCount ? `${row.regionCount} regions` : "registered, no regions yet"}{row.claimantCount ? ` · ${row.claimantCount} claims` : ""}{Array.isArray(polities?.[row.key]?.formerNames) && polities[row.key].formerNames.length ? ` · formerly ${polities[row.key].formerNames.join(", ")}` : ""}
+                  </div>
+                </span>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -418,7 +504,15 @@ const PolitiesPanel = ({
                 title="Renames the country everywhere on this map: its regions, claims, colour, flag, tags and cities. The old name is kept as a former name."
                 onClick={() => {
                   const next = clean(draftName);
-                  renamePolity?.(current.key, next);
+                  const previousKey = current.key;
+                  renamePolity?.(previousKey, next);
+                  setBulkSelected((previous) => {
+                    if (!previous.has(previousKey)) return previous;
+                    const updated = new Set(previous);
+                    updated.delete(previousKey);
+                    updated.add(next);
+                    return updated;
+                  });
                   setSelectedKey(next);
                 }}
               >
