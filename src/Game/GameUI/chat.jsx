@@ -803,7 +803,7 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             setIsLoading(true);
             setSpeakingCountry(country);
             try {
-                const { reply, reaction, memorySummary } = await sendDiplomaticMessage(playerMessage, country.name, countries);
+                const { reply, reaction, memorySummary } = await sendDiplomaticMessage(playerMessage, country.name, countries, { chatId: chat.id });
                 // The thread's rolling durable memory rides on the reply that
                 // produced it, so a reopened thread, the advisor's one-off sends
                 // and the world director read the same continuity.

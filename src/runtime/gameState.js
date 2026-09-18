@@ -11,6 +11,7 @@ import { foundPolityIfUnknown } from "./polityFounding.js";
 import { normalizeTerritoryBasis, screenTerritoryBasis } from "./territoryBasis.js";
 import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
+import { normalizeGmChanges, normalizeReminders } from "./gmChanges.js";
 import { normalizeSpyOp } from "./spycraft.js";
 import { normalizeChatEvents, projectChatThread } from "./chatThreads.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
@@ -63,6 +64,12 @@ export const WORLD_DEFAULTS = {
   // history, not a second world model: canonical state stays in the ledgers
   // below; the record keeps the exact previewed transaction for debugging.
   gmAudit: [],
+  // Every change made outside the simulation — the GM console and each cheats
+  // tool — one line each, tagged with its round, newest first; the next skip is
+  // told the ones from the round it starts in. And the Game Master's standing
+  // reminders, which every AI in the game is shown. See gmChanges.js.
+  gmChanges: [],
+  simulationReminders: [],
   // Persisted per-country stat sheets (code -> the full sheet), seeded on first view
   // and thereafter changed ONLY by the AI (polityChanges.stats), so a country's stats
   // stop regenerating/drifting every date change.
@@ -3372,6 +3379,8 @@ export const normalizeWorldState = (world) => {
     spies,
     spySeal,
     gmAudit: normalizeGameMasterAudit(nextWorld.gmAudit),
+    gmChanges: normalizeGmChanges(nextWorld.gmChanges),
+    simulationReminders: normalizeReminders(nextWorld.simulationReminders),
     labelFont: normalizeOptionalString(nextWorld.labelFont),
     labelHaloColor: normalizeOptionalString(nextWorld.labelHaloColor),
     labelTextColor: normalizeOptionalString(nextWorld.labelTextColor),

@@ -232,6 +232,7 @@ import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
+import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
   eventsFromLegacyChat,
@@ -1841,7 +1842,10 @@ const resolvePlacements = async (containers, world, { receipt = null } = {}) => 
 // frozen copies of the templates). Its own function so that the turn review
 // (runTurnReview below) can put several tasks into ONE request and still show
 // each of them exactly the prompt it would have been sent alone.
-const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null } = {}) => {
+//
+// `reminders: false` leaves out the Game Master's reminders; the turn review
+// adds them once to the whole request instead of once per job.
+const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null, reminders = true } = {}) => {
   const prompts = await loadPromptCatalog();
   // The GM operational contract is native behaviour: a campaign's frozen
   // gameMaster prompt would silently roll the transaction semantics back.
@@ -2403,7 +2407,45 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     if (directionDirective) systemPrompt = `${systemPrompt}\n\n${directionDirective}`;
   }
 
+  // The Game Master's standing reminders (runtime/gmChanges.js), for every task
+  // that writes the world or speaks for a polity. After the author's priority
+  // rules: a fact the GM declared mid-game is newer than any rule written before
+  // the game began. Nothing at all while there are none.
+  if (reminders && GM_REMINDER_TASKS.has(taskKey)) {
+    const block = await gmRemindersBlock();
+    if (block) systemPrompt = `${systemPrompt}\n\n${block}`;
+  }
+
   return { prompts, promptTemplate, staticPromptPrefix, systemPrompt };
+};
+
+// Who is shown the reminders. Left out: the tasks that only reshape text
+// (translation, consolidation, place names, the pre-game bootstrap) or only
+// describe a polity's figures.
+const GM_REMINDER_TASKS = new Set([
+  "jumpForward",
+  "autoJumpForward",
+  "worldMotionRepair",
+  "worldBreadthRepair",
+  "timelineCurator",
+  "unitDirector",
+  "territoryDirector",
+  "projects",
+  "gameMaster",
+  "actions",
+  "idleDiplomacy",
+  "catalystCreation",
+  "catalystExecutor",
+  "spyIntercept",
+  "chatActions",
+]);
+
+// Read from the stored world as it is, without normalizing the rest of it: a
+// reminder is edited in the cheats panel, which writes the world, and the next
+// prompt sees the new list.
+const gmRemindersBlock = async () => {
+  const raw = await readJson(JSON_URLS.world, { defaultValue: {}, clone: false }).catch(() => null);
+  return renderReminders(normalizeReminders(raw?.simulationReminders), { formatDate: formatDateReadable });
 };
 
 const runJsonTask = async (taskKey, {
@@ -5898,6 +5940,7 @@ export const sendAdvisorDraftedMessage = async ({ countryName, text }) => {
       participantNames: [playerName, recipient.name],
       playerCountry: playerName,
       priorMessages,
+      chatId: existing?.id ?? "",
     });
 
     const userMessage = {
@@ -10289,9 +10332,26 @@ export const runChatActionBatch = async ({
     )).join("\n")}`
     : "";
 
-  const transcript = projected.messages.slice(-24)
-    .map((message) => `[${message.id}] ${message.speaker || (message.role === "user" ? player : "someone")}: ${message.text}`)
-    .join("\n");
+  // One request writes every participant, so the whole thread is in front of the
+  // model — including what was said before a newcomer came into the room. The
+  // log knows who heard each line (chatThreads.js heardBy); a line some present
+  // participant did NOT hear says so, and the header says what that means.
+  const absentFrom = (message) => {
+    const heard = normalizeArray(message.heardBy).map(regionKey);
+    return heard.length ? aiParticipants.filter((name) => !heard.includes(regionKey(name))) : [];
+  };
+  const recent = projected.messages.slice(-24);
+  const lines = recent.map((message) => {
+    const absent = absentFrom(message);
+    return `[${message.id}] ${message.speaker || (message.role === "user" ? player : "someone")}: ${message.text}`
+      + (absent.length ? ` (not heard by ${absent.join(", ")})` : "");
+  });
+  const transcript = [
+    ...(recent.some((message) => absentFrom(message).length)
+      ? ["(A line marked \"not heard by\" was said while that polity was not in this conversation. It does not know what was said there unless its own cables below tell it; write it that way.)"]
+      : []),
+    ...lines,
+  ].join("\n");
   const rosterText = [
     ...aiParticipants.map((name) => `- ${name} — AI-controlled: you act for it`),
     `- ${player} — HUMAN-controlled (the player): never speak or act for it`,
@@ -10625,6 +10685,11 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
   // Empty on a campaign's first jump and after a turn that predates receipts, and
   // then the message is byte-for-byte what it always was.
   const lastTurnReceipt = renderLastTurnReceipt(normalizeWorldState(bundle.world).simulationHistory);
+  // And what the Game Master changed by hand since then (runtime/gmChanges.js):
+  // the changes made in the round this skip starts from. Once, because the round
+  // moves on when the skip lands — and again after a rollback, because the skip
+  // that heard them no longer happened. Empty when nobody touched the world.
+  const gmChangeNarration = renderGmChangeNarration(gmChangesForRound(bundle.world, bundle.game?.round));
 
   // Starts at 0 on a fresh jump, and at the failed segment on a retry.
   let segmentIndex = state.nextSegment;
@@ -10720,7 +10785,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
         // silence, not elapsed time, so a long segment is never mistaken for a
         // stalled one (and a segmented jump gets that window per segment, since it
         // is per request). Cancel works either way.
-        userMessage: [lastTurnReceipt, buildSegmentInstruction({
+        userMessage: [lastTurnReceipt, gmChangeNarration, buildSegmentInstruction({
           mode,
           segmentIndex,
           segmentCount,
@@ -11130,7 +11195,7 @@ const runTurnReview = async ({ context, merged, signal, state }) => {
   const jobs = [];
   const sharedBlocks = [];
   const addJob = async (job, variables) => {
-    const { systemPrompt } = await buildTaskSystemPrompt(job.taskKey, { variables, lookups: null });
+    const { systemPrompt } = await buildTaskSystemPrompt(job.taskKey, { variables, lookups: null, reminders: false });
     jobs.push({ ...job, prompt: systemPrompt, schema: getGameplayTool(job.taskKey)?.schema });
     for (const value of Object.values(variables ?? {})) if (typeof value === "string") sharedBlocks.push(value);
   };
@@ -11260,7 +11325,8 @@ const runTurnReview = async ({ context, merged, signal, state }) => {
   }
 
   const { jobs: shared, savedChars } = shareRepeatedBlocks(usable, sharedBlocks);
-  const systemPrompt = buildTurnReviewPrompt(shared);
+  // The Game Master's reminders once for the whole request, not once per job.
+  const systemPrompt = [buildTurnReviewPrompt(shared), await gmRemindersBlock()].filter(Boolean).join("\n\n");
   const tool = buildTurnReviewTool(shared);
   review.asked = true;
   logDebugEvent("turn", `Turn review: ${shared.map((job) => job.key).join(", ")} in one request.`, {
@@ -12414,6 +12480,31 @@ const gameMasterTransactionCandidate = (transaction) => ({
   diplomaticOutreach: cloneValue(normalizeArray(transaction?.diplomaticOutreach)),
 });
 
+// The GM console's transaction in one line of words, for the next skip
+// (runtime/gmChanges.js). The audit keeps the whole of it; the skip needs to know
+// what was done, and that it was done by decree.
+const gameMasterChangeSummary = ({ transaction, summary = "", request = "" }) => {
+  const count = (list, one, many) => {
+    const total = normalizeArray(list).length;
+    return total ? `${total} ${total === 1 ? one : many}` : "";
+  };
+  const events = normalizeArray(transaction?.events);
+  const titles = events.slice(0, 3).map((event) => `"${normalizeString(event?.title) || "untitled"}"`).join(", ");
+  const statCountries = [...new Set(normalizeArray(transaction?.countryStatPatches)
+    .map((entry) => normalizeString(entry?.country)).filter(Boolean))];
+  const parts = [
+    events.length ? `wrote ${events.length === 1 ? "the event" : `${events.length} events`} ${titles}${events.length > 3 ? " and more" : ""} into the record` : "",
+    statCountries.length ? `set the figures of ${statCountries.join(", ")}` : "",
+    count(transaction?.warUpdates, "war record", "war records"),
+    count(transaction?.relationUpdates, "relation", "relations"),
+    count(transaction?.agreementUpdates, "agreement", "agreements"),
+    count(transaction?.storylineUpdates, "storyline", "storylines"),
+    count(transaction?.diplomaticOutreach, "diplomatic note", "diplomatic notes"),
+  ].filter(Boolean);
+  const what = normalizeString(summary) || normalizeString(request);
+  return `${what ? `${what} — ` : ""}the GM console ${parts.length ? parts.join("; ") : "changed nothing that can be listed"}.`;
+};
+
 const gameMasterAcceptedOperationLabels = (transaction) => {
   const labels = [];
   for (const [eventIndex, event] of normalizeArray(transaction?.events).entries()) {
@@ -12841,6 +12932,13 @@ export const applyGameMasterPreview = async (preview) => {
       statCountries: [...new Set(statCountries.filter(Boolean))],
     };
     nextWorld.gmAudit = [auditRecord, ...normalizeArray(nextWorld.gmAudit)].slice(0, 64);
+    nextWorld = recordGmChange(nextWorld, {
+      kind: "gm-console",
+      summary: gameMasterChangeSummary({ transaction, summary, request }),
+      round: bundle.game.round || 0,
+      date: bundle.game.gameDate || bundle.game.startDate || "",
+      at: auditRecord.appliedAt,
+    });
 
     // Canonical persistence only. Deliberately omit actions/game writes, rollback
     // snapshots and oh:turn-complete: a GM edit is administrative authority, not a turn.

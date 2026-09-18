@@ -14,6 +14,9 @@ import { buildMessageDrafts, splitAtBlockquotes } from "./advisorDrafts.js";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import StatsPane from "./stats.jsx";
+import { buildCatchUpNote } from "../AI/conversationCatchUp.js";
+import { gmChangesSince } from "../../runtime/gmChanges.js";
+import { compareGameDates, formatGameDateReadable } from "../../runtime/gameDates.js";
 
 Chart.register(...registerables);
 
@@ -699,6 +702,33 @@ const AdvisorReplyBody = ({ text, drafts, onDraftMessage }) => {
     );
 };
 
+// What the world did since the conversation last spoke (AI/conversationCatchUp.js):
+// the time that passed, the newest events since, and the Game Master's changes by
+// hand. A fresh conversation has nothing to catch up on — it reads the present.
+// A note that cannot be built is no note: the question still goes.
+const buildAdvisorCatchUp = async (messages, gameDate) => {
+    const previous = [...(Array.isArray(messages) ? messages : [])].reverse()
+        .find((msg) => (msg.role === "user" || msg.role === "advisor") && !msg.streaming);
+    if (!previous) return { text: "", label: "" };
+    try {
+        const [events, world] = await Promise.all([
+            readJson(JSON_URLS.events, { defaultValue: [] }),
+            readJson(JSON_URLS.world, { defaultValue: {}, clone: false }),
+        ]);
+        return buildCatchUpNote({
+            previousDate: previous.time || "",
+            currentDate: gameDate || "",
+            events,
+            gmChanges: previous.at ? gmChangesSince(world, previous.at) : [],
+            compareDates: compareGameDates,
+            formatDate: (value) => formatGameDateReadable(value),
+        });
+    } catch (error) {
+        console.warn("[advisor] could not work out what changed since the last exchange:", error);
+        return { text: "", label: "" };
+    }
+};
+
 // No closure over component state, so hoisted rather than redefined on every
 // AdvisorPanel render (and needed at module scope by the memoized row below).
 const formatAdvisorDate = (dateStr) => {
@@ -727,6 +757,13 @@ const AdvisorMessageRow = React.memo(({ msg, msgIndex, chatDiffers, chatDir, onO
 
     return (
         <div style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
+        {/* The world moved on before this question; the advisor was told how
+            (the whole note is in the tooltip). */}
+        {msg.role === "user" && msg.catchUpLabel && (
+            <span title={msg.catchUp} style={{ alignSelf: "center", color: "rgba(255,255,255,0.38)", fontSize: "0.66rem", marginBottom: "0.45rem" }}>
+            ⏳ {msg.catchUpLabel}
+            </span>
+        )}
         {msg.role !== "user" && (
             <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", marginBottom: "0.25rem" }}>
             {msg.role === "error" ? "⚠️ Error" : "🧭 Advisor"}
@@ -952,13 +989,30 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             force: true,
         }).catch(() => ({ gameDate: null, round: 0 }));
 
+        // Written once, for a new question, and kept on it; a retry sends the
+        // note its question was first sent with.
+        const askedBefore = replaceTrailingError
+            ? [...messagesRef.current].reverse().find((msg) => msg.role === "user")
+            : null;
+        const catchUp = replaceTrailingError
+            ? { text: askedBefore?.catchUp || "", label: askedBefore?.catchUpLabel || "" }
+            : await buildAdvisorCatchUp(messagesRef.current, gameDate);
+
         // A fresh question re-engages auto-scroll even if the player had
         // paused it reading up through history — the pause is scoped to the
         // reply they scrolled away from, not the whole session.
         shouldAutoScrollRef.current = true;
         setMessages(prev => (replaceTrailingError
             ? (prev[prev.length - 1]?.role === "error" ? prev.slice(0, -1) : prev.slice())
-            : [...prev, { role: "user", text, time: gameDate }]));
+            : [...prev, {
+                role: "user",
+                text,
+                time: gameDate,
+                // When it was asked, by the clock: the next question's catch-up
+                // counts the Game Master's changes from here.
+                at: new Date().toISOString(),
+                ...(catchUp.text ? { catchUp: catchUp.text, catchUpLabel: catchUp.label } : {}),
+            }]));
         setIsLoading(true);
 
         // Streaming: the ThinkingDots show until the first token, then a live
@@ -976,7 +1030,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
         });
 
         try {
-            const reply = await sendMessage(text, { onChunk: (_delta, full) => showStreaming(full) });
+            const reply = await sendMessage(text, { onChunk: (_delta, full) => showStreaming(full), catchUp: catchUp.text });
             // Apply any ```actions proposal in the reply to the real queue BEFORE
             // finalising the message, so the confirmation card that renders with it
             // reflects what actually happened — not a re-derivation done later at
@@ -1039,7 +1093,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             setMessages(prev => {
                 const next = prev.slice();
                 const last = next[next.length - 1];
-                const finalMessage = { role: "advisor", text: reply, time: gameDate, ...(actionsSummary ? { actionsSummary } : {}), ...(projectsSummary ? { projectsSummary } : {}), ...(projectsProblem ? { projectsProblem } : {}), ...(projectsDetail ? { projectsDetail } : {}), ...(projectsExcerptText ? { projectsExcerpt: projectsExcerptText } : {}) };
+                const finalMessage = { role: "advisor", text: reply, time: gameDate, at: new Date().toISOString(), ...(actionsSummary ? { actionsSummary } : {}), ...(projectsSummary ? { projectsSummary } : {}), ...(projectsProblem ? { projectsProblem } : {}), ...(projectsDetail ? { projectsDetail } : {}), ...(projectsExcerptText ? { projectsExcerpt: projectsExcerptText } : {}) };
                 // Finalise the streaming bubble, or append the full reply if the
                 // provider never streamed a chunk.
                 if (last && last.role === "advisor" && last.streaming) {
