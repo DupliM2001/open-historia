@@ -234,7 +234,7 @@ import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js"
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
-import { documentExchange, documentNote, isDocumentExchange, markIntercepted, planReportDeliveries } from "../../runtime/reportDelivery.js";
+import { documentExchange, documentNote, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments } from "../../runtime/reportDelivery.js";
 import { canRewindCatalystTo, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
@@ -5759,7 +5759,11 @@ const MAX_ROLLBACK_SNAPSHOTS = 12;
 // `turn` is the journal of what the turn APPLIED (intervene.js journalTurn):
 // with the pre-turn state beside it, the turn can be applied again from any
 // point the player chooses — Intervene (interveneAfterEvent below).
-const captureRollbackSnapshot = async ({ round, fromDate, toDate, game, world, events, actions, chat, colors, turn = null }) => {
+// `intercepts` is the agents' file as it stood before the turn filed anything
+// into it (sealed, as stored): an undone turn takes its agents' reports and the
+// documents they stole with it. A snapshot captured before this carried none,
+// and restoring one keeps today's file, less the copies of undone documents.
+const captureRollbackSnapshot = async ({ round, fromDate, toDate, game, world, events, actions, chat, colors, intercepts = null, turn = null }) => {
   try {
     const prior = await readJson(JSON_URLS.snapshots, { defaultValue: [], force: true }).catch(() => []);
     const list = Array.isArray(prior) ? prior : [];
@@ -5776,6 +5780,7 @@ const captureRollbackSnapshot = async ({ round, fromDate, toDate, game, world, e
         actions: cloneValue(actions),
         chat: cloneValue(chat),
         colors: cloneValue(colors),
+        ...(intercepts && typeof intercepts === "object" ? { intercepts: cloneValue(intercepts) } : {}),
       },
       ...(turn ? { turn: cloneValue(turn) } : {}),
     };
@@ -5793,9 +5798,10 @@ export const loadRollbackSnapshots = async () => {
 };
 
 // Roll back to the start of the turn captured at `index`: restore the six
-// per-turn assets, discard that restore point and every newer one (those turns
-// no longer happened), and return the freshly-normalized bundle so the caller
-// can update immediately. Returns null if there is no such snapshot.
+// per-turn assets and the agents' file, discard that restore point and every
+// newer one (those turns no longer happened), and return the freshly-normalized
+// bundle so the caller can update immediately. Returns null if there is no such
+// snapshot.
 //
 // Wrapped in the same beginSimulation/endSimulation busy-lock every jump,
 // game-master and catalyst call already uses — without it, the idle pulse (on
@@ -5820,6 +5826,15 @@ export const rollBackToSnapshot = async (index = 0) => {
       writeJson(JSON_URLS.chat, s.chat ?? [], { pretty: true }),
       writeJson(JSON_URLS.colors, s.colors ?? {}, { pretty: true }),
     ]);
+    // The agents' file as it stood before the turn — the traffic and the stolen
+    // copies the turn filed go with it. Either way, a copy of a document the
+    // restored file no longer holds as stolen is taken out (reportDelivery.js).
+    const snapshotIntercepts = s.intercepts && typeof s.intercepts === "object" && !Array.isArray(s.intercepts) ? s.intercepts : null;
+    const filedIntercepts = snapshotIntercepts ?? await readInterceptsState({ force: true }).catch(() => ({}));
+    const reconciledIntercepts = withoutOrphanedDocuments(filedIntercepts, normalizeWorldState(s.world ?? {}).reports);
+    if (snapshotIntercepts || reconciledIntercepts !== filedIntercepts) {
+      await writeInterceptsState(reconciledIntercepts);
+    }
     await writeJson(JSON_URLS.snapshots, snapshots.slice(index + 1));
     const bundle = await readGameStateBundle({ force: true });
     // A rollback is the one event that legitimately moves the clock BACKWARDS.
@@ -6803,6 +6818,11 @@ const applySimulationResult = async ({
   // sees the committed round.
   if (typeof window !== "undefined") window.dispatchEvent(new Event("oh:turn-complete"));
 
+  // The agents' file before this turn files anything into it, kept with the
+  // restore point below so an undo takes the turn's reports and stolen copies
+  // back with everything else.
+  const baseIntercepts = await readInterceptsState({ force: true }).catch(() => null);
+
   // Spies report on the world the turn just produced. Awaited so the reports are
   // there when the player opens the Spy tab, but never allowed to fail the turn.
   // While requests are being saved the reports came with the turn review, in its
@@ -6828,6 +6848,7 @@ const applySimulationResult = async ({
     actions: baseActions,
     chat: baseChats,
     colors: baseColors,
+    intercepts: baseIntercepts,
     turn: result.mode === "jump" || result.mode === "auto"
       ? journalTurn({
         events: freshEvents,

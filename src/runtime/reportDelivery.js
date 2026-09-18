@@ -122,15 +122,18 @@ export const documentNote = (delivery) => {
   };
 };
 
+// The id a stolen copy is filed under: the report's, so filing it twice files it
+// once, and so the file can be checked against the reports it came from.
+export const documentExchangeId = (reportId) => `doc-${asText(reportId)}`.toLowerCase().replace(/\s+/g, "-");
+
 // The intercept a stolen document becomes, beside the agent's other traffic.
-// Its id comes from the report, so filing it twice files it once.
 export const documentExchange = (delivery, { date = "" } = {}) => {
   const { report } = delivery;
   // Its sender when that is one of its holders; otherwise the government the
   // agent took it from.
   const speaker = report.from && has(report.visibleTo, report.from) ? report.from : delivery.target;
   return {
-    id: `doc-${asText(report.id)}`.toLowerCase().replace(/\s+/g, "-"),
+    id: documentExchangeId(report.id),
     counterpart: delivery.counterparts?.length ? delivery.counterparts.join(", ") : "internal document",
     date: asText(report.dateline) || asText(date),
     subject: report.title,
@@ -139,6 +142,31 @@ export const documentExchange = (delivery, { date = "" } = {}) => {
 };
 
 export const isDocumentExchange = (exchange) => asText(exchange?.id).startsWith("doc-");
+
+// The agents' file after a turn is undone or cut short: a stolen copy stays only
+// while the report it copies is still on file as stolen. An undone turn takes its
+// reports back with it, and a copy of a document that never existed — or that no
+// agent ever took — must not be left in the Spies tab. Returns the same object
+// when nothing had to go.
+export const withoutOrphanedDocuments = (intercepts, reports) => {
+  const source = intercepts && typeof intercepts === "object" && !Array.isArray(intercepts) ? intercepts : {};
+  const stolen = new Set(asArray(reports)
+    .filter((report) => asArray(report?.interceptedBy).length > 0)
+    .map((report) => documentExchangeId(report.id)));
+  let changed = false;
+  const next = {};
+  for (const [target, entry] of Object.entries(source)) {
+    const exchanges = asArray(entry?.exchanges);
+    const kept = exchanges.filter((exchange) => !isDocumentExchange(exchange) || stolen.has(asText(exchange.id)));
+    if (kept.length === exchanges.length) {
+      next[target] = entry;
+      continue;
+    }
+    changed = true;
+    if (kept.length) next[target] = { ...entry, exchanges: kept };
+  }
+  return changed ? next : intercepts;
+};
 
 // The file after the player's service has read what it stole: the narrator is
 // told who has a copy; the holders are not.
