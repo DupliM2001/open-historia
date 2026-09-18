@@ -141,6 +141,42 @@
   .nav-cta:hover{background:linear-gradient(180deg,#a12b3e,#7a1e2b)}
   @media(max-width:720px){.nav-links a:not(.nav-cta){display:none}}
 
+  /* ---------- community bar ---------- */
+  /* Above the sticky header, so it scrolls away once someone is reading and the
+     nav keeps the top of the screen. Carbon fibre in the page's own greys: a
+     woven texture built from hard-edged stripes, with no fade and no colour, so
+     the strip belongs to the dark page and still reads apart from the flat header. */
+  .community{position:relative;z-index:51;font-size:1rem;color:var(--sepia);
+    background-color:#131315;
+    background-image:
+      linear-gradient(27deg,#161618 5px,transparent 5px),
+      linear-gradient(207deg,#161618 5px,transparent 5px),
+      linear-gradient(27deg,#232327 5px,transparent 5px),
+      linear-gradient(207deg,#232327 5px,transparent 5px),
+      linear-gradient(90deg,#1c1c1f 10px,transparent 10px),
+      linear-gradient(#1e1e21 25%,#1a1a1d 25%,#1a1a1d 50%,transparent 50%,transparent 75%,#252529 75%,#252529);
+    background-position:0 5px,10px 0,0 10px,10px 5px,0 0,0 0;
+    background-size:20px 20px;
+    border-bottom:1px solid var(--line2)}
+  .community-in{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
+    gap:0.5rem 1.125rem;min-height:2.875rem;padding:0.5rem 1.5rem;text-align:center}
+  .community-say b{color:var(--ink);font-weight:500}
+  .community-links{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.5625rem}
+  /* The site's display type (Cinzel, uppercase, tracked) on a solid pill, so the
+     weave never runs behind the letters. Gold lettering, the page's accent, marks
+     them as links without competing with the red Play and Download. */
+  .community-btn{display:inline-flex;align-items:center;padding:0.375rem 0.9375rem;border-radius:999px;
+    font-family:var(--display);font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    white-space:nowrap;color:var(--gold-l);background:var(--parch);border:1px solid var(--line2);
+    transition:background .15s,border-color .15s,color .15s,transform .12s}
+  .community-btn:hover{color:#fff4d4;background:var(--marble);border-color:var(--gold-l);transform:translateY(-0.0625rem)}
+  .community-btn:focus-visible{outline:2px solid var(--gold-l);outline-offset:2px}
+  /* On a narrow screen the two buttons ARE the message; the sentence is what goes. */
+  @media(max-width:560px){.community-in{gap:0.5rem;padding:0.4375rem 0.75rem;min-height:2.625rem}
+    .community-say{display:none}
+    .community-btn{font-size:.68rem;letter-spacing:.06em;padding:0.375rem 0.75rem}}
+  @media(prefers-reduced-motion: reduce){.community-btn{transition:none}.community-btn:hover{transform:none}}
+
   /* ---------- hero ---------- */
   .hero{padding:0 0 1.875rem;text-align:center}
   /* Full-bleed screenshot behind the badge and headline only. */
@@ -372,6 +408,16 @@
 </style>
 </head>
 <body>
+
+<aside class="community" aria-label="Join the community">
+  <div class="community-in">
+    <span class="community-say">Ask questions, share scenarios, and hear about updates &mdash; <b>come say hello.</b></span>
+    <span class="community-links">
+      <a class="community-btn" href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">Join the Discord</a>
+      <a class="community-btn" href="https://www.reddit.com/r/OpenHistoria" target="_blank" rel="noopener">r/OpenHistoria</a>
+    </span>
+  </div>
+</aside>
 
 <header>
   <div class="wrap nav">
