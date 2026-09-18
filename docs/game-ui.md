@@ -271,6 +271,12 @@ Shows player country + formatted date (`«` opens Events history, `»` opens the
 
 On success it swaps to the **history panel** with `visibleEventCount = 1`. Fallback generations surface a warning banner.
 
+### 6.2-ter Group chats: one request, and binding votes
+
+A group turn no longer rotates one leader at a time. `runGroupTurn` (`chat.jsx`) calls `runChatActionBatch` once for the whole table (see [group diplomacy](ai-overview.md#group-diplomacy-one-request-for-the-whole-table)); the answer is applied to the thread's event log and the panel re-renders from its projection, so messages, reactions, a join or a rename all arrive together. A failure falls back to the old rotation, which is exactly the behaviour it replaces.
+
+A binding vote renders as a `PollCard` above the composer: who called it, each option as a bar with its share and tally, the voters on hover, and the player's own vote cast once by clicking. A model can never cast it for them — `chatActions.js` refuses any action whose actor is human-controlled — and there is no closing a poll or changing a vote, because neither is a thing a government gets to do.
+
 ### 6.2-bis Dossier (`dossier.jsx`)
 
 The fourth launcher in the bottom-left dock. Lists the documents this player's government holds — secret protocols, private letters, intelligence assessments, treaty articles (`world.reports`, see [reports](ai-overview.md#reports-what-only-some-governments-know)) — newest first, each card expanding to the document rendered as Markdown, with a search box over title and body. Read-only: only the simulation writes reports. Scoped by exactly the rule every other reader uses, `audienceSeesScoped(viewerAudience([player]), report.visibleTo)`, so a document addressed only to other powers is not in the list at all; the subtitle says `Published`, `Held by us alone` or `Shared with …`.

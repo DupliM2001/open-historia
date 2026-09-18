@@ -190,6 +190,14 @@ The **game master keeps the full `impactsSchema`**, board included: it is a sing
 
 Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It grew again with what beta added to the jump (31,720 once `at` joined), and the **description audit** brought it to **24,915**: every field description says what the field *is* in a line, because the levers are explained at length in the actions reference and the call-time directives the jump is always given — a paragraph in a field description was the same paragraph a third time. The guard in `projectOpSchema.test.js` is now **28,000**, raised on purpose when `impacts.reports` landed (26,363 chars; ~1,450 for the family). It is a prompt-size guard, not a provider limit: an impact family that saves a *request* may raise it — reports inside the jump cost ~1,450 characters instead of a whole request a turn, which is the trade the budget asks for.
 
+### 4.5-ter `CHAT_ACTIONS_SCHEMA` — one turn of a conversation
+
+`{ actions: chatActionSchema[], memorySummary? }`, the answer to one request that acts for every AI participant in a thread (`submit_chat_actions`; see [group diplomacy](ai-overview.md#group-diplomacy-one-request-for-the-whole-table)).
+
+`chatActionSchema` is ONE object with a `type` enum — send_message, add_reaction, rename_chat, add_member, remove_member, create_poll, add_poll_option, poll_vote — and all-optional fields, like `projectOpSchema` and for a harder reason: **Gemini refuses a function declaration whose `anyOf` has more than six branches** (bisected live: six passed, seven did not) and this vocabulary has eight. Nothing is lost, because `normalizeChatAction` (`chatActions.js`) enforces what each type needs before anything is applied, and a malformed action costs only itself.
+
+`pollRef`/`optionRef` are the batch's own labels for a poll it invents, so it can be created and voted in the same answer; the engine mints the real ids. A label is accepted where a ref is expected — the model writes them that way.
+
 ### 4.6 `createdChatSchema`
 
 The initiating polity always speaks first — a blank untitled chat tells the player nothing.
