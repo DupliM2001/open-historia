@@ -354,3 +354,54 @@ export const threadAsSeenBy = (events, polity) => {
     }
     return projectChatThread(visible);
 };
+
+// Messages a writer put in a thread's `messages` without going through its log
+// — the one-on-one panel, the rotation fallback, a note a turn folded into an
+// open thread, the player's own line before a group turn — appended to the log
+// in the order they appear. Without this the log, being the truth of a thread,
+// silently dropped them on the next read: the second one-request group turn
+// lost the very message the player had just sent.
+//
+// A message is already in the log when the log has one with its id, or with the
+// same speaker and the same words. An error bubble is the panel's, not the
+// thread's, and never enters it. A message that came without an id gets one from
+// its content, so reading a thread twice gives the same log.
+const contentId = (text) => {
+    let value = 0x811c9dc5;
+    for (let index = 0; index < text.length; index += 1) {
+        value ^= text.charCodeAt(index);
+        value = Math.imul(value, 0x01000193) >>> 0;
+    }
+    return value.toString(36);
+};
+
+export const withUnloggedMessages = (events, messages, { threadId = "" } = {}) => {
+    const log = normalizeChatEvents(events);
+    if (!log.length) return log;
+    const logged = projectChatThread(log).messages;
+    const ids = new Set(logged.map((message) => asText(message.id)).filter(Boolean));
+    const said = new Set(logged.map((message) => `${fold(message.speaker)}|${asText(message.text)}`));
+    const additions = [];
+    for (const message of asArray(messages)) {
+        const role = asText(message?.role ?? message?.sender);
+        if (role === "error") continue;
+        const text = asText(message?.text ?? message?.message ?? message?.content);
+        if (!text) continue;
+        const speaker = asText(message?.speaker ?? message?.senderName);
+        const id = asText(message?.id);
+        const key = `${fold(speaker)}|${text}`;
+        if ((id && ids.has(id)) || said.has(key)) continue;
+        said.add(key);
+        additions.push({
+            id: id || `${asText(threadId) || "chat"}-unlogged-${contentId(`${key}|${asText(message?.time)}`)}`,
+            kind: "message",
+            time: asText(message?.time ?? message?.date),
+            by: speaker,
+            role: role || (speaker ? "leader" : "system"),
+            code: asText(message?.code),
+            text,
+            memorySummary: asText(message?.memorySummary ?? message?.diplomaticMemorySummary),
+        });
+    }
+    return additions.length ? normalizeChatEvents([...log, ...additions]) : log;
+};

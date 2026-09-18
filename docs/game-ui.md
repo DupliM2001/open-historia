@@ -113,7 +113,7 @@ Both launchers use `hasOpened` latches so the panel body isn't mounted until fir
 | Live sync | While open, polls stored chats every 5 s and merges additions (jump invitations, idle drip) without clobbering the active conversation | — |
 | Send | `sendDiplomaticMessage(text, countryName, countries)` → `{ reply, reaction, memorySummary }` (the leader appends a hidden `DIPLOMATIC_MEMORY:` line, stored on the reply as `memorySummary` and fed back as system-side context — `runtime/diplomaticEnvelope.js`); multi-country chats rotate speakers via `chooseNextDiplomaticSpeaker`, at most 3 NPC replies per player message | `src/Game/AI/main.jsx`, `src/Game/AI/gameplay.js` |
 | Group turn UI | `phase` = `player`/`pending`/`leader`; "Let X speak →" vs "Speak" buttons offer each queued country | `ConversationView` |
-| Conversation view | A date separator opens every new game day; the last 12 messages render first with a "Show earlier" button; stacked flags on list rows | `ConversationView`, `ChatListItem` |
+| Conversation view | A date separator opens every new game day; the last 12 messages render first with a "Show earlier" button; stacked flags on list rows; a leader's message is dated through `gameDates.js` (it used to show a day early west of Greenwich); a document delivered through diplomacy is a message like any other, its `📄` heading in bold ([§6.2-bis](#62-bis-documents-where-they-arrive)) | `ConversationView`, `ChatListItem` |
 | External trigger | `requestDiplomaticChat(country)` bridge (`chat.jsx:697`) lets the map region popup open/reuse a 1-on-1 chat | Map selection layer |
 | Reactions | Leader reactions attach an emoji to the player's last message; hover tooltip is a portal at z 99999 | — |
 
@@ -279,9 +279,15 @@ A group turn no longer rotates one leader at a time. `runGroupTurn` (`chat.jsx`)
 
 A binding vote renders as a `PollCard` above the composer: who called it, each option as a bar with its share and tally, the voters on hover, and the player's own vote cast once by clicking. A model can never cast it for them — `chatActions.js` refuses any action whose actor is human-controlled — and there is no closing a poll or changing a vote, because neither is a thing a government gets to do.
 
-### 6.2-bis Dossier (`dossier.jsx`)
+### 6.2-bis Documents, where they arrive
 
-The fourth launcher in the bottom-left dock. Lists the documents this player's government holds — secret protocols, private letters, intelligence assessments, treaty articles (`world.reports`, see [reports](ai-overview.md#reports-what-only-some-governments-know)) — newest first, each card expanding to the document rendered as Markdown, with a search box over title and body. Read-only: only the simulation writes reports. Scoped by exactly the rule every other reader uses, `audienceSeesScoped(viewerAudience([player]), report.visibleTo)`, so a document addressed only to other powers is not in the list at all; the subtitle says `Published`, `Held by us alone` or `Shared with …`.
+There is no document panel (a Dossier launcher existed briefly in the lab and was removed). The documents the simulation writes — secret protocols, private letters, intelligence assessments, treaty articles (`world.reports`, see [reports](ai-overview.md#reports-what-only-some-governments-know)) — reach the player through the panels they already use (`runtime/reportDelivery.js`):
+
+- **Diplomacy.** A document the player holds with other governments arrives as a message in the thread with them, spoken by its sender: a bold `📄` heading and dateline over the document in full. It raises the unread badge and the notification like any message.
+- **The Spy tab.** A document held by a government where the player has an agent arrives among that agent's intercepts, listed with `📄` rather than `📡`, sealed like the rest and redacted to the player's signal clarity.
+- **The event card.** A published document, or one only the player's government holds, sits under the text of the event that produced it (`EventDocument` in `time.jsx`): `📄 title`, `Published` or `Our government's`, and the document a click away.
+
+The advisor reads all of them as the government's own staff; the dock is back to three launchers.
 
 ### 6.3 Event history panel (`«`) + staged reveal
 
@@ -399,7 +405,7 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 
 ## 11. Search — `src/Game/GameUI/search.jsx`
 
-`Search` (`search.jsx:144`, memoized) — a small 2.4rem square just right of the toolbar (z 9999), its bottom edge level with the bottoms of the dock's buttons rather than the dock, so it reads as a utility beside the launchers and not a fifth one; expands to an input (rightward on desktop, a full-width 3rem bar above the toolbar on mobile). Its position is derived from the dock's geometry in `hudDock.js`, which the `Toolbar` reads too: the two used to be separate literals, and when the Dossier launcher widened the dock the search control sat on top of it. Debounced (200 ms) autocomplete against **Nominatim** (`nominatim.openstreetmap.org/search`), results deduped + cached in-module. Picking a result (click / Enter / ↑↓) calls `mapRef.current.flyTo({center:[lon,lat], zoom:5})`. Purely a camera control — it does not touch game state.
+`Search` (`search.jsx:144`, memoized) — a small 2.4rem square just right of the three-launcher toolbar (13.8rem from the left, z 9999), its bottom edge level with the bottoms of the dock's buttons rather than the dock, so it reads as a utility beside the launchers and not another one; expands to an input (rightward on desktop, a full-width 3rem bar above the toolbar on mobile). Its position is derived from the dock's geometry in `hudDock.js`, which the `Toolbar` reads too: the two used to be separate literals, and when a fourth launcher (the since-removed Dossier) widened the dock the search control sat on top of it. Adding or removing a launcher moves it on its own. Debounced (200 ms) autocomplete against **Nominatim** (`nominatim.openstreetmap.org/search`), results deduped + cached in-module. Picking a result (click / Enter / ↑↓) calls `mapRef.current.flyTo({center:[lon,lat], zoom:5})`. Purely a camera control — it does not touch game state.
 
 ---
 

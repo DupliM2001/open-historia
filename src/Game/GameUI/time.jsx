@@ -21,6 +21,7 @@ import { describeJumpCost, requestDay, savingRequests } from "../AI/requestBudge
 import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
+import { documentsForEvent } from "../../runtime/reportDelivery.js";
 import { isMainMenuOpen, useMainMenuOpen } from "./libraryBar";
 import {
     applyEventImpactsToWorld,
@@ -653,6 +654,33 @@ const LinkPill = ({ link, onFocus }) => (
     </button>
 );
 
+// A document that came with an event: its heading, and the text itself on a
+// click. Published ones say so; a paper only the player's government holds says
+// that instead.
+const EventDocument = ({ report }) => {
+    const [open, setOpen] = useState(false);
+    return (
+        <div style={{ background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.18)", borderRadius: "12px", overflow: "hidden" }}>
+        <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        style={{ alignItems: "center", background: "none", border: "none", color: "rgba(254,243,199,0.92)", cursor: "pointer", display: "flex", font: "inherit", fontSize: "0.74rem", fontWeight: 700, gap: "0.45rem", padding: "0.5rem 0.7rem", textAlign: "left", width: "100%" }}
+        >
+        <span aria-hidden="true">📄</span>
+        <span style={{ flex: 1, minWidth: 0 }}>{report.title}</span>
+        <span style={{ color: "rgba(254,243,199,0.5)", flexShrink: 0, fontSize: "0.62rem", fontWeight: 600 }}>
+        {report.visibleTo === null ? "Published" : "Our government's"}{report.dateline ? ` · ${report.dateline}` : ""} {open ? "▴" : "▾"}
+        </span>
+        </button>
+        {open && (
+            <div className="timeline-markdown" style={{ borderTop: "1px solid rgba(251,191,36,0.12)", color: "rgba(228,228,231,0.84)", fontSize: "0.74rem", lineHeight: 1.55, padding: "0.55rem 0.8rem 0.7rem" }}>
+            <ReactMarkdown>{report.body}</ReactMarkdown>
+            </div>
+        )}
+        </div>
+    );
+};
+
 const EventCard = ({ event, footer = null, lookups }) => {
     // The model's category tags, then what the event is about: links the map
     // can fly to when the card has them, the participants it names otherwise.
@@ -661,6 +689,10 @@ const EventCard = ({ event, footer = null, lookups }) => {
         [event, lookups],
     );
     const tags = [...(Array.isArray(event.tags) ? event.tags : []), ...(links ? [] : collectEventTags(event, lookups))];
+    const documents = useMemo(
+        () => (typeof lookups?.eventDocuments === "function" ? lookups.eventDocuments(event) : []),
+        [event, lookups],
+    );
     const mapChanges = describeEventMapChanges(event, lookups);
     const mapChangeCount = mapChanges.length;
     const [showMapChanges, setShowMapChanges] = useState(false);
@@ -731,6 +763,12 @@ const EventCard = ({ event, footer = null, lookups }) => {
         {event.description && (
             <div className="timeline-markdown" style={{ color: "rgba(228,228,231,0.82)", fontSize: "0.77rem", lineHeight: "1.58" }}>
             <ReactMarkdown>{event.description}</ReactMarkdown>
+            </div>
+        )}
+
+        {documents.length > 0 && (
+            <div style={{ display: "grid", gap: "0.35rem" }}>
+            {documents.map((report) => <EventDocument key={report.id} report={report} />)}
             </div>
         )}
 
@@ -2478,13 +2516,20 @@ const DateWidget = ({
     // What each event is about, as chips on its card that fly the map there
     // (eventFocus.js deriveEventLinks). Re-derived once the map data has loaded,
     // since currentFocusContext changes with the catalog.
+    // And the documents that reached the player with the event itself — a
+    // published text, or a paper only the player's government holds
+    // (runtime/reportDelivery.js). A letter came through diplomacy and a stolen
+    // copy through an agent; the card shows neither.
+    const documentReports = worldState?.reports;
+    const documentPlayer = gameData?.country;
     const cardLookups = useMemo(() => ({
         ...lookups,
         eventLinks: (event) => deriveEventLinks(event, currentFocusContext(), {
             unitName: (id) => getUnitById(id)?.name || "",
         }),
         focusLink: (bounds) => focusMapOnBounds(mapRef, bounds),
-    }), [lookups, currentFocusContext, mapRef]);
+        eventDocuments: (event) => documentsForEvent(documentReports, event?.id, documentPlayer),
+    }), [lookups, currentFocusContext, mapRef, documentReports, documentPlayer]);
 
     // The camera follows EVERY revealed event — impacts pin the exact spot,
     // otherwise the polities the event involves do, and its own words are the

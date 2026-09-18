@@ -20,6 +20,7 @@ import {
     normalizeChatEvents,
     projectChatThread,
     threadAsSeenBy,
+    withUnloggedMessages,
 } from "./chatThreads.js";
 
 const legacy = () => ({
@@ -141,4 +142,42 @@ test("a very long thread keeps its structure and its newest talk", () => {
     assert.equal(kept[1].kind, "member_joined", "nor is a join: it is who is in the room");
     assert.equal(kept.at(-1).text, `line ${CHAT_EVENTS_LIMIT + 49}`, "the newest talk is what survives");
     assert.deepEqual(projectChatThread(kept).countries.map((member) => member.name), ["France"]);
+});
+
+test("a message written beside the log is folded into it, once, and a re-read changes nothing", () => {
+    // The second one-request group turn: the log already exists, and the
+    // player's new line reached the thread only through its `messages`.
+    const log = [
+        { id: "c", kind: "chat_created", title: "Conference" },
+        { id: "j1", kind: "member_joined", member: "France" },
+        { id: "j2", kind: "member_joined", member: "Prussia" },
+        { id: "m1", kind: "message", by: "France", role: "leader", text: "We open." },
+    ];
+    const messages = [
+        ...projectChatThread(log).messages,
+        { role: "user", speaker: "Bavaria", text: "Then we answer.", time: "1870-07-16" },
+        { role: "error", speaker: "System", text: "This chat has no valid participants." },
+    ];
+    const folded = withUnloggedMessages(log, messages, { threadId: "chat-9" });
+    assert.deepEqual(projectChatThread(folded).messages.map((message) => `${message.speaker}: ${message.text}`), [
+        "France: We open.",
+        "Bavaria: Then we answer.",
+    ], "the player's line is kept and the error bubble is not");
+    const again = withUnloggedMessages(folded, [...messages, ...projectChatThread(folded).messages], { threadId: "chat-9" });
+    assert.deepEqual(again, folded, "idempotent: the content-derived id matches on every read");
+    assert.equal(folded.at(-1).role, "user");
+});
+
+test("a message the log already has, by id or by speaker and words, is not added twice", () => {
+    const log = [
+        { id: "c", kind: "chat_created", title: "Talks" },
+        { id: "j1", kind: "member_joined", member: "France" },
+        { id: "m1", kind: "message", by: "France", role: "leader", text: "We open." },
+    ];
+    const same = withUnloggedMessages(log, [
+        { id: "m1", speaker: "France", text: "We open (edited on screen)." },
+        { speaker: "france", text: "We open." },
+    ]);
+    assert.deepEqual(same, normalizeChatEvents(log));
+    assert.deepEqual(withUnloggedMessages([], [{ speaker: "France", text: "hi" }]), [], "no log, nothing to fold into");
 });

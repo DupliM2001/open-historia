@@ -234,6 +234,7 @@ import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js"
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
+import { documentExchange, documentNote, isDocumentExchange, markIntercepted, planReportDeliveries } from "../../runtime/reportDelivery.js";
 import { canRewindCatalystTo, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
@@ -6663,6 +6664,26 @@ const applySimulationResult = async ({
     phases?.enter("applying");
   }
 
+  // The documents that changed hands this turn, delivered to the player the way
+  // a government receives them (runtime/reportDelivery.js): a letter into the
+  // thread with its sender (below, with the other notes), a copy stolen by an
+  // agent into that agent's intercepts (filed after the write), a published text
+  // or the player's own paper onto its event (time.jsx reads those from the
+  // file). A stolen copy is marked in the file for the narrator.
+  const documentPlayer = normalizeString(baseGame.country);
+  const reportDeliveries = planReportDeliveries({
+    before: normalizeArray(baseWorld.reports),
+    after: normalizeArray(worldWithImpacts.reports),
+    player: documentPlayer,
+    agents: activeSpies(worldWithImpacts, documentPlayer).filter((spy) => spy.status === "active"),
+  });
+  if (reportDeliveries.some((delivery) => delivery.channel === "intelligence")) {
+    worldWithImpacts = { ...worldWithImpacts, reports: markIntercepted(worldWithImpacts.reports, reportDeliveries, documentPlayer) };
+  }
+  if (reportDeliveries.length) {
+    logDebugEvent("turn", `Documents delivered: ${reportDeliveries.map((delivery) => `"${delivery.report.title}" by ${delivery.channel}`).join("; ")}.`, undefined, { verbose: true });
+  }
+
   let nextWorld = worldWithImpacts;
 
   for (const event of freshEvents) {
@@ -6683,6 +6704,16 @@ const applySimulationResult = async ({
       playerName: baseGame.country,
     });
     if (nextChat) { nextChats.unshift(nextChat); generatedChats.unshift(nextChat); }
+  }
+
+  // A document the player now holds with other governments is filed in the
+  // thread with them, spoken by its sender — folded like any note, so a thread
+  // already open is where it lands.
+  for (const delivery of reportDeliveries.filter((entry) => entry.channel === "diplomacy")) {
+    const nextChat = await buildGeneratedChat(documentNote(delivery), normalizeString(delivery.report.sourceEventId), worldWithImpacts, {
+      playerName: baseGame.country,
+    });
+    if (nextChat) { nextChats.unshift(nextChat); generatedChats.push(nextChat); }
   }
 
   if (result.mode === "jump" || result.mode === "auto") {
@@ -6780,6 +6811,8 @@ const applySimulationResult = async ({
   // agent makes its own request, as before.
   if (review) await fileReviewedAgentReports(review);
   else if (!savingRequests()) await refreshSpyIntercepts();
+  // And what the player's agents stole this turn, beside their traffic.
+  await fileStolenDocuments(reportDeliveries, { world: nextWorld, game: nextGame });
 
   // Snapshot the state we just replaced so it can be rolled back to (best-effort),
   // with what this turn applied beside it, in the order the reveal shows it, so
@@ -9382,11 +9415,43 @@ const storeSpyReport = async (bundle, spy, payload) => {
   // service did not decode. Only the renderer and the jump prompt open it.
   const seal = isSeal(bundle.world?.spySeal) ? bundle.world.spySeal : await ensureSpySeal();
   const sealed = await Promise.all(exchanges.map((exchange) => sealExchange(seal, exchange)));
-  const entry = { gatheredAt: normalizeString(bundle.game?.gameDate), round: Number(bundle.game?.round) || 0, planted: spy.status === "turned", exchanges: sealed };
   // Re-read at write time: another gather may have landed for a different target.
   const current = normalizeIntercepts(await readInterceptsState({ force: true }));
+  // Each report replaces the agent's traffic — what it heard this period — but
+  // not the documents it stole (reportDelivery.js): those stay on file with it.
+  const stolen = normalizeArray(current[name]?.exchanges).filter(isDocumentExchange).slice(0, STOLEN_DOCUMENTS_KEPT);
+  const entry = { gatheredAt: normalizeString(bundle.game?.gameDate), round: Number(bundle.game?.round) || 0, planted: spy.status === "turned", exchanges: [...stolen, ...sealed] };
   await writeInterceptsState({ ...current, [name]: entry });
   return entry;
+};
+
+// How many stolen documents an agent's file keeps, newest first.
+const STOLEN_DOCUMENTS_KEPT = 8;
+
+// The documents the player's agents stole this turn (reportDelivery.js), filed
+// among each agent's intercepts — sealed like the rest, and decoded in the Spies
+// tab only as far as the player's service can read the target's. Filing one
+// twice files it once (its id comes from the report). Never costs the turn.
+const fileStolenDocuments = async (deliveries, { world, game }) => {
+  const stolen = normalizeArray(deliveries).filter((delivery) => delivery?.channel === "intelligence");
+  if (!stolen.length) return;
+  try {
+    const seal = isSeal(world?.spySeal) ? world.spySeal : await ensureSpySeal();
+    const current = normalizeIntercepts(await readInterceptsState({ force: true }));
+    const next = { ...current };
+    for (const delivery of stolen) {
+      const key = normalizeString(delivery.agentTarget || delivery.target);
+      const exchange = documentExchange(delivery, { date: game?.gameDate });
+      const entry = next[key] ?? { gatheredAt: normalizeString(game?.gameDate), round: Number(game?.round) || 0, planted: false, exchanges: [] };
+      if (entry.exchanges.some((existing) => existing.id === exchange.id)) continue;
+      const documents = entry.exchanges.filter(isDocumentExchange);
+      const traffic = entry.exchanges.filter((existing) => !isDocumentExchange(existing));
+      next[key] = { ...entry, exchanges: [await sealExchange(seal, exchange), ...documents].slice(0, STOLEN_DOCUMENTS_KEPT).concat(traffic) };
+    }
+    await writeInterceptsState(next);
+  } catch (error) {
+    console.warn("[spycraft] a stolen document could not be filed:", error?.message || error);
+  }
 };
 
 const playersAgentIn = (bundle, target) => {
@@ -10298,8 +10363,11 @@ export const runChatActionBatch = async ({
   if (!stored) return { events: [], applied: [], rejected: [], actions: [] };
 
   // The log is the truth; a thread saved before it existed is migrated on read.
-  const events = normalizeArray(chat?.events).length
-    ? normalizeChatEvents(chat.events)
+  // The normalized entry has already folded in what was written beside the log —
+  // the player's line that started this turn among it — so read it from there:
+  // the raw `chat.events` would leave that line out of the thread for good.
+  const events = normalizeArray(stored.events).length
+    ? stored.events
     : eventsFromLegacyChat(stored);
   const projected = projectChatThread(events);
   const aiParticipants = projected.countries

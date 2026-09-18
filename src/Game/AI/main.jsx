@@ -79,6 +79,8 @@ import { collapseRepeatedWorldContext } from "./promptDedupe.js";
 import { filterChatsVisibleTo, isChatVisibleTo } from "./chatVisibility.js";
 import { foreignAgentBrief } from "../../runtime/spycraft.js";
 import { renderReminders } from "../../runtime/gmChanges.js";
+import { describeReportsForPrompt, normalizeReports } from "../../runtime/reports.js";
+import { describeDocumentsForAdvisor } from "../../runtime/reportDelivery.js";
 import { withCatchUp } from "./conversationCatchUp.js";
 
 // main.jsx - AI chat module
@@ -2763,6 +2765,10 @@ async function buildAdvisorSystemPrompt() {
         ADVISOR_DEPLOY_DIRECTIVE,
         buildAdvisorProjectsDirective(variables.projectsSummary),
         buildAdvisorForcesDirective(variables.forcePosture),
+        // The government's papers (runtime/reportDelivery.js): what reached it
+        // through its diplomats, its agents and the news. The file the player
+        // no longer browses; the advisor, as the government's staff, reads it.
+        describeDocumentsForAdvisor(worldData?.reports, gameData?.country),
         // The Game Master's standing reminders (runtime/gmChanges.js): what is
         // true now, whatever the record says. Empty — and so absent — without any.
         renderReminders(worldData?.simulationReminders, { formatDate: formatDateReadable }),
@@ -2853,8 +2859,21 @@ export async function buildDiplomaticSystemPrompt(countries, playerCountry, spea
     // bridge is down does not offer to meet on it.
     const reminders = renderReminders(worldData?.simulationReminders, { formatDate: formatDateReadable });
 
+    // The documents this leader's government holds (runtime/reports.js), by the
+    // same audience rule as everything it may read: its own, and what was
+    // published. Never who else stole a copy.
+    const speakerKey = String(speaker || "").trim().toLowerCase();
+    const papers = speakerKey
+        ? describeReportsForPrompt(normalizeReports(worldData?.reports), {
+            sees: (visibleTo) => visibleTo === null || visibleTo.some((name) => String(name).trim().toLowerCase() === speakerKey),
+            heading: "[Documents Your Government Holds]",
+            limit: 8,
+            bodyChars: 220,
+        })
+        : "";
+
     // Leaders negotiate as softly or ruthlessly as the chosen difficulty.
-    return `${rendered}${espionage}${reminders ? `\n\n${reminders}` : ""}\n\n${difficultyDirective(gameData?.difficulty)}`;
+    return `${rendered}${espionage}${papers ? `\n\n${papers}` : ""}${reminders ? `\n\n${reminders}` : ""}\n\n${difficultyDirective(gameData?.difficulty)}`;
 }
 
 let advisorHistory = [];

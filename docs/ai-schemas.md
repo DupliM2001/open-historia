@@ -91,7 +91,7 @@ The heart of the map-mutating pipeline. Attached to events (`eventSchema.impacts
 | `regionClaims` | `regionClaimSchema[]` | **Territory claimed but not held.** Marks a region disputed (striped) *without* moving the border — an irredentist declaration, a proclaimed union, a contested frontier. `drop: true` withdraws a claim | no |
 | `unitOps` | `unitOpSchema[]` | Military unit mutations | no |
 | `markerOps` | `markerOpSchema[]` | Structures built/destroyed on the map | no |
-| `reports` | `reportOpSchema[]` | **Documents only some governments hold** — `create` (title, body, `visibleTo` of full polity names, optional `reportId`/`dateline`) or `share` (`reportId`, `visibleTo`). Never carries impacts: what moved the map stays in the public event. See [reports](ai-overview.md#reports-what-only-some-governments-know) | no |
+| `reports` | `reportOpSchema[]` | **Documents only some governments hold** — `create` (title, body, `visibleTo` of full polity names, optional `reportId`/`from`/`dateline`) or `share` (`reportId`, `visibleTo`, optional `from` — the holder who passed it on). `from` decides the thread and the speaker when a document reaches the player through diplomacy. Never carries impacts: what moved the map stays in the public event. See [reports](ai-overview.md#reports-what-only-some-governments-know) | no |
 
 ### 4.2 `regionTransferSchema` (`:90`)
 
