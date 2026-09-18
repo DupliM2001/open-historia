@@ -1985,6 +1985,10 @@ const SettingsWorkspace = ({
                     <div style={settingsHelper}>
                     Only used while Save AI requests (above) is off, because every lookup is a whole extra request. On: before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
                     </div>
+                    <Toggle label="Show time skip events as they are written" enabled={mapSettings.liveSkipEvents} onToggle={() => updateMapSetting("liveSkipEvents", MAP_SETTING_KEYS.liveSkipEvents, !mapSettings.liveSkipEvents)} />
+                    <div style={settingsHelper}>
+                    On (default): a time skip opens the Events panel and fills it as the model writes, one card at a time, with the spinner and Cancel underneath. Reveal them with Next event as they arrive; wherever you get to is kept when the turn lands. Off: the skip stays behind the Timeline panel's spinner and the whole round appears at the end, as it did before. Nothing about the turn itself changes either way. Providers that hand their answer over whole rather than in pieces, Gemini among them, arrive all at once regardless.
+                    </div>
                     <Toggle label="Batch background AI tasks" enabled={mapSettings.batchBackgroundTasks} onToggle={() => updateMapSetting("batchBackgroundTasks", MAP_SETTING_KEYS.batchBackgroundTasks, !mapSettings.batchBackgroundTasks)} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
                     Anthropic only. On: history consolidation runs through the Message Batches API at about half the price and lands a little later, applied between turns. Off (default): every task answers in the same call. Other providers are unaffected either way.
@@ -2196,6 +2200,8 @@ const SettingsMenu = ({
         chunkLongJumps: getMapSetting(MAP_SETTING_KEYS.chunkLongJumps),
         // Ships ON: an absent key reads as on (see mapSettings.js).
         lookupFunctions: getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions),
+        // Ships ON too.
+        liveSkipEvents: getMapSettingDefaultOn(MAP_SETTING_KEYS.liveSkipEvents),
         batchBackgroundTasks: getMapSetting(MAP_SETTING_KEYS.batchBackgroundTasks),
     }));
 

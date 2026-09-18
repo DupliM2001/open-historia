@@ -254,6 +254,7 @@ import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
 import { describeGoalForSimulation, describeGoalForSuggestions, playerGoalOf } from "../../runtime/playerGoal.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
+import { createStreamedEventReader } from "./streamedEvents.js";
 import { deliveryEventId, documentExchange, documentNote, documentNotices, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments, withoutOrphanedNotices } from "../../runtime/reportDelivery.js";
 import { unseenEvents, withoutUnseenMessages } from "../../runtime/unseenEvents.js";
 import { canRewindCatalystTo, isSceneInProgress, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
@@ -2725,6 +2726,10 @@ const runJsonTask = async (taskKey, {
   // saved: it keeps strict-then-retry. For something asked once per campaign and
   // built on for the rest of it, not for anything asked every turn.
   strictFirst = false,
+  // The answer's events as the model writes them (streamedEvents.js): every
+  // complete event this attempt has produced, and an empty list when an attempt
+  // begins. A preview only, through no validator. Only a time skip passes it.
+  onPartialEvents = null,
 }) => {
   const { prompts, promptTemplate, staticPromptPrefix, systemPrompt, statContract } = await buildTaskSystemPrompt(taskKey, { variables, lookups });
   const { customFullStatSheet, customStatRows, statIndexRows, statIndexKeys, customStatIndices } = statContract;
@@ -2874,6 +2879,28 @@ const runJsonTask = async (taskKey, {
       // Telemetry: the record for THIS attempt comes back through the sink, so
       // the validation outcome below lands on the call that produced it.
       const attemptSink = {};
+      // One reader per attempt: a rejected attempt's events leave the panel when the next starts.
+      const streamed = [];
+      const eventReader = typeof onPartialEvents === "function"
+        ? createStreamedEventReader({
+          // An index below what is held means the stream restarted: one attempt
+          // can produce several, since a busy provider retries in place and the
+          // Fallback list moves to the next entry, and the abandoned answer's
+          // events must not sit above the real one's. Anything else appends.
+          // Never written AT the index: the reader numbers every element it
+          // closes, including one it could not parse, so the indexes it hands
+          // out can skip. Assigning to those would leave a hole in the array,
+          // and the panel builds its record straight off it.
+          onEvent: (event, { index }) => {
+            if (index < streamed.length) streamed.length = index;
+            streamed.push(event);
+            try { onPartialEvents(streamed.slice()); } catch { /* a preview listener must never cost a turn */ }
+          },
+        })
+        : null;
+      if (eventReader) {
+        try { onPartialEvents([]); } catch { /* as above */ }
+      }
       let response;
       try {
         response = await callAI(systemPrompt, history, {
@@ -2909,8 +2936,18 @@ const runJsonTask = async (taskKey, {
           __debugSink: attemptSink,
           ...(requestKind ? { requestKind } : {}),
           ...(typeof onRequest === "function" ? { onRequest } : {}),
+          // The arguments as they assemble (streamAssembly.js). A lookup round's
+          // call is ignored by name, so only the answer itself is read.
+          ...(eventReader ? {
+            onToolStream: (progress) => {
+              if (progress?.name && tool?.name && progress.name !== tool.name) return;
+              if (typeof progress?.json === "string") eventReader.pushJson(progress.json);
+              else if (progress?.args) eventReader.pushArgs(progress.args, progress.paths);
+            },
+          } : {}),
         });
       } catch (error) {
+        // No finish() here: an attempt that never answered has nothing to release.
         // The provider refused inside the stream and gave no answer at all
         // (providerErrors.js toolStreamRefusalError). There is nothing to correct,
         // so the second attempt is a plain re-ask — after a real pause when it
@@ -2933,6 +2970,8 @@ const runJsonTask = async (taskKey, {
       // the wire, and leaving the window armed across them would have attempt
       // 1's clock abort a perfectly healthy attempt 2. The next answer re-arms it.
       idle.cancel();
+      // Releases the last event, which a path stream holds back until the stream closes.
+      eventReader?.finish();
       const rawText = typeof response === "string" ? response : normalizeString(response?.rawText);
       // A tool-call answer has no text of its own (Gemini sends the call with
       // no text parts), so the call's input IS the answer. Kept as such, or the
@@ -11481,7 +11520,7 @@ export const advanceActiveCatalyst = async (choiceText) => {
 // finished segments are kept, and the player decides whether to retry the one
 // that failed or discard the turn. Half a round of real events followed by half
 // a round of canned ones is never on the table.
-const runJumpSegments = async ({ context, onProgress, signal, state }) => {
+const runJumpSegments = async ({ context, onEvents, onProgress, signal, state }) => {
   const {
     bundle,
     dateStep,
@@ -11502,6 +11541,20 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
   // segment brings its own, since the panel that started the skip may be gone.
   if (!state.phases) state.phases = createSkipPhases({ requestsUsed: () => state.requests?.used ?? 0, onChange: onProgress });
   const writingLabel = `Writing ${formatDurationLabel(safeDays)} of events`;
+  // The whole round so far for the panel: the committed segments, which are
+  // validated, plus the raw events the running segment has written. Preview
+  // only; nothing here reaches the world.
+  const showEvents = typeof onEvents === "function"
+    ? (partial) => {
+      // Ordered as the validator will order it (timelineOrder.js), not as the
+      // model wrote it. Sorting is the first thing validatePayload does, so a
+      // preview left in write order rearranges itself when the turn lands and
+      // the cards the player opened become different ones in the same places.
+      const ordered = { events: [...state.generatedSoFar, ...partial] };
+      sortTimelineEventsChronologically(ordered);
+      try { onEvents(ordered.events); } catch { /* the panel's problem, never the turn's */ }
+    }
+    : null;
   const reportProgress = (segmentIndex) => {
     state.phases.enter("writing", {
       label: writingLabel,
@@ -11611,6 +11664,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
         ...(segmentCount > 1
           ? {}
           : { fallback: () => fallbackJumpSimulation({ bundle, days: dateStep || 1, mode, targetDate }) }),
+        ...(showEvents ? { onPartialEvents: showEvents } : {}),
         signal,
         // The jump IS the game, and its deadline is runJsonTask's for every task:
         // silence, not elapsed time, so a long segment is never mistaken for a
@@ -11782,6 +11836,8 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
         round: (bundle.game.round || 1) + 1,
       });
       state.generatedSoFar.push(...normalizeArray(payload?.events));
+      // The segment is in: its raw preview gives way to the events actually taken.
+      showEvents?.([]);
       state.generation = segmentGeneration;
       // Where the next segment picks up. An auto jump can stop short of its span on
       // purpose, so follow the payload rather than the calendar.
@@ -11809,6 +11865,8 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
     if (segmentCount <= 1) {
       console.warn(`[ai] the jump failed (${reason}) — falling back for the whole period.`);
       logDebugEvent("warn", "[turn] The jump failed; it falls back.", { reason });
+      // Off the panel now, so the player is not reading events already thrown away.
+      showEvents?.([]);
       state.segmentPayloads.length = 0;
       state.segmentPayloads.push(await fallbackJumpSimulation({ bundle, days: dateStep || 1, mode, targetDate }));
       state.nextSegment = segmentCount;
@@ -12401,7 +12459,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
   }
 };
 
-export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, signal } = {}) => {
+export const simulateTimelineJump = async ({ days, mode = "jump", onEvents, onProgress, signal } = {}) => {
   // Starting a fresh turn abandons any jump still held on a failed segment. Its
   // state was captured against a world snapshot this one is about to re-read, so
   // applying it later would write a turn built on stale ground.
@@ -12520,7 +12578,7 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
   };
   budgetForPhases = jumpState.requests;
 
-  await runJumpSegments({ context: jumpContext, onProgress, signal, state: jumpState });
+  await runJumpSegments({ context: jumpContext, onEvents, onProgress, signal, state: jumpState });
   return await finishTimelineJump({ context: jumpContext, signal, state: jumpState });
   } finally {
     endSimulation();
@@ -12532,7 +12590,7 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
 // slow model each one may have cost minutes. Nothing was written when the
 // segment failed, so this is the same code path as the first attempt rather than
 // a second one to keep in step.
-export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
+export const retryPendingJumpSegment = async ({ onEvents, onProgress, signal } = {}) => {
   const heldSegment = getPendingJumpSegment();
   if (!heldSegment) throw new Error("There is no jump waiting on a failed segment.");
   const { context, state } = heldSegment;
@@ -12551,15 +12609,15 @@ export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
     state.phases = createSkipPhases({ requestsUsed: () => state.requests?.used ?? 0, onChange: onProgress });
     // Re-holds itself on another failure, so the player can retry again or
     // discard — exactly as they could the first time.
-    await runJumpSegments({ context, onProgress, signal, state });
+    await runJumpSegments({ context, onEvents, onProgress, signal, state });
     return await finishTimelineJump({ context, signal, state });
   } finally {
     endSimulation();
   }
 };
 
-export const simulateAutoJump = async ({ days = 365, signal, onProgress } = {}) =>
-  simulateTimelineJump({ days, mode: "auto", signal, onProgress });
+export const simulateAutoJump = async ({ days = 365, signal, onEvents, onProgress } = {}) =>
+  simulateTimelineJump({ days, mode: "auto", signal, onEvents, onProgress });
 
 // ---- GM Console: previewable, revalidated, audited transactions ------------
 // The AI plans a structured transaction; native code validates it against the
