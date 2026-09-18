@@ -4194,8 +4194,10 @@ const applyPolityAndTerritoryImpacts = ({
     // Reputation the AI set this turn becomes the polity's authoritative value.
     if (Number.isFinite(change.reputation)) {
       world.internationalReputation[code] = change.reputation;
-      // Keep the persisted sheet's reputation index in sync with the authoritative value.
-      if (world.countryStats?.[code]) {
+      // Keep the persisted sheet's reputation index in sync only when this
+      // scenario actually tracks that index. Custom stat sheets may replace the
+      // stock strategic indices entirely; never smuggle a hidden seventh row in.
+      if (Object.prototype.hasOwnProperty.call(world.countryStats?.[code]?.indices ?? {}, "internationalReputation")) {
         applyCountryStatPatchToWorld(world, code, {
           indices: { internationalReputation: change.reputation },
         });

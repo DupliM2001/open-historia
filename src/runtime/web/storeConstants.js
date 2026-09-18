@@ -27,7 +27,7 @@ export const COVER_IMAGE_ASSET_KEY = "cover";
 export const STORAGE_JSON_ASSET_KEYS = ["actions", "advisor", "chat", "events"];
 export const CORE_JSON_ASSET_KEYS = ["game", "prompts", "world"];
 export const JSON_ASSET_KEYS = [...STORAGE_JSON_ASSET_KEYS, ...CORE_JSON_ASSET_KEYS];
-export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags"];
+export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags", "stats"];
 export const RUNTIME_ONLY_JSON_ASSET_KEYS = ["snapshots", "intercepts"];
 export const PMTILES_ASSET_KEYS = ["cities", "countries", "regions"];
 export const SCENARIO_GEOJSON_ASSET_KEYS = ["regionsGeojson", "citiesGeojson", "backgroundData"];
@@ -42,7 +42,7 @@ export const UPLOADABLE_GAME_ASSET_KEYS = [COVER_IMAGE_ASSET_KEY];
 
 export const JSON_ASSET_DEFAULTS = {
   actions: [], advisor: [], chat: [], colors: {}, events: [],
-  game: {}, prompts: {}, world: {}, snapshots: [], intercepts: {},
+  game: {}, prompts: {}, stats: {}, world: {}, snapshots: [], intercepts: {},
 };
 
 // This project's name, deliberately. The scenario schema below is a frozen wire

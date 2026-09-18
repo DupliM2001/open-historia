@@ -976,6 +976,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
             if (paintOnlyOwner === from) setPaintOnlyOwner(to);
           }}
           removePolity={d.removePolity}
+          removePolities={d.removePolities}
           importPolityRoster={d.importPolityRoster}
           setColorOverride={d.setColorOverride}
           setTags={d.setTags}

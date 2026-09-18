@@ -5,6 +5,7 @@ import {
   buildGuidanceDefaults,
   composePrompt,
   hasGuidance,
+  materializePackGuidance,
   normalizePackGuidance,
 } from "./promptGuidance.js";
 
@@ -419,4 +420,14 @@ export const normalizePromptPack = (rawPrompts) => {
 export const serializePromptPack = (rawPack) => ({
   promptModel: PROMPT_MODEL_VERSION,
   guidance: normalizePromptGuidance(rawPack),
+});
+
+// What an explicit "Export all prompts" transfer carries: every editable
+// guidance passage as concrete text, including passages that still match the
+// current defaults. This is deliberately different from serializePromptPack():
+// persistence stays sparse so app-owned prompt contracts can evolve, while an
+// author-requested export is a complete portable snapshot of the editable layer.
+export const materializePromptPack = (rawPack) => ({
+  promptModel: PROMPT_MODEL_VERSION,
+  guidance: materializePackGuidance(rawPack, PROMPT_GUIDANCE_DEFAULTS),
 });

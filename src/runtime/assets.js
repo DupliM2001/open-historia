@@ -71,6 +71,7 @@ export const JSON_URLS = {
   colors: "",
   flags: "",
   tags: "",
+  stats: "",
   events: "",
   game: "",
   prompts: "",
@@ -211,6 +212,7 @@ const isMutableRuntimeJsonUrl = (url) =>
   url === JSON_URLS.colors ||
   url === JSON_URLS.flags ||
   url === JSON_URLS.tags ||
+  url === JSON_URLS.stats ||
   url === JSON_URLS.events ||
   url === JSON_URLS.game ||
   url === JSON_URLS.intercepts ||
@@ -428,6 +430,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
   JSON_URLS.colors = withRuntimeToken("/api/runtime/json/colors");
   JSON_URLS.flags = withRuntimeToken("/api/runtime/json/flags");
   JSON_URLS.tags = withRuntimeToken("/api/runtime/json/tags");
+  JSON_URLS.stats = withRuntimeToken("/api/runtime/json/stats");
   JSON_URLS.events = withRuntimeToken("/api/runtime/json/events");
   JSON_URLS.game = withRuntimeToken("/api/runtime/json/game");
   JSON_URLS.prompts = withRuntimeToken("/api/runtime/json/prompts");

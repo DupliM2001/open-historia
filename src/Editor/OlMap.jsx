@@ -1473,6 +1473,44 @@ const OlMap = ({
         });
         return undos.length;
       },
+      // Remove several owners from the map in one scan and one undo command.
+      // Owned regions become unowned and claims for those countries disappear.
+      removeOwners: (ownerKeys) => {
+        const keys = new Set((ownerKeys || []).map((key) => String(key || "").trim()).filter(Boolean));
+        if (!keys.size) return { affectedRegions: 0, ownedRegions: 0, claimRefs: 0 };
+        const undos = [];
+        let ownedRegions = 0;
+        let claimRefs = 0;
+        for (const f of regionSource.getFeatures()) {
+          const owner = f.get("owner") || null;
+          const claimants = Array.isArray(f.get("claimants")) ? f.get("claimants") : [];
+          const ownerHit = Boolean(owner) && keys.has(String(owner).trim());
+          const removedClaims = claimants.filter((claimant) => keys.has(String(claimant || "").trim()));
+          if (!ownerHit && !removedClaims.length) continue;
+          const before = { owner, claimants: claimants.length ? claimants.slice() : null };
+          const nextClaimants = removedClaims.length
+            ? claimants.filter((claimant) => !keys.has(String(claimant || "").trim()))
+            : claimants;
+          const after = { owner: ownerHit ? null : owner, claimants: nextClaimants.length ? nextClaimants : null };
+          f.set("owner", after.owner);
+          f.set("claimants", after.claimants);
+          if (ownerHit) ownedRegions += 1;
+          claimRefs += removedClaims.length;
+          undos.push([f, before, after]);
+        }
+        if (!undos.length) return { affectedRegions: 0, ownedRegions: 0, claimRefs: 0 };
+        const refresh = () => {
+          regionLayer.changed();
+          labelLayer.changed();
+          notifyRegions();
+        };
+        refresh();
+        pushCmd({
+          undo: () => { undos.forEach(([f, b]) => { f.set("owner", b.owner); f.set("claimants", b.claimants); }); refresh(); },
+          redo: () => { undos.forEach(([f, , a]) => { f.set("owner", a.owner); f.set("claimants", a.claimants); }); refresh(); },
+        });
+        return { affectedRegions: undos.length, ownedRegions, claimRefs };
+      },
       deleteRegions: (ids) => {
         const removed = [];
         for (const id of ids) {

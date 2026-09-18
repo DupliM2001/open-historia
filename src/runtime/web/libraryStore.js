@@ -174,8 +174,7 @@ const trimmed = (value) => String(value ?? "").trim();
 // --- Asset status ---------------------------------------------------------
 const scenarioAssetPresent = (record, key) => {
   if (key === COVER_IMAGE_ASSET_KEY) return Boolean(record.cover);
-  if (key === "colors") return record.colors !== undefined;
-  if (key === "flags") return record.flags !== undefined;
+  if (OPTIONAL_JSON_ASSET_KEYS.includes(key)) return record[key] !== undefined;
   if (PMTILES_ASSET_KEYS.includes(key)) return record.pmtiles?.[key] !== undefined;
   if (SCENARIO_GEOJSON_ASSET_KEYS.includes(key)) return record.geojson?.[key] !== undefined;
   return false;
@@ -610,6 +609,21 @@ const readRuntimeJsonAsset = async (assetKey) => {
   }
 
   const activeGame = await getActiveGameRecord();
+
+  // Scenario-authored Stats sheet definitions are canonical while the linked
+  // scenario exists. Games own the generated VALUES (world.countryStats and
+  // customStats), not the schema that says which rows the scenario tracks.
+  // Keep a game-level stats snapshot only as a fallback for imported/orphaned
+  // campaigns whose source scenario is genuinely unavailable.
+  if (assetKey === "stats" && activeGame) {
+    const scenarioId = readGameMeta(activeGame.id, activeGame.meta ?? {}).scenarioId;
+    const exactScenario = scenarioId ? await getScenario(scenarioId) : null;
+    if (exactScenario) {
+      const scenarioValue = runtimeValueFromRecord(exactScenario, assetKey, /*scenarioScope*/ true);
+      return scenarioValue === undefined ? {} : coerceRuntimeValue(assetKey, scenarioValue);
+    }
+  }
+
   const gameValue = activeGame ? runtimeValueFromRecord(activeGame, assetKey) : undefined;
   if (gameValue !== undefined) {
     const value = coerceRuntimeValue(assetKey, gameValue);
@@ -645,8 +659,7 @@ const readRuntimeJsonAsset = async (assetKey) => {
 
 // The stored value for a runtime key on a record, or undefined if "no file".
 const runtimeValueFromRecord = (record, assetKey, scenarioScope = false) => {
-  if (assetKey === "colors") return record.colors;
-  if (assetKey === "flags") return record.flags;
+  if (OPTIONAL_JSON_ASSET_KEYS.includes(assetKey)) return record[assetKey];
   if (assetKey === "snapshots") return scenarioScope ? undefined : record.snapshots; // snapshots are game-only
   // Derived, read-only: the same projection the desktop server keeps on disk.
   if (assetKey === "snapshotsIndex") {
@@ -670,7 +683,7 @@ const runtimeValueFromRecord = (record, assetKey, scenarioScope = false) => {
 // colors may be stored as raw uploaded text; parse it on read (the 7 core json
 // assets and snapshots are always structured, so they pass through).
 const coerceRuntimeValue = (assetKey, value) =>
-  (assetKey === "colors" || assetKey === "flags" ? parseJsonValue(value, {}) : value);
+  (OPTIONAL_JSON_ASSET_KEYS.includes(assetKey) ? parseJsonValue(value, {}) : value);
 
 // Serialized: this is a read-modify-write of the WHOLE game record (every runtime
 // JSON asset lives in one), and the end of a turn fires six of these at once. Run
@@ -697,11 +710,7 @@ const writeRuntimeJsonAssetLocked = async (assetKey, value) => {
   else if (assetKey === "game") canonical = canonicalizeGameCountry(value);
   else if (assetKey === "colors") canonical = canonicalizeColorKeys(value, activeGame.json?.world ?? null);
 
-  if (assetKey === "colors") activeGame.colors = canonical;
-  // Flags are keyed by owner code like colors, but are NOT canonicalized:
-  // canonicalizeColorKeys resolves names->codes, and a flag key is always the
-  // code the editor painted with.
-  else if (assetKey === "flags") activeGame.flags = canonical;
+  if (OPTIONAL_JSON_ASSET_KEYS.includes(assetKey)) activeGame[assetKey] = canonical;
   else if (assetKey === "snapshots") activeGame.snapshots = canonical;
   else activeGame.json = { ...activeGame.json, [assetKey]: canonical };
   writeGameMeta(activeGame, {});
@@ -732,8 +741,14 @@ const seedScenarioJsonFromScenario = (targetRecord, sourceRecord, baseRecord) =>
   copyScenarioOptionalAssets(targetRecord, source);
 };
 
+const copyOptionalJsonAssets = (target, source) => {
+  for (const key of OPTIONAL_JSON_ASSET_KEYS) {
+    target[key] = source?.[key] !== undefined ? cloneJson(source[key]) : undefined;
+  }
+};
+
 const copyScenarioOptionalAssets = (target, source) => {
-  target.colors = source.colors !== undefined ? cloneJson(source.colors) : undefined;
+  copyOptionalJsonAssets(target, source);
   target.cover = source.cover ? { contentType: source.cover.contentType, bytes: source.cover.bytes.slice() } : undefined;
   target.geojson = {};
   for (const key of SCENARIO_GEOJSON_ASSET_KEYS) if (source.geojson?.[key] !== undefined) target.geojson[key] = cloneJson(source.geojson[key]);
@@ -774,8 +789,7 @@ const createScenario = async (body = {}) => {
     // Not the cover.
     record.json = {};
     for (const key of JSON_ASSET_KEYS) record.json[key] = cloneJson(baseRecord.json?.[key] ?? JSON_ASSET_DEFAULTS[key]);
-    if (baseRecord.colors !== undefined) record.colors = cloneJson(baseRecord.colors);
-    if (baseRecord.flags !== undefined) record.flags = cloneJson(baseRecord.flags);
+    copyOptionalJsonAssets(record, baseRecord);
     record.geojson = { ...(baseRecord.geojson ?? {}) };
   }
 
@@ -891,12 +905,15 @@ const createGame = async (body = {}) => {
     const source = await getGame(body.seedGameId);
     record.json = {};
     for (const key of JSON_ASSET_KEYS) record.json[key] = cloneJson(source.json?.[key] ?? JSON_ASSET_DEFAULTS[key]);
+    copyOptionalJsonAssets(record, source);
     record.cover = source.cover ? { contentType: source.cover.contentType, bytes: source.cover.bytes.slice() } : undefined;
   } else {
     const nextScenarioId = trimmed(body.scenarioId) || DEFAULT_SCENARIO_ID;
     // Server calls getScenarioSummary here, which THROWS on an unknown id → 400.
     sourceScenarioSummary = await getScenarioSummary(nextScenarioId);
-    seedGameJsonFromScenario(record, await getScenario(nextScenarioId), baseRecord);
+    const sourceScenario = await getScenario(nextScenarioId);
+    seedGameJsonFromScenario(record, sourceScenario, baseRecord);
+    copyOptionalJsonAssets(record, sourceScenario);
   }
 
   // Meta cascade + seed inheritance, byte-faithful to server createGame (:1343).
@@ -999,9 +1016,10 @@ const uploadScenarioAsset = async (id, key, bytes, contentType) => {
     const ct = validateImageContentType(contentType);
     record.cover = { contentType: ct, bytes };
     writeScenarioMeta(record, { coverImageContentType: ct });
-  } else if (key === "colors") {
-    // Server stores upload bytes verbatim (no JSON validation) — keep the raw text.
-    record.colors = new TextDecoder().decode(bytes);
+  } else if (OPTIONAL_JSON_ASSET_KEYS.includes(key)) {
+    // Optional JSON assets are scenario-owned author data. Store the uploaded
+    // text byte-faithfully, matching desktop; runtime reads parse it lazily.
+    record[key] = new TextDecoder().decode(bytes);
     writeScenarioMeta(record, {});
   } else if (PMTILES_ASSET_KEYS.includes(key)) {
     record.pmtiles = { ...record.pmtiles, [key]: bytes };
@@ -1018,7 +1036,7 @@ const removeScenarioAsset = async (id, key) => {
   const record = await getScenario(id);
   if (!record) throw new Error(`Scenario not found: ${id}`);
   if (key === COVER_IMAGE_ASSET_KEY) { record.cover = undefined; writeScenarioMeta(record, { coverImageContentType: null }); }
-  else if (key === "colors") { record.colors = undefined; writeScenarioMeta(record, {}); }
+  else if (OPTIONAL_JSON_ASSET_KEYS.includes(key)) { delete record[key]; writeScenarioMeta(record, {}); }
   else if (PMTILES_ASSET_KEYS.includes(key)) { if (record.pmtiles) delete record.pmtiles[key]; writeScenarioMeta(record, {}); }
   else if (SCENARIO_GEOJSON_ASSET_KEYS.includes(key)) { if (record.geojson) delete record.geojson[key]; writeScenarioMeta(record, {}); }
   await putScenario(record);
@@ -1043,10 +1061,13 @@ const scenarioAssetResponse = async (record, key, rangeHeader, { coarse = false 
     if (!record.cover) throw new Error("Asset not found");
     return binaryResponse(record.cover.bytes, record.cover.contentType || "application/octet-stream", rangeHeader);
   }
-  if (key === "colors") {
-    if (record.colors === undefined) throw new Error("Asset not found");
-    // Serve the stored value verbatim (byte-faithful like the server), not re-encoded.
-    return new Response(serializeJsonValue(record.colors), { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+  if (OPTIONAL_JSON_ASSET_KEYS.includes(key)) {
+    if (record[key] === undefined) throw new Error("Asset not found");
+    // Serve raw uploaded JSON text byte-faithfully when present; structured
+    // values (imports/seeds) are serialized normally.
+    const stored = record[key];
+    const text = typeof stored === "string" ? stored : serializeJsonValue(stored);
+    return new Response(text, { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
   }
   if (PMTILES_ASSET_KEYS.includes(key)) {
     if (record.pmtiles?.[key] === undefined) throw new Error("Asset not found");
@@ -1102,9 +1123,13 @@ const exportScenarioBundle = async (id) => {
   assets.cover = record.cover
     ? { contentType: record.cover.contentType, data: bytesToBase64(record.cover.bytes), encoding: "base64", fileName: "cover-image.bin", mode: "embedded" }
     : { fileName: "cover-image.bin", mode: "default" };
-  assets.colors = record.colors !== undefined
-    ? { data: parseJsonValue(record.colors, {}), fileName: "colors.json", mode: "embedded" }
-    : { fileName: "colors.json", mode: "default" };
+  const optionalJsonFileNames = { colors: "colors.json", flags: "flags.json", tags: "tags.json", stats: "stats.json" };
+  for (const key of OPTIONAL_JSON_ASSET_KEYS) {
+    const fileName = optionalJsonFileNames[key] || `${key}.json`;
+    assets[key] = record[key] !== undefined
+      ? { data: parseJsonValue(record[key], {}), fileName, mode: "embedded" }
+      : { fileName, mode: "default" };
+  }
   for (const [key, fileName] of [["regionsGeojson", "regions.geojson"], ["citiesGeojson", "cities.geojson"], ["backgroundData", "background.json"]]) {
     assets[key] = record.geojson?.[key] !== undefined
       ? { contentType: "application/json", data: bytesToBase64(new TextEncoder().encode(serializeJsonValue(record.geojson[key]))), encoding: "base64", fileName, mode: "embedded" }
@@ -1416,6 +1441,16 @@ const exportGameBundle = async (id) => {
 
   for (const key of GAME_BUNDLE_DATA_KEYS) data[key] = jsonAsset(record, key);
 
+  // Same ownership rule as the desktop store: while the linked scenario exists,
+  // its Stats definition is canonical. The game copy is only an orphan/import
+  // fallback and must not freeze an older Scenario Editor definition into an
+  // export.
+  const scenarioRecord = await getScenario(meta.scenarioId);
+  if (scenarioRecord) {
+    if (scenarioRecord.stats !== undefined) data.stats = parseJsonValue(scenarioRecord.stats, {});
+    else delete data.stats;
+  }
+
   return {
     data,
     exportedAt: nowIso(),
@@ -1490,7 +1525,9 @@ const importGameBundle = async (bundle) => {
   for (const key of GAME_BUNDLE_DATA_KEYS) {
     const value = data[key];
     if (value === undefined && OPTIONAL_GAME_BUNDLE_KEYS.has(key)) continue;
-    record.json[key] = cloneJson(value ?? JSON_ASSET_DEFAULTS[key] ?? {});
+    const canonical = cloneJson(value ?? JSON_ASSET_DEFAULTS[key] ?? {});
+    if (OPTIONAL_JSON_ASSET_KEYS.includes(key)) record[key] = canonical;
+    else record.json[key] = canonical;
   }
 
   const arrivedAt = nowIso();
