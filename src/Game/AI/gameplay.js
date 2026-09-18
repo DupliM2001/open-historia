@@ -234,6 +234,7 @@ import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js"
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
+import { canRewindCatalystTo, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
   eventsFromLegacyChat,
@@ -10506,17 +10507,41 @@ export const createCatalyst = async ({ force = true } = {}) => {
     variables,
   });
 
-  const catalyst = {
-    choices: normalizeArray(payload?.choices).map((entry) => normalizeString(entry)).filter(Boolean).slice(0, 5),
+  // Opened with its first opening kept, so a beat can be taken back to the very
+  // start (catalystRewind.js).
+  const catalyst = openCatalyst({
+    choices: normalizeArray(payload?.choices).map((entry) => normalizeString(entry)).filter(Boolean),
     opening: normalizeString(payload?.opening),
     premise: normalizeString(payload?.premise),
     title: normalizeString(payload?.title),
-  };
+  });
 
   const world = normalizeWorldState(await readWorldState({ force: true }));
   world.activeCatalyst = catalyst;
   await writeWorldState(world);
   return catalyst;
+};
+
+// Take back beat `beatIndex` of the scene in progress (D6, catalystRewind.js):
+// the scene returns to exactly how it stood when that beat was about to be
+// chosen. Nothing outside the scene has changed before it resolves, so the
+// rewind itself asks nothing of a model; with `choice` the beat is chosen again
+// at once, which is the one request any beat costs.
+export const rewindActiveCatalyst = async ({ beatIndex, choice = "" } = {}) => {
+  if (isSimulationBusy()) throw new Error("A turn is being generated; wait for it to finish before changing the scene.");
+  const world = normalizeWorldState(await readWorldState({ force: true }));
+  const catalyst = world.activeCatalyst;
+  if (!catalyst) throw new Error("No catalyst scene is in progress.");
+  const rewound = rewindCatalyst(catalyst, Number(beatIndex));
+  if (!rewound) {
+    throw new Error(canRewindCatalystTo(catalyst, Number(beatIndex))
+      ? "That beat cannot be returned to."
+      : "That beat was played before the scene kept what was on screen at each beat, so it cannot be returned to; a later one can.");
+  }
+  await writeWorldState({ ...world, activeCatalyst: rewound });
+  logDebugEvent("turn", `Catalyst scene "${rewound.title || "untitled"}": beat ${Number(beatIndex) + 1} taken back${normalizeString(choice) ? " and chosen again" : ""}.`);
+  if (normalizeString(choice)) return advanceActiveCatalyst(normalizeString(choice));
+  return { catalyst: rewound };
 };
 
 export const advanceActiveCatalyst = async (choiceText) => {
@@ -10572,12 +10597,13 @@ export const advanceActiveCatalyst = async (choiceText) => {
     summary: normalizeString(payload?.summary),
   };
 
-  const nextCatalyst = {
-    ...catalyst,
-    choices: normalizeArray(payload?.nextChoices).map((entry) => normalizeString(entry)).filter(Boolean).slice(0, 5),
-    history: [...normalizeArray(catalyst.history), historyEntry],
-    opening: normalizeString(payload?.summary) || catalyst.opening,
-  };
+  // The beat keeps what the player was shown when they chose it, so it can be
+  // taken back and chosen differently (catalystRewind.js).
+  const nextCatalyst = recordCatalystBeat(catalyst, {
+    choice: choiceText,
+    summary: historyEntry.summary,
+    nextChoices: normalizeArray(payload?.nextChoices).map((entry) => normalizeString(entry)).filter(Boolean),
+  });
 
   if (!payload?.resolved) {
     const nextWorld = {
