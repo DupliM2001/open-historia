@@ -321,3 +321,76 @@ export const looksLikeProjectOps = (text) => {
   return new RegExp(`["“]op["”]\\s*:\\s*["“](${PROJECT_OP_VERBS})["”]`).test(source)
     && /["“](name|project|projectId)["”]\s*:/.test(source);
 };
+
+// ── Charts, and what happened to a reply's blocks ─────────────────────────────
+//
+// The advisor draws a chart by writing a ```chart fence with a Chart.js config
+// in it. The references do this with a typed output function per chart and a
+// receipt that says whether it rendered; here the fence stays (it works on every
+// provider, a function only where functions do), and the two things the fence
+// was missing are added:
+//
+//   - a check BEFORE it is drawn. AdvisorChart read config.data.datasets
+//     unguarded, so a config without data threw during render — a broken
+//     bubble at best. A chart that fails the check is not drawn; the panel says
+//     why in a line of its own.
+//   - a receipt. The advisor never learned that a chart did not draw, or that
+//     its actions or board block half landed, and would build on it. What went
+//     wrong with a reply is kept on it and told to the advisor ahead of the next
+//     question (AI/conversationCatchUp.js), once.
+
+// The types the advisor's prompt permits, and the only ones AdvisorChart lays
+// out correctly (every other type gets x/y axes).
+export const CHART_TYPES = Object.freeze(["bar", "line", "pie", "doughnut"]);
+
+// "4.2%", "1,200", " 42 " → numbers; anything else a gap, which Chart.js draws
+// as one rather than failing.
+const chartNumber = (value) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const text = String(value ?? "").replace(/[,%\s]/g, "");
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+};
+
+// { config, problem }: a config safe to hand AdvisorChart, or why not.
+export const validateChartConfig = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { config: null, problem: "the chart block was not a Chart.js config object" };
+  }
+  const type = String(value.type ?? "").trim().toLowerCase();
+  if (!CHART_TYPES.includes(type)) {
+    return { config: null, problem: `"${String(value.type ?? "")}" is not a chart type the panel can draw; use one of ${CHART_TYPES.join(", ")}` };
+  }
+  const labels = Array.isArray(value.data?.labels) ? value.data.labels.map((label) => String(label ?? "")) : [];
+  if (!labels.length) return { config: null, problem: "the chart had no data.labels" };
+  const datasets = (Array.isArray(value.data?.datasets) ? value.data.datasets : [])
+    .filter((dataset) => dataset && typeof dataset === "object")
+    .map((dataset) => ({ ...dataset, data: Array.isArray(dataset.data) ? dataset.data.map(chartNumber) : [] }))
+    .filter((dataset) => dataset.data.some((point) => point !== null));
+  if (!datasets.length) return { config: null, problem: "none of the chart's data.datasets had a number in it" };
+  const options = value.options && typeof value.options === "object" && !Array.isArray(value.options) ? value.options : {};
+  return { config: { ...value, type, data: { ...value.data, labels, datasets }, options }, problem: "" };
+};
+
+// Everything that went wrong with one stored advisor reply, as sentences the
+// advisor can act on. Reads only what the panel stored on the message.
+export const describeReplyProblems = (message) => {
+  if (!message || typeof message !== "object") return [];
+  const problems = [];
+  const chart = String(message.chartProblem ?? "").trim();
+  if (chart) problems.push(`your chart was not drawn: ${chart}`);
+  for (const line of Array.isArray(message.actionsProblems) ? message.actionsProblems : []) {
+    const text = String(line ?? "").trim();
+    if (text) problems.push(`in your actions block, ${text}`);
+  }
+  const detail = String(message.projectsDetail ?? "").trim();
+  switch (String(message.projectsProblem ?? "")) {
+    case "partial": problems.push(`in your projects block, ${detail || "some entries were malformed and skipped"}`); break;
+    case "unusable": problems.push(`your projects block could not be used: ${detail || "nothing in it applied"}`); break;
+    case "truncated": problems.push("your projects block was cut off by the reply's length limit, so its last entries may be missing"); break;
+    case "truncated-empty": problems.push("your projects block was cut off before any entry finished, so nothing on the board changed"); break;
+    default: break;
+  }
+  return problems;
+};

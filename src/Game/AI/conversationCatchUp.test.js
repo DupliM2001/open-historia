@@ -78,6 +78,18 @@ test("dates are ordered by the comparison handed in, so BC years work", () => {
   assert.equal(buildCatchUpNote({ previousDate: "-0044-12-31", currentDate: "-0050-01-01", events: bc, compareDates }).text, "", "time does not run backwards");
 });
 
+test("what became of the last reply is told first, and never shown in the label", () => {
+  const { text, label } = buildCatchUpNote({
+    previousDate: "2014-04-21",
+    currentDate: "2014-04-21",
+    replyProblems: ["your chart was not drawn: the chart had no data.labels"],
+  });
+  assert.match(text, /^\[Since your last reply\]\nWhat became of your last reply: your chart was not drawn: the chart had no data\.labels\. Do not build on any of that/);
+  assert.equal(label, "", "the panel already shows the player; the note is the advisor's receipt");
+  const later = buildCatchUpNote({ previousDate: "2014-04-21", currentDate: "2014-05-21", events, replyProblems: ["x"] }).text.split("\n");
+  assert.match(later[1], /^What became of your last reply/, "before the time that passed");
+});
+
 test("the note rides ahead of what the player typed", () => {
   assert.equal(withCatchUp("Where do we stand?", "[Since your last reply]\nX"), "[Since your last reply]\nX\n\nWhere do we stand?");
   assert.equal(withCatchUp("Hello", "   "), "Hello");

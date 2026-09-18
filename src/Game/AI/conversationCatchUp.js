@@ -43,11 +43,18 @@ export const eventsBetween = (events, fromDate, toDate, { compareDates = default
 
 // { text, label }: the note the model is given, and the few words the player is
 // shown in its place. Both empty when there is nothing to catch up on.
+//
+// `replyProblems` is what went wrong with the advisor's own last reply — a chart
+// that was not drawn, a block that half landed (GameUI/advisorBlocks.js
+// describeReplyProblems). The panel already shows the player; this is the
+// advisor's receipt, so it does not build on what never happened. The label
+// leaves it out for that reason.
 export const buildCatchUpNote = ({
   previousDate = "",
   currentDate = "",
   events = [],
   gmChanges = [],
+  replyProblems = [],
   compareDates = defaultCompare,
   formatDate = (value) => value,
 } = {}) => {
@@ -56,11 +63,15 @@ export const buildCatchUpNote = ({
   const moved = Boolean(from && to && compareDates(to, from) > 0);
   const since = moved ? eventsBetween(events, from, to, { compareDates }) : [];
   const changes = array(gmChanges).map((entry) => clean(entry?.summary)).filter(Boolean);
-  if (!moved && !changes.length) return { text: "", label: "" };
+  const problems = array(replyProblems).map(clean).filter(Boolean);
+  if (!moved && !changes.length && !problems.length) return { text: "", label: "" };
 
   const lines = [moved
     ? `[Since your last reply: ${clean(formatDate(from))} → ${clean(formatDate(to))}]`
     : "[Since your last reply]"];
+  if (problems.length) {
+    lines.push(`What became of your last reply: ${problems.join("; ")}. Do not build on any of that as though it happened; if it still matters, send it again, corrected.`);
+  }
   if (moved) {
     const named = since.slice(-CATCH_UP_EVENTS_NAMED)
       .map((event) => `"${clean(event.title)}" (${clean(formatDate(clean(event.date)))})`);
