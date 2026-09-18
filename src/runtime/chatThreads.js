@@ -105,6 +105,9 @@ export const normalizeChatEvent = (entry, index = 0) => {
             code: asText(entry.code),
             text,
             memorySummary: asText(entry.memorySummary),
+            // A turn's own message: shown when this event is revealed
+            // (runtime/unseenEvents.js).
+            ...(asText(entry.eventId) ? { eventId: asText(entry.eventId) } : {}),
         };
     }
     if (kind === "reaction") {
@@ -195,6 +198,7 @@ export const eventsFromLegacyChat = (chat) => {
             code: asText(message?.code),
             text,
             memorySummary: asText(message?.memorySummary ?? message?.diplomaticMemorySummary),
+            eventId: asText(message?.eventId),
         });
         // Reactions were a map on the message; each becomes its own event.
         const reactions = message?.reactions && typeof message.reactions === "object" ? message.reactions : {};
@@ -262,6 +266,7 @@ export const projectChatThread = (events) => {
                 // Who was in the room when this was said (E5): a member added
                 // later did not hear it, and must not be written as though it did.
                 heardBy: members.map((member) => member.name),
+                ...(event.eventId ? { eventId: event.eventId } : {}),
             };
             messages.push(message);
             messageById.set(event.id, message);
@@ -401,6 +406,7 @@ export const withUnloggedMessages = (events, messages, { threadId = "" } = {}) =
             code: asText(message?.code),
             text,
             memorySummary: asText(message?.memorySummary ?? message?.diplomaticMemorySummary),
+            eventId: asText(message?.eventId),
         });
     }
     return additions.length ? normalizeChatEvents([...log, ...additions]) : log;

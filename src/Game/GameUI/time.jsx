@@ -22,6 +22,7 @@ import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
 import { documentsForEvent } from "../../runtime/reportDelivery.js";
+import { unseenEvents } from "../../runtime/unseenEvents.js";
 import { isMainMenuOpen, useMainMenuOpen } from "./libraryBar";
 import {
     applyEventImpactsToWorld,
@@ -1890,10 +1891,11 @@ const DateWidget = ({
 
     // The store owns the refresh and the never-move-the-clock-backwards guard.
     // Left here is the panel's own reaction to an undone turn: the live warning
-    // belongs to the discarded turn, and the event reel folds back to one card.
+    // belongs to the discarded turn. The turn now newest was seen in full before
+    // the undone one was made, and the reel shows it so (the effect on the
+    // newest turn, below).
     useEffect(() => {
         const handleRolledBack = () => {
-            setVisibleEventCount(1);
             setFallbackWarning("");
         };
         window.addEventListener("oh:rolled-back", handleRolledBack);
@@ -2458,9 +2460,15 @@ const DateWidget = ({
     ? normalizeGameDate(rawGameDate)
     : dayjs().format("YYYY-MM-DD");
 
+    // Where the reveal stands for the newest turn (runtime/unseenEvents.js): a
+    // skip that just landed shows its first event, a reload mid-reveal resumes
+    // where the player was, and a turn with nothing left unseen — an older one,
+    // an undone-to one, a stopped one — is shown whole.
     useEffect(() => {
-        setVisibleEventCount(1);
-    }, [latestTurnRecord?.id]);
+        const ids = (latestTurnRecord?.events ?? []).map((event) => event?.id).filter(Boolean);
+        setVisibleEventCount(Math.max(1, ids.length - unseenEvents.unseenInTurn(ids).size));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [latestTurnRecord?.id, totalVisibleEvents]);
 
     // Half of what the camera needs to turn the names an event carries
     // ("Ireland", "Donetsk") into a place on the map: the half that only moves
@@ -2543,14 +2551,18 @@ const DateWidget = ({
         focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, currentFocusContext()));
     }, [activeVisibleEvent, disableEventCamera, currentFocusContext, mapRef]);
 
+    // Each step of the reveal is remembered (runtime/unseenEvents.js): what it
+    // uncovers may now be shown everywhere — the thread an event opened, the copy
+    // an agent stole in it — and the advisor and the leaders may speak of it.
+    const turnEventIdsInOrder = () => (latestTurnRecord?.events ?? []).map((event) => event?.id).filter(Boolean);
     const revealNextEvent = () => {
-        setVisibleEventCount((current) => {
-            if (!totalVisibleEvents) {
-                return 1;
-            }
-
-            return Math.min(totalVisibleEvents, current + 1);
-        });
+        if (!totalVisibleEvents) {
+            setVisibleEventCount(1);
+            return;
+        }
+        const next = Math.min(totalVisibleEvents, visibleEventCount + 1);
+        setVisibleEventCount(next);
+        unseenEvents.markSeenThrough(turnEventIdsInOrder(), next);
     };
 
     // Skip the remaining reveals: the map snaps to the final post-jump state.
@@ -2559,6 +2571,7 @@ const DateWidget = ({
     const revealAllEvents = () => {
         if (totalVisibleEvents) {
             setVisibleEventCount(totalVisibleEvents);
+            unseenEvents.markSeenThrough(turnEventIdsInOrder(), totalVisibleEvents);
         }
     };
 

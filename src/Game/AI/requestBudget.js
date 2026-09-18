@@ -5,9 +5,9 @@
 // and REQUESTS are what run out: a few hundred a day, a handful a minute. So
 // the yardstick for every AI feature is how many requests a player action
 // costs, not how long its prompt is. A time skip is ONE request where it can
-// be, and never more than JUMP_REQUEST_CAP; nothing spends a request while the
-// player is not pressing anything unless they turned that on, and then only up
-// to a daily cap.
+// be, and never more than JUMP_REQUEST_CAP; what the game spends while the
+// player is not pressing anything stops at a daily cap, and at nothing when
+// the player turns it off.
 //
 // Three parts, all plain data and rules:
 //   - the SETTINGS a player chooses (save requests, background AI, the limits);
@@ -24,7 +24,7 @@ import { nextPacificMidnight } from "./fallbackRunner.js";
 
 // What a free Gemini key allows in a day, near enough; the player can change it.
 export const DEFAULT_DAILY_REQUEST_LIMIT = 500;
-// What background AI may spend in a day once the player has turned it on.
+// What background AI may spend in a day.
 export const DEFAULT_BACKGROUND_DAILY_CAP = 30;
 // Background AI also stops while less than this share of the day is left, so
 // the last requests of the day are always the player's own.
@@ -35,7 +35,7 @@ export const JUMP_REQUEST_CAP = 3;
 export const REQUEST_BUDGET_KEYS = Object.freeze({
     // ON unless the player turned it off ("0"): an absent key saves requests.
     saveRequests: "ai_save_requests",
-    // OFF unless the player turned it on ("1").
+    // ON unless the player turned it off ("0"), within its daily cap.
     backgroundAi: "ai_background_activity",
     dailyLimit: "ai_daily_request_limit",
     backgroundDailyCap: "ai_background_daily_cap",
@@ -103,7 +103,7 @@ const wholeNumber = (value, { min, max, fallback }) => {
 
 export const createRequestSettings = ({ storage = defaultStorage() } = {}) => ({
     saveRequests: () => readItem(storage, REQUEST_BUDGET_KEYS.saveRequests) !== "0",
-    backgroundAi: () => readItem(storage, REQUEST_BUDGET_KEYS.backgroundAi) === "1",
+    backgroundAi: () => readItem(storage, REQUEST_BUDGET_KEYS.backgroundAi) !== "0",
     dailyLimit: () => wholeNumber(readItem(storage, REQUEST_BUDGET_KEYS.dailyLimit), {
         min: 1, max: 1000000, fallback: DEFAULT_DAILY_REQUEST_LIMIT,
     }),
@@ -240,8 +240,8 @@ export const createRequestLedger = ({ storage = defaultStorage(), now = Date.now
 //
 // Anything the game would do with nobody pressing a button: a country writing
 // to the player unprompted, an agent filing a report on a timer, a first
-// reading of a service nobody asked about. Off until the player turns it on;
-// then capped for the day, and never out of the last tenth of the allowance.
+// reading of a service nobody asked about. On unless the player turns it off,
+// capped for the day, and never out of the last tenth of the allowance.
 export const backgroundAllowance = ({ settings, ledger }) => {
     if (!settings.backgroundAi()) return { allowed: false, reason: "off", remaining: 0 };
     const day = ledger.today();

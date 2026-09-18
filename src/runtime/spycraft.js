@@ -384,12 +384,16 @@ const normalizeExchange = (exchange, index, target) => {
   const counterpart = String(exchange?.counterpart ?? "").trim();
   const messages = (Array.isArray(exchange?.messages) ? exchange.messages : []).map(normalizeMessage).filter(Boolean);
   if (!counterpart || messages.length === 0) return null;
+  // A copy stolen in a turn carries the event it came with, and is shown when
+  // that event is revealed (runtime/unseenEvents.js).
+  const eventId = String(exchange?.eventId ?? "").trim();
   return {
     id: String(exchange?.id ?? "").trim() || `${target}:${index}:${counterpart}`.toLowerCase().replace(/\s+/g, "-"),
     counterpart,
     date: String(exchange?.date ?? "").trim(),
     subject: String(exchange?.subject ?? "").trim(),
     messages,
+    ...(eventId ? { eventId } : {}),
   };
 };
 

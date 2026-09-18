@@ -13,12 +13,14 @@ import assert from "node:assert/strict";
 import {
   describeDocumentsForAdvisor,
   documentExchange,
+  documentExchangeId,
   documentNote,
   documentsForEvent,
   documentsReadableBy,
   isDocumentExchange,
   markIntercepted,
   planReportDeliveries,
+  withoutOrphanedDocuments,
 } from "./reportDelivery.js";
 
 const PLAYER = "Ukraine";
@@ -110,6 +112,29 @@ test("the event card shows what came with the event, and the advisor reads every
     "the letter came through diplomacy and the protocol through the agent, not the card");
   assert.deepEqual(documentsReadableBy(reports, PLAYER).map((report) => report.id), ["protocol", "letter", "assessment", "communique"]);
   assert.deepEqual(planReportDeliveries({ after: reports, player: "" }), [], "no player, no deliveries");
+});
+
+test("an undone turn takes its stolen copies out of the agents' file", () => {
+  const traffic = { id: "russian-federation:4:0", counterpart: "Belarus", messages: [{ speaker: "Russian Federation", cipher: "…" }] };
+  const kept = { id: documentExchangeId("Old Protocol"), counterpart: "Belarus", messages: [{ speaker: "Russian Federation", cipher: "…" }] };
+  const undone = { id: documentExchangeId("new-memo"), counterpart: "internal document", messages: [{ speaker: "Russian Federation", cipher: "…" }] };
+  const onlyUndone = { id: documentExchangeId("lone"), counterpart: "Serbia", messages: [{ speaker: "Hungary", cipher: "…" }] };
+  const intercepts = {
+    "Russian Federation": { gatheredAt: "2014-05-01", round: 4, planted: false, exchanges: [undone, kept, traffic] },
+    Hungary: { gatheredAt: "2014-05-01", round: 4, planted: false, exchanges: [onlyUndone] },
+  };
+  const restoredReports = [
+    doc("Old Protocol", ["Russian Federation", "Belarus"], { interceptedBy: ["Ukraine"] }),
+    // On file, but the turn that stole it was undone: nobody holds a stolen copy.
+    doc("lone", ["Hungary", "Serbia"]),
+  ];
+  const next = withoutOrphanedDocuments(intercepts, restoredReports);
+  assert.deepEqual(next["Russian Federation"].exchanges.map((exchange) => exchange.id), [kept.id, traffic.id],
+    "the agent's traffic and the copy still on file stay; the undone memo goes");
+  assert.equal(next.Hungary, undefined, "an agent left with nothing drops out of the file");
+  assert.equal(documentExchangeId("Old Protocol"), "doc-old-protocol");
+  const untouched = { "Russian Federation": { exchanges: [kept, traffic] } };
+  assert.equal(withoutOrphanedDocuments(untouched, restoredReports), untouched, "nothing to take out: the same object back");
 });
 
 test("the advisor is told how the government came by each paper", () => {

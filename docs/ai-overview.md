@@ -42,6 +42,7 @@ This page documents the plumbing. For the prompt templates and how they are asse
 | `src/runtime/reports.js` | **Documents, and the governments that hold them.** The stored shape, the `create`/`share` ops an event carries, the audience-scoped read, the list a prompt is shown, and the Report Voice directive. See [reports](#reports-what-only-some-governments-know). |
 | `src/runtime/reportDelivery.js` | **How a document reaches the player** — through diplomacy, an agent, or its event — planned from what changed hands in a turn; the note, the intercept and the card's documents it becomes; the advisor's list of the government's papers. |
 | `src/Game/AI/intervene.js` | **Stopping a round where the player wants to act.** The journal of what a turn applied, kept on its rollback snapshot; the cut of that journal to the revealed prefix (ledger records bound only to discarded events go with them; the closing date is the last kept event's); and the receipt note that tells the simulator what never happened. See [Intervene](#intervene-stopping-a-round-where-the-player-wants-to-act). |
+| `src/runtime/unseenEvents.js` | **What the player has not been shown yet.** Which of the newest skip's events the reveal has not reached (kept on the device), and the rules that take them — and what they brought — out of what the player and the AI speaking to them are shown. See [what the player has not been shown yet](#what-the-player-has-not-been-shown-yet). |
 | `src/Game/AI/placement.js` | **Where a thing goes, said in words.** The grammar of `at` ("near Kharkiv", "eastern Ukraine", "off Sevastopol", "Donetsk Oblast facing Russia") and its resolution against a gazetteer of the map into one deterministic point. See [placing things by name](#placing-things-by-name-and-keeping-them-apart). |
 | `src/runtime/featureSpacing.js` | Keeping counters and structures off each other: a golden-angle spiral search outward from the point a thing wants, held inside the region (or the sea) it was put in. |
 
@@ -323,8 +324,8 @@ Most players bring a free Gemini key. On that tier tokens are close to free and 
 |---|---|---|---|
 | Save AI requests | `ai_save_requests` | **on** | Everything below the table. Off restores the pipeline exactly as it was: lookups, strict-then-retry, one request per check, one per agent. |
 | Requests a day your key allows | `ai_daily_request_limit` | 500 | The denominator of the count, and the reserve background AI keeps clear of. The game never stops a call at the limit; the provider does. |
-| Background AI | `ai_background_activity` | **off** | Whether anything may call the model with nobody pressing a button. |
-| Background requests a day, at most | `ai_background_daily_cap` | 30 | The cap once it is on. It also stops while less than a tenth of the day is left (`BACKGROUND_RESERVE_SHARE`). |
+| Background AI | `ai_background_activity` | **on** | Whether anything may call the model with nobody pressing a button. Absent means on; only an explicit `"0"` turns it off. |
+| Background requests a day, at most | `ai_background_daily_cap` | 30 | The most it may spend in a day. It also stops while less than a tenth of the day is left (`BACKGROUND_RESERVE_SHARE`). |
 | Checks after a time skip ×5 | `ai_review_units` / `_territory` / `_timeline` / `_board` / `_spies` | on | Which jobs the turn review may carry. |
 
 **What saving changes.** A time skip is one request where it can be and never more than `JUMP_REQUEST_CAP` (3; a skip the player chose to generate in segments pays one per segment, and the cap moves with it — `jumpRequestCap`).
@@ -463,6 +464,33 @@ It costs no request, and it is built on what a turn already does. `applySimulati
 Proven offline (`.lab/probes/intervene-probe.mjs`): a four-event skip whose third event occupies a region and whose fourth raises an army, stopped after the second, leaves the first two on the timeline, no occupation, no army, the game on the second event's date, the receipt saying so, the round undoable, and no request spent. Seen in the app: **✋ Intervene here** under *Next event* / *Skip to end*, its one confirmation, and the panel afterwards.
 
 Deliberately not built: the *live* reveal — events appearing as the answer streams in rather than after it lands. Gemini, the provider most players use, delivers a function call as one whole part at the end of the stream, so there is nothing to parse incrementally on the default path; OpenAI-style and Anthropic endpoints stream tool arguments and could feed an incremental parser. Until the default provider can show anything early, a live reveal would be an OpenAI-and-Anthropic-only feature, and the staged reveal already gives Intervene everything it needs.
+
+An undo and an Intervene also take the Spies file back with the turn: the restore point keeps the agents' file as it stood before the turn filed anything (see [world state](world-state.md#2e-ter-espionage-rides-inside-world-state-except-the-intercepts)), so an undone turn's traffic and stolen copies go with it, and Intervene files again only what the kept events stole. Before, a copy of a protocol signed in a discarded event stayed in the Spies tab after the protocol itself was gone. Proven offline in `.lab/probes/rollback-intercepts-probe.mjs`.
+
+## What the player has not been shown yet
+
+A skip is written whole and then shown one event at a time. Until the reveal reaches an event the player has not seen it — and until they have, nothing else may show it to them: not the advisor, not a leader answering a letter, not the thread that event opened, not the copy an agent stole in it. Intervene can still discard it, and an advisor who had spoken of it would have spoken of something that, for the player, never happened. The reference's advisor is shown the same thing: only the activity revealed so far in the running jump.
+
+**Which events are unseen** (`src/runtime/unseenEvents.js`, 5 tests): `applySimulationResult` marks every event of a time skip but its first as unseen, before it writes anything; each **Next event** and **Skip to end** in the time panel marks the reveal's front; an undo and an Intervene end the reveal. It is kept on the device (localStorage `oh_unseen_turn_events`, keyed by the turn's first event), because a reveal is the player's progress through the record, not part of the record — and it only ever applies to the turn the world says is newest, so a reveal abandoned by a later skip or undone away can never hide anything. A reload now resumes the reveal where the player left it; a turn with nothing unseen opens whole.
+
+**What a turn's own writing carries.** Every message a turn puts in a thread carries `eventId`, the event whose reveal shows it: a chat an event opened (`buildGeneratedChat`'s `revealWith`), the period's outreach (the turn's last event), a document's note (the event that wrote it, or the last event for a copy passed on). So does a stolen copy in the Spies file.
+
+**What each surface is shown:**
+
+| surface | shown |
+|---|---|
+| the advisor, a leader (1:1 or the group batch), the next-speaker pick, suggestions, Improve | the campaign **as seen** (`gameState.js viewAsSeen`): the events up to the reveal's front; the world as those events left it — the turn's restore point with the seen events applied, exactly as the map is showing it, with what belongs to no turn (reminders, the GM's log, the seal, the leaders' cursors) kept from today; the threads without what the unseen events wrote; the date of the last event shown. Read-only — every writer re-reads what is stored. |
+| the chat list, its unread badge and the incoming-message watcher | the threads without what the unseen events wrote (`withoutUnseenChats`): a letter arrives — and counts as unread, and raises its notification — when the reveal reaches the event that brought it. The panel filters when it shows; what it writes back is always the stored thread. |
+| an open conversation | the same, at render time, with each message keeping its index in the stored thread (a retry replays the right one); the leader is sent only what is shown, and again when the reveal moves on |
+| the Spies tab | the file without the copies stolen in unseen events (`withoutUnseenIntercepts`) |
+| the advisor's catch-up note and the dates on its messages | the moment the player is asking from: the events shown, and the reveal's date — so the next question's note picks up what the rest of the reveal showed |
+| background writers — the idle pulse, the timed agent report, a reaction queued to an unseen event | wait for the reveal to finish, or for their event to be revealed |
+
+The time skip itself, the checks after it and the GM console see everything: they are the narrator.
+
+Proven offline in `.lab/probes/reveal-gate-probe.mjs` (eight checks): a four-event skip whose later events deliver a letter, open a thread, take a region and steal a protocol; with only the first shown, neither the advisor nor Russia's leader is told any of it, no surface shows it, and the world as seen still has the region and stands on the first event's date; after the reveal, all of it. Seen in the app on the Fault Lines save: a letter and a thread tied to the third event absent with one event shown, arriving marked *new* when **Next event** reached it, the reveal resuming at the same event after a reload, and **Skip to end** clearing it.
+
+Found on the way, and fixed: **no chat an event opened was ever opened.** A chat an event opens is written as an opener — who speaks first and what they say — and the chat normalizer, which knows threads and not openers, dropped both fields when the event was normalized; the turn writer then found nothing to say and opened nothing. Only the period's top-level outreach ever reached the player. `normalizeEventImpacts` now keeps the opener (`normalizeCreatedChat`, `gameState.createdChats.test.js`).
 
 ## Placing things by name, and keeping them apart
 

@@ -266,7 +266,7 @@ Shows player country + formatted date (`«` opens Events history, `»` opens the
 | Fixed jumps (6h…1yr) | `runJump(days, "jump")` → `simulateTimelineJump` | `src/Game/AI/gameplay.js` |
 | Custom amount + unit | same, arbitrary days | — |
 | **Auto-jump** | `runJump(365, "auto")` → `simulateAutoJump` (AI picks how far) | — |
-| **↩ Undo last turn** | `runUndo()` → `rollBackToSnapshot(0)`; `undoCount` from `loadRollbackSnapshots` | rollback snapshots |
+| **↩ Undo last turn** | `runUndo()` → `rollBackToSnapshot(0)`; `undoCount` from `loadRollbackSnapshots` — the Spies file goes back with the turn | rollback snapshots |
 | Cancel (during load) | `cancelJump()` aborts the in-flight `AbortController` | — |
 
 On success it swaps to the **history panel** with `visibleEventCount = 1`. Fallback generations surface a warning banner.
@@ -283,7 +283,7 @@ A binding vote renders as a `PollCard` above the composer: who called it, each o
 
 There is no document panel (a Dossier launcher existed briefly in the lab and was removed). The documents the simulation writes — secret protocols, private letters, intelligence assessments, treaty articles (`world.reports`, see [reports](ai-overview.md#reports-what-only-some-governments-know)) — reach the player through the panels they already use (`runtime/reportDelivery.js`):
 
-- **Diplomacy.** A document the player holds with other governments arrives as a message in the thread with them, spoken by its sender: a bold `📄` heading and dateline over the document in full. It raises the unread badge and the notification like any message.
+- **Diplomacy.** A document the player holds with other governments arrives as a message in the thread with them, spoken by its sender: a bold `📄` heading and dateline over the document in full. It raises the unread badge and the notification like any message — once the reveal reaches the event that brought it (see 6.3).
 - **The Spy tab.** A document held by a government where the player has an agent arrives among that agent's intercepts, listed with `📄` rather than `📡`, sealed like the rest and redacted to the player's signal clarity.
 - **The event card.** A published document, or one only the player's government holds, sits under the text of the event that produced it (`EventDocument` in `time.jsx`): `📄 title`, `Published` or `Our government's`, and the document a click away.
 
@@ -291,7 +291,9 @@ The advisor reads all of them as the government's own staff; the dock is back to
 
 ### 6.3 Event history panel (`«`) + staged reveal
 
-Renders the latest turn's events (`buildTurnRecord`) one at a time; **Next event** / **Skip to end** reveal more. The camera follows every revealed event (`deriveEventFocusBounds` → `focusMapOnBounds`), unless the **Disable camera movement during events** map setting is on. A **staged reveal** (`time.jsx:1558`) replays the pre-jump world from the rollback snapshot and applies only revealed events' impacts through a purely visual override (`setWorldStateOverride`/`setUnitsOverride`) so ownership/units/markers animate in; finishing/closing clears the override.
+Renders the latest turn's events (`buildTurnRecord`) one at a time; **Next event** / **Skip to end** reveal more. The camera follows every revealed event (`deriveEventFocusBounds` → `focusMapOnBounds`), unless the **Disable camera movement during events** map setting is on. A **staged reveal** replays the pre-jump world from the rollback snapshot and applies only revealed events' impacts through a purely visual override (`setWorldStateOverride`/`setUnitsOverride`) so ownership/units/markers animate in; finishing/closing clears the override.
+
+The reveal is remembered (`runtime/unseenEvents.js`): each step marks what it uncovered, a reload resumes where the player was, and a turn with nothing left unseen — an older one, an undone-to one, a stopped one — opens whole. Until the reveal reaches an event, nothing it brought is shown anywhere else: a thread it opened or a letter it delivered is not in the chat list (nor its unread count or notification), a copy an agent stole in it is not in the Spy tab, and the advisor and the leaders speak from the world as the player has seen it (see [what the player has not been shown yet](ai-overview.md#what-the-player-has-not-been-shown-yet)).
 
 **✋ Intervene here** sits under those two while events remain unrevealed (and no category filter is on, since the count is by reveal order). It asks once — *Stop the round after «title»? The N events not yet revealed will be discarded — they never happen — and the date becomes …* — then `runIntervene` calls `interveneAfterEvent(visibleEventCount)` (`gameplayLazy.js`): the engine rolls the game back to the turn's snapshot and applies the kept prefix of the turn's journal again, without a request (see [Intervene](ai-overview.md#intervene-stopping-a-round-where-the-player-wants-to-act)). The panel then shows the shorter turn fully revealed, the date widget the last kept event's date, and **Undo last turn** still works. Offered only when the newest snapshot carries a journal (`canInterveneInLastTurn`, re-checked with the round), never while a jump runs.
 

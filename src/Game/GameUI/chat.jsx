@@ -35,6 +35,8 @@ import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import { formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 import { refreshRuntimeState, subscribeRuntime } from "../../runtime/runtimeStore.js";
 import { useRuntimeState } from "../../runtime/useRuntimeState.js";
+import { UNSEEN_EVENTS_CHANGED, withoutUnseenChats, withoutUnseenIntercepts, withoutUnseenMessages } from "../../runtime/unseenEvents.js";
+import { unseenEventIdsFor, useUnseenEventIds } from "./useUnseenEvents.js";
 
 // Who the player is and when it is: all this panel reads of game.json.
 const selectGameIdentity = (game) => ({
@@ -700,6 +702,10 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
     const isGroup = countries.length > 1;
 
     const [messages, setMessages]               = useState(chat.messages ?? []);
+    // A letter an event of the skip being revealed delivered waits for the
+    // reveal to reach that event (runtime/unseenEvents.js) — on screen and in
+    // what the leader is sent. The stored thread keeps it all along.
+    const unseen = useUnseenEventIds();
     const [visibleMessageLimit, setVisibleMessageLimit] = useState(CHAT_INITIAL_RENDER_WINDOW);
     const [phase, setPhase]                     = useState("player");
     const [isLoading, setIsLoading]             = useState(false);
@@ -773,11 +779,25 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
         logDebugEvent("diplomacy",
             `Opened chat #${chat.id} with ${countries.map((country) => country.name).join(", ") || "(nobody)"} — ${saved.length} saved message(s).`,
             undefined, { verbose: true });
-        if (saved.length > 0) loadDiplomaticHistory(saved);
+        const shown = withoutUnseenMessages(saved, unseen);
+        if (shown.length > 0) loadDiplomaticHistory(shown);
         else startDiplomaticChat();
         setVisibleMessageLimit(CHAT_INITIAL_RENDER_WINDOW);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [chat.id]);
+
+    // The reveal moved on while this thread was open: the leader is sent what
+    // the player can now see. Not mid-reply — that exchange is already under way.
+    const unseenKey = [...unseen].join("|");
+    const unseenKeyAtOpen = useRef(unseenKey);
+    useEffect(() => {
+        if (unseenKeyAtOpen.current === unseenKey || isLoading) return;
+        unseenKeyAtOpen.current = unseenKey;
+        const shown = withoutUnseenMessages(messagesRef.current, unseen);
+        if (shown.length > 0) loadDiplomaticHistory(shown);
+        else startDiplomaticChat();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [unseenKey]);
 
         useEffect(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1024,10 +1044,15 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
         };
 
         const typingSpeaker = speakingCountry ?? countries[0];
-        const visibleMessages = messages.length > visibleMessageLimit
-            ? messages.slice(messages.length - visibleMessageLimit)
-            : messages;
-        const hiddenMessageCount = messages.length - visibleMessages.length;
+        // What the reveal has reached, each with its place in the stored thread
+        // (a retry replays the stored message at that index).
+        const shownEntries = messages
+            .map((msg, index) => ({ msg, index }))
+            .filter(({ msg }) => !unseen.has(String(msg?.eventId ?? "")));
+        const visibleEntries = shownEntries.length > visibleMessageLimit
+            ? shownEntries.slice(shownEntries.length - visibleMessageLimit)
+            : shownEntries;
+        const hiddenMessageCount = shownEntries.length - visibleEntries.length;
 
         return (
             <>
@@ -1091,10 +1116,9 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                 already been answered past, and re-running it would splice a
                 reply into the middle of the thread. A date separator opens
                 every new game day. */}
-            {visibleMessages.map((msg, i) => {
-                const index = hiddenMessageCount + i;
+            {visibleEntries.map(({ msg, index }, i) => {
                 const dateKey = chatDateKey(msg?.time);
-                const showDateSeparator = Boolean(dateKey) && (i === 0 || dateKey !== chatDateKey(visibleMessages[i - 1]?.time));
+                const showDateSeparator = Boolean(dateKey) && (i === 0 || dateKey !== chatDateKey(visibleEntries[i - 1]?.msg?.time));
                 return (
                     <React.Fragment key={index}>
                     {showDateSeparator && <ChatDateSeparator value={msg.time} />}
@@ -1660,7 +1684,11 @@ const InterceptView = ({ target, exchange, clarity, seal, onBack }) => {
 
 const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
     const world                       = useRuntimeState("world");
-    const intercepts                  = useRuntimeState("intercepts", normalizeIntercepts);
+    const filedIntercepts             = useRuntimeState("intercepts", normalizeIntercepts);
+    // A copy an agent stole in an event the reveal has not reached yet is not in
+    // the file the player is shown (runtime/unseenEvents.js).
+    const unseen                      = useUnseenEventIds();
+    const intercepts                  = useMemo(() => withoutUnseenIntercepts(filedIntercepts, unseen), [filedIntercepts, unseen]);
     const [open, setOpen]             = useState(null); // { target, exchange }
     const [choosing, setChoosing]     = useState(false);
     const [error, setError]           = useState("");
@@ -1888,7 +1916,14 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     // mount. Tied to a chat id so navigating to a DIFFERENT chat never inherits it.
     const [composerDraft, setComposerDraft]       = useState(null);
     const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
-    const openChats = chats.filter((chat) => chat.status !== "closed" && Array.isArray(chat.countries) && chat.countries.length > 0);
+    // The threads as the player has been shown them (runtime/unseenEvents.js): a
+    // thread an unseen event opened, or a letter one delivered, arrives when the
+    // reveal reaches that event — and only then counts as unread. Only for
+    // showing: every write below writes `chats`, the stored threads.
+    const unseen = useUnseenEventIds();
+    const shownChats = useMemo(() => withoutUnseenChats(chats, unseen), [chats, unseen]);
+    const shownVersion = (chat) => (chat ? withoutUnseenChats([chat], unseen)[0] ?? chat : chat);
+    const openChats = shownChats.filter((chat) => chat.status !== "closed" && Array.isArray(chat.countries) && chat.countries.length > 0);
 
     // Which chats to flag as unread: seeded from the persisted baseline when the
     // panel OPENS, then only ever added to (arrivals) or cleared per-chat (an
@@ -2014,8 +2049,10 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     // stays the active chat, so messages that arrive WHILE the player is looking
     // at it (an incoming reply, a background poll merge) don't get left stranded
     // above the last-seen baseline and resurface as unread on the next visit.
+    // The list row is the thread as shown; the conversation gets the stored one,
+    // which is what it writes back.
     const openChatFromList = (chat) => {
-        setActiveChat(chat);
+        setActiveChat(chats.find((entry) => entry.id === chat.id) ?? chat);
         setHeldUnreadId(null);
         setChatReadState(chat, true);
     };
@@ -2025,15 +2062,18 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
     const toggleActiveChatRead = (chat) => {
         const wasUnread = unreadIds.has(String(chat.id));
         setHeldUnreadId(wasUnread ? null : String(chat.id));
-        setChatReadState(chat, wasUnread);
+        setChatReadState(shownVersion(chat), wasUnread);
     };
 
+    // Read as far as it is shown: a letter still waiting on the reveal is not
+    // read yet, and marks the thread new when it arrives.
+    const shownActiveCount = shownVersion(activeChat)?.messages?.length ?? 0;
     useEffect(() => {
         if (!activeChat) return;
         if (heldUnreadId === String(activeChat.id)) return;
-        setChatReadState(activeChat, true);
+        setChatReadState(shownVersion(activeChat), true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeChat?.id, activeChat?.messages?.length, heldUnreadId]);
+    }, [activeChat?.id, shownActiveCount, heldUnreadId]);
 
     // Leaving a chat ends the hold — the next visit is an ordinary read.
     useEffect(() => {
@@ -2508,8 +2548,13 @@ const Chat = ({ hovered, setHovered, isOpen, onToggle }) => {
         let cancelled = false;
         const check = async (provided = null, { force = false } = {}) => {
             try {
-                const saved = provided ?? await loadAllChats({ force });
-                if (cancelled || !Array.isArray(saved)) return;
+                const stored = provided ?? await loadAllChats({ force });
+                if (cancelled || !Array.isArray(stored)) return;
+                // A letter an unseen event delivered announces itself when the
+                // reveal reaches that event, not when the turn is written
+                // (runtime/unseenEvents.js) — the toast would say what the
+                // reveal is about to show.
+                const saved = withoutUnseenChats(stored, unseenEventIdsFor(await readWorldStateView().catch(() => null)));
 
                 const open = saved.filter((chat) =>
                     chat.status !== "closed" &&
@@ -2696,6 +2741,8 @@ const Chat = ({ hovered, setHovered, isOpen, onToggle }) => {
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("oh:runtime-json-updated", onRuntimeUpdate);
         window.addEventListener("oh:diplomacy-chats-updated", onExternalChatUpdate);
+        // A reveal step may uncover a letter the turn delivered.
+        window.addEventListener(UNSEEN_EVENTS_CHANGED, onExternalChatUpdate);
         // A save switch is a different set of threads: drop the baseline and the
         // pending toasts, and re-seed from the new save without announcing it.
         const onActiveGameChanged = () => {
@@ -2715,6 +2762,7 @@ const Chat = ({ hovered, setHovered, isOpen, onToggle }) => {
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("oh:runtime-json-updated", onRuntimeUpdate);
             window.removeEventListener("oh:diplomacy-chats-updated", onExternalChatUpdate);
+            window.removeEventListener(UNSEEN_EVENTS_CHANGED, onExternalChatUpdate);
             window.removeEventListener("oh:active-game-changed", onActiveGameChanged);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
