@@ -209,14 +209,15 @@ Boot order inside `startTranslator` (`translator.js:587`): `syncLanguageFromServ
 
 ### Translation engine + config
 
-`translateBatch()` (`translator.js:305`) late-imports `callAI` from `../Game/AI/main.jsx` and sends a strict JSON-array prompt (same length/order, keep numbers/emoji/placeholders, proper names unchanged). `processQueue()` runs up to `MAX_CONCURRENT_BATCHES` batches in parallel, writes results into both `cache` and `unsyncedEntries`, and backs off on repeated failure.
+`translateBatch()` (`translator.js:305`) late-imports `callAI` from `../Game/AI/main.jsx` and sends a strict JSON-array prompt (same length/order, keep numbers/emoji/placeholders, proper names unchanged). `processQueue()` sends **one batch at a time** (`planTranslationBatch`), writes results into both `cache` and `unsyncedEntries`, and backs off on repeated failure. It used to send 60 strings × 3 batches in parallel, which made a first pass over a new language dozens of requests nobody pressed a button for — on a free key, where a few hundred a day is the whole allowance, and where three concurrent requests is also the surest way to trip the per-MINUTE limit. A batch is now up to 240 strings or 6,000 source characters, whichever comes first: a quarter of the requests for the same language, one request in flight. On a failure the size halves (down to `BATCH_MIN_STRINGS`) and recovers on the next success, so a model that cannot hold a big batch still finishes. Live check (`.lab/probes/live-translation-probe.mjs`, Gemini, Japanese — the worst case for output tokens): 240 strings, 9.3 KB in, a complete 240-entry array back in 9 s.
 
 | Constant | Value | Meaning |
 |---|---|---|
 | `CACHE_PREFIX` | `i18n_cache_` | localStorage key prefix (`+language`) |
 | `CACHE_LIMIT` | `8000` | Max cached entries persisted (most-recent kept) |
-| `BATCH_SIZE` | `60` | Strings per AI call |
-| `MAX_CONCURRENT_BATCHES` | `3` | Parallel batches per pump |
+| `BATCH_MAX_STRINGS` | `240` | Strings per AI call, at most |
+| `BATCH_MAX_CHARS` | `6000` | Source characters per call, at most (whichever ceiling binds first) |
+| `BATCH_MIN_STRINGS` | `30` | What the batch halves down to after a failure, recovering on the next success |
 | `SCAN_DEBOUNCE_MS` | `350` | Debounce before a DOM scan |
 | `MAX_CONSECUTIVE_FAILURES` | `3` | Failures before a 60 s cooldown |
 | `TRANSLATED_ATTRIBUTES` | `placeholder, title, aria-label` | Attributes also translated |
