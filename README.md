@@ -45,8 +45,7 @@ Contributions are accepted under the [Contributor Copyright Assignment Agreement
 <br />
 <br />
 
-![](https://github.com/Open-Historia/open-historia/blob/main/public/screenshot.png?raw=true)
-
+![](https://github.com/Open-Historia/open-historia/blob/main/public/screenshots/screenshot.webp?raw=true)
 ---
 
 ## ✨ Features
