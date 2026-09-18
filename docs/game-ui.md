@@ -3,7 +3,7 @@
 The in-game UI is a flat set of `position: fixed` React components layered over a full-screen MapLibre canvas — there is no single container div, each widget positions itself against the viewport edges and competes for the stacking order through an explicit z-index ladder. `src/Game/GameUI/main.jsx` is the shell: it mounts every HUD element, owns the panel-open booleans, and computes `rightShift` (the horizontal offset that slides the bottom-right cluster left when the advisor drawer opens). Everything the UI reads or writes flows through the runtime state stores (`readJson`/`writeJson`, `readGameData`/`readWorldState`, `useLibraryState`) and the AI layer (`src/Game/AI/*`) — the components hold almost no game data of their own, they poll the stores on a 5-second cadence and push edits back.
 
 - Shell & mount point: `src/App.jsx` (`GameApp`) renders `<UI>` = `src/Game/GameUI/main.jsx` once `isReady`, passing `mapRef`, `isGlobeEnabled`, `isTerrainEnabled`, and their setters.
-- Related pages: [World state](world-state.md) · [AI gameplay pipeline](ai-gameplay.md) · [Map rendering](map-rendering.md) · [Library & scenarios runtime](library-runtime.md) · [Diplomacy & chat](diplomacy.md)
+- Related pages: [World state](world-state.md) · [AI gameplay pipeline](ai-overview.md) · [Map rendering](game-map.md) · [Library & scenarios runtime](runtime-services.md) · [Diplomacy & chat](ai-overview.md)
 
 ---
 

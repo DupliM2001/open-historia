@@ -866,13 +866,25 @@ const EFFORT_START_PATTERN = new RegExp(
 export const eventStartsLongEffort = (event) =>
   EFFORT_START_PATTERN.test(`${asText(event?.title)}. ${asText(event?.description)}`);
 
+// An entry the ENGINE keeps in step by itself: the covert-operation entries
+// spyOperationOps opens and closes for every agent in place (they carry
+// linkedSpyIds, and that sync runs before the board pass every turn). Such an
+// entry must never be the REASON a request is made. One is called "Agent in
+// Ukraine", so half its distinctive words are a country name — and in a
+// campaign fought over Ukraine, every event that mentions the place matched it
+// and bought the board job a request a skip (seen in a live run, 2026-09-17).
+// The model may still move one if it looks at the board for some other reason;
+// this only stops it being what wakes the board.
+const isEngineSyncedEntry = (entry) => asArray(entry?.linkedSpyIds).length > 0;
+
 export const boardPassReasons = ({ board, events = [], gameDate = "", round = 0, reviewedRound = 0, playerCountry = "" } = {}) => {
   const open = asArray(board).filter(isProjectOpen);
+  const asks = open.filter((entry) => !isEngineSyncedEntry(entry));
   const happened = asArray(events);
   const reasons = [];
 
   for (const event of happened) {
-    const concerned = open.length ? boardEntriesConcernedByEvent(event, open, { playerCountry }) : [];
+    const concerned = asks.length ? boardEntriesConcernedByEvent(event, asks, { playerCountry }) : [];
     if (concerned.length) {
       reasons.push(`"${asText(event?.title)}" concerns ${concerned.slice(0, 2).map((entry) => `"${asText(entry?.name)}"`).join(", ")}`);
     } else if (eventStartsLongEffort(event)) {
@@ -886,7 +898,7 @@ export const boardPassReasons = ({ board, events = [], gameDate = "", round = 0,
   const lastPass = Number(reviewedRound) || 0;
   if (round > 0 && lastPass > 0 && lastPass <= round && round - lastPass < BOARD_PASS_QUIET_ROUNDS) return reasons;
 
-  for (const entry of open) {
+  for (const entry of asks) {
     const updatedRound = Number(entry?.updatedRound) || 0;
     // An entry with no round on it has never been looked at; one from a save that
     // predates rounds is treated the same way, once.

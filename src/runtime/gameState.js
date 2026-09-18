@@ -11,6 +11,7 @@ import { foundPolityIfUnknown } from "./polityFounding.js";
 import { normalizeTerritoryBasis, screenTerritoryBasis } from "./territoryBasis.js";
 import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
+import { normalizeSpyOp } from "./spycraft.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -2740,6 +2741,7 @@ const normalizeEventImpacts = (value) => {
       regionControlOps: [],
       regionTransfers: [],
       reports: [],
+      spyOps: [],
       unitOps: [],
     };
   }
@@ -2755,6 +2757,9 @@ const normalizeEventImpacts = (value) => {
     regionTransfers: normalizeArray(value.regionTransfers).map(normalizeRegionTransfer).filter(Boolean),
     // Documents the event writes or widens (runtime/reports.js).
     reports: normalizeArray(value.reports).map(normalizeReportOp).filter(Boolean),
+    // The player's espionage orders this event carried (runtime/spycraft.js).
+    // Kept on the stored event so a reloaded campaign can replay them.
+    spyOps: normalizeArray(value.spyOps).map(normalizeSpyOp).filter(Boolean),
     // Say WHY a unit op was thrown away. A dropped op is the difference between an
     // event that narrates a deployment and troops that actually appear on the map,
     // and it used to vanish into .filter(Boolean) without a word — leaving no way

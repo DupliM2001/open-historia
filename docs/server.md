@@ -264,7 +264,7 @@ Bundles are the shareable unit strangers swap on the community hub. Schema strin
 - **Import** — `importScenarioBundle` (`server/libraryStore.js:2529`) creates a **new** scenario, writes its core data via `updateScenario`, lays down each embedded asset via `applyScenarioBundleAsset`, then stamps `hubOrigin` last (so the import's own meta writes don't clear it) and selects it.
 - **Update-in-place** — `updateScenarioFromBundle` (`server/libraryStore.js:2635`) is the hub card's "Update" button: it keeps the local `id` (games reference scenarios by id) and `createdAt`, replaces meta/world/assets from the new bundle, and visits **every** uploadable key so an asset the new version dropped doesn't linger. `hubOrigin` is re-stamped last so the card reverts to "New Game" after refresh.
 
-`hubOrigin` (`{ postId, bundleUrl, syncedAt }`, normalized at `server/libraryStore.js:575-585`) is provenance for hub imports. **Any meta write that doesn't explicitly carry `hubOrigin` clears it** (`writeScenarioMeta`, `server/libraryStore.js:639-641`) — a local edit forks the copy and stops offering overwrites. GitHub mints a new immutable attachment URL per re-upload, so `bundleUrl` inequality is itself the update signal (and the reason `/api/hub/file`'s disk cache can never go stale). See [Scenario hub](scenario-hub.md).
+`hubOrigin` (`{ postId, bundleUrl, syncedAt }`, normalized at `server/libraryStore.js:575-585`) is provenance for hub imports. **Any meta write that doesn't explicitly carry `hubOrigin` clears it** (`writeScenarioMeta`, `server/libraryStore.js:639-641`) — a local edit forks the copy and stops offering overwrites. GitHub mints a new immutable attachment URL per re-upload, so `bundleUrl` inequality is itself the update signal (and the reason `/api/hub/file`'s disk cache can never go stale). See [Scenario hub](runtime-services.md).
 
 ---
 
@@ -304,4 +304,4 @@ Every store imports this one constant, so a single env var relocates **all** wri
 | `OH_ALLOW_CROSS_ORIGIN` | unset | `=1` disables the cross-origin-write guard (`server/server.js:111`) |
 | `OH_IMPORT_COUNTER_URL` | `https://oh-import-counter.…workers.dev` | Import-telemetry counter Worker; empty string disables pings (`server/server.js:653`) |
 
-Related sibling pages: [World state](world-state.md) · [Map editor](map-editor.md) · [Scenario hub](scenario-hub.md).
+Related sibling pages: [World state](world-state.md) · [Map editor](map-editor.md) · [Scenario hub](runtime-services.md).

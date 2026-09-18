@@ -4,7 +4,7 @@ Open Historia keeps a running game in five plain-JSON documents served from a pe
 
 Core files: `src/runtime/gameState.js` (state shape, normalizers, impact application), `src/Game/Map/useWorldState.js` (the map store), `src/runtime/runtimeStore.js` (the HUD store), `src/Game/Map/unitsController.js` (the units store), `src/runtime/countryTags.js` (tag rules), `src/runtime/assets.js` (read/write/cache plumbing), `src/Game/AI/gameplay.js` (`applySimulationResult`, the turn writer).
 
-Related pages: [Country tags](country-tags.md) · [Map rendering & Nations layer](nations-layer.md) · [Units & combat](units.md) · [AI turn / time jump](ai-turn.md) · [Scenario library](library.md).
+Related pages: [Country tags](world-state.md) · [Map rendering & Nations layer](game-map.md) · [Units & combat](world-state.md) · [AI turn / time jump](ai-overview.md) · [Scenario library](runtime-services.md).
 
 ## Glossary
 
@@ -102,57 +102,57 @@ _Avoid_: Broken, Spent (for this case)
 
 ## 1. Storage model: the runtime JSON assets
 
-All mutable game state lives behind a small set of URLs built in `src/runtime/assets.js:63` (`JSON_URLS`) and rebuilt on every scenario/game switch by `setRuntimeAssetEndpoints` (`src/runtime/assets.js:204`). Each URL carries a `?v=<token>` cache-buster; changing the token (a library mutation) sweeps the in-memory value caches so the next read re-fetches (`src/runtime/assets.js:218`).
+All mutable game state lives behind a small set of URLs built in `src/runtime/assets.js` (`JSON_URLS`) and rebuilt on every scenario/game switch by `setRuntimeAssetEndpoints` (`src/runtime/assets.js`). Each URL carries a `?v=<token>` cache-buster; changing the token (a library mutation) sweeps the in-memory value caches so the next read re-fetches (`src/runtime/assets.js`).
 
 | Asset key | URL (path) | Read / write helpers (`gameState.js`) | Holds |
 |---|---|---|---|
-| `world` | `/api/runtime/json/world` | `readWorldState` / `writeWorldState` (`:985`,`:988`) | The political map + AI-mutated state (this page). |
-| `game` | `/api/runtime/json/game` | `readGameData` / `writeGameData` (`:997`,`:1000`) | Player country, clock, round, difficulty (§6). |
-| `events` | `/api/runtime/json/events` | `readEventsState` / `writeEventsState` (`:1009`,`:1012`) | Timeline of AI/scenario events, each with `impacts`. |
-| `actions` | `/api/runtime/json/actions` | `readActionsState` / `writeActionsState` (`:1003`,`:1006`) | Player/queued orders awaiting the next jump. |
-| `chat` | `/api/runtime/json/chat` | `readChatsState` / `writeChatsState` (`:1019`,`:1022`) | Diplomacy conversation threads. |
-| `colors` | `/api/runtime/json/colors` | plain `writeJson(JSON_URLS.colors, …)` / `getNationColors` (`assets.js:900`) | `code → [r,g,b]` palette (sibling of `world`, not inside it). |
-| `flags` | `/api/runtime/json/flags` | `getNationFlags` (`assets.js:949`) | Author flags `code → PNG data URL`. |
-| `tags` | `/api/runtime/json/tags` | `getNationTags` (`assets.js:933`) | Author STARTING country tags (§10). |
-| `regionsGeojson` / `citiesGeojson` | `/api/runtime/json/regionsGeojson` … | via `loadRegionCatalog` (`assets.js:1036`) | Custom drawn geometry (never value-cached, see `isNoStoreJsonUrl` `:158`). |
+| `world` | `/api/runtime/json/world` | `readWorldState` / `writeWorldState` | The political map + AI-mutated state (this page). |
+| `game` | `/api/runtime/json/game` | `readGameData` / `writeGameData` | Player country, clock, round, difficulty (§6). |
+| `events` | `/api/runtime/json/events` | `readEventsState` / `writeEventsState` | Timeline of AI/scenario events, each with `impacts`. |
+| `actions` | `/api/runtime/json/actions` | `readActionsState` / `writeActionsState` | Player/queued orders awaiting the next jump. |
+| `chat` | `/api/runtime/json/chat` | `readChatsState` / `writeChatsState` | Diplomacy conversation threads. |
+| `colors` | `/api/runtime/json/colors` | plain `writeJson(JSON_URLS.colors, …)` / `getNationColors` (`assets.js`) | `code → [r,g,b]` palette (sibling of `world`, not inside it). |
+| `flags` | `/api/runtime/json/flags` | `getNationFlags` (`assets.js`) | Author flags `code → PNG data URL`. |
+| `tags` | `/api/runtime/json/tags` | `getNationTags` (`assets.js`) | Author STARTING country tags (§10). |
+| `regionsGeojson` / `citiesGeojson` | `/api/runtime/json/regionsGeojson` … | via `loadRegionCatalog` (`assets.js`) | Custom drawn geometry (never value-cached, see `isNoStoreJsonUrl`). |
 
-`readGameStateBundle` (`src/runtime/gameState.js:1025`) reads `actions`, `chats`, `events`, `game`, `world` in one `Promise.all` and is the standard "load everything" entry point.
+`readGameStateBundle` (`src/runtime/gameState.js`) reads `actions`, `chats`, `events`, `game`, `world` in one `Promise.all` and is the standard "load everything" entry point.
 
 ### Games vs scenarios
 
-The same asset keys are served from two different server roots (`src/runtime/library.js:10`):
+The same asset keys are served from two different server roots (`src/runtime/library.js`):
 
-- **Scenarios** — `/api/scenarios/*`. The immutable authored seed (WWII preset, a hub download, an editor export). `world.json` here is the STARTING position produced by the editor (`src/Editor/exportPreset.js:220`).
+- **Scenarios** — `/api/scenarios/*`. The immutable authored seed (WWII preset, a hub download, an editor export). `world.json` here is the STARTING position produced by the editor (`src/Editor/exportPreset.js`).
 - **Games** — `/api/games/*`. A live playthrough. Selecting a scenario spawns a game whose `world.json` starts as a copy of the scenario's and is then mutated in place by every jump.
 
-Only a **game's** `world.json` is written during play; the scenario copy stays pristine so the same scenario can seed many games. `setRuntimeAssetEndpoints` points `JSON_URLS.*` at whichever is active (the runtime token encodes it). `saveGame` in `src/Game/GameUI/libraryBar.jsx:1180` writes `world` **whole** (never a shallow `worldPatch`, which would drop `polityOverrides`/`ownerCodes`/`regionOwnershipOverrides` and wipe the map).
+Only a **game's** `world.json` is written during play; the scenario copy stays pristine so the same scenario can seed many games. `setRuntimeAssetEndpoints` points `JSON_URLS.*` at whichever is active (the runtime token encodes it). `saveGame` in `src/Game/GameUI/libraryBar.jsx` writes `world` **whole** (never a shallow `worldPatch`, which would drop `polityOverrides`/`ownerCodes`/`regionOwnershipOverrides` and wipe the map).
 
 ---
 
 ## 2. `world.json` shape — field table
 
-`WORLD_DEFAULTS` (`src/runtime/gameState.js:15`) is the authoritative default object; `normalizeWorldState` (`:815`) spreads `{ ...WORLD_DEFAULTS, ...world }` and then re-derives the structured fields. Anything **not** in `WORLD_DEFAULTS` (e.g. `customRegions`, `basemap`, `ownerCodes`) passes through untouched from the stored document — these are scenario-authored or game-appended fields the normalizer never rewrites.
+`WORLD_DEFAULTS` (`src/runtime/gameState.js`) is the authoritative default object; `normalizeWorldState` spreads `{...WORLD_DEFAULTS,...world }` and then re-derives the structured fields. Anything **not** in `WORLD_DEFAULTS` (e.g. `customRegions`, `basemap`, `ownerCodes`) passes through untouched from the stored document — these are scenario-authored or game-appended fields the normalizer never rewrites.
 
 ### 2a. Core political-map fields
 
 | Field | Type | Default | Meaning / data flow |
 |---|---|---|---|
-| `regionOwnershipOverrides` | `{ regionId: ownerCode }` | `{}` | THE re-ownership map: which polity owns each region above the base tiles. Written by AI `regionTransfers` (§8) and by cheats. Read by the Nations layer to paint fills, and by `isPolityLandless` (`:917`). Normalized to string→string, blanks dropped (`:823`). |
-| `polityOverrides` | `{ name: {code,name,aliases[],formerNames?[],color,note,status?,mapRefs?{gadm0[]},mapLabel?,mapDistinctLabel?,verbatim?} }` | `{}` | Declared/renamed polities: new countries, renames, colors, alt-names. **A polity is keyed by its name and `name` equals the key; a rename re-keys the country everywhere** (`server/polityRename.js` `renamePolityInWorld`, reached from an event's `polityChanges` — a `rename`, or an `update` carrying a new `name` — and from the Workshop) with the old name kept in `formerNames`, which `buildOwnerAliasMap` folds onto the country and `resolveCountryTags` uses to find the scenario's starting tags. A save whose record still shows a display name over a different key is re-keyed on its next apply (`displayNameMigrations`), except onto a real country's name that was never its own. Written by AI `polityChanges` and the editor. `enqueueContentStrings` translates names on write (`:993`). Normalized by `normalizePolityOverride` (`:758`). Feeds `loadCountryNames` (`assets.js:1004`) and every name/flag resolver. |
-| `regionClaimants` | `{ regionId: string[] }` (≤4) | `{}` | Marks a region DISPUTED — striped in the administrator's + claimants' colors. World-data equivalent of a `claimants` list on the geojson feature, and WINS over feature props. Normalized `:829` (sliced to 4). |
+| `regionOwnershipOverrides` | `{ regionId: ownerCode }` | `{}` | THE re-ownership map: which polity owns each region above the base tiles. Written by AI `regionTransfers` (§8) and by cheats. Read by the Nations layer to paint fills, and by `isPolityLandless`. Normalized to string→string, blanks dropped. |
+| `polityOverrides` | `{ name: {code,name,aliases[],formerNames?[],color,note,status?,mapRefs?{gadm0[]},mapLabel?,mapDistinctLabel?,verbatim?} }` | `{}` | Declared/renamed polities: new countries, renames, colors, alt-names. **A polity is keyed by its name and `name` equals the key; a rename re-keys the country everywhere** (`server/polityRename.js` `renamePolityInWorld`, reached from an event's `polityChanges` — a `rename`, or an `update` carrying a new `name` — and from the Workshop) with the old name kept in `formerNames`, which `buildOwnerAliasMap` folds onto the country and `resolveCountryTags` uses to find the scenario's starting tags. A save whose record still shows a display name over a different key is re-keyed on its next apply (`displayNameMigrations`), except onto a real country's name that was never its own. Written by AI `polityChanges` and the editor. `enqueueContentStrings` translates names on write. Normalized by `normalizePolityOverride`. Feeds `loadCountryNames` (`assets.js`) and every name/flag resolver. |
+| `regionClaimants` | `{ regionId: string[] }` (≤4) | `{}` | Marks a region DISPUTED — striped in the administrator's + claimants' colors. World-data equivalent of a `claimants` list on the geojson feature, and WINS over feature props. Normalized (sliced to 4). |
 | `regionSovereigntyOverrides` | `{ regionId: ownerCode }` | `{}` | The LEGAL sovereign of a region where it differs from the polity in `regionOwnershipOverrides` that administers it — an occupation, a displaced government's homeland. Sparse: normal territory has no row (a row equal to the controller is dropped on normalisation). Written by legal `regionTransfers` (which move the title, and administration unless a third party holds the ground) and anchored by de-facto `regionControlOps` before control flips, so the occupied region stays striped in its sovereign's colour. Read by the Region Inspector, the country panel and the Stats territorial scope. |
-| `ownerCodes` | `string[]` | *(not defaulted; pass-through)* | The playable factions list — who can be picked/played, including landless ones. Appended by `saveGame` (`libraryBar.jsx:1197`), read by cheats (`cheats.jsx:120`) to enumerate owners. |
-| `customRegions` | `boolean` | *(pass-through)* | When true, render political fills/borders/labels from the scenario's `regions.geojson` instead of the stock modern overlay. Set by the editor export (`exportPreset.js:227`) — forced on whenever there's custom geometry OR a custom background. Read in `useWorldState` and the Nations layer. |
-| `customCities` | `boolean` | *(pass-through)* | Render authored cities instead of the modern city set (`exportPreset.js:239`). Surfaced by `useWorldState` (`:87`). |
-| `basemap` | `string \| null` | *(pass-through)* | ESRI basemap preset id (`ESRI_BASEMAPS`, `assets.js:82`); falls back to `ocean` in-game. |
-| `background` / `backgroundData` | `string \| null` / payload | *(pass-through)* | Custom map background (image-by-extent or vector overlay) that replaces Earth; heavy payload rides in a separate scenario asset (`exportPreset.js:228`). |
+| `ownerCodes` | `string[]` | *(not defaulted; pass-through)* | The playable factions list — who can be picked/played, including landless ones. Appended by `saveGame` (`libraryBar.jsx`), read by cheats (`cheats.jsx`) to enumerate owners. |
+| `customRegions` | `boolean` | *(pass-through)* | When true, render political fills/borders/labels from the scenario's `regions.geojson` instead of the stock modern overlay. Set by the editor export (`exportPreset.js`) — forced on whenever there's custom geometry OR a custom background. Read in `useWorldState` and the Nations layer. |
+| `customCities` | `boolean` | *(pass-through)* | Render authored cities instead of the modern city set (`exportPreset.js`). Surfaced by `useWorldState`. |
+| `basemap` | `string \| null` | *(pass-through)* | ESRI basemap preset id (`ESRI_BASEMAPS`, `assets.js`); falls back to `ocean` in-game. |
+| `background` / `backgroundData` | `string \| null` / payload | *(pass-through)* | Custom map background (image-by-extent or vector overlay) that replaces Earth; heavy payload rides in a separate scenario asset (`exportPreset.js`). |
 
 ### 2b. AI-evolved diplomacy / identity fields
 
 | Field | Type | Default | Meaning / data flow |
 |---|---|---|---|
-| `internationalReputation` | `{ code: 0–100 }` | `{}` | Per-polity reputation, authoritative (not the on-demand stat sheet it was first read from). Evolved by AI `polityChanges.reputation` each turn (`:1081`) and fed back into prompts. Normalized/clamped to `[0,100]` int (`:838`). Keyed by country NAME verbatim. |
-| `countryTags` | `{ country: string[] }` | `{}` | Per-country tags the AI has CHANGED since the scenario started. Wins over the author's `tags.json` where present (see `resolveCountryTags`, `countryTags.js:55`). Keyed by country NAME verbatim (same namespace as reputation/colors — see the desync warning at `:845`). Normalized via `normalizeTagList` (`:850`). |
+| `internationalReputation` | `{ code: 0–100 }` | `{}` | Per-polity reputation, authoritative (not the on-demand stat sheet it was first read from). Evolved by AI `polityChanges.reputation` each turn and fed back into prompts. Normalized/clamped to `[0,100]` int. Keyed by country NAME verbatim. |
+| `countryTags` | `{ country: string[] }` | `{}` | Per-country tags the AI has CHANGED since the scenario started. Wins over the author's `tags.json` where present (see `resolveCountryTags`, `countryTags.js`). Keyed by country NAME verbatim (same namespace as reputation/colors — see the desync warning at). Normalized via `normalizeTagList`. |
 | `notes` | `string` | `""` | Free-form world notes. |
 
 ### 2b-bis. Canonical ledgers — wars, relations, agreements, storylines
@@ -175,18 +175,18 @@ Empty string = defaults (Georgia, white letters, half-black outline). The font r
 
 | Field | Type | Default | Notes (`gameState.js`) |
 |---|---|---|---|
-| `labelFont` | `string` | `""` | CSS font-family stack for country labels (`:31`, normalized `:864`). |
-| `labelTextColor` | `string` | `""` | Label fill color (`:33`). |
-| `labelHaloColor` | `string` | `""` | Label outline color (`:32`). |
+| `labelFont` | `string` | `""` | CSS font-family stack for country labels (normalized). |
+| `labelTextColor` | `string` | `""` | Label fill color. |
+| `labelHaloColor` | `string` | `""` | Label outline color. |
 
 ### 2d. Simulation config & timeline text
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `simulationRules` | `string` | `""` | Author house-rules injected into the AI prompt (`exportPreset.js:242`). |
-| `startingTimelineText` | `string` | `""` | Author-written opening timeline shown pre-game (`exportPreset.js:243`). |
-| `language` | `string` | `"English"` | UI/content language for translation (`:34`, `:867`). |
-| `allowedUnitTypes` | `string[]` | *(pass-through)* | Scenario whitelist of deployable troop types; `null`/empty = all allowed (read in `unitsController.js:81`). |
+| `simulationRules` | `string` | `""` | Author house-rules injected into the AI prompt (`exportPreset.js`). |
+| `startingTimelineText` | `string` | `""` | Author-written opening timeline shown pre-game (`exportPreset.js`). |
+| `language` | `string` | `"English"` | UI/content language for translation. |
+| `allowedUnitTypes` | `string[]` | *(pass-through)* | Scenario whitelist of deployable troop types; `null`/empty = all allowed (read in `unitsController.js`). |
 
 ### 2e. Units and markers (ride inside world state)
 
@@ -194,12 +194,12 @@ Stored in world so they share every read/write/poll/normalize path with no serve
 
 | Field | Type | Default | Element shape (normalizer) |
 |---|---|---|---|
-| `units` | `Unit[]` | `[]` | `normalizeUnitEntry` (`:475`): `{id,name,type,ownerCode,strength,lng,lat,regionId,status,note,source,orderId,createdAt,updatedAt}`. |
-| `markers` | `Marker[]` | `[]` | `normalizeMarkerEntry` (`:518`): built structures — `{id,name,kind,ownerCode,lng,lat,note,foundedAt,createdAt}`. |
+| `units` | `Unit[]` | `[]` | `normalizeUnitEntry`: `{id,name,type,ownerCode,strength,lng,lat,regionId,status,note,source,orderId,createdAt,updatedAt}`. |
+| `markers` | `Marker[]` | `[]` | `normalizeMarkerEntry`: built structures — `{id,name,kind,ownerCode,lng,lat,note,foundedAt,createdAt}`. |
 | `reports` | `Report[]` | `[]` | `normalizeReports` (`runtime/reports.js`): documents held by the governments they were addressed to — `{id,title,body,visibleTo,sourceEventId,createdRound,createdDate,dateline,origin}`. `visibleTo` null = public. Written by `impacts.reports` (create / share); read through `audienceSeesScoped`. Bounded to 240. |
-| `pendingUnitOrders` | `PendingUnitOrder[]` | `[]` | `normalizePendingUnitOrders`/`normalizePendingUnitOrderEntry` (`:625`,`:603`): `{id,unitId,kind,toLng,toLat,radiusKm,untilRound,targetId,targetLabel,note,issuedAt,issuedRound}`. Standing orders the **engine** advances every turn (`advanceStandingOrders`): `move` travels to a destination, `patrol` works a station of `radiusKm` centred on it. Minted by `applyUnitOpBatch` when an AI move exceeds what the unit could travel in the elapsed time, or when a unit takes `posture: "patrol"`. Surfaced to the AI every jump via `buildPendingUnitOrdersText` (`promptContext.js`) as **context only** — the model must not emit a move for one, or the unit advances twice. Auto-dropped by `pruneSatisfiedUnitOrders` (`:641`) once the unit is within ~60km of `toLng`/`toLat` or no longer exists; a `patrol` order is exempt from that arrival test (its destination *is* its station) and ends via `untilRound` instead. Pruned on **every** `normalizeWorldState` call (`:1128`), so this never needs a separate cleanup pass. |
+| `pendingUnitOrders` | `PendingUnitOrder[]` | `[]` | `normalizePendingUnitOrders`/`normalizePendingUnitOrderEntry`: `{id,unitId,kind,toLng,toLat,radiusKm,untilRound,targetId,targetLabel,note,issuedAt,issuedRound}`. Standing orders the **engine** advances every turn (`advanceStandingOrders`): `move` travels to a destination, `patrol` works a station of `radiusKm` centred on it. Minted by `applyUnitOpBatch` when an AI move exceeds what the unit could travel in the elapsed time, or when a unit takes `posture: "patrol"`. Surfaced to the AI every jump via `buildPendingUnitOrdersText` (`promptContext.js`) as **context only** — the model must not emit a move for one, or the unit advances twice. Auto-dropped by `pruneSatisfiedUnitOrders` once the unit is within ~60km of `toLng`/`toLat` or no longer exists; a `patrol` order is exempt from that arrival test (its destination *is* its station) and ends via `untilRound` instead. Pruned on **every** `normalizeWorldState` call, so this never needs a separate cleanup pass. |
 
-`Unit` enums (`:60`–`:64`): `type ∈ {infantry,armor,air,naval,artillery,garrison}` (default `infantry`); `status ∈ {idle,moving,engaged,defeated,pending}` (default `idle`; `pending` = a player deploy awaiting AI resolution, rendered translucent); `source ∈ {player,ai,scenario}` (default `scenario`; `scenario` = placed in the map editor's Units panel, map-editor.md §9b); `posture ∈ {holding,massing,patrol,transit,exercise,blockade,withdrawing,assaulting}` (default `""` — intent, as distinct from lifecycle `status`; deliberately not `garrison`, which would collide with the unit *type*). **`assaulting` is the one posture that also moves the lifecycle**: a unit *arriving* under it is stamped `status: "engaged"` rather than `idle` (`applyUnitOpBatch`). It exists so the **beta** system can express a province assault at all — classic players reach that through the unit popup's Attack button (`attackRegion`, which does the same bookkeeping locally), but the beta card deliberately has no direct-control buttons ("intent, not control"), so a typed order like "Attack Provence" has to be something the *model* can enact. The AI still owns the outcome (casualties, and a `regionTransfer` only if the province actually falls); `engaged` is additionally exempt from `enforceUnitVolume` pruning, which is right for a formation in contact. `strength` is a **percentage of established strength**, clamped to `[0,100]` by `clampUnitStrength`, which coerces the old 1–1000 scale by dividing anything over 100 by ten. `composition` is free text for the order of battle ("1 aircraft carrier, 2 frigates"); `covert` is engine-assigned and means "no confirmed line of support" (a covert insertion **or** a presence only just detected), shown to the player as *Unconfirmed*; `eventId` links the event that created or last moved the unit. `marker.kind` is free-form (lowercased for stable styling), default `landmark`. `PendingUnitOrder.kind ∈ {move,patrol}` (default `move`; a legacy `attack` is coerced to `move`, keeping its destination and `targetLabel`).
+`Unit` enums (–): `type ∈ {infantry,armor,air,naval,artillery,garrison}` (default `infantry`); `status ∈ {idle,moving,engaged,defeated,pending}` (default `idle`; `pending` = a player deploy awaiting AI resolution, rendered translucent); `source ∈ {player,ai,scenario}` (default `scenario`; `scenario` = placed in the map editor's Units panel, map-editor.md §9b); `posture ∈ {holding,massing,patrol,transit,exercise,blockade,withdrawing,assaulting}` (default `""` — intent, as distinct from lifecycle `status`; deliberately not `garrison`, which would collide with the unit *type*). **`assaulting` is the one posture that also moves the lifecycle**: a unit *arriving* under it is stamped `status: "engaged"` rather than `idle` (`applyUnitOpBatch`). It exists so the **beta** system can express a province assault at all — classic players reach that through the unit popup's Attack button (`attackRegion`, which does the same bookkeeping locally), but the beta card deliberately has no direct-control buttons ("intent, not control"), so a typed order like "Attack Provence" has to be something the *model* can enact. The AI still owns the outcome (casualties, and a `regionTransfer` only if the province actually falls); `engaged` is additionally exempt from `enforceUnitVolume` pruning, which is right for a formation in contact. `strength` is a **percentage of established strength**, clamped to `[0,100]` by `clampUnitStrength`, which coerces the old 1–1000 scale by dividing anything over 100 by ten. `composition` is free text for the order of battle ("1 aircraft carrier, 2 frigates"); `covert` is engine-assigned and means "no confirmed line of support" (a covert insertion **or** a presence only just detected), shown to the player as *Unconfirmed*; `eventId` links the event that created or last moved the unit. `marker.kind` is free-form (lowercased for stable styling), default `landmark`. `PendingUnitOrder.kind ∈ {move,patrol}` (default `move`; a legacy `attack` is coerced to `move`, keeping its destination and `targetLabel`).
 
 ### 2e-bis. Projects & operations (ride inside world state)
 
@@ -276,68 +276,68 @@ Espionage resolves once per turn in `applySimulationResult`, **after** the stand
 
 | Field | Type | Default | Meaning (normalizer) |
 |---|---|---|---|
-| `activeCatalyst` | `Catalyst \| null` | `null` | A running branching scenario prompt: `{title,premise,opening,choices[],history[]}` (`normalizeCatalyst` `:264`). Advanced by `advanceActiveCatalyst` (`gameplay.js:1701`). |
-| `actionSuggestions` | `Topic[]` | `[]` | AI-proposed action topics `{id,title,description,actions[]}` (`:777`); cleared each jump (`gameplay.js:1339`). |
+| `activeCatalyst` | `Catalyst \| null` | `null` | A running branching scenario prompt: `{title,premise,opening,choices[],history[]}` (`normalizeCatalyst`). Advanced by `advanceActiveCatalyst` (`gameplay.js`). |
+| `actionSuggestions` | `Topic[]` | `[]` | AI-proposed action topics `{id,title,description,actions[]}`; cleared each jump (`gameplay.js`). |
 | `simulationHistory` | `Turn[]` | `[]` | Last ≤12 turns: `{catalyst,date,eventIds[],fallbackReason,fromDate,mode,plannedActions[],receipt?,round,summary,source,toDate}` (built in `applySimulationResult`, normalized in `normalizeWorldState`). `receipt` is the **application receipt** (`runtime/applicationReceipt.js`): `{version, applied:{events,regionTransfers,…}, notes:[{kind,text}], omitted}` — what the engine dropped, withheld or changed in that turn's answer, read once by the next jump. Only a jump writes one, and only the **newest** receipt keeps its `notes` (older turns keep `applied` alone), so this polled file never holds more than one receipt's text. It lives here rather than in a runtime asset so that a rollback restores the receipt belonging to the restored turn. |
 | `consolidatedHistory` | `Summary[]` | `[]` | The ledger of consolidation passes `{summary,chatIds[],actionIds[],throughDate,throughEventId,throughRound,source,createdAt}` (`normalizeConsolidatedHistory`) — appended by `compactHistoryIfNeeded`; the last entry's `throughEventId` is the boundary the prompt reads events from (`getUnconsolidatedEvents`, or its `throughDate` if that event was deleted). Consolidation never trims the event log. Rendered as the older history only while no `historyDocument` exists. |
 | `historyDocument` | `{text,revision,updatedAt,source,throughDate,throughEventId,throughRound}` \| `null` | `null` | The living history the AI is shown in place of the folded events: the first pass writes it, every later pass rewrites it with the new period folded in and unimportant older material condensed past ~1,500 words (`applyHistoryDocumentUpdate`, `historyConsolidation.js`; a pass that returns no document appends its summary instead). Editable in Cheats → History Document (`source: "manual"`). |
 | `boardReviewedRound` | `number` | `0` | The round the Projects board was last checked against a turn's events (the turn review's board job, or the board's own request). `0` = never. Lets a skip decide without asking anyone whether the calendar is due another look (`projects.js` `boardPassReasons`); a value later than the current round is another campaign's and counts as never. |
-| `lastJumpMode` | `string` | `""` | Mode of the most recent jump (`jump`/`auto`/…) (`:867`). |
+| `lastJumpMode` | `string` | `""` | Mode of the most recent jump (`jump`/`auto`/…). |
 | `lastJumpSummary` | `string` | `""` | One-line summary of the last jump. |
 | `lastJumpTargetDate` | `string` | `""` | Target date the last jump advanced to. |
 
-> `ownerSchema` is a **document/editor** marker (`src/Editor/documentMigration.js:27`), not a runtime `world.json` field — it gates the editor's owner-code→name migration. A game's `world.json` inherits it only as an inert pass-through if the seed carried it.
+> `ownerSchema` is a **document/editor** marker (`src/Editor/documentMigration.js`), not a runtime `world.json` field — it gates the editor's owner-code→name migration. A game's `world.json` inherits it only as an inert pass-through if the seed carried it.
 
 ---
 
 ## 3. `normalizeWorldState` — the single normalizer
 
-`normalizeWorldState(world)` (`src/runtime/gameState.js:815`) is called on **every** read and write of `world.json`, so no downstream code has to defend against missing/malformed fields. Behavior:
+`normalizeWorldState(world)` (`src/runtime/gameState.js`) is called on **every** read and write of `world.json`, so no downstream code has to defend against missing/malformed fields. Behavior:
 
-1. Spread defaults then the raw doc: `{ ...WORLD_DEFAULTS, ...nextWorld, … }` (`:856`). Unknown fields (scenario extras) survive; known fields are then overwritten by their normalized versions.
+1. Spread defaults then the raw doc: `{...WORLD_DEFAULTS,...nextWorld, … }`. Unknown fields (scenario extras) survive; known fields are then overwritten by their normalized versions.
 2. Rebuild the maps with blank-key/blank-value filtering: `regionOwnershipOverrides`, `polityOverrides`, `regionClaimants` (≤4), `internationalReputation` (clamped ints), `countryTags` (via `normalizeTagList`).
 3. Normalize the arrays: `units`, `pendingUnitOrders` (pruned against the just-normalized `units`), `markers`, `actionSuggestions`, `simulationHistory`, `consolidatedHistory`, and singletons `activeCatalyst`, `historyDocument`, label config, `notes`, `language`, `simulationRules`, `startingTimelineText`.
 
-`writeWorldState` (`:988`) normalizes, calls `enqueueContentStrings(polityOverrides)` to translate edited names on write, then `writeJson(JSON_URLS.world, …, { pretty:true })`.
+`writeWorldState` normalizes, calls `enqueueContentStrings(polityOverrides)` to translate edited names on write, then `writeJson(JSON_URLS.world, …, { pretty:true })`.
 
-**Namespace caution (`:845`):** `countryTags`, `internationalReputation`, `polityOverrides`, and `colors` are all keyed by country **NAME verbatim**. An earlier version uppercased `countryTags` keys only, so a single `change.code` could land under two keys (`countryTags["RUSSIA"]` vs `internationalReputation["Russia"]`) — harmless while owners were uppercase GADM codes, a silent desync once owners are names. Keep the casing consistent.
+**Namespace caution:** `countryTags`, `internationalReputation`, `polityOverrides`, and `colors` are all keyed by country **NAME verbatim**. An earlier version uppercased `countryTags` keys only, so a single `change.code` could land under two keys (`countryTags["RUSSIA"]` vs `internationalReputation["Russia"]`) — harmless while owners were uppercase GADM codes, a silent desync once owners are names. Keep the casing consistent.
 
 ---
 
 ## 4. `isPolityLandless` — "does this polity hold territory?"
 
-`isPolityLandless(world, code)` (`src/runtime/gameState.js:917`) is the single source of truth for "landless" (a government-in-exile, movement, or stateless person), used by both the AI prompt (`buildPlayerPolityRegionsText`) and the flag resolvers (a landless polity must NOT borrow the code-derived country flag). The subtlety: owning a region via an override = has land; but a scenario that ships **no** `regionOwnershipOverrides` at all means every polity owns its country through the base map tiles (a stock modern map), which is NOT landless (`:928`).
+`isPolityLandless(world, code)` (`src/runtime/gameState.js`) is the single source of truth for "landless" (a government-in-exile, movement, or stateless person), used by both the AI prompt (`buildPlayerPolityRegionsText`) and the flag resolvers (a landless polity must NOT borrow the code-derived country flag). The subtlety: owning a region via an override = has land; but a scenario that ships **no** `regionOwnershipOverrides` at all means every polity owns its country through the base map tiles (a stock modern map), which is NOT landless.
 
 ---
 
 ## 5. AI "impacts" — the mutation vocabulary
 
-Every event may carry an `impacts` object (`normalizeEventImpacts`, `src/runtime/gameState.js`) whose nine arrays are the ONLY way the AI mutates world state. Each is independently normalized and invalid entries are dropped. (`spyOps` is a tenth family in the AI schema that is deliberately **not** normalized here: it is read off the raw event and applied by `applySpyOps` after `resolveEspionage`, so it does not survive into `events.json`.)
+Every event may carry an `impacts` object (`normalizeEventImpacts`, `src/runtime/gameState.js`) whose eleven arrays are the ONLY way the AI mutates world state: `actionIds`, `createdChats`, `markerOps`, `polityChanges`, `projectOps`, `regionClaims`, `regionControlOps`, `regionTransfers`, `reports`, `spyOps` and `unitOps`. Each is independently normalized and invalid entries are dropped. (`spyOps` used to be the one family read off the raw event and never normalized, so a reloaded campaign could not replay espionage from `events.json`; it is normalized like the rest now, and still APPLIED after `resolveEspionage` by `applySpyOps`, so an agent placed this turn is not also caught this turn.)
 
 | Impact array | Element normalizer | Applied by | Effect on `world.json` |
 |---|---|---|---|
 | `regionControlOps` | `normalizeRegionControlOp` → `{op: contest\|control\|clear_contest, regionId, fromCode, actorCode\|toCode\|claimantCode, clearAll?, wholeCountry?, note}` | `applyPolityAndTerritoryImpacts` | De-facto control without a legal change: `contest` adds a contender to the stripes, `control` makes `toCode` the controller (the previous controller and the lawful sovereign become claimants, the sovereign anchored in `regionSovereigntyOverrides`), `clear_contest` removes one claimant (or all with `clearAll`, never the displaced sovereign). Proposed by the simulator and by `nativeTerritoryDirector.js`; resolved through the same geography resolver as transfers, bounded by current control. |
 | `regionClaims` | `normalizeRegionClaim` → `{regionId,claimantCode,drop,note}` | `applyPolityAndTerritoryImpacts` | Appends to / removes from `regionClaimants[regionId]` (de-duplicated case-insensitively; the key is deleted at zero). Applied **before** `regionTransfers`, so a region claimed and handed over in the same jump ends settled rather than striped. Until this existed nothing but the map editor and the cheats panel could raise a dispute, so a unilateral claim had nowhere to go but a project. A claimant the world does not know is founded as a landless polity rather than written as a bare name. Plain region names are resolved to ids beside the transfers (`resolveRegionTransfers`); a claim that matches nothing is dropped, never failed. |
 | `regionTransfers` | `normalizeRegionTransfer` → `{regionId,toCode,fromCode,regionName,note,basis?}` | `applyPolityAndTerritoryImpacts` | A change of LEGAL sovereignty: `regionSovereigntyOverrides[regionId] = toCode`, and `regionOwnershipOverrides[regionId] = toCode` too unless a third party physically holds the region, in which case the lawful sovereign stays visible as a claimant. A clean hand‑over clears the region's claimants. |
-| `polityChanges` | `normalizePolityChange` (`:442`) → `{code,name,color,aliases[],note,reputation,tags}` | inline loop (`:1052`) | Upserts `polityOverrides[code]`; also writes `colors[code]` (§7), `internationalReputation[code]`, `countryTags[code]`. A polity can also come into being without any entry here: territory given to a name the world does not know (a transfer's `toCode`, a control op's `toCode`, a contest's `actorCode`, a live claim's `claimantCode`) founds it as an active record with a colour of its own (`polityFounding.js` `foundPolityIfUnknown`; the AI resolver adds the create explicitly, this is the safety net). Stock country names and names already on the map are never founded this way. |
-| `unitOps` | `normalizeUnitOp` (`:592`) → `spawn\|move\|strength\|remove` | `applyUnitOps` (`:638`) | Rewrites `world.units`. |
-| `markerOps` | `normalizeMarkerOp` (`:549`) → `build\|remove` | `applyMarkerOps` (`:575`) | Rewrites `world.markers`. |
+| `polityChanges` | `normalizePolityChange` → `{code,name,color,aliases[],note,reputation,tags}` | inline loop | Upserts `polityOverrides[code]`; also writes `colors[code]` (§7), `internationalReputation[code]`, `countryTags[code]`. A polity can also come into being without any entry here: territory given to a name the world does not know (a transfer's `toCode`, a control op's `toCode`, a contest's `actorCode`, a live claim's `claimantCode`) founds it as an active record with a colour of its own (`polityFounding.js` `foundPolityIfUnknown`; the AI resolver adds the create explicitly, this is the safety net). Stock country names and names already on the map are never founded this way. |
+| `unitOps` | `normalizeUnitOp` → `spawn\|move\|strength\|remove` | `applyUnitOps` | Rewrites `world.units`. |
+| `markerOps` | `normalizeMarkerOp` → `build\|remove` | `applyMarkerOps` | Rewrites `world.markers`. |
 | `projectOps` | `normalizeProjectOp` → `create\|update\|milestone\|close\|remove` | `applyProjectOps` (via `releaseProjectCompletionEffects` first) | Rewrites `world.projects`. **Ending a project keeps it:** `complete`/`cancel`/`fail` (plus the aliases `finish`, `abandon`, `shelve`) all resolve to one `close` op that sets a closed status and leaves the entry on the board under the Closed view — success marks pending milestones `done` and forces 100%, anything else marks them `missed` and preserves the progress actually reached. Only `remove`/`delete`/`drop` erase, which is for an entry that should never have been opened. `cancel` used to alias to `remove`, so the most natural way for a model to say "we gave up on this" silently deleted it instead of recording it. Matches by id, then case-insensitive name; an op against a project that does not exist is **dropped**, never auto-created. A `create` naming a project already on the board is folded in as an **update that merges only the fields the op actually carried**, so a chatty turn can neither fill the board with duplicates nor reset what it failed to restate. That merge is driven by a `provided` field list recorded at normalize time (a JSON-safe array, because normalized ops are persisted in `events.json` and replayed by the staged reveal): once an op is normalized, every field is populated, so there is otherwise no way to tell `progress: 0` from "progress was not mentioned". Before this, a jump that merely mentioned a running operation reset `ongoing` to false, `progress` to 0, `status` to active, `secrecy` to public, emptied `tags`, and demoted an operation to a project. `tags` follows the `countryTags` rule — an array replaces wholesale, absent means unchanged. |
-| `createdChats` | `normalizeChats` (`:415`) | turn writer (`gameplay.js:1364`) | New diplomacy threads pushed into `chat.json` (not `world`). |
-| `actionIds` | string list (`:683`) | turn writer | Which queued actions this event resolves. |
+| `createdChats` | `normalizeChats` | turn writer (`gameplay.js`) | New diplomacy threads pushed into `chat.json` (not `world`). |
+| `actionIds` | string list | turn writer | Which queued actions this event resolves. |
 
 **Why the land moves — `basis`.** A transfer, and a `regionControlOps` control flip, may say why (`runtime/territoryBasis.js`). `treaty`, `annexation`, `unification`, `independence` and `occupation` move the map. `claim`, `threat` and `raid` do not: `applyPolityAndTerritoryImpacts` screens all three arrays first (`screenTerritoryBasis`), turning a `claim`‑basis entry into a `regionClaims` entry for its receiver — the region goes disputed instead of changing hands — and leaving a `threat` or a `raid` out. A claim over a whole country (`wholeCountry: true`) is refused rather than striped across every province. The field is carried through normalization **only when present**, so a transfer written before it existed round‑trips byte‑for‑byte, and **an entry with no basis is applied exactly as before**. The turn validator runs the same screen earlier and tells the model what it did (the [application receipt](ai-overview.md#the-application-receipt-what-salvage-did-told-to-the-next-turn)); the screen here is the net for impacts that never meet it, and it is idempotent.
 
-### `normalizePolityChange` semantics (`:442`)
+### `normalizePolityChange` semantics
 
 - `reputation`: parsed and clamped to `[0,100]` int, else `null` ("unchanged").
-- `tags`: `Array.isArray` → `normalizeTagList`; otherwise `null`. This distinction is load-bearing — the AI sends the COMPLETE new tag list, so `[]` means "this country now has no defining tags" (must drop them) while `null`/undefined means "unchanged" (`:459`). `applyEventImpactsToWorld` deletes the key on `[]` and sets it on a non-empty list (`:1089`).
+- `tags`: `Array.isArray` → `normalizeTagList`; otherwise `null`. This distinction is load-bearing — the AI sends the COMPLETE new tag list, so `[]` means "this country now has no defining tags" (must drop them) while `null`/undefined means "unchanged". `applyEventImpactsToWorld` deletes the key on `[]` and sets it on a non-empty list.
 
-### `applyUnitOps` (`:638`) — pure
+### `applyUnitOps` — pure
 
-`spawn` (marks `source:"ai"`) pushes; `move` sets `lng/lat/regionId`, `status:"moving"`; `strength` clamps and marks `defeated` at ≤0; `remove` filters by id. Ops on unknown ids are silently ignored; the final list drops any unit with `strength ≤ 0` or `status === "defeated"` (`:666`).
+`spawn` (marks `source:"ai"`) pushes; `move` sets `lng/lat/regionId`, `status:"moving"`; `strength` clamps and marks `defeated` at ≤0; `remove` filters by id. Ops on unknown ids are silently ignored; the final list drops any unit with `strength ≤ 0` or `status === "defeated"`.
 
-### `applyMarkerOps` (`:575`) — pure
+### `applyMarkerOps` — pure
 
 `build` replaces any existing marker of the same name (case-insensitive) rather than stacking duplicates; `remove` matches by id first, then exact name (the AI usually knows the name, rarely the id).
 
@@ -345,7 +345,7 @@ Every event may carry an `impacts` object (`normalizeEventImpacts`, `src/runtime
 
 ## 6. `game.json` — the clock (`GAME_DEFAULTS`)
 
-`GAME_DEFAULTS` (`src/runtime/gameState.js:6`), normalized by `normalizeGameData` (`:956`):
+`GAME_DEFAULTS` (`src/runtime/gameState.js`), normalized by `normalizeGameData`:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -354,7 +354,7 @@ Every event may carry an `impacts` object (`normalizeEventImpacts`, `src/runtime
 | `gameDate` | `string` | `""` | Current in-game date (`YYYY-MM-DD`; a year before AD 1 carries a leading minus and counts backwards with no year zero, so `-0218-03-01` is 1 March 218 BC — see `src/runtime/gameDates.js`), advanced each jump to `result.stopDate`. |
 | `startDate` | `string` | `""` | Scenario start date. |
 | `language` | `string` | `"English"` | UI/content language. |
-| `round` | `int > 0` | `1` | Turn counter, `+1` each jump (`gameplay.js:1324`). |
+| `round` | `int > 0` | `1` | Turn counter, `+1` each jump (`gameplay.js`). |
 
 `canonicalizeDateString` repairs `gameDate`/`startDate` from loose formats (`"2016-12-31T00:00:00.000Z"`, `"December 31, 2016"`, `"-218-03-01"`) back to the canonical form (`normalizeGameDate`). Without it, the jump's date arithmetic rejects the value and every jump computes `target == origin`, freezing the clock while the model re-simulates the past. **Every parse, step, difference, comparison and display of a game date goes through `src/runtime/gameDates.js`** — BC years are negative, there is no year zero, the arithmetic is astronomical inside, and comparing two date strings is wrong for BC (`-0218` sorts before `-0300` as text, yet 218 BC comes after 300 BC). Prose dates (`"Third Age 3019"`) don't parse and pass through untouched, on the lenient validation branch.
 
@@ -362,22 +362,22 @@ Every event may carry an `impacts` object (`normalizeEventImpacts`, `src/runtime
 
 ## 7. `colors.json` — the palette (a sibling, not a world field)
 
-Colors live in a separate asset (`code → [r,g,b]`), not inside `world.json`. `applyEventImpactsToWorld` takes `colors` as an input and returns the mutated palette alongside the world (`:1043`, `:1107`): when a `polityChange` carries a 6-hex `color`, it is parsed to `[r,g,b]` and written to `nextColors[change.code]` (`:1067`). The turn writer persists both in the same `Promise.all` (`gameplay.js:1402`). A colors write invalidates the memoized `getNationColors` cache and dispatches `oh:colors-updated` so the map repaints mid-session without a reload (`assets.js:177`).
+Colors live in a separate asset (`code → [r,g,b]`), not inside `world.json`. `applyEventImpactsToWorld` takes `colors` as an input and returns the mutated palette alongside the world: when a `polityChange` carries a 6-hex `color`, it is parsed to `[r,g,b]` and written to `nextColors[change.code]`. The turn writer persists both in the same `Promise.all` (`gameplay.js`). A colors write invalidates the memoized `getNationColors` cache and dispatches `oh:colors-updated` so the map repaints mid-session without a reload (`assets.js`).
 
 ---
 
 ## 8. `applyEventImpactsToWorld` — folding impacts into state
 
-`applyEventImpactsToWorld({ colors, events, world })` (`src/runtime/gameState.js:1043`) is a **pure** function returning `{ colors, world }`. It clones the inputs, normalizes the world and the events, then for each event applies (in order): region transfers → polity changes (name/color/reputation/tags + palette) → unit ops → marker ops. It does NOT persist — the caller writes. Two callers:
+`applyEventImpactsToWorld({ colors, events, world })` (`src/runtime/gameState.js`) is a **pure** function returning `{ colors, world }`. It clones the inputs, normalizes the world and the events, then for each event applies (in order): region transfers → polity changes (name/color/reputation/tags + palette) → unit ops → marker ops. It does NOT persist — the caller writes. Two callers:
 
-1. **The turn writer** — `applySimulationResult` (`src/Game/AI/gameplay.js:1305`). It builds the next world (merging `activeCatalyst`, `lastJump*`, and the new `simulationHistory` head), calls `applyEventImpactsToWorld` with the generated events (`:1333`), optionally compacts history, then persists everything in one `Promise.all`: `writeActionsState`, `writeChatsState`, `writeEventsState`, `writeGameData`, `writeJson(colors)`, `writeWorldState` (`:1397`). It then captures a rollback snapshot of the pre-jump state (`captureRollbackSnapshot`, `:1407`).
-2. **The staged reveal** — `src/Game/GameUI/time.jsx:1617`. As a turn's events are revealed one at a time, it re-applies impacts up to the last revealed event onto `stagedBase.world` and calls `setWorldStateOverride(stagedWorld)` / `setUnitsOverride(...)` so the map shows the world as of that event. It passes `colors: {}` because it only needs the world, not the palette. When staging ends (or on unmount) both overrides are cleared to `null` (`:1612`, `:1629`).
+1. **The turn writer** — `applySimulationResult` (`src/Game/AI/gameplay.js`). It builds the next world (merging `activeCatalyst`, `lastJump*`, and the new `simulationHistory` head), calls `applyEventImpactsToWorld` with the generated events, optionally compacts history, then persists everything in one `Promise.all`: `writeActionsState`, `writeChatsState`, `writeEventsState`, `writeGameData`, `writeJson(colors)`, `writeWorldState`. It then captures a rollback snapshot of the pre-jump state (`captureRollbackSnapshot`,).
+2. **The staged reveal** — `src/Game/GameUI/time.jsx`. As a turn's events are revealed one at a time, it re-applies impacts up to the last revealed event onto `stagedBase.world` and calls `setWorldStateOverride(stagedWorld)` / `setUnitsOverride(...)` so the map shows the world as of that event. It passes `colors: {}` because it only needs the world, not the palette. When staging ends (or on unmount) both overrides are cleared to `null`.
 
 ---
 
 ## 9. State distribution: three stores, no panel polls
 
-No panel fetches a runtime document on its own timer any more. Three stores hold the live state, and all three are driven by the canonical write events `writeJson` dispatches (`assets.js:1039`-`:1048`): `oh:world-updated`, `oh:game-updated`, and `oh:runtime-json-updated` for every mutable runtime asset. Updates are pushed, not polled. The one remaining timer is a 60-second backstop for a writer no event can reach.
+No panel fetches a runtime document on its own timer any more. Three stores hold the live state, and all three are driven by the canonical write events `writeJson` dispatches (`assets.js`-): `oh:world-updated`, `oh:game-updated`, and `oh:runtime-json-updated` for every mutable runtime asset. Updates are pushed, not polled. The one remaining timer is a 60-second backstop for a writer no event can reach.
 
 ### The map store: `src/Game/Map/useWorldState.js`
 
@@ -385,12 +385,12 @@ A singleton that holds `world.json` for all map consumers. It bootstraps once fr
 
 | Piece | Location | Behavior |
 |---|---|---|
-| `sharedState` / `publishedState` / `subscribers` | `:16`-`:20` | One world object, one derived object, a `Set` of subscriber callbacks. |
-| `bootstrap()` | `:227` | `readJson(JSON_URLS.world, { force: false, clone: false })` on first subscribe. On error it publishes `{}` rather than leaving consumers unpainted. |
-| `onWorldUpdated` | `:251` | `oh:world-updated` carries the saved world in `event.detail.world`; the store adopts that object directly, with no read. |
-| `onActiveGameChanged` | `:267` | A save switch drops `sharedState`, the override and the published object, then bootstraps again from the new save's `world.json`. |
-| `overrideState` / `setWorldStateOverride` | `:21`,`:221` | Staged-reveal override. `effectiveState() = overrideState ?? sharedState` (`:23`). Canonical updates keep landing underneath, and clearing to `null` snaps consumers back to live state. |
-| `getWorldStateSnapshot` | `:219` | Read-only accessor of the effective state (peer of `unitsController.getUnits`). |
+| `sharedState` / `publishedState` / `subscribers` | - | One world object, one derived object, a `Set` of subscriber callbacks. |
+| `bootstrap` | | `readJson(JSON_URLS.world, { force: false, clone: false })` on first subscribe. On error it publishes `{}` rather than leaving consumers unpainted. |
+| `onWorldUpdated` | | `oh:world-updated` carries the saved world in `event.detail.world`; the store adopts that object directly, with no read. |
+| `onActiveGameChanged` | | A save switch drops `sharedState`, the override and the published object, then bootstraps again from the new save's `world.json`. |
+| `overrideState` / `setWorldStateOverride` |, | Staged-reveal override. `effectiveState = overrideState ?? sharedState`. Canonical updates keep landing underneath, and clearing to `null` snaps consumers back to live state. |
+| `getWorldStateSnapshot` | | Read-only accessor of the effective state (peer of `unitsController.getUnits`). |
 
 ### The HUD store: `src/runtime/runtimeStore.js`
 
@@ -398,17 +398,17 @@ One store and one subscription list for all six mutable runtime documents: `game
 
 | Piece | Location | Behavior |
 |---|---|---|
-| `SOURCES` | `:34` | Per key: the `gameState.js` reader and the matching normalizer. The store always holds normalized documents. |
-| `subscribeRuntime(key, fn, { select, seed })` | `:254` | Adds a subscriber. With `select`, `fn` is called only when that selector's output changes, compared with `deepEqual` (`:59`). Without one, only when the document's own reference changes. `seed` is the slice the caller last rendered, so a change landing between a render and its subscription is not swallowed. |
-| `applyValue` | `:111` | Normalizes, deep-compares against the current document, and publishes only on a real difference. A poll that found nothing new notifies nobody. |
-| `openChannel` | `:186` | A `BroadcastChannel` carrying **only the key** of a document this tab wrote. Other tabs of the origin share one save and see no `window` event from it; posting the value instead would structured-clone a multi-megabyte world into every listening tab on every write. A receiving tab marks that key `stale` and re-reads it, or defers if it is hidden or has nobody subscribed. |
-| `tick` / `syncTimer` | `:154`,`:167` | The 60-second backstop (`RUNTIME_BACKSTOP_MS`), running only while at least one key has subscribers and the tab is visible. A tick reads only the keys that are marked stale or whose last write is older than the backstop, so in an ordinary session it finds nothing and issues nothing. It exists for a writer no event reaches: a save edited on disk while the app runs. |
-| `onRuntimeJsonUpdated` | `:200` | A same-tab write is authoritative on arrival: the store takes `event.detail.value` and marks that key fresh, so the next tick skips it. In an ordinary session almost every update arrives this way and costs no request. |
-| `isStaleGameRead` | `:88` | A read that comes back behind the published `(round, gameDate)` is refused, and the whole batch with it, since world and events belong to that same stale turn. `game` therefore rides along with every batch (`:162`). This is the invariant that used to live in `time.jsx`'s `gameStampRef`. |
-| `onRolledBack` | `:210` | A rollback is the one write that legitimately moves the clock backwards, so `oh:rolled-back` (dispatched by `rollBackToSnapshot`) clears the stamp and re-reads. |
-| `onActiveGameChanged` | `:215` | Same reset as the map store: every document is dropped and re-read for the new save. |
-| `primeRuntimeValue(key, value)` | `:280` | Publishes state the caller already holds (a finished turn, a restored bundle) without a round trip. `time.jsx` uses it where it used to call `setGameData` / `setEvents` / `setWorldState`. |
-| `refreshRuntimeState(keys)` | `:286` | An explicit read, for the moment a panel opens. |
+| `SOURCES` | | Per key: the `gameState.js` reader and the matching normalizer. The store always holds normalized documents. |
+| `subscribeRuntime(key, fn, { select, seed })` | | Adds a subscriber. With `select`, `fn` is called only when that selector's output changes, compared with `deepEqual`. Without one, only when the document's own reference changes. `seed` is the slice the caller last rendered, so a change landing between a render and its subscription is not swallowed. |
+| `applyValue` | | Normalizes, deep-compares against the current document, and publishes only on a real difference. A poll that found nothing new notifies nobody. |
+| `openChannel` | | A `BroadcastChannel` carrying **only the key** of a document this tab wrote. Other tabs of the origin share one save and see no `window` event from it; posting the value instead would structured-clone a multi-megabyte world into every listening tab on every write. A receiving tab marks that key `stale` and re-reads it, or defers if it is hidden or has nobody subscribed. |
+| `tick` / `syncTimer` |, | The 60-second backstop (`RUNTIME_BACKSTOP_MS`), running only while at least one key has subscribers and the tab is visible. A tick reads only the keys that are marked stale or whose last write is older than the backstop, so in an ordinary session it finds nothing and issues nothing. It exists for a writer no event reaches: a save edited on disk while the app runs. |
+| `onRuntimeJsonUpdated` | | A same-tab write is authoritative on arrival: the store takes `event.detail.value` and marks that key fresh, so the next tick skips it. In an ordinary session almost every update arrives this way and costs no request. |
+| `isStaleGameRead` | | A read that comes back behind the published `(round, gameDate)` is refused, and the whole batch with it, since world and events belong to that same stale turn. `game` therefore rides along with every batch. This is the invariant that used to live in `time.jsx`'s `gameStampRef`. |
+| `onRolledBack` | | A rollback is the one write that legitimately moves the clock backwards, so `oh:rolled-back` (dispatched by `rollBackToSnapshot`) clears the stamp and re-reads. |
+| `onActiveGameChanged` | | Same reset as the map store: every document is dropped and re-read for the new save. |
+| `primeRuntimeValue(key, value)` | | Publishes state the caller already holds (a finished turn, a restored bundle) without a round trip. `time.jsx` uses it where it used to call `setGameData` / `setEvents` / `setWorldState`. |
+| `refreshRuntimeState(keys)` | | An explicit read, for the moment a panel opens. |
 
 `countryStats` and `countryStatsHistory` are the one exception to all of this: the stats worker writes `world.json` from off-thread and `primeCountryStatsWorkerCommit` patches the same-tab caches narrowly rather than re-broadcasting the world, so those two fields only become current here on a backstop read. Read them through `readCountryStatsBundle`.
 
@@ -416,21 +416,21 @@ React consumers use `useRuntimeState(key, select, depsKey)` (`src/runtime/useRun
 
 The practical rule for a new panel: subscribe to the narrowest slice you can name. `actions.jsx` takes `{ country, gameDate, round }` off `game.json` and re-renders for nothing else; `projects.jsx` takes `world.projects` and `world.polityOverrides` separately, so a unit move does not touch the board.
 
-### Content-compare / referential-identity guard (`useWorldState.js:143`-`:190`)
+### Content-compare / referential-identity guard (`useWorldState.js`-)
 
 `useWorldState` derives a small object of the fields the map cares about (`worldState`, `worldKnown`, `customRegions`, `customCities`, `basemap`, `background`, `regionOwnershipOverrides`, `regionClaimants`, `polityOverrides`, `markers`, `cityRenames`, `cityPopulations`, `labelFont`, `labelHaloColor`, `labelTextColor`) and, if it is **content-equal** to the previous derived object, RETURNS THE PREVIOUS OBJECT REFERENCE. This keeps `useMemo`/`useEffect` consumers from re-running when nothing meaningful changed. Comparison strategy:
 
 - Scalars (`basemap`, label config, booleans): `===`.
-- `regionOwnershipOverrides`: `areEqualShallow` (`:25`), key count plus per-key `===` (values are strings).
-- `background`, `regionClaimants`, `polityOverrides`, `markers`, `cityRenames`, `cityPopulations`: `areEqualStructured` (`:37`), a recursive content compare. Their values are fresh arrays/objects on every canonical update, so reference equality would churn; the payloads are small. `EMPTY_MARKERS` (`:14`) is a stable `[]` so a marker-less world never churns the memo.
+- `regionOwnershipOverrides`: `areEqualShallow`, key count plus per-key `===` (values are strings).
+- `background`, `regionClaimants`, `polityOverrides`, `markers`, `cityRenames`, `cityPopulations`: `areEqualStructured`, a recursive content compare. Their values are fresh arrays/objects on every canonical update, so reference equality would churn; the payloads are small. `EMPTY_MARKERS` is a stable `[]` so a marker-less world never churns the memo.
 
 `worldState` itself is the raw world object (replaced whenever a write lands), but the sibling derived fields drive the map layers and are identity-stable.
 
 ### The units store: `unitsController.js`
 
-`src/Game/Map/unitsController.js` is the third store and follows the same shape: `startUnitsSync` (`:256`) ref-counts subscribers, bootstraps once, and then listens for `oh:world-updated` and `oh:game-updated` (`:242`), republishing `world.units` to its own pub/sub (`:39`). Its own 5-second `world.json` + `game.json` poll is gone.
+`src/Game/Map/unitsController.js` is the third store and follows the same shape: `startUnitsSync` ref-counts subscribers, bootstraps once, and then listens for `oh:world-updated` and `oh:game-updated`, republishing `world.units` to its own pub/sub. Its own 5-second `world.json` + `game.json` poll is gone.
 
-The player's only mutations are **deploy**, **disband** and **request orders**. Manual movement and manual combat were removed, so where forces go and what happens when they meet belongs to the AI and to `advanceStandingOrders`. `deployUnit` and `removeUnit` apply optimistically in memory and `commit` does a read-modify-write of `world.units` **preserving the rest of world state** (`{ ...world, units: nextUnits }`), guarded by a `busy` flag (`:36`) so an incoming update does not clobber a mid-commit write. A deploy and a `requestUnitOrders` both `queueOrder` (an action) so the AI adjudicates them on the next jump; a deploy carries a `unitRevert` describing how to undo it if the player deletes the action first (`normalizeUnitRevert` in `gameState.js`). `revertUnitOrder` keeps its `lng`/`lat`/`status`/`pendingOrderId` branches for actions queued by the old manual-order UI that are still sitting in existing saves. It exposes its own `setUnitsOverride`/`getUnits` (`:58`,`:63`) mirroring the world-state override for staged reveals.
+The player's only mutations are **deploy**, **disband** and **request orders**. Manual movement and manual combat were removed, so where forces go and what happens when they meet belongs to the AI and to `advanceStandingOrders`. `deployUnit` and `removeUnit` apply optimistically in memory and `commit` does a read-modify-write of `world.units` **preserving the rest of world state** (`{...world, units: nextUnits }`), guarded by a `busy` flag so an incoming update does not clobber a mid-commit write. A deploy and a `requestUnitOrders` both `queueOrder` (an action) so the AI adjudicates them on the next jump; a deploy carries a `unitRevert` describing how to undo it if the player deletes the action first (`normalizeUnitRevert` in `gameState.js`). `revertUnitOrder` keeps its `lng`/`lat`/`status`/`pendingOrderId` branches for actions queued by the old manual-order UI that are still sitting in existing saves. It exposes its own `setUnitsOverride`/`getUnits` mirroring the world-state override for staged reveals.
 
 ---
 
@@ -440,13 +440,13 @@ A dependency-free module (imported by the editor, the game, and the server) that
 
 | Export | Location | Purpose |
 |---|---|---|
-| `MAX_TAGS` / `MAX_TAG_LEN` | `:12`,`:13` | 8 tags, 32 chars each. |
-| `TAG_SUGGESTIONS` | `:19` | Open-vocabulary suggestions (`socialist`, `authoritarian`, `nato-aligned`, …) so common cases converge on one spelling. |
-| `normalizeTagList(list, opts)` | `:32` | Trim, collapse whitespace, cap length, drop blanks, dedupe case-insensitively, cap count. Non-strings dropped (a stray number means a palette `[r,g,b]` leaked in). |
-| `resolveCountryTags(baseTags, world, country)` | `:55` | The tags in force NOW for one country: the AI's live `world.countryTags[name]` if it has ever set one, ELSE the author's `tags.json` list. **Not a merge** — a revolution that dropped "socialist" must not have it restored by the scenario file underneath. Keyed by country NAME verbatim. |
-| `resolveAllCountryTags(baseTags, world)` | `:65` | Every tagged country, live winning over author, for the world summary the model reads. Emits keys verbatim (no uppercasing — see the desync note). |
+| `MAX_TAGS` / `MAX_TAG_LEN` |, | 8 tags, 32 chars each. |
+| `TAG_SUGGESTIONS` | | Open-vocabulary suggestions (`socialist`, `authoritarian`, `nato-aligned`, …) so common cases converge on one spelling. |
+| `normalizeTagList(list, opts)` | | Trim, collapse whitespace, cap length, drop blanks, dedupe case-insensitively, cap count. Non-strings dropped (a stray number means a palette `[r,g,b]` leaked in). |
+| `resolveCountryTags(baseTags, world, country)` | | The tags in force NOW for one country: the AI's live `world.countryTags[name]` if it has ever set one, ELSE the author's `tags.json` list. **Not a merge** — a revolution that dropped "socialist" must not have it restored by the scenario file underneath. Keyed by country NAME verbatim. |
+| `resolveAllCountryTags(baseTags, world)` | | Every tagged country, live winning over author, for the world summary the model reads. Emits keys verbatim (no uppercasing — see the desync note). |
 
-Author starting tags come from `getNationTags` (`assets.js:933`, the scenario's `tags.json`); live changes land in `world.countryTags` via `polityChanges.tags` (§5/§8). See [Country tags](country-tags.md).
+Author starting tags come from `getNationTags` (`assets.js`, the scenario's `tags.json`); live changes land in `world.countryTags` via `polityChanges.tags` (§5/§8). See [Country tags](world-state.md).
 
 ---
 
@@ -454,15 +454,15 @@ Author starting tags come from `getNationTags` (`assets.js:933`, the scenario's 
 
 | Function | Line | Notes |
 |---|---|---|
-| `readWorldState({force})` | `:985` | `readJson(world)` → `normalizeWorldState`. |
-| `writeWorldState(world, opts)` | `:988` | normalize → `enqueueContentStrings(polityOverrides)` → `writeJson(pretty)`. |
-| `readGameData` / `writeGameData` | `:997`,`:1000` | `normalizeGameData` on both ends. |
-| `readActionsState` / `writeActionsState` | `:1003`,`:1006` | `normalizeActions`. |
-| `readEventsState` / `writeEventsState` | `:1009`,`:1012` | `normalizeEvents`; write enqueues content strings. |
-| `readChatsState` / `writeChatsState` | `:1019`,`:1022` | `normalizeChats`. |
-| `readGameStateBundle` | `:1025` | `Promise.all` of all five. |
-| `applyEventImpactsToWorld` | `:1043` | Pure fold of impacts → `{colors, world}`. |
-| `applyUnitOps` / `applyMarkerOps` | `:638`,`:575` | Pure list mutators. |
-| `isPolityLandless` | `:917` | Territory check. |
+| `readWorldState({force})` | | `readJson(world)` → `normalizeWorldState`. |
+| `writeWorldState(world, opts)` | | normalize → `enqueueContentStrings(polityOverrides)` → `writeJson(pretty)`. |
+| `readGameData` / `writeGameData` |, | `normalizeGameData` on both ends. |
+| `readActionsState` / `writeActionsState` |, | `normalizeActions`. |
+| `readEventsState` / `writeEventsState` |, | `normalizeEvents`; write enqueues content strings. |
+| `readChatsState` / `writeChatsState` |, | `normalizeChats`. |
+| `readGameStateBundle` | | `Promise.all` of all five. |
+| `applyEventImpactsToWorld` | | Pure fold of impacts → `{colors, world}`. |
+| `applyUnitOps` / `applyMarkerOps` |, | Pure list mutators. |
+| `isPolityLandless` | | Territory check. |
 
-All reads/writes route through `src/runtime/assets.js` `readJson`/`writeJson`, which layer value-caching, request batching, Cache-Storage persistence with a HEAD freshness check, and derived-cache invalidation (`invalidateDerivedCachesForWrite`, `assets.js:177`) on top of the raw `/api/runtime/json/*` endpoints.
+All reads/writes route through `src/runtime/assets.js` `readJson`/`writeJson`, which layer value-caching, request batching, Cache-Storage persistence with a HEAD freshness check, and derived-cache invalidation (`invalidateDerivedCachesForWrite`, `assets.js`) on top of the raw `/api/runtime/json/*` endpoints.

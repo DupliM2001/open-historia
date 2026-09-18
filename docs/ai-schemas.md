@@ -2,7 +2,7 @@
 
 Every AI gameplay task in Open Historia hands the model a JSON Schema (as a provider "tool") and gets back a JSON object it must trust before mutating the world. This page documents the schemas the model must return (`src/Game/AI/gameplaySchemas.js`), the hand-rolled two-layer validator that gates every response, and the strict-vs-salvage retry discipline in `runJsonTask` (`src/Game/AI/gameplay.js`) that decides whether a bad answer earns a corrective retry or gets repaired in place. If you are adding a field the model should emit, read the [`additionalProperties: false` trap](#the-additionalpropertiesfalse-trap) first — it is the single most common way a new feature silently does nothing.
 
-Related pages: [World state](world-state.md) (what these payloads mutate), [AI providers](ai-providers.md) (how the schema becomes a tool call in `main.jsx`), [Gameplay orchestration](ai-gameplay.md) (the task callers), [Gameplay prompts](gameplay-prompts.md) (the templates rendered alongside each schema).
+Related pages: [World state](world-state.md) (what these payloads mutate), [AI providers](ai-overview.md) (how the schema becomes a tool call in `main.jsx`), [Gameplay orchestration](ai-overview.md) (the task callers), [Gameplay prompts](ai-prompts.md) (the templates rendered alongside each schema).
 
 ---
 
@@ -476,4 +476,4 @@ This ladder is what lets local/self-hosted models without tool support still pla
 | Change map/world-aware validation | `validateGeneratedWorldChanges` (`gameplay.js:1002`) |
 | Tune retry feedback wording | The corrective strings returned by the validators (they are shown to the model verbatim) |
 | Debug "the AI turn silently became a fallback" | `runJsonTask` `failureReason`, and check whether a strict error leaked (see `finalAttempt`, §8.4) |
-| Debug provider tool wiring | `callAI` in `main.jsx` ([AI providers](ai-providers.md)) |
+| Debug provider tool wiring | `callAI` in `main.jsx` ([AI providers](ai-overview.md)) |

@@ -27,6 +27,7 @@ import {
   GAME_BUNDLE_DATA_KEYS,
   GAME_BUNDLE_SCHEMA,
   OPTIONAL_GAME_BUNDLE_KEYS,
+  TEMPLATE_WORLD_OVERRIDE_KEYS,
 } from "./web/storeConstants.js";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
@@ -73,6 +74,23 @@ test("both stores carry the same set of game data keys", () => {
 
 test("both stores agree on which entries may simply be absent", () => {
   assert.deepEqual(serverStringList("OPTIONAL_GAME_BUNDLE_KEYS"), [...OPTIONAL_GAME_BUNDLE_KEYS]);
+});
+
+test("both stores seed a fresh game from the same scenario world keys", () => {
+  // The sixth mirrored constant, and the one that had drifted: the web copy
+  // carried a duplicated five-key run and a `customGeometry` the server had
+  // never heard of, so a game made on the web inherited one thing from its
+  // scenario that the same game made on desktop did not.
+  assert.deepEqual(
+    serverStringList("TEMPLATE_WORLD_OVERRIDE_KEYS"),
+    TEMPLATE_WORLD_OVERRIDE_KEYS,
+    "a key on one side only means a fresh game silently stops inheriting it on that platform",
+  );
+  assert.equal(
+    new Set(TEMPLATE_WORLD_OVERRIDE_KEYS).size,
+    TEMPLATE_WORLD_OVERRIDE_KEYS.length,
+    "no key is listed twice",
+  );
 });
 
 test("both stores agree on which scenarios never need to travel", () => {

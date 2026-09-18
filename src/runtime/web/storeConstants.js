@@ -58,12 +58,29 @@ export const CLASSIC_SCENARIO_ID = "modern-day-classic";
 export const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENARIO_ID]);
 
 
+// Mirrors TEMPLATE_WORLD_OVERRIDE_KEYS in server/libraryStore.js; held to it by
+// src/runtime/gameBundleParity.test.js. (It had drifted: a duplicated five-key run,
+// and customGeometry on this side only.)
 export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
-  "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "units",
-  "regionClaimants", "regionOwnershipOverrides", "regionSovereigntyOverrides",
-  "simulationRules", "startingTimelineText",
+  "allowedUnitTypes",
+  "author",
+  "background",
+  "basemap",
+  "customCities",
+  "customGeometry",
+  "customRegions",
+  "difficulty",
+  "language",
+  "mapCredit",
+  "notes",
+  "ownerCodes",
+  "polityOverrides",
+  "units",
+  "regionClaimants",
+  "regionOwnershipOverrides",
+  "regionSovereigntyOverrides",
+  "simulationRules",
+  "startingTimelineText",
 ];
 
 export const SUPPORTED_IMAGE_CONTENT_TYPES = new Set([
