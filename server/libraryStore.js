@@ -80,6 +80,9 @@ const BUILT_IN_RESET_STALE_FILES = [
   "regions.coarse.geojson",
   "regions.coarse.geojson.stamp",
 ];
+// Where a built-in the player edited is kept when the seed's content changes
+// on the same map (see refreshBuiltInContent).
+const EDITED_BUILT_IN_SCENARIO_ID = "modern-day-edited";
 // Where the campaigns started on an older built-in map are moved to.
 const CLASSIC_SCENARIO_ID = "modern-day-classic";
 
@@ -1207,6 +1210,17 @@ const readInstalledBuiltInStamp = () => {
   return String(world?.builtInMap ?? "").trim() || null;
 };
 
+// Which edition of the built-in's content — its countries' names, colours,
+// claims — a world carries on its map (builtInMap). A new map is a new stamp; the
+// same map with new content is a new revision. 1 when unstamped: the content the
+// map first shipped with.
+const builtInRevisionOf = (world) => {
+  const value = Number(world?.builtInRevision);
+  return Number.isInteger(value) && value > 0 ? value : 1;
+};
+const readBuiltInSeedRevision = () => builtInRevisionOf(readJsonFile(path.join(BUILT_IN_SEED_DIR, "world.json"), null));
+const readInstalledBuiltInRevision = () => builtInRevisionOf(readJsonFile(getScenarioJsonPath(DEFAULT_SCENARIO_ID, "world"), null));
+
 // The manifest's byte size for the stock world: how an older install's built-in
 // regions.geojson is recognised as that world (the fetcher wrote it there before
 // the stock map had a home of its own).
@@ -1278,10 +1292,11 @@ const retireLegacyBuiltInRegions = () => {
 };
 
 // Fork the install's current built-in scenario so the campaigns started on it
-// keep their map, then point those campaigns at the fork.
-const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath) => {
+// keep their map, then point those campaigns at the fork. `edited`: the map is
+// the same and the fork keeps the player's own edits to it (refreshBuiltInContent).
+const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath, { edited = false } = {}) => {
   const sourceDir = getScenarioDirectory(DEFAULT_SCENARIO_ID);
-  const forkId = ensureUniqueId(CLASSIC_SCENARIO_ID, "scenario");
+  const forkId = ensureUniqueId(edited ? EDITED_BUILT_IN_SCENARIO_ID : CLASSIC_SCENARIO_ID, "scenario");
   const forkDir = getScenarioDirectory(forkId);
   ensureDirectory(forkDir);
   const skip = new Set(["regions.geojson", "regions.coarse.geojson", "regions.coarse.geojson.stamp"]);
@@ -1290,13 +1305,16 @@ const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath) => {
 
   const meta = readScenarioMeta(DEFAULT_SCENARIO_ID);
   const now = new Date().toISOString();
-  const blurb = `The world map ${meta.name} used before it was redrawn. Kept for the campaigns that were started on it.`;
+  const suffix = edited ? "(your edited copy)" : "(classic map)";
+  const blurb = edited
+    ? `Your edited copy of ${meta.name}, kept with the campaigns started on it when the built-in scenario was updated.`
+    : `The world map ${meta.name} used before it was redrawn. Kept for the campaigns that were started on it.`;
   writeJsonFile(getScenarioMetaPath(forkId), {
     ...meta,
     id: forkId,
-    name: `${meta.name} (classic map)`,
-    heroTitle: `${meta.heroTitle || meta.name} (classic map)`,
-    subtitle: "The map before the built-in scenario was redrawn",
+    name: `${meta.name} ${suffix}`,
+    heroTitle: `${meta.heroTitle || meta.name} ${suffix}`,
+    subtitle: edited ? "Your edits to the built-in scenario" : "The map before the built-in scenario was redrawn",
     description: blurb,
     heroSubtitle: blurb,
     hubOrigin: null,
@@ -1313,6 +1331,38 @@ const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath) => {
   manifest.order.splice(at >= 0 ? at + 1 : manifest.order.length, 0, forkId);
   saveScenarioManifest(manifest);
   return forkId;
+};
+
+// A campaign reads its scenario's colours, flags, tags and stats sheet only when
+// it has no copy of its own (readRuntimeJsonAsset) — a game made before every new
+// game was given copies. Before the scenario's content changes under it, such a
+// campaign is given copies of what it has been reading.
+const keepScenarioJsonForGame = (gameId, scenarioId) => {
+  for (const assetKey of Object.keys(OPTIONAL_JSON_ASSET_FILES)) {
+    const own = getGameJsonPath(gameId, assetKey);
+    if (!fs.existsSync(own)) copyFileIfPresent(getScenarioJsonPath(scenarioId, assetKey), own);
+  }
+};
+
+// The seed carries newer content on the same map — its countries renamed, say.
+// Every campaign keeps its own world, colours, flags and tags and reads only the
+// geometry from here, which a revision never changes, so the built-in is simply
+// brought up to date and its campaigns stay on it. A copy the player edited is
+// kept, with the campaigns started on it, before the built-in is reseeded.
+const refreshBuiltInContent = (stamp) => {
+  const gamesOnBuiltIn = listGameIdsOnDisk().filter(
+    (gameId) => readGameMeta(gameId).scenarioId === DEFAULT_SCENARIO_ID,
+  );
+  const meta = readScenarioMeta(DEFAULT_SCENARIO_ID);
+  if (meta.updatedAt !== meta.createdAt) {
+    const regionsPath = getScenarioUploadPath(DEFAULT_SCENARIO_ID, "regionsGeojson");
+    const forkId = forkBuiltInScenarioForExistingGames(gamesOnBuiltIn, fs.existsSync(regionsPath) ? regionsPath : null, { edited: true });
+    console.warn(`[built-in scenario] kept the player's edited Modern Day as "${forkId}" for ${gamesOnBuiltIn.length} campaign(s)`);
+  } else {
+    for (const gameId of gamesOnBuiltIn) keepScenarioJsonForGame(gameId, DEFAULT_SCENARIO_ID);
+  }
+  seedBuiltInScenarioFiles(stamp);
+  console.warn(`[built-in scenario] Modern Day content updated to revision ${readInstalledBuiltInRevision()} (${stamp})`);
 };
 
 const seedRegionsBytes = () => {
@@ -1339,6 +1389,7 @@ const syncBuiltInScenarioFromSeed = () => {
   }
   const scenarioDir = getScenarioDirectory(DEFAULT_SCENARIO_ID);
   if (readInstalledBuiltInStamp() === stamp) {
+    if (readInstalledBuiltInRevision() < readBuiltInSeedRevision()) refreshBuiltInContent(stamp);
     builtInScenarioSynced = true;
     return;
   }

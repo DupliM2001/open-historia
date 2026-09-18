@@ -7707,5 +7707,6 @@
   "customCities": true,
   "background": null,
   "basemap": "ocean",
-  "builtInMap": "fault-lines-2014-v1"
+  "builtInMap": "fault-lines-2014-v1",
+  "builtInRevision": 2
 }

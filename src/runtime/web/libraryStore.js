@@ -13,7 +13,7 @@ import {
   parseJsonValue, serializeJsonValue,
 } from "./util.js";
 import FALLBACK_COLORS from "./generated/fallbackColors.js";
-import { builtInMap as BUILT_IN_MAP, regionsUrl as BUILT_IN_REGIONS_URL } from "./generated/defaultScenarioMeta.js";
+import { builtInMap as BUILT_IN_MAP, builtInRevision as BUILT_IN_REVISION, regionsUrl as BUILT_IN_REGIONS_URL } from "./generated/defaultScenarioMeta.js";
 import {
   DEFAULT_SCENARIO_ID, DEFAULT_GAME_ID, EMPTY_FEATURE_COLLECTION, COVER_IMAGE_ASSET_KEY,
   JSON_ASSET_KEYS, STORAGE_JSON_ASSET_KEYS, OPTIONAL_JSON_ASSET_KEYS, RUNTIME_ONLY_JSON_ASSET_KEYS,
@@ -1307,11 +1307,75 @@ const defaultScenarioSeedRecord = async () => {
 // then the built-in becomes the seed. The old record never held the stock
 // geometry (it came from the content origin), and the fork keeps not holding it,
 // so it goes on rendering the stock world exactly as before.
+// Which edition of the built-in's content a world carries on its map; 1 when
+// unstamped. Mirrors the server's builtInRevisionOf.
+const builtInRevisionOf = (world) => {
+  const value = Number(world?.builtInRevision);
+  return Number.isInteger(value) && value > 0 ? value : 1;
+};
+
+// The seed carries newer content on the same map (its countries renamed, say).
+// Mirrors the server's refreshBuiltInContent: every campaign keeps its own world,
+// colours, flags and tags and reads only the geometry from the built-in, which a
+// revision never changes, so the built-in is brought up to date and its campaigns
+// stay on it — each given copies of the colours, flags, tags or stats sheet it
+// was still reading from the scenario. A copy the player edited is kept, with the
+// campaigns started on it; its world keeps the map's stamp, so it keeps the map.
+const refreshBuiltInContent = async (current) => {
+  const games = (await idbGetAll(STORES.games)).filter(
+    (game) => readGameMeta(game.id, game.meta ?? {}).scenarioId === DEFAULT_SCENARIO_ID,
+  );
+  if (current.meta?.updatedAt !== current.meta?.createdAt) {
+    const forkId = await ensureUniqueId("modern-day-edited", "scenario");
+    const name = current.meta?.name || DEFAULT_SCENARIO_META.name;
+    const now = nowIso();
+    const blurb = `Your edited copy of ${name}, kept with the campaigns started on it when the built-in scenario was updated.`;
+    await putScenario({
+      ...current,
+      id: forkId,
+      meta: {
+        ...current.meta,
+        id: forkId,
+        name: `${name} (your edited copy)`,
+        heroTitle: `${current.meta?.heroTitle || name} (your edited copy)`,
+        subtitle: "Your edits to the built-in scenario",
+        description: blurb,
+        heroSubtitle: blurb,
+        hubOrigin: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    for (const game of games) {
+      writeGameMeta(game, { scenarioId: forkId });
+      await putGame(game);
+    }
+    const manifest = await getScenarioManifest();
+    const order = manifest.order.filter((entry) => entry !== forkId);
+    const at = order.indexOf(DEFAULT_SCENARIO_ID);
+    order.splice(at >= 0 ? at + 1 : order.length, 0, forkId);
+    await saveScenarioManifest({ order, selectedScenarioId: manifest.selectedScenarioId });
+    console.info(`[built-in scenario] kept the player's edited Modern Day as "${forkId}" for ${games.length} campaign(s)`);
+  } else {
+    for (const game of games) {
+      const missing = OPTIONAL_JSON_ASSET_KEYS.filter((key) => game[key] === undefined && current[key] !== undefined);
+      if (!missing.length) continue;
+      for (const key of missing) game[key] = cloneJson(current[key]);
+      await putGame(game);
+    }
+  }
+  await putScenario(await defaultScenarioSeedRecord());
+  console.info(`[built-in scenario] Modern Day content updated to revision ${BUILT_IN_REVISION} (${BUILT_IN_MAP})`);
+};
+
 const syncBuiltInScenarioFromSeed = async () => {
   if (!BUILT_IN_MAP) return;
   const current = await getScenario(DEFAULT_SCENARIO_ID);
   if (!current) return; // deleted on purpose: stays deleted
-  if (current.json?.world?.builtInMap === BUILT_IN_MAP) return;
+  if (current.json?.world?.builtInMap === BUILT_IN_MAP) {
+    if (builtInRevisionOf(current.json?.world) < (BUILT_IN_REVISION ?? 1)) await refreshBuiltInContent(current);
+    return;
+  }
 
   const games = (await idbGetAll(STORES.games)).filter(
     (game) => readGameMeta(game.id, game.meta ?? {}).scenarioId === DEFAULT_SCENARIO_ID,
