@@ -55,6 +55,13 @@ export const recordCatalystBeat = (catalyst, { choice, summary, nextChoices = []
   };
 };
 
+// Whether a scene is one the player is in the middle of: one they started in
+// Catalyst mode, or one they have played a beat of. A scene a time skip proposed
+// before skips stopped proposing them is neither — the player never saw it — and
+// the next skip clears it like any leftover.
+export const isSceneInProgress = (catalyst) => Boolean(catalyst && typeof catalyst === "object")
+  && (catalyst.origin === "player" || array(catalyst.history).length > 0);
+
 // Whether beat `index` can be taken back: it exists, and it was recorded with
 // what the player was shown when they chose it.
 export const canRewindCatalystTo = (catalyst, index) => {

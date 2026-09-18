@@ -10,7 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canRewindCatalystTo, catalystChoiceTexts, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
+import { canRewindCatalystTo, catalystChoiceTexts, isSceneInProgress, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 
 const scene = () => {
   let catalyst = openCatalyst({
@@ -62,6 +62,14 @@ test("it survives a save, whatever shape the choices were normalized into", () =
   const back = rewindCatalyst({ ...saved, history: saved.history.map((beat) => ({ ...beat, offered: catalystChoiceTexts(beat.offered) })) }, 1);
   assert.deepEqual(back.choices, ["Mobilise", "Offer talks"]);
   assert.deepEqual(catalystChoiceTexts([{ id: "x", text: " Strike  first " }, "Wait", {}, null]), ["Strike first", "Wait"]);
+});
+
+test("a scene is in progress once the player starts it or plays a beat, never because a skip left one behind", () => {
+  const proposed = openCatalyst({ title: "Left by a skip", opening: "Now.", choices: ["A", "B"] });
+  assert.equal(isSceneInProgress(proposed), false, "the player never saw it");
+  assert.equal(isSceneInProgress({ ...proposed, origin: "player" }), true, "started in Catalyst mode");
+  assert.equal(isSceneInProgress(recordCatalystBeat(proposed, { choice: "A", summary: "Then.", nextChoices: ["C"] })), true, "a beat played");
+  assert.equal(isSceneInProgress(null), false);
 });
 
 test("a beat recorded before beats kept their screen cannot be returned to, and nothing else is invented", () => {

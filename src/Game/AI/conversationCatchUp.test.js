@@ -12,10 +12,47 @@ import assert from "node:assert/strict";
 
 import {
   CATCH_UP_EVENTS_NAMED,
+  bordersMovedIn,
   buildCatchUpNote,
+  buildThreadCatchUp,
   eventsBetween,
+  politiesChangedIn,
   withCatchUp,
 } from "./conversationCatchUp.js";
+
+test("a leader is told what changed in public since the thread last spoke: events, borders, polities, votes", () => {
+  const record = [
+    { date: "2014-04-10", title: "Before the last message" },
+    { date: "2014-04-20", title: "Donetsk declares independence", impacts: {
+      regionTransfers: [{ regionId: "UKR.5_1", regionName: "Donetsk", fromCode: "Ukraine", toCode: "Donetsk People's Republic", basis: "independence" }],
+      polityChanges: [{ code: "Donetsk People's Republic", name: "Donetsk People's Republic", operation: "create" }],
+    } },
+    { date: "2014-04-28", title: "Luhansk falls", impacts: {
+      regionControlOps: [{ op: "control", regionId: "UKR.12_1", regionName: "Luhansk", fromCode: "Ukraine", toCode: "Russian Federation" }],
+      polityChanges: [{ code: "Kingdom of Ruritania", name: "Ruritania", operation: "rename" }],
+    } },
+  ];
+  assert.deepEqual(bordersMovedIn(record), [
+    "Donetsk passed from Ukraine to Donetsk People's Republic",
+    "Luhansk came under Russian Federation's control, taken from Ukraine",
+  ]);
+  assert.deepEqual(politiesChangedIn(record), ["Donetsk People's Republic came into being", "Kingdom of Ruritania is now called Ruritania"]);
+  const note = buildThreadCatchUp({
+    previousDate: "2014-04-15",
+    currentDate: "2014-05-01",
+    events: record,
+    votesSince: ['United States of America voted "Accept" on "A ceasefire?"'],
+  });
+  assert.match(note.text, /^\[Since this conversation last spoke: 2014-04-15 → 2014-05-01\]/);
+  assert.match(note.text, /2 events are on the public record/);
+  assert.doesNotMatch(note.text, /Before the last message/);
+  assert.match(note.text, /Borders moved: Donetsk passed from Ukraine/);
+  assert.match(note.text, /Among the polities: .*is now called Ruritania/);
+  assert.match(note.text, /Votes cast in this conversation since your last turn: United States of America voted "Accept"/);
+  assert.equal(note.label, "Since 2014-04-15 · 2 events · 2 border changes · 1 vote");
+  assert.deepEqual(buildThreadCatchUp({ previousDate: "2014-05-01", currentDate: "2014-05-01", events: record }), { text: "", label: "" },
+    "nothing moved and nobody voted: the message goes as typed");
+});
 
 const events = [
   { date: "2014-04-10", title: "Before the last reply" },

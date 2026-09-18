@@ -15,6 +15,8 @@ import {
   documentExchange,
   documentExchangeId,
   documentNote,
+  documentNotices,
+  withoutOrphanedNotices,
   documentsForEvent,
   documentsReadableBy,
   isDocumentExchange,
@@ -135,6 +137,30 @@ test("an undone turn takes its stolen copies out of the agents' file", () => {
   assert.equal(documentExchangeId("Old Protocol"), "doc-old-protocol");
   const untouched = { "Russian Federation": { exchanges: [kept, traffic] } };
   assert.equal(withoutOrphanedDocuments(untouched, restoredReports), untouched, "nothing to take out: the same object back");
+});
+
+test("the advisor flags each new paper once, never a published one, and an undo takes the flag back with the paper", () => {
+  const after = [
+    doc("communique", null),
+    doc("letter", ["Ukraine", "Russian Federation"], { from: "Russian Federation" }),
+    doc("assessment", ["Ukraine"]),
+    doc("protocol", ["Russian Federation", "Federal Republic of Germany"]),
+  ];
+  const deliveries = planReportDeliveries({ after, player: PLAYER, agents: [{ target: "Russian Federation" }] });
+  const notices = documentNotices(deliveries, { lastEventId: "e-last", date: "2014-05-21" });
+  assert.deepEqual(notices.map((notice) => [notice.reportId, notice.channel, notice.from ?? "", notice.eventId]), [
+    ["letter", "diplomacy", "Russian Federation", "event-letter"],
+    ["assessment", "event", "", "event-assessment"],
+    ["protocol", "intelligence", "Russian Federation", "event-protocol"],
+  ], "the communiqué is news, not a paper on the desk");
+  assert.ok(notices.every((notice) => notice.role === "notice" && notice.kind === "document" && notice.time === "2014-05-21"));
+
+  const conversation = [{ role: "user", text: "What do we know?" }, ...notices, { role: "advisor", text: "Plenty." }];
+  const restored = [doc("letter", ["Ukraine", "Russian Federation"])];
+  assert.deepEqual(withoutOrphanedNotices(conversation, restored, PLAYER).map((message) => message.reportId ?? message.role),
+    ["user", "letter", "advisor"], "the assessment and the stolen protocol were undone with their turn");
+  const stolenStill = [doc("protocol", ["Russian Federation", "Federal Republic of Germany"], { interceptedBy: ["Ukraine"] }), ...after.slice(1, 3)];
+  assert.equal(withoutOrphanedNotices(conversation, stolenStill, PLAYER), conversation, "nothing to take out: the same list back");
 });
 
 test("the advisor is told how the government came by each paper", () => {

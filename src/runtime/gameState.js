@@ -12,6 +12,7 @@ import { normalizeTerritoryBasis, screenTerritoryBasis } from "./territoryBasis.
 import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
 import { normalizeGmChanges, normalizeReminders } from "./gmChanges.js";
+import { normalizePlayerGoals } from "./playerGoal.js";
 import { normalizeSpyOp } from "./spycraft.js";
 import { normalizeChatEvents, projectChatThread, withUnloggedMessages } from "./chatThreads.js";
 import { latestTurnEventIds, unseenEvents, withoutUnseenChats, withoutUnseenEvents, withoutUnseenReports } from "./unseenEvents.js";
@@ -71,6 +72,10 @@ export const WORLD_DEFAULTS = {
   // reminders, which every AI in the game is shown. See gmChanges.js.
   gmChanges: [],
   simulationReminders: [],
+  // What each player's government is steering toward, set in the Actions panel:
+  // polity name -> { text, round, date }. Told to the advisor, the time skip and
+  // the suggestions, never to a foreign leader. See playerGoal.js.
+  playerGoals: {},
   // Persisted per-country stat sheets (code -> the full sheet), seeded on first view
   // and thereafter changed ONLY by the AI (polityChanges.stats), so a country's stats
   // stop regenerating/drifting every date change.
@@ -571,6 +576,11 @@ const normalizeChatMessage = (message, index = 0) => {
   // The event a turn wrote this message with: it is shown when that event is
   // revealed (runtime/unseenEvents.js). Only a turn's own messages carry one.
   const eventId = normalizeOptionalString(message.eventId);
+  // What the world did since the thread last spoke, carried on the player's
+  // message that was sent with it (AI/conversationCatchUp.js buildThreadCatchUp),
+  // and the few words the panel shows for it.
+  const catchUp = normalizeOptionalString(message.catchUp);
+  const catchUpLabel = normalizeOptionalString(message.catchUpLabel);
 
   return {
     code: normalizeOptionalString(message.code),
@@ -585,6 +595,7 @@ const normalizeChatMessage = (message, index = 0) => {
     text,
     time: normalizeOptionalString(message.time || message.date),
     ...(eventId ? { eventId } : {}),
+    ...(catchUp ? { catchUp, ...(catchUpLabel ? { catchUpLabel } : {}) } : {}),
   };
 };
 
@@ -3406,6 +3417,7 @@ export const normalizeWorldState = (world) => {
     gmAudit: normalizeGameMasterAudit(nextWorld.gmAudit),
     gmChanges: normalizeGmChanges(nextWorld.gmChanges),
     simulationReminders: normalizeReminders(nextWorld.simulationReminders),
+    playerGoals: normalizePlayerGoals(nextWorld.playerGoals),
     labelFont: normalizeOptionalString(nextWorld.labelFont),
     labelHaloColor: normalizeOptionalString(nextWorld.labelHaloColor),
     labelTextColor: normalizeOptionalString(nextWorld.labelTextColor),

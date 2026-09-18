@@ -53,7 +53,6 @@ const jumpWith = (unitOps) => ({
       regionClaims: [],
     },
   }],
-  catalyst: null,
   storylineUpdates: "",
   warUpdates: "",
   relationUpdates: "",
@@ -72,6 +71,16 @@ test("the field-report jump: a posture written as a status no longer fails the m
   assert.equal(result.valid, true, result.error);
   assert.equal("status" in unitOf(normalized), false);
   assert.equal(unitOf(normalized).posture, "holding");
+});
+
+test("a skip answer that still offers a scene has it dropped, not refused", () => {
+  // Scenes exist only in Catalyst mode now; the jump schema has no catalyst.
+  const raw = { ...jumpWith([spawnedCarrier()]), catalyst: { title: "A summit", premise: "p", opening: "o", choices: ["a", "b"] } };
+  assert.equal(validateGameplayPayload("jumpForward", raw).valid, false, "the schema has no catalyst");
+  const normalized = normalizeGameplayPayload("jumpForward", raw);
+  assert.equal("catalyst" in normalized, false);
+  assert.equal(validateGameplayPayload("jumpForward", normalized).valid, true);
+  assert.equal(validateGameplayPayload("autoJumpForward", normalizeGameplayPayload("autoJumpForward", { ...raw, catalyst: null })).valid, true);
 });
 
 test("a posture word in status becomes the posture when none was given", () => {

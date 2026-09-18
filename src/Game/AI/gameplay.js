@@ -234,10 +234,11 @@ import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureE
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
+import { describeGoalForSimulation, describeGoalForSuggestions, playerGoalOf } from "../../runtime/playerGoal.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
-import { deliveryEventId, documentExchange, documentNote, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments } from "../../runtime/reportDelivery.js";
+import { deliveryEventId, documentExchange, documentNote, documentNotices, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments, withoutOrphanedNotices } from "../../runtime/reportDelivery.js";
 import { unseenEvents, withoutUnseenMessages } from "../../runtime/unseenEvents.js";
-import { canRewindCatalystTo, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
+import { canRewindCatalystTo, isSceneInProgress, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
   eventsFromLegacyChat,
@@ -1502,7 +1503,7 @@ const buildTemplateVariables = async (bundle, options = {}) => {
 // full menu of world-changing levers the tool schema exposes, so the model always ends
 // its system prompt with an explicit list of what it can do and how. Injected at call
 // time so it reaches existing frozen-prompt games too.
-const ACTIONS_REFERENCE = "[Actions You Can Take]\nThis is the full menu of levers you have to change the world. Everything you change rides on an event's \"impacts\" object, except the two whole-jump levers noted at the end. Reach for the RIGHT lever, and NEVER narrate a change in an event's text without also emitting the impact that makes it real — narration and world state must always agree.\n\n• regionTransfers — Move a region to a new owner. This is the most important lever and the one most often forgotten: use it for every conquest, cession, sale, liberation, annexation, or hand-over, one entry per region. Shape: {\"regionId\":\"<exact id, or the plain region name if you don't know the id>\",\"regionName\":\"\",\"fromCode\":\"\",\"toCode\":\"<new owner code>\"}. toCode may name a polity that does not exist yet: the exact name you write founds it (a new state, a breakaway, a successor), so spell a new polity as it should appear on the map and an existing polity exactly as the map does, since a short form or translation of an existing country founds a second country beside it; add a polityChanges entry in the same event only to give the new polity a colour, aliases or a note. An event whose text says land changed hands but that carries no regionTransfers is invalid output and silently breaks the map. Transfer in order of proximity to the attacker's territory; never hand over an isolated region ringed by enemy land without a naval or airborne reason. A transfer is enacted IMMEDIATELY when the other side has agreed (a treaty, a negotiated cession, an event where they conceded) or when the ground has already been taken and held - a hand-over both sides accept needs no programme and no project. Where neither is true the land has NOT changed hands: record the claim with regionClaims instead and leave the border exactly where it is.\n\n• polityChanges — Create, rename, recolor, or re-describe a polity. One entry can do any combination: {\"code\":\"<polity code>\",\"name\":\"<new name, only if it changed>\",\"color\":\"#RRGGBB (only if it changed)\",\"aliases\":[\"...\"],\"reputation\":0-100,\"intelligence\":0-100,\"tags\":[\"...\"],\"stats\":{...},\"note\":\"<why>\"}. Create a polity by giving a new code with a name and color, or simply by handing it territory in regionTransfers or regionControlOps (it is founded under that exact name; an entry here then sets its colour, aliases and note). Change name/color when the polity's identity actually changes - a regime change, a revolution, a unification or partition, a proclaimed republic or a restored monarchy - and ALWAYS when the player has ordered it for their own polity. A mere new leader is not a rename. But a rename or recolour the player has ordered for THEIR OWN country is an administrative act of their own government: it needs no other power's consent, it cannot be refused, and it must be enacted in this jump by an event carrying polityChanges with the new name and that action's id in actionIds. Keep \"code\" as the polity's CURRENT name - the engine matches on it and then re-keys the country to the new one, so from then on the country IS the new name everywhere and the old one survives only as a former name; a change addressed to the name you are introducing lands on nothing and mints a second country beside the real one. On an ideological or alignment shift, rewrite the COMPLETE tags list (it is a full replacement, not a delta). Set reputation (0 = pariah, 100 = universally trusted) only when this turn's events actually moved a polity's standing. Set intelligence (0 = no service to speak of, 100 = the best in the world) only when something changed it: a purge or defection, a new bureau or budget, a foreign spy ring exposed, a player action that built the service up or ran it down. A SUDDEN shock — a purge, a defector, a ring rolled up — is a direct change here and takes effect at once. Building a service UP is not sudden and does not belong here: open it on the Projects board as a programme and put the new rating in that project's onComplete.polityChanges, so it arrives when the work actually finishes and the player can watch it coming, fund it, or have a rival wreck it first. Deciding to have a better service is not the same as having one. A country's national statistics move ONLY through \"stats\" here — send just the fields that changed; everything omitted keeps its prior value. That includes WHO LEADS: when a leader is overthrown, assassinated, dies, resigns or is voted out, put the successor's name in stats.leader (together with stats.government and stats.stability when those moved too). An event that narrates a leader falling but leaves stats.leader untouched leaves the OLD name standing on that country's stat sheet, so the story and the sheet disagree.\n\n• regionClaims — Mark territory CLAIMED but not held, so the map can show a dispute instead of pretending nothing happened. Use it when a polity asserts a right to land it does not control and has not been given: an irredentist declaration, a proclaimed union, a contested border, a government-in-exile's title, a player declaring a neighbour's province theirs. Shape: {\"regionId\":\"<exact id, or the plain region name>\",\"claimantCode\":\"<claiming polity's full name>\",\"note\":\"<why>\"}; add \"drop\":true to withdraw a claim that was renounced, traded away, or lost with the claimant's defeat. The region renders striped in every claimant's colour and stays that way until it is settled - by a regionTransfers entry when someone finally wins or concedes it, or by a drop. NEVER move a border for a claim alone, and never leave a claim unrecorded either: a declaration that changes nothing the player can see is a declaration they cannot tell they made.\n\n• unitOps — Move the war on the map with battalions. Four ops:\n    {\"op\":\"spawn\",\"unit\":{\"name\":\"\",\"type\":\"infantry|armor|air|naval|artillery|garrison\",\"ownerCode\":\"\",\"strength\":1-100,\"composition\":\"\",\"at\":\"<where, in words: near Kharkiv / eastern Ukraine / off Sevastopol>\"}}\n    {\"op\":\"move\",\"unitId\":\"<existing id>\",\"at\":\"<where, in words>\",\"posture\":\"\",\"note\":\"\"}\n    {\"op\":\"strength\",\"unitId\":\"<existing id>\",\"strength\":0-100,\"note\":\"\"}\n    {\"op\":\"remove\",\"unitId\":\"<existing id>\",\"note\":\"\"}\n  Spawn units for mobilizations and reinforcements, move them to reflect offensives, lower their strength as they take losses, and remove them only when destroyed or disbanded. Only reference unit ids that appear in the current-units list. Say WHERE with at, in words (see [Placing Things]); the engine finds the point and keeps counters off each other. Give lng/lat only for a spot no name describes. When a front is decisively won, pair the advance with a regionTransfers entry so the border follows the troops.\n\n• markerOps — Place, remove, rename or resize a named structure or city. Four ops:\n    {\"op\":\"build\",\"marker\":{\"name\":\"\",\"kind\":\"<lowercase, e.g. military base / port / embassy / airfield / city>\",\"ownerCode\":\"\",\"at\":\"<where, in words: near Odesa / coast of Crimea>\",\"note\":\"\",\"foundedAt\":\"\"}}\n    {\"op\":\"remove\",\"name\":\"<exact existing name>\",\"note\":\"\"}\n    {\"op\":\"rename\",\"name\":\"<current name>\",\"newName\":\"<new name>\",\"note\":\"<why>\"}\n    {\"op\":\"population\",\"name\":\"<city>\",\"population\":<whole number of people>,\"note\":\"<why>\"}\n  Emit build whenever an event founds or constructs a place, remove when one is destroyed, and rename when a city or structure is renamed (rename works on existing map cities too — a city renamed after a leader or ideology, a capital re-designated, a conquered city given the conqueror's name). Structures NEVER move borders: a facility one polity builds inside another's land does not transfer the region, and ownerCode is who runs the facility, not who owns the ground. Emit population whenever an event plausibly moves how many people live somewhere - a siege, famine, epidemic, bombing or evacuation shrinking a city; an industrial boom, resettlement or refugee influx growing one - giving the new TOTAL, not the change. It works on any city on the map, whether the scenario authored it or it came with the world.\n\n• createdChats — Have another polity open a diplomatic chat with the player BECAUSE of this event (a war scare prompting mediation, a border incident prompting an ultimatum, a windfall prompting a trade delegation). Shape: {\"countries\":[\"...\"],\"title\":\"<names the purpose>\",\"speaker\":\"<the initiating polity — never the player>\",\"openingMessage\":\"<that leader's first message, in their voice>\"}. The other side always speaks first; a blank or untitled chat is invalid.\n\n• actionIds — List the ids of the player's queued actions that this event resolves, so the game can clear them from the queue.\n\nWhole-jump levers (top level of your output, NOT inside an event):\n• diplomaticOutreach — Polities reaching out to the player on their OWN initiative this period — treaty feelers, trade proposals, non-aggression pacts, mediation offers, warnings, summit invitations — not tied to any single event. Same shape as createdChats. Open one whenever a polity plausibly would, rather than defaulting to none.\n• catalyst — An interactive branching scene handed to the player when a moment genuinely demands their decision, or null when none is warranted. Shape: {\"title\":\"\",\"premise\":\"\",\"opening\":\"\",\"choices\":[\"...\", \"...\", up to 5 distinct]}.\n\nKeep the total across createdChats and diplomaticOutreach to at most 3 per jump, and only when the approach genuinely serves the sender's interests.";
+const ACTIONS_REFERENCE = "[Actions You Can Take]\nThis is the full menu of levers you have to change the world. Everything you change rides on an event's \"impacts\" object, except the two whole-jump levers noted at the end. Reach for the RIGHT lever, and NEVER narrate a change in an event's text without also emitting the impact that makes it real — narration and world state must always agree.\n\n• regionTransfers — Move a region to a new owner. This is the most important lever and the one most often forgotten: use it for every conquest, cession, sale, liberation, annexation, or hand-over, one entry per region. Shape: {\"regionId\":\"<exact id, or the plain region name if you don't know the id>\",\"regionName\":\"\",\"fromCode\":\"\",\"toCode\":\"<new owner code>\"}. toCode may name a polity that does not exist yet: the exact name you write founds it (a new state, a breakaway, a successor), so spell a new polity as it should appear on the map and an existing polity exactly as the map does, since a short form or translation of an existing country founds a second country beside it; add a polityChanges entry in the same event only to give the new polity a colour, aliases or a note. An event whose text says land changed hands but that carries no regionTransfers is invalid output and silently breaks the map. Transfer in order of proximity to the attacker's territory; never hand over an isolated region ringed by enemy land without a naval or airborne reason. A transfer is enacted IMMEDIATELY when the other side has agreed (a treaty, a negotiated cession, an event where they conceded) or when the ground has already been taken and held - a hand-over both sides accept needs no programme and no project. Where neither is true the land has NOT changed hands: record the claim with regionClaims instead and leave the border exactly where it is.\n\n• polityChanges — Create, rename, recolor, or re-describe a polity. One entry can do any combination: {\"code\":\"<polity code>\",\"name\":\"<new name, only if it changed>\",\"color\":\"#RRGGBB (only if it changed)\",\"aliases\":[\"...\"],\"reputation\":0-100,\"intelligence\":0-100,\"tags\":[\"...\"],\"stats\":{...},\"note\":\"<why>\"}. Create a polity by giving a new code with a name and color, or simply by handing it territory in regionTransfers or regionControlOps (it is founded under that exact name; an entry here then sets its colour, aliases and note). Change name/color when the polity's identity actually changes - a regime change, a revolution, a unification or partition, a proclaimed republic or a restored monarchy - and ALWAYS when the player has ordered it for their own polity. A mere new leader is not a rename. But a rename or recolour the player has ordered for THEIR OWN country is an administrative act of their own government: it needs no other power's consent, it cannot be refused, and it must be enacted in this jump by an event carrying polityChanges with the new name and that action's id in actionIds. Keep \"code\" as the polity's CURRENT name - the engine matches on it and then re-keys the country to the new one, so from then on the country IS the new name everywhere and the old one survives only as a former name; a change addressed to the name you are introducing lands on nothing and mints a second country beside the real one. On an ideological or alignment shift, rewrite the COMPLETE tags list (it is a full replacement, not a delta). Set reputation (0 = pariah, 100 = universally trusted) only when this turn's events actually moved a polity's standing. Set intelligence (0 = no service to speak of, 100 = the best in the world) only when something changed it: a purge or defection, a new bureau or budget, a foreign spy ring exposed, a player action that built the service up or ran it down. A SUDDEN shock — a purge, a defector, a ring rolled up — is a direct change here and takes effect at once. Building a service UP is not sudden and does not belong here: open it on the Projects board as a programme and put the new rating in that project's onComplete.polityChanges, so it arrives when the work actually finishes and the player can watch it coming, fund it, or have a rival wreck it first. Deciding to have a better service is not the same as having one. A country's national statistics move ONLY through \"stats\" here — send just the fields that changed; everything omitted keeps its prior value. That includes WHO LEADS: when a leader is overthrown, assassinated, dies, resigns or is voted out, put the successor's name in stats.leader (together with stats.government and stats.stability when those moved too). An event that narrates a leader falling but leaves stats.leader untouched leaves the OLD name standing on that country's stat sheet, so the story and the sheet disagree.\n\n• regionClaims — Mark territory CLAIMED but not held, so the map can show a dispute instead of pretending nothing happened. Use it when a polity asserts a right to land it does not control and has not been given: an irredentist declaration, a proclaimed union, a contested border, a government-in-exile's title, a player declaring a neighbour's province theirs. Shape: {\"regionId\":\"<exact id, or the plain region name>\",\"claimantCode\":\"<claiming polity's full name>\",\"note\":\"<why>\"}; add \"drop\":true to withdraw a claim that was renounced, traded away, or lost with the claimant's defeat. The region renders striped in every claimant's colour and stays that way until it is settled - by a regionTransfers entry when someone finally wins or concedes it, or by a drop. NEVER move a border for a claim alone, and never leave a claim unrecorded either: a declaration that changes nothing the player can see is a declaration they cannot tell they made.\n\n• unitOps — Move the war on the map with battalions. Four ops:\n    {\"op\":\"spawn\",\"unit\":{\"name\":\"\",\"type\":\"infantry|armor|air|naval|artillery|garrison\",\"ownerCode\":\"\",\"strength\":1-100,\"composition\":\"\",\"at\":\"<where, in words: near Kharkiv / eastern Ukraine / off Sevastopol>\"}}\n    {\"op\":\"move\",\"unitId\":\"<existing id>\",\"at\":\"<where, in words>\",\"posture\":\"\",\"note\":\"\"}\n    {\"op\":\"strength\",\"unitId\":\"<existing id>\",\"strength\":0-100,\"note\":\"\"}\n    {\"op\":\"remove\",\"unitId\":\"<existing id>\",\"note\":\"\"}\n  Spawn units for mobilizations and reinforcements, move them to reflect offensives, lower their strength as they take losses, and remove them only when destroyed or disbanded. Only reference unit ids that appear in the current-units list. Say WHERE with at, in words (see [Placing Things]); the engine finds the point and keeps counters off each other. Give lng/lat only for a spot no name describes. When a front is decisively won, pair the advance with a regionTransfers entry so the border follows the troops.\n\n• markerOps — Place, remove, rename or resize a named structure or city. Four ops:\n    {\"op\":\"build\",\"marker\":{\"name\":\"\",\"kind\":\"<lowercase, e.g. military base / port / embassy / airfield / city>\",\"ownerCode\":\"\",\"at\":\"<where, in words: near Odesa / coast of Crimea>\",\"note\":\"\",\"foundedAt\":\"\"}}\n    {\"op\":\"remove\",\"name\":\"<exact existing name>\",\"note\":\"\"}\n    {\"op\":\"rename\",\"name\":\"<current name>\",\"newName\":\"<new name>\",\"note\":\"<why>\"}\n    {\"op\":\"population\",\"name\":\"<city>\",\"population\":<whole number of people>,\"note\":\"<why>\"}\n  Emit build whenever an event founds or constructs a place, remove when one is destroyed, and rename when a city or structure is renamed (rename works on existing map cities too — a city renamed after a leader or ideology, a capital re-designated, a conquered city given the conqueror's name). Structures NEVER move borders: a facility one polity builds inside another's land does not transfer the region, and ownerCode is who runs the facility, not who owns the ground. Emit population whenever an event plausibly moves how many people live somewhere - a siege, famine, epidemic, bombing or evacuation shrinking a city; an industrial boom, resettlement or refugee influx growing one - giving the new TOTAL, not the change. It works on any city on the map, whether the scenario authored it or it came with the world.\n\n• createdChats — Have another polity open a diplomatic chat with the player BECAUSE of this event (a war scare prompting mediation, a border incident prompting an ultimatum, a windfall prompting a trade delegation). Shape: {\"countries\":[\"...\"],\"title\":\"<names the purpose>\",\"speaker\":\"<the initiating polity — never the player>\",\"openingMessage\":\"<that leader's first message, in their voice>\"}. The other side always speaks first; a blank or untitled chat is invalid.\n\n• actionIds — List the ids of the player's queued actions that this event resolves, so the game can clear them from the queue.\n\nWhole-jump levers (top level of your output, NOT inside an event):\n• diplomaticOutreach — Polities reaching out to the player on their OWN initiative this period — treaty feelers, trade proposals, non-aggression pacts, mediation offers, warnings, summit invitations — not tied to any single event. Same shape as createdChats. Open one whenever a polity plausibly would, rather than defaulting to none.\n\nKeep the total across createdChats and diplomaticOutreach to at most 3 per jump, and only when the approach genuinely serves the sender's interests.";
 
 // Written into a fallback's rawResponse when there is no model output to show.
 // Exported so the debug report (time.jsx) can tell this apart from real model
@@ -2404,6 +2405,14 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   // meant to outrank everything above them. By default it is one paragraph, the
   // world's share; with world direction switched off it is nothing, and the
   // prompt is what it always was.
+  // The player's standing goal (runtime/playerGoal.js): how the player's own
+  // government conducts what their orders did not cover. Before the author's
+  // direction, which outranks it like every other default.
+  if (PLAYER_GOAL_TASKS.has(taskKey)) {
+    const block = await playerGoalBlock(normalizeString(variables?.playerPolity));
+    if (block) systemPrompt = `${systemPrompt}\n\n${block}`;
+  }
+
   if (["jumpForward", "autoJumpForward"].includes(taskKey)) {
     const directionDirective = buildWorldDirectionDirective(getActiveWorldDirection(), {
       playerPolity: normalizeString(variables?.playerPolity),
@@ -2451,6 +2460,21 @@ const GM_REMINDER_TASKS = new Set([
 const gmRemindersBlock = async () => {
   const raw = await readJson(JSON_URLS.world, { defaultValue: {}, clone: false }).catch(() => null);
   return renderReminders(normalizeReminders(raw?.simulationReminders), { formatDate: formatDateReadable });
+};
+
+// Who is told the player's standing goal: the time skip and the repairs that
+// add to its answer. Never a leader's task — a government's aims are its own
+// (the advisor is told it in main.jsx, the suggestions in their request).
+const PLAYER_GOAL_TASKS = new Set(["jumpForward", "autoJumpForward", "worldMotionRepair", "worldBreadthRepair"]);
+
+// Read like the reminders: set in the Actions panel, which writes the world.
+const playerGoalBlock = async (playerPolity) => {
+  const [raw, game] = await Promise.all([
+    readJson(JSON_URLS.world, { defaultValue: {}, clone: false }).catch(() => null),
+    playerPolity ? null : readJson(JSON_URLS.game, { defaultValue: {}, clone: false }).catch(() => null),
+  ]);
+  const player = playerPolity || normalizeString(game?.country);
+  return describeGoalForSimulation(playerGoalOf(raw, player), player);
 };
 
 const runJsonTask = async (taskKey, {
@@ -2714,16 +2738,8 @@ const runJsonTask = async (taskKey, {
       // Lenient jump shapes (gameplaySchemas.js normalizeGameplayPayload): an
       // envelope, a singular event, synonym keys, doubled impacts wrappers —
       // rewritten to the canonical shape before the schema sees them.
+      // It also drops the `catalyst` a time skip no longer proposes.
       parsed = normalizeGameplayPayload(taskKey, parsed);
-      // A single mistyped optional field must not discard the whole turn to the
-      // canned fallback: the model sometimes returns `catalyst` as a prose string
-      // instead of the object|null the jump schema requires. Coerce any non-object
-      // catalyst to null (= no catalyst offered this turn) so the turn's real
-      // content (events, transfers, chats) still validates and applies.
-      if (parsed && typeof parsed === "object" && parsed.catalyst != null
-          && (typeof parsed.catalyst !== "object" || Array.isArray(parsed.catalyst))) {
-        parsed.catalyst = null;
-      }
       // Same idea for markerOps. The engine has always accepted `found`/`destroy`
       // as aliases and a build written flat, but the schema only ever allowed the
       // canonical spelling — and a single rejected op fails the WHOLE payload, so
@@ -5723,22 +5739,8 @@ const fallbackJumpSimulation = async ({ bundle, days, mode, targetDate }) => {
     });
   }
 
-  const lastEvent = events.at(-1) ?? null;
-  const catalyst = lastEvent
-    ? {
-        choices: [
-          "Press the advantage immediately",
-          "Probe cautiously before committing",
-          "Hold position and gather more intelligence",
-        ],
-        opening: `${lastEvent.title}. ${lastEvent.description}`,
-        premise: `This scene begins as ${lastEvent.title.toLowerCase()} reaches the point where direct judgment matters.`,
-        title: lastEvent.title,
-      }
-    : null;
-
+  // No scene: a time skip no longer proposes one (Catalyst mode starts them).
   return {
-    catalyst,
     clearActions: true,
     events,
     stopDate: targetDate,
@@ -5826,12 +5828,19 @@ export const rollBackToSnapshot = async (index = 0) => {
     const snap = snapshots[index];
     if (!snap) return null;
     const s = snap.state ?? {};
+    // The player's standing goal is theirs, not the turn's (runtime/playerGoal.js):
+    // one set or changed after the snapshot — during the reveal, say, before an
+    // Intervene — stays.
+    const liveWorld = await readJson(JSON_URLS.world, { defaultValue: {}, force: true }).catch(() => null);
+    const worldToRestore = liveWorld && typeof liveWorld === "object" && liveWorld.playerGoals !== undefined
+      ? { ...(s.world ?? {}), playerGoals: liveWorld.playerGoals }
+      : (s.world ?? {});
     await Promise.all([
       // writeGameData rather than a raw writeJson: the snapshot was captured a
       // whole turn ago and carries that turn's unit-system flag, and a setting
       // must not roll back with the turn. See writeGameData in gameState.js.
       writeGameData(s.game ?? {}),
-      writeJson(JSON_URLS.world, s.world ?? {}, { pretty: true }),
+      writeJson(JSON_URLS.world, worldToRestore, { pretty: true }),
       writeJson(JSON_URLS.events, s.events ?? [], { pretty: true }),
       writeJson(JSON_URLS.actions, s.actions ?? [], { pretty: true }),
       writeJson(JSON_URLS.chat, s.chat ?? [], { pretty: true }),
@@ -5845,6 +5854,17 @@ export const rollBackToSnapshot = async (index = 0) => {
     const reconciledIntercepts = withoutOrphanedDocuments(filedIntercepts, normalizeWorldState(s.world ?? {}).reports);
     if (snapshotIntercepts || reconciledIntercepts !== filedIntercepts) {
       await writeInterceptsState(reconciledIntercepts);
+    }
+    // The advisor's notices of papers the restored world no longer puts in the
+    // government's hands go with them; its conversation is otherwise the
+    // player's and is not rolled back.
+    try {
+      const advisorMessages = await readJson(JSON_URLS.advisor, { defaultValue: [], force: true });
+      const restoredWorld = normalizeWorldState(s.world ?? {});
+      const keptMessages = withoutOrphanedNotices(advisorMessages, restoredWorld.reports, normalizeString(s.game?.country));
+      if (Array.isArray(advisorMessages) && keptMessages !== advisorMessages) await writeJson(JSON_URLS.advisor, keptMessages);
+    } catch (error) {
+      console.warn("[rollback] the advisor's notices could not be reconciled:", error?.message || error);
     }
     // Whatever was left of the undone turn's reveal went with it; the turn now
     // newest was seen before the one after it was made.
@@ -6875,6 +6895,8 @@ const applySimulationResult = async ({
   else if (!savingRequests()) await refreshSpyIntercepts();
   // And what the player's agents stole this turn, beside their traffic.
   await fileStolenDocuments(reportDeliveries, { world: nextWorld, game: nextGame, lastEventId: lastTurnEventId });
+  // And the advisor flags each new paper in its conversation.
+  await postDocumentNotices(reportDeliveries, { lastEventId: lastTurnEventId, date: nextGame.gameDate });
 
   // Snapshot the state we just replaced so it can be rolled back to (best-effort),
   // with what this turn applied beside it, in the order the reveal shows it, so
@@ -6938,7 +6960,12 @@ export const generateActionSuggestions = async ({ force = true } = {}) => {
   const { payload } = await runJsonTask("actions", {
     lookups: buildTaskLookups(bundle),
     fallback: () => fallbackActionSuggestions(bundle),
-    userMessage: "Generate current strategic action suggestions as JSON only.",
+    // The direction the suggestions serve (runtime/playerGoal.js), when the
+    // player has set one.
+    userMessage: [
+      describeGoalForSuggestions(playerGoalOf(bundle.world, bundle.game?.country)),
+      "Generate current strategic action suggestions as JSON only.",
+    ].filter(Boolean).join("\n\n"),
     variables,
   });
 
@@ -7925,7 +7952,7 @@ const runWorldBreadthRepair = async ({
     `Do NOT repeat or paraphrase events already generated by the main pass. Do NOT service an existing persistent storyline merely because it exists; selected/deferred processes were handled by the primary simulation and anti-stasis machinery. If a supplied quiet slot independently creates a genuinely NEW unresolved process, you may create a NEW storyline linked to that event. Do not update an existing storyline id.\n\n` +
     `This narrow repair cannot declare/join/end a war, sign/ratify/suspend/end a formal agreement, or mutate bilateral relation ledgers. Those high-consequence ledger transitions belong to the primary whole-world pass. If a quiet-slot search points toward such a development, prefer the preceding concrete pressure/initiative only when it is independently timeline-worthy; otherwise return nothing rather than half-canonizing a treaty or war.\n\n` +
     `PLAYER AGENCY: ${playerPolity} is human-controlled. Autonomous private/social/local actors and limited officials may create circumstances, pressure, proposals, unrest, research, scandals, local actions, or public movements inside it. Do not make a NEW major sovereign/executive choice for ${playerPolity}.\n\n` +
-    `OUTPUT CONTRACT: call the normal jump-result tool once. stopDate=${targetDate}. clearActions=false. catalyst=null. diplomaticOutreach must be empty. warUpdates, relationUpdates and agreementUpdates must be empty strings. Return at most ${maxEvents} visible event(s), but there is NO minimum and no preferred exact count. Search all supplied lanes first, then return every independently worthwhile, date-valid outcome you found up to the ceiling. storylineUpdates may contain only NEW storyline ids created by a returned event, never an existing storyline.\n`;
+    `OUTPUT CONTRACT: call the normal jump-result tool once. stopDate=${targetDate}. clearActions=false. diplomaticOutreach must be empty. warUpdates, relationUpdates and agreementUpdates must be empty strings. Return at most ${maxEvents} visible event(s), but there is NO minimum and no preferred exact count. Search all supplied lanes first, then return every independently worthwhile, date-valid outcome you found up to the ceiling. storylineUpdates may contain only NEW storyline ids created by a returned event, never an existing storyline.\n`;
 
   try {
     const game = normalizeGameData(bundle?.game || {});
@@ -7997,7 +8024,7 @@ const runWorldBreadthRepair = async ({
     }
 
     parsed.clearActions = false;
-    parsed.catalyst = null;
+    delete parsed.catalyst;
     parsed.diplomaticOutreach = [];
 
     const schemaValidation = validateGameplayPayload("jumpForward", parsed);
@@ -9529,6 +9556,24 @@ const fileStolenDocuments = async (deliveries, { world, game, lastEventId = "" }
   }
 };
 
+// The advisor's notices of the papers this turn put in the government's hands
+// (reportDelivery.js documentNotices), appended to its conversation; the panel
+// merges them in whenever the file changes. One per paper, so re-applying a turn
+// (Intervene) posts nothing twice. Never costs the turn.
+const postDocumentNotices = async (deliveries, { lastEventId = "", date = "" } = {}) => {
+  const notices = documentNotices(deliveries, { lastEventId, date });
+  if (!notices.length) return;
+  try {
+    const stored = await readJson(JSON_URLS.advisor, { defaultValue: [], force: true });
+    const list = Array.isArray(stored) ? stored : [];
+    const posted = new Set(list.filter((message) => message?.role === "notice").map((message) => message.id));
+    const fresh = notices.filter((notice) => !posted.has(notice.id));
+    if (fresh.length) await writeJson(JSON_URLS.advisor, [...list, ...fresh]);
+  } catch (error) {
+    console.warn("[advisor] a new paper could not be flagged:", error?.message || error);
+  }
+};
+
 const playersAgentIn = (bundle, target) => {
   const player = normalizeString(bundle.game?.country);
   return normalizeSpies(bundle.world?.spies).find((entry) =>
@@ -10441,6 +10486,11 @@ export const runChatActionBatch = async ({
   chat,
   playerMessage = "",
   playerCountry = "",
+  // What the world did since this thread last spoke (conversationCatchUp.js
+  // buildThreadCatchUp), and the moment the player wrote from; the panel keeps
+  // both on the player's line.
+  catchUp = "",
+  time = "",
   signal = null,
   requestKind = undefined,
 } = {}) => {
@@ -10539,11 +10589,12 @@ export const runChatActionBatch = async ({
     fallback: () => ({ actions: [] }),
     signal,
     userMessage: [
+      normalizeString(catchUp),
       playerMessage
         ? `${player} has just said: ${playerMessage}`
         : "Nobody has spoken since your last turn; decide whether anyone would speak now.",
       "Return this turn's actions as JSON only.",
-    ].join("\n\n"),
+    ].filter(Boolean).join("\n\n"),
     variables,
     ...(requestKind ? { requestKind } : {}),
   });
@@ -10555,7 +10606,7 @@ export const runChatActionBatch = async ({
     knownPolities: known,
     messageIds: shownMessages.map((message) => message.id),
     polls: projected.polls,
-  }, { time: normalizeString((bundle.savedGame ?? bundle.game)?.gameDate) });
+  }, { time: normalizeString(time) || normalizeString((bundle.savedGame ?? bundle.game)?.gameDate) });
 
   const memorySummary = normalizeString(payload?.memorySummary);
   if (memorySummary) {
@@ -10648,38 +10699,165 @@ export const consolidateHistoryNow = async () => {
   }
 };
 
-export const createCatalyst = async ({ force = true } = {}) => {
-  const bundle = await readGameStateBundle({ force });
-  const variables = await buildTemplateVariables(bundle, { lookups: true });
-  const { payload } = await runJsonTask("catalystCreation", {
-    lookups: buildTaskLookups(bundle),
-    fallback: () => ({
-      choices: [
-        "Intervene decisively",
-        "Probe for weakness first",
-        "Remain cautious and observe",
-      ],
-      opening: normalizeEvents(bundle.events).at(-1)?.description || "A turning point begins to unfold.",
-      premise: normalizeEvents(bundle.events).at(-1)?.title || "A decisive moment takes shape.",
-      title: normalizeEvents(bundle.events).at(-1)?.title || "Emerging Catalyst",
-    }),
-    userMessage: "Design the next catalyst scene as JSON only.",
-    variables,
-  });
+// ---- Catalyst mode: a moment played out as a scene ---------------------------
+//
+// A scene exists only once the player enters Catalyst mode and starts one
+// (GameUI/catalyst.jsx); a time skip no longer proposes them. The player may say
+// what scene they want, or leave it to the simulation. Starting is one request,
+// each beat one more, and the end — the beats written into the record as one
+// event — one more. A step that fails changes nothing: the canned text a task
+// falls back on is not a scene anyone asked for, so it is reported instead.
 
-  // Opened with its first opening kept, so a beat can be taken back to the very
-  // start (catalystRewind.js).
-  const catalyst = openCatalyst({
-    choices: normalizeArray(payload?.choices).map((entry) => normalizeString(entry)).filter(Boolean),
-    opening: normalizeString(payload?.opening),
-    premise: normalizeString(payload?.premise),
-    title: normalizeString(payload?.title),
-  });
+// What the creation task is told about the scene it is to open.
+const sceneRequestDirective = (request) => (request
+  ? "[THE PLAYER'S REQUESTED SCENE — BINDING]\n"
+    + `${request}\n`
+    + "Build the scene on exactly this request. Establish only the facts needed to begin it. Do not widen it, escalate it, reinterpret it or resolve it in advance, and do not invent relationships, motives, arrivals or backstory to make it more dramatic. Keep any ambiguity the player left, and open as close to the requested moment as you can."
+  : "[CHOOSING THE SCENE]\n"
+    + "The player asked for no particular scene. Choose the strongest one the current state, the player's recent orders and the latest events make ready: a moment where a decision by the player's leader matters now. Do not build it on a person, object or detail merely because it appears somewhere in older history.");
 
+const sceneStepFailed = (generation, what) => {
+  if (generation?.source !== "fallback") return null;
+  const reason = normalizeString(generation.fallbackReason) || "the model's answer could not be used";
+  return new Error(`${what} (${reason}). Nothing changed; try again.`);
+};
+
+export const createCatalyst = async ({ request = "", force = true } = {}) => {
+  if (isSimulationBusy()) throw new Error("A turn is being generated; wait for it to finish before starting a scene.");
+  beginSimulation();
+  try {
+    // The scene starts from the moment the player is looking at: never from
+    // events a reveal has not shown them yet (runtime/unseenEvents.js).
+    const bundle = await readSeenGameStateBundle({ force });
+    if (bundle.unseen?.size) throw new Error("Finish revealing the last time skip before starting a scene.");
+    if (hasSceneInProgress(bundle.world)) throw new Error("A scene is already in progress: end it or set it aside first.");
+    const asked = normalizeString(request).slice(0, 1200);
+    const variables = await buildTemplateVariables(bundle, { lookups: true });
+    const { generation, payload } = await runJsonTask("catalystCreation", {
+      lookups: buildTaskLookups(bundle),
+      fallback: () => ({ choices: [], opening: "", premise: "", title: "" }),
+      userMessage: [sceneRequestDirective(asked), "Design the scene as JSON only."].join("\n\n"),
+      variables,
+    });
+    const failed = sceneStepFailed(generation, "The scene could not be written");
+    if (failed) throw failed;
+
+    // Opened with its first opening kept, so a beat can be taken back to the very
+    // start (catalystRewind.js); marked as the player's, which is what makes it a
+    // scene in progress rather than a leftover.
+    const catalyst = {
+      ...openCatalyst({
+        choices: normalizeArray(payload?.choices).map((entry) => normalizeString(entry)).filter(Boolean),
+        opening: normalizeString(payload?.opening),
+        premise: normalizeString(payload?.premise),
+        title: normalizeString(payload?.title),
+      }),
+      origin: "player",
+      ...(asked ? { request: asked } : {}),
+      startedOn: normalizeString(bundle.game?.gameDate),
+    };
+
+    const world = normalizeWorldState(await readWorldState({ force: true }));
+    await writeWorldState({ ...world, activeCatalyst: catalyst });
+    logDebugEvent("turn", `Catalyst mode: scene "${catalyst.title || "untitled"}" opened${asked ? " as the player asked" : ""}.`);
+    return catalyst;
+  } finally {
+    endSimulation();
+  }
+};
+
+// A scene the player is in the middle of. A scene a time skip proposed before
+// skips stopped proposing them is not one: the player never saw it.
+const hasSceneInProgress = (world) => isSceneInProgress(normalizeWorldState(world ?? {}).activeCatalyst);
+
+// Set the scene aside: it ends with nothing written. No request.
+export const setAsideActiveCatalyst = async () => {
+  if (isSimulationBusy()) throw new Error("A turn is being generated; wait for it to finish before changing the scene.");
   const world = normalizeWorldState(await readWorldState({ force: true }));
-  world.activeCatalyst = catalyst;
-  await writeWorldState(world);
-  return catalyst;
+  if (!world.activeCatalyst) return { catalyst: null };
+  await writeWorldState({ ...world, activeCatalyst: null });
+  logDebugEvent("turn", `Catalyst mode: scene "${world.activeCatalyst.title || "untitled"}" set aside.`);
+  return { catalyst: null };
+};
+
+// The scene's beats written into the record as one event, and the scene closed:
+// how it resolves when the scene decides it has, and how the player ends it
+// early. The one request any resolution costs.
+const resolveCatalystScene = async ({ bundle, baseColors, campaignId, catalyst, history }) => {
+  const summaryVariables = await buildTemplateVariables(bundle, {
+    catalystHistory: normalizeArray(history)
+      .map((entry) => `${entry.choice}: ${entry.summary}`)
+      .join("\n"),
+    catalystPremise: catalyst.premise || catalyst.title || "",
+  });
+  const { generation: summaryGeneration, payload: summaryPayload } = await runJsonTask("catalystSummary", {
+    fallback: () => ({ description: "", importance: "major", title: "" }),
+    userMessage: "Summarize the finished catalyst into one campaign event as JSON only.",
+    variables: summaryVariables,
+  });
+  const failed = sceneStepFailed(summaryGeneration, "The scene could not be written into the record");
+  if (failed) throw failed;
+  const lastSummary = normalizeString(normalizeArray(history).at(-1)?.summary);
+
+  const catalystEvent = normalizeGeneratedEvent({
+    date: bundle.game.gameDate,
+    description: normalizeString(summaryPayload?.description) || lastSummary,
+    impacts: {
+      createdChats: [],
+      polityChanges: [],
+      regionTransfers: [],
+    },
+    importance: normalizeString(summaryPayload?.importance) || "major",
+    kind: "catalyst",
+    notable: true,
+    playerRelated: true,
+    title: normalizeString(summaryPayload?.title) || catalyst.title || "Catalyst resolved",
+    source: summaryGeneration.source,
+  });
+
+  return applySimulationResult({
+    baseActions: bundle.actions,
+    baseChats: bundle.chats,
+    baseColors,
+    campaignId,
+    baseEvents: bundle.events,
+    baseGame: bundle.game,
+    baseWorld: {
+      ...bundle.world,
+      activeCatalyst: null,
+    },
+    result: {
+      catalyst: null,
+      clearActions: false,
+      events: catalystEvent ? [catalystEvent] : [],
+      mode: "catalyst",
+      stopDate: bundle.game.gameDate,
+      summary: normalizeString(summaryPayload?.description) || lastSummary,
+      generation: summaryGeneration,
+    },
+  });
+};
+
+// End the scene where it stands (Catalyst mode's End the scene). With no beat
+// played there is nothing to record, and it is simply set aside.
+export const endActiveCatalyst = async () => {
+  beginSimulation();
+  try {
+    const bundle = await readGameStateBundle({ force: true });
+    const catalyst = normalizeWorldState(bundle.world).activeCatalyst;
+    if (!catalyst) throw new Error("No scene is in progress.");
+    if (!normalizeArray(catalyst.history).length) {
+      const world = normalizeWorldState(await readWorldState({ force: true }));
+      await writeWorldState({ ...world, activeCatalyst: null });
+      return { resolved: false };
+    }
+    const baseColors = await readJson(JSON_URLS.colors, { defaultValue: {}, force: true });
+    const applied = await resolveCatalystScene({ bundle, baseColors, campaignId: activeCampaignId(), catalyst, history: catalyst.history });
+    logDebugEvent("turn", `Catalyst mode: scene "${catalyst.title || "untitled"}" ended by the player after ${catalyst.history.length} beat(s).`);
+    return { resolved: true, ...applied };
+  } finally {
+    endSimulation();
+  }
 };
 
 // Take back beat `beatIndex` of the scene in progress (D6, catalystRewind.js):
@@ -10729,28 +10907,14 @@ export const advanceActiveCatalyst = async (choiceText) => {
     catalystPremise: catalyst.premise || catalyst.title || "",
   });
 
-  const { payload } = await runJsonTask("catalystExecutor", {
+  const { generation, payload } = await runJsonTask("catalystExecutor", {
     lookups: buildTaskLookups(bundle),
-    fallback: () => {
-      const resolved = normalizeArray(catalyst.history).length >= 1;
-      const existingChoices = normalizeArray(catalyst.choices)
-        .map((entry) => normalizeString(entry))
-        .filter(Boolean);
-      const distinctChoices = Array.from(
-        new Map(existingChoices.map((choice) => [choice.toLocaleLowerCase(), choice])).values(),
-      );
-      const nextChoices = distinctChoices.length >= 2
-        ? distinctChoices.slice(0, 5)
-        : ["Press the advantage", "Reassess the situation"];
-      return {
-        nextChoices: resolved ? [] : nextChoices,
-        resolved,
-        summary: `${choiceText} becomes the line of action inside "${catalyst.title || "the scene"}", pushing the situation toward a definite outcome.`,
-      };
-    },
+    fallback: () => ({ nextChoices: [], resolved: false, summary: "" }),
     userMessage: "Continue the catalyst scene as JSON only.",
     variables,
   });
+  const failed = sceneStepFailed(generation, "The scene did not go on");
+  if (failed) throw failed;
 
   const historyEntry = {
     choice: choiceText,
@@ -10777,58 +10941,12 @@ export const advanceActiveCatalyst = async (choiceText) => {
     };
   }
 
-  const summaryVariables = await buildTemplateVariables(bundle, {
-    catalystHistory: [...normalizeArray(catalyst.history), historyEntry]
-      .map((entry) => `${entry.choice}: ${entry.summary}`)
-      .join("\n"),
-    catalystPremise: catalyst.premise || catalyst.title || "",
-  });
-  const { generation: summaryGeneration, payload: summaryPayload } = await runJsonTask("catalystSummary", {
-    fallback: () => ({
-      description: historyEntry.summary,
-      importance: "major",
-      title: catalyst.title || "Catalyst resolved",
-    }),
-    userMessage: "Summarize the finished catalyst into one campaign event as JSON only.",
-    variables: summaryVariables,
-  });
-
-  const catalystEvent = normalizeGeneratedEvent({
-    date: bundle.game.gameDate,
-    description: normalizeString(summaryPayload?.description),
-    impacts: {
-      createdChats: [],
-      polityChanges: [],
-      regionTransfers: [],
-    },
-    importance: normalizeString(summaryPayload?.importance) || "major",
-    kind: "catalyst",
-    notable: true,
-    playerRelated: true,
-    title: normalizeString(summaryPayload?.title) || catalyst.title || "Catalyst resolved",
-    source: summaryGeneration.source,
-  });
-
-  return applySimulationResult({
-    baseActions: bundle.actions,
-    baseChats: bundle.chats,
+  return resolveCatalystScene({
+    bundle,
     baseColors,
     campaignId,
-    baseEvents: bundle.events,
-    baseGame: bundle.game,
-    baseWorld: {
-      ...bundle.world,
-      activeCatalyst: null,
-    },
-    result: {
-      catalyst: null,
-      clearActions: false,
-      events: catalystEvent ? [catalystEvent] : [],
-      mode: "catalyst",
-      stopDate: bundle.game.gameDate,
-      summary: normalizeString(summaryPayload?.description) || historyEntry.summary,
-      generation: summaryGeneration,
-    },
+    catalyst,
+    history: [...normalizeArray(catalyst.history), historyEntry],
   });
   } finally {
     endSimulation();
@@ -11786,6 +11904,11 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
   const safeDays = Math.max(0, Number(days) || 0);
   if (safeDays <= 0) {
     throw new Error("Choose a time-skip amount greater than zero.");
+  }
+  // Time stands still while the player is in a scene (Catalyst mode): the scene
+  // is a moment, and a skip would leave it half played at a date long gone.
+  if (hasSceneInProgress(bundle.world)) {
+    throw new Error("A scene is in progress in Catalyst mode: end it or set it aside before skipping time.");
   }
   // One rule for where a skip lands, shared with the timeline's labels
   // (runtime/jumpDates.js), so a label never promises a date the jump misses.

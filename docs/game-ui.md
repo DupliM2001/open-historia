@@ -61,6 +61,7 @@ The in-game UI is a flat set of `position: fixed` React components layered over 
 | `AdvisorButton` (🧭) | `main.jsx` (inline) | Toggles the advisor drawer; sits at `rightShift` |
 | `AdvisorPanel` | `advisor.jsx` (lazy) | Advisor chat + Stats tabs, resizable drawer |
 | `CheatsPanel` | `cheats.jsx` (lazy) | God-mode tools (opened from Settings) |
+| `CatalystPanel` | `catalyst.jsx` (lazy) | Catalyst mode: a scene the player asks for, played beat by beat (opened from Settings → Tools, or `oh:open-catalyst-mode`). See [§10-bis](#10-bis-catalyst-mode--srcgamegameuicatalystjsx) |
 | `SettingsButton` (☰) | `settings.jsx` | Toggles the game menu; same corner and size as before, glass finish |
 | `SettingsMenu` | `settings.jsx` | Ported from kernely's Continuum branch as it is there: a quick menu with Game / Tools / Settings / Help tabs (session card, Game Management, Cheats, Events, AI debug console, Guides, bug report, community links) and `SettingsWorkspace`, a full-screen portal with Continuum's four sections — General, Map (with the basemap picker), AI, Advanced. This branch's own settings (profiles, per-task models, segments, batching, telemetry, beta units, network sharing, diagnostics) sit inside those four sections |
 | `ApiSetupPrompt` | `apiSetupPrompt.jsx` | Shown once per game per session when nothing in the Fallback list has what its provider needs (`providerConfig.js isFallbackListConfigured`). The prompt IS the setup: a provider select, the key (or the endpoint for a self-hosted provider) and an optional model, saved by `applyQuickAiSetup` (completes a key-less connection for that provider or adds one, and moves its entry to the top of the list); the `ai:fallback-changed` refresh then hides the prompt. Above the form: an embedded YouTube tutorial on getting a free Gemini key (privacy-enhanced embed, hideable) and a **Get a key at Google AI Studio** button (external link). **Open full settings** opens the game menu on the AI section (`SettingsMenu initialSection`), **Not now** dismisses it |
@@ -116,6 +117,7 @@ Both launchers use `hasOpened` latches so the panel body isn't mounted until fir
 | Conversation view | A date separator opens every new game day; the last 12 messages render first with a "Show earlier" button; stacked flags on list rows; a leader's message is dated through `gameDates.js` (it used to show a day early west of Greenwich); a document delivered through diplomacy is a message like any other, its `📄` heading in bold ([§6.2-bis](#62-bis-documents-where-they-arrive)) | `ConversationView`, `ChatListItem` |
 | External trigger | `requestDiplomaticChat(country)` bridge (`chat.jsx:697`) lets the map region popup open/reuse a 1-on-1 chat | Map selection layer |
 | Reactions | Leader reactions attach an emoji to the player's last message; hover tooltip is a portal at z 99999 | — |
+| Catch-up line | A line the player sends after the world moved on carries a note for the leader (`buildLeaderCatchUp` → `conversationCatchUp.js buildThreadCatchUp`, from the moment the player has been shown): the bubble shows `⏳ Since 1 December 2015 · 3 events · 1 border change`, the whole note on hover. Stored on the message (`catchUp`, `catchUpLabel`), sent ahead of the words one-to-one and in the group batch | `src/Game/AI/main.jsx`, `src/Game/AI/gameplay.js` |
 
 ---
 
@@ -220,7 +222,7 @@ When the menu is closed, `LibraryTopBar` renders a compact cluster (z 9997): a s
 
 | Tab | Component | Behavior |
 |---|---|---|
-| 🧭 Advisor | inline chat | Loads/saves history to `JSON_URLS.advisor`; `startChat()`/`loadHistory()` bootstrap; `sendMessage(text)` → advisor reply. Renders markdown (`react-markdown`) and inline ` ```chart ` blocks via `AdvisorChart` (Chart.js) — only after `validateChartConfig` (`advisorBlocks.js`) passes them: bar, line, pie or doughnut, with labels and a number somewhere; one that fails shows `📉 The chart could not be drawn: <why>` instead of throwing mid-render. A question asked after the world moved on carries a line above it — `⏳ Since 1 January 2016 · 3 events · 1 change by the Game Master` — whose tooltip is the whole catch-up note the advisor was given (see [conversations](ai-overview.md#conversations-one-copy-a-stable-prefix-and-a-catch-up-note)). Dates under replies go through `gameDates.js` (they used to show a day early west of Greenwich). 🗑 clears the chat; ✕ closes (the only exit on phones where the drawer covers 🧭) |
+| 🧭 Advisor | inline chat | Loads/saves history to `JSON_URLS.advisor`; `startChat()`/`loadHistory()` bootstrap; `sendMessage(text)` → advisor reply. Renders markdown (`react-markdown`) and inline ` ```chart ` blocks via `AdvisorChart` (Chart.js) — only after `validateChartConfig` (`advisorBlocks.js`) passes them: bar, line, pie or doughnut, with labels and a number somewhere; one that fails shows `📉 The chart could not be drawn: <why>` instead of throwing mid-render. A question asked after the world moved on carries a line above it — `⏳ Since 1 January 2016 · 3 events · 1 change by the Game Master` — whose tooltip is the whole catch-up note the advisor was given (see [conversations](ai-overview.md#conversations-one-copy-a-stable-prefix-and-a-catch-up-note)). Dates under replies go through `gameDates.js` (they used to show a day early west of Greenwich). A document that reached the government in a turn shows as a notice between the messages — `📄 A new paper on your desk: <title>, <how it came>` with **Read it** / **Put it away** (`AdvisorDocumentNotice`) — hidden until the reveal reaches its event, merged in while the drawer is open, never sent to the model, and taken back with an undone turn (see [reports](ai-overview.md#reports-what-only-some-governments-know)). 🗑 clears the chat; ✕ closes (the only exit on phones where the drawer covers 🧭) |
 | 📊 Stats | `StatsPane` | National stat sheet (see [§5.2](#52-statspane--srcgamegameuistatsjsx)) |
 
 ### 5.1 Advisor width state
@@ -271,6 +273,8 @@ Shows player country + formatted date (`«` opens Events history, `»` opens the
 
 On success it swaps to the **history panel** with `visibleEventCount = 1`. Fallback generations surface a warning banner.
 
+While a scene is in progress in Catalyst mode (`isSceneInProgress(world.activeCatalyst)`), the jumps, auto-jump and the custom amount are disabled and a yellow note says why, with **Return to the scene** (`oh:open-catalyst-mode`). Undo stays available, and undoing the turn a scene was built on takes the scene with it.
+
 While a skip runs the spinner says what it is doing, in the skip's own words as each phase starts (`showSkipPhase`, fed by `onProgress` from `skipPhases.js`): *Reading the world…*, *Writing 1 month of events… (part 2 of 3)*, *Moving the armies, redrawing the fronts and hearing from 2 agents…*, *Placing the armies and the fronts…*, *Updating the Projects board…*, *Folding older history into the history document…*, *Writing it into the record…*. Auto-jump and a held segment's retry report the same way.
 
 ### 6.2-ter Group chats: one request, and binding votes
@@ -319,6 +323,7 @@ If a fresh game (round 1, no events/turns) has a "World Before Round One" briefi
 | **Get/Refresh AI suggestions** | `generateActionSuggestions({force:true})` → `SuggestionCard`s | AI |
 | Queue a suggestion | `normalizeSuggestionAction` → persisted; button flips to "✓ Queued" | — |
 | Delete an action | `handleDelete`; if it was a queued unit order (`unitRevert`, still `planned`), also `revertUnitOrder` to undo its map effect | `src/Game/Map/unitsController.js` |
+| **🎯 Standing goal** (`StandingGoal`) | Under the date line: *Set a standing goal*, or the goal with **Edit**; editing offers Save (Enter), Cancel (Esc) and **Clear goal**. Locked while a turn runs (polls `isSimulationBusy()`), since the turn writes the world the goal lives in. The advisor, the time skip and the suggestions steer by it; a leader never sees it | `withPlayerGoal` → `writeWorldState` (`src/runtime/playerGoal.js`); read with `useRuntimeState("world", playerGoalOf)` |
 
 Only `status === "planned"` actions render. Country + date poll `JSON_URLS.game` every 5 s (display only). The launcher button (`Actions`, `actions.jsx:700`) lives in the toolbar.
 
@@ -402,6 +407,22 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 | Footer | **🧪 Cheats** (→ `onOpenCheats`), **📖 Guides** (`/guides/`), Discord/Reddit/GitHub links | — |
 
 `Toggle` (`settings.jsx:156`) is the shared switch primitive (also exported). Map-setting toggles read initial values from `getMapSetting` and mirror them locally.
+
+The quick menu's **Tools** tab opens with **⚡ Catalyst mode** in yellow (the `yellow` tone of `QuickAction`), before Cheats, Events / Timeline and the AI debug console; its line reads *A scene is in progress — return to it* while one is.
+
+---
+
+## 10-bis. Catalyst mode — `src/Game/GameUI/catalyst.jsx`
+
+`CatalystPanel` — a centred yellow-edged dialog (z 10001), lazy, opened from Settings → Tools or by `oh:open-catalyst-mode` (the time panel's *Return to the scene*). Nothing of a scene exists until the player starts one here; a time skip no longer proposes them (see [Catalyst mode](ai-overview.md#catalyst-mode-a-scene-the-player-asks-for)).
+
+| State | Controls | Calls |
+|---|---|---|
+| No scene | *What scene do you want to play?* (empty = the moment is chosen for the player), **Begin the scene**; the cost said beside it; a note while a reveal is unfinished | `createCatalyst({ request })` |
+| A scene | title, premise, *You asked for*, each move played (**↶ Take back**), the scene's current text, the offered choices and an own-move box with **Play**, **End the scene** (off with no move played) and **Set aside** | `advanceActiveCatalyst`, `rewindActiveCatalyst({ beatIndex })`, `endActiveCatalyst`, `setAsideActiveCatalyst` |
+| Finished | *The scene is over and written into the record* with **See it on the timeline** | — |
+
+One engine call at a time; a failed step changes nothing and its reason shows in the panel. **✕ Leave** closes the dialog and leaves a scene where it is.
 
 ---
 

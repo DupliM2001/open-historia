@@ -23,16 +23,18 @@ import {
     getNationColors,
     getNationFlags,
     loadCountryNames as loadCachedCountryNames,
+    readJson,
 } from "../../runtime/assets.js";
 import { flagEmojiFromGid, flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
 import { fetchCommunityFlags, loadCommunityFlagDataUrl } from "../../runtime/communityFlags.js";
 import { logDebugEvent } from "../../runtime/debugLog.js";
 import { getLibraryState } from "../../runtime/library.js";
-import { readChatsState, writeChatsState, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld } from "../../runtime/gameState.js";
+import { readChatsState, writeChatsState, readWorldState, readWorldStateView, writeWorldState, applyProjectOpsToWorld, viewAsSeen } from "../../runtime/gameState.js";
+import { buildThreadCatchUp } from "../AI/conversationCatchUp.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
-import { formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
+import { compareGameDates, formatGameDateReadable, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 import { refreshRuntimeState, subscribeRuntime } from "../../runtime/runtimeStore.js";
 import { useRuntimeState } from "../../runtime/useRuntimeState.js";
 import { UNSEEN_EVENTS_CHANGED, withoutUnseenChats, withoutUnseenIntercepts, withoutUnseenMessages } from "../../runtime/unseenEvents.js";
@@ -66,6 +68,61 @@ const loadAllChats = async ({ force = false } = {}) => {
     try {
         return await readChatsState({ force });
     } catch { return []; }
+};
+
+// ── What a thread missed ──────────────────────────────────────────────────────
+
+// The moment the player is writing from: the events they have been shown and the
+// date of the last of them — while a skip is being revealed, the reveal's front
+// (gameState.js viewAsSeen). The player's line is dated there, so the thread's
+// next catch-up picks up what the rest of the reveal showed.
+const readSeenChatMoment = async (gameDate) => {
+    try {
+        const [events, world] = await Promise.all([
+            readJson(JSON_URLS.events, { defaultValue: [] }),
+            readJson(JSON_URLS.world, { defaultValue: {}, clone: false }),
+        ]);
+        const seen = await viewAsSeen({ world, events, game: { gameDate } });
+        return { events: seen.events, date: seen.game?.gameDate || gameDate || "" };
+    } catch {
+        return { events: [], date: gameDate || "" };
+    }
+};
+
+// The votes cast in this thread since an AI participant last spoke — the one
+// thing the thread's own log knows that the leaders were not there to see.
+const votesSinceLastTurn = (chat, player) => {
+    const log = Array.isArray(chat?.events) ? chat.events : [];
+    if (!log.length) return [];
+    const me = String(player ?? "").trim().toLowerCase();
+    const lastLeaderLine = log.reduce((at, entry, index) => (
+        entry?.kind === "message" && entry.by && entry.by.trim().toLowerCase() !== me ? index : at
+    ), -1);
+    const { polls } = projectChatThread(log);
+    return log.slice(lastLeaderLine + 1)
+        .filter((entry) => entry?.kind === "poll_vote_cast")
+        .map((entry) => {
+            const poll = polls.find((candidate) => candidate.id === entry.pollId);
+            const option = poll?.options.find((candidate) => candidate.id === entry.optionId);
+            return poll && option ? `${entry.by} voted "${option.label}" on "${poll.question}"` : "";
+        })
+        .filter(Boolean);
+};
+
+// What the world did since this thread last spoke (AI/conversationCatchUp.js):
+// nothing for a thread's first line, or when nothing moved and nobody voted.
+const buildLeaderCatchUp = (messages, chat, player, moment) => {
+    const previous = [...(Array.isArray(messages) ? messages : [])].reverse()
+        .find((msg) => (msg.role === "user" || msg.role === "leader") && msg.time);
+    if (!previous) return { text: "", label: "" };
+    return buildThreadCatchUp({
+        previousDate: previous.time,
+        currentDate: moment?.date || "",
+        events: moment?.events ?? [],
+        votesSince: votesSinceLastTurn(chat, player),
+        compareDates: compareGameDates,
+        formatDate: (value) => formatGameDateReadable(value) || value,
+    });
 };
 
 // ── PMTiles country loader ────────────────────────────────────────────────────
@@ -424,6 +481,14 @@ const MessageBubble = ({ msg, onRetry }) => {
             }}>
             {isError ? "⚠️ Error" : <><FlagImg url={flagUrl} alt={msg.speaker} size="0.95em" />{msg.speaker}</>}
             </span>
+        )}
+
+        {/* What the leaders were told the world did since this thread last
+            spoke, sent with this line (AI/conversationCatchUp.js); hover for it. */}
+        {isPlayer && msg.catchUpLabel && (
+            <div title={msg.catchUp || ""} style={{ color: "rgba(255,255,255,0.42)", fontSize: "0.66rem", marginBottom: "0.25rem", textAlign: "right" }}>
+                ⏳ {msg.catchUpLabel}
+            </div>
         )}
 
         {isPlayer && reactions.length > 0 && (
@@ -824,13 +889,18 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             }
             setIsLoading(true);
             setSpeakingCountry(country);
+            // The player's message as stored: the catch-up it was sent with
+            // (AI/conversationCatchUp.js), and the moment it was asked from — a
+            // reply is dated with its question. A retry finds the same one.
+            const asked = [...messagesRef.current].reverse().find((msg) => msg.role === "user" && msg.text === playerMessage);
+            const repliedOn = asked?.time || gameDate;
             try {
-                const { reply, reaction, memorySummary } = await sendDiplomaticMessage(playerMessage, country.name, countries, { chatId: chat.id });
+                const { reply, reaction, memorySummary } = await sendDiplomaticMessage(playerMessage, country.name, countries, { chatId: chat.id, catchUp: asked?.catchUp || "" });
                 // The thread's rolling durable memory rides on the reply that
                 // produced it, so a reopened thread, the advisor's one-off sends
                 // and the world director read the same continuity.
                 const leaderMessage = {
-                    role: "leader", speaker: country.name, code: country.code, text: reply, time: gameDate,
+                    role: "leader", speaker: country.name, code: country.code, text: reply, time: repliedOn,
                     ...(memorySummary ? { memorySummary } : {}),
                 };
 
@@ -849,7 +919,7 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                 }
             } catch (err) {
                 pushMessages([...messagesRef.current, {
-                    role: "error", speaker: country.name, code: country.code, text: err.message, time: gameDate,
+                    role: "error", speaker: country.name, code: country.code, text: err.message, time: repliedOn,
                     // Everything handleRetry needs to re-issue this exact turn.
                     // Plain data so it survives a save/reload of the chat.
                     retry: {
@@ -927,11 +997,15 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
         // rotation below, which is the behaviour this replaces.
         const runGroupTurn = async (text, nextMessages) => {
             setIsLoading(true);
+            // The player's line, with the catch-up it carries and its moment.
+            const asked = nextMessages.at(-1);
             try {
                 const outcome = await runChatActionBatch({
                     chat: { ...chat, messages: nextMessages, actionFeedback: actionFeedbackRef.current },
                     playerMessage: text,
                     playerCountry,
+                    catchUp: asked?.catchUp || "",
+                    time: asked?.time || "",
                 });
                 const spoken = (outcome?.newEvents ?? []).filter((event) => event.kind === "message");
                 if (!spoken.length && !(outcome?.newEvents ?? []).length) return false;
@@ -949,6 +1023,8 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                     time: message.time,
                     reactions: message.reactions,
                     ...(message.memorySummary ? { memorySummary: message.memorySummary } : {}),
+                    ...(message.eventId ? { eventId: message.eventId } : {}),
+                    ...(message.catchUp ? { catchUp: message.catchUp, catchUpLabel: message.catchUpLabel } : {}),
                 })));
                 onThreadUpdate?.(chat.id, { events: outcome.events, countries: projected.countries, title: projected.title, polls: projected.polls, cursors: outcome.cursors });
                 setPhase("player");
@@ -982,9 +1058,17 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             const text = playerInput.trim();
             if (!text || isLoading) return;
             lastPlayerMessage.current = text;
-            const nextMessages = [...messagesRef.current, { role: "user", speaker: playerCountry, text, time: gameDate }];
-            pushMessages(nextMessages);
             setPlayerInput("");
+            // What the world did since this thread last spoke, told to the
+            // leaders with the player's line and kept on it (AI/conversationCatchUp.js
+            // buildThreadCatchUp), dated from the moment the player is looking at.
+            const moment = await readSeenChatMoment(gameDate);
+            const catchUp = buildLeaderCatchUp(messagesRef.current, chat, playerCountry, moment);
+            const nextMessages = [...messagesRef.current, {
+                role: "user", speaker: playerCountry, text, time: moment.date || gameDate,
+                ...(catchUp.text ? { catchUp: catchUp.text, catchUpLabel: catchUp.label } : {}),
+            }];
+            pushMessages(nextMessages);
             // One request for the whole table. Only for a group: a one-on-one
             // chat is already a single request, and its streaming reply is what
             // the player watches arrive.

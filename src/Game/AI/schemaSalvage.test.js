@@ -142,7 +142,6 @@ const jumpAnswer = (events) => ({
     stopDate: "2014-03-30",
     summary: "A tense month.",
     clearActions: false,
-    catalyst: null,
     events,
 });
 

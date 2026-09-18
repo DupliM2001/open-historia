@@ -954,10 +954,6 @@ const catalystSchema = {
   additionalProperties: false,
 };
 
-const nullableCatalystSchema = {
-  anyOf: [catalystSchema, { type: "null" }],
-};
-
 export const ACTIONS_SCHEMA = {
   type: "object",
   description: "Strategic topics of concern and concrete actions available under each topic.",
@@ -1003,7 +999,9 @@ export const JUMP_FORWARD_SCHEMA = {
       type: "boolean",
       description: "Whether planned player actions were resolved by this jump. Defaults to true (resolved) when omitted.",
     },
-    catalyst: nullableCatalystSchema,
+    // No `catalyst`: a scene exists only once the player enters Catalyst mode
+    // and starts one (GameUI/catalyst.jsx). A skip used to propose one every
+    // time, into a save nothing showed it from.
     diplomaticOutreach: {
       type: "array",
       description:
@@ -2571,7 +2569,7 @@ export const ACTIONS_TOOL = makeTool(
 
 export const JUMP_FORWARD_TOOL = makeTool(
   "submit_jump_result",
-  "Submit the events, stop date, summary, resolved-action state, and optional catalyst from a timeline jump.",
+  "Submit the events, stop date, summary and resolved-action state from a timeline jump.",
   JUMP_FORWARD_SCHEMA,
 );
 
@@ -2807,15 +2805,6 @@ const validateAgainstSchema = (schema, value, path) => {
 
   return "";
 };
-
-const hasMeaningfulCatalyst = (value) =>
-  value &&
-  typeof value === "object" &&
-  !Array.isArray(value) &&
-  ([value.title, value.premise, value.opening].some(
-    (entry) => typeof entry === "string" && entry.trim().length > 0,
-  ) ||
-    (Array.isArray(value.choices) && value.choices.length > 0));
 
 const validateDistinctChoices = (choices, path) => {
   const normalized = choices.map((choice) => choice.trim().toLocaleLowerCase());
@@ -3103,6 +3092,12 @@ export const normalizeGameplayPayload = (taskKey, value) => {
   delete candidate.timeline;
   delete candidate.newEvents;
   delete candidate.generatedEvents;
+  // A time skip no longer proposes a scene: scenes exist only once the player
+  // enters Catalyst mode (GameUI/catalyst.jsx), and the jump schema has no
+  // `catalyst`. A model still answering in the old shape — an edited prompt
+  // passage, a habit — has the field dropped here rather than costing the turn
+  // a retry over something nothing reads.
+  delete candidate.catalyst;
 
   const stopDateAlias = firstDefinedKey(candidate, ["stop_date", "endDate", "targetDate"]);
   const summaryAlias = firstDefinedKey(candidate, ["overview", "periodSummary"]);
@@ -3151,15 +3146,11 @@ export const validateGameplayPayload = (taskKey, value) => {
     }
     const hasEvents = value.events.length > 0;
     const hasSummary = value.summary.trim().length > 0;
-    if (!hasEvents && !hasSummary && !hasMeaningfulCatalyst(value.catalyst)) {
+    if (!hasEvents && !hasSummary) {
       return {
         valid: false,
-        error: "Jump payload must contain at least one event, a nonempty summary, or a meaningful catalyst.",
+        error: "Jump payload must contain at least one event or a nonempty summary.",
       };
-    }
-    if (value.catalyst) {
-      const catalystError = validateDistinctChoices(value.catalyst.choices, "$.catalyst.choices");
-      if (catalystError) return { valid: false, error: catalystError };
     }
   }
 

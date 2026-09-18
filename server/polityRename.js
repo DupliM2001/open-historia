@@ -1,6 +1,7 @@
 /*! Open Historia — polity re-keying © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // A polity is keyed by its full name everywhere: regions, colours, flags, tags,
-// stats, reputation, units, spies, wars, treaties, chats, the game's own polity.
+// stats, reputation, units, spies, wars, treaties, chats, the player's standing
+// goal, the game's own polity.
 // Renaming a country therefore RE-KEYS it. One pass rewrites every store from
 // the old name to the new one, and the old name is kept as a former name so
 // history written under it, and a model still using it, fold onto the same
@@ -131,7 +132,7 @@ export const renamePolityInWorld = (world, fromName, toName) => {
   })));
   put("storylines", mapRows(world?.storylines, (storyline) => ({ ...storyline, participants: mapList(storyline.participants, fromKey, to) })));
   put("projects", mapRows(world?.projects, (project) => ({ ...project, ownerCode: one(project.ownerCode) })));
-  for (const field of ["countryStats", "countryTags", "internationalReputation", "intelligence"]) {
+  for (const field of ["countryStats", "countryTags", "internationalReputation", "intelligence", "playerGoals"]) {
     put(field, mapKeys(world?.[field], fromKey, to));
   }
   return { world: next, from: fromKey, to };

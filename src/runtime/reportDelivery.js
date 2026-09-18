@@ -155,6 +155,42 @@ export const documentExchange = (delivery, { date = "", eventId = "" } = {}) => 
 
 export const isDocumentExchange = (exchange) => asText(exchange?.id).startsWith("doc-");
 
+// The advisor's notice of a paper this turn put in the government's hands: one
+// line in the advisor's conversation with the document a click away, the way
+// the reference's advisor announces a new report. A published text is news, not
+// a paper on the desk, and gets none. Not a turn of the conversation — the
+// advisor already reads every paper — and shown with the event it came with.
+export const documentNotices = (deliveries, { lastEventId = "", date = "" } = {}) => asArray(deliveries)
+  .filter((delivery) => delivery?.report && delivery.report.visibleTo !== null)
+  .map((delivery) => ({
+    id: `notice-${documentExchangeId(delivery.report.id)}`,
+    role: "notice",
+    kind: "document",
+    reportId: asText(delivery.report.id),
+    channel: delivery.channel,
+    ...(asText(delivery.channel === "intelligence" ? delivery.target : delivery.sender)
+      ? { from: asText(delivery.channel === "intelligence" ? delivery.target : delivery.sender) }
+      : {}),
+    eventId: deliveryEventId(delivery, lastEventId),
+    time: asText(date),
+  }));
+
+// Whether the player's government can read a report: it holds it, it was
+// published, or its agents took a copy.
+const readableBy = (report, player) => Boolean(report) && (report.visibleTo === null
+  || has(report.visibleTo, player) || has(report.interceptedBy, player));
+
+// The advisor's conversation after a turn is undone or cut short: a notice stays
+// only while the paper it announced is still one the government can read.
+// Returns the same list when nothing had to go.
+export const withoutOrphanedNotices = (messages, reports, player) => {
+  const list = asArray(messages);
+  const byId = new Map(asArray(reports).map((report) => [asText(report?.id), report]));
+  const kept = list.filter((message) => message?.role !== "notice"
+    || readableBy(byId.get(asText(message.reportId)), player));
+  return kept.length === list.length ? messages : kept;
+};
+
 // The agents' file after a turn is undone or cut short: a stolen copy stays only
 // while the report it copies is still on file as stolen. An undone turn takes its
 // reports back with it, and a copy of a document that never existed — or that no
