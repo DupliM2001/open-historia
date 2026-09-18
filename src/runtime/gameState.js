@@ -12,6 +12,7 @@ import { normalizeTerritoryBasis, screenTerritoryBasis } from "./territoryBasis.
 import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
 import { normalizeSpyOp } from "./spycraft.js";
+import { normalizeChatEvents, projectChatThread } from "./chatThreads.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -100,6 +101,11 @@ export const WORLD_DEFAULTS = {
   // (impacts.reports); read by an audience through visibleTo. Listed in the
   // normalizeWorldState return too, for the reason given elsewhere here.
   reports: [],
+  // How far each polity has been shown of each OTHER thread it is party to
+  // (AI/crossChatKnowledge.js): "<threadId>|<polity>" -> the last message id it
+  // was shown. Keeps a leader from being handed the same exchange twice, and a
+  // long campaign from growing the chat prompt without bound.
+  chatKnowledgeCursors: {},
   // Real-time grace-period queue for optional Event Editor -> NPC diplomatic
   // reactions. Pending evaluations only, never chats: the conversation itself
   // is created later through the normal chat merge seam.
@@ -612,16 +618,29 @@ export const normalizeChatEntry = (entry, index = 0) => {
     .filter(Boolean);
   if (countries.length === 0) return null;
 
+  // The thread's event log, when it has one (runtime/chatThreads.js): who
+  // joined, who left, who said what, who voted. It is the TRUTH of the thread;
+  // countries, messages and title are its projection, kept beside it so every
+  // existing reader of a chat goes on working unchanged. A thread saved before
+  // the log existed simply has none, and is migrated where it is read.
+  const events = normalizeChatEvents(entry.events);
+  const projected = events.length ? projectChatThread(events) : null;
+
   return {
-    countries,
+    countries: projected?.countries?.length ? projected.countries : countries,
     id: normalizeOptionalString(entry.id) || generateId(`chat-${index}`),
     linkedEventId: normalizeOptionalString(entry.linkedEventId || entry.eventId),
-    messages: normalizeArray(entry.messages)
-      .map((message, messageIndex) => normalizeChatMessage(message, messageIndex))
-      .filter(Boolean),
-    source: normalizeOptionalString(entry.source) || "manual",
+    messages: projected
+      ? projected.messages.map((message, messageIndex) => normalizeChatMessage(message, messageIndex)).filter(Boolean)
+      : normalizeArray(entry.messages)
+        .map((message, messageIndex) => normalizeChatMessage(message, messageIndex))
+        .filter(Boolean),
+    ...(events.length ? { events } : {}),
+    // The binding votes the log carries, ready for the panel to render.
+    ...(projected?.polls?.length ? { polls: projected.polls } : {}),
+    source: projected?.source || normalizeOptionalString(entry.source) || "manual",
     status: normalizeOptionalString(entry.status) || "open",
-    title: normalizeOptionalString(entry.title),
+    title: projected?.title || normalizeOptionalString(entry.title),
   };
 };
 
@@ -3413,6 +3432,16 @@ export const normalizeWorldState = (world) => {
       .filter(Boolean),
     markers: normalizeMarkers(nextWorld.markers),
     reports: normalizeReports(nextWorld.reports),
+    chatKnowledgeCursors: (() => {
+      const source = nextWorld.chatKnowledgeCursors;
+      if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+      const cursors = {};
+      for (const [key, value] of Object.entries(source)) {
+        const id = normalizeOptionalString(value);
+        if (normalizeOptionalString(key) && id) cursors[key] = id;
+      }
+      return cursors;
+    })(),
     pendingEventOutreach: normalizePendingEventOutreach(nextWorld.pendingEventOutreach),
     // Explicit (not via the ...WORLD_DEFAULTS spread) so these new fields survive every
     // write path — the documented new-world-field trap.

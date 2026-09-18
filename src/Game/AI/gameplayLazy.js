@@ -44,6 +44,8 @@ export const interveneAfterEvent = async (...args) => (await gameplay()).interve
 
 // --- Chat and diplomacy -----------------------------------------------------
 export const chooseNextDiplomaticSpeaker = async (...args) => (await gameplay()).chooseNextDiplomaticSpeaker(...args);
+// One request acts for every AI participant in a thread (AI/chatActions.js).
+export const runChatActionBatch = async (...args) => (await gameplay()).runChatActionBatch(...args);
 export const ensureCountryAssessed = async (...args) => (await gameplay()).ensureCountryAssessed(...args);
 export const processPendingEventOutreach = async (...args) => (await gameplay()).processPendingEventOutreach(...args);
 

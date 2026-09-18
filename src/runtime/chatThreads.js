@@ -1,0 +1,356 @@
+/*! Open Historia — chat threads as an event log © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
+// A diplomatic thread used to be a title, a list of countries and a list of
+// messages. That shape cannot answer the questions a real negotiation asks:
+//
+//   Who was in the room when this was said? (a polity added on turn six did not
+//   hear turn two, and must not be written as though it had)
+//   Who renamed it, and when did Italy leave?
+//   What was the vote, and who voted which way?
+//
+// So a thread is an EVENT LOG — chat_created, member_joined, member_left,
+// title_changed, message, reaction, poll_created, poll_option_added,
+// poll_vote_cast — and everything else is a projection of it. The projection
+// produces exactly the old shape (countries, messages, title, status), so every
+// existing reader of a chat goes on working unchanged; the new things (polls,
+// membership windows, per-participant knowledge cursors) read the log.
+//
+// A thread saved before this existed is migrated on read, idempotently: its
+// countries become joins and its messages become message events, in order.
+//
+// DELIBERATELY IMPORT-FREE, like projects.js and reports.js: the rules on plain
+// data, tested on their own.
+
+export const CHAT_EVENT_KINDS = Object.freeze([
+    "chat_created",
+    "member_joined",
+    "member_left",
+    "title_changed",
+    "message",
+    "reaction",
+    "poll_created",
+    "poll_option_added",
+    "poll_vote_cast",
+]);
+
+// A thread keeps this many events. A long negotiation is summarised into the
+// rolling memory on its messages (diplomaticEnvelope.js), not kept whole.
+export const CHAT_EVENTS_LIMIT = 600;
+export const POLL_OPTION_LIMIT = 10;
+export const POLL_QUESTION_MAX_CHARS = 500;
+export const POLL_LABEL_MAX_CHARS = 120;
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+const asText = (value) => String(value ?? "").trim();
+const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const fold = (value) => asText(value).toLowerCase();
+
+let sequence = 0;
+const mintId = (prefix) => {
+    sequence += 1;
+    return `${prefix}-${Date.now().toString(36)}-${sequence.toString(36)}`;
+};
+
+// A participant is a name, or {name, code} — the shape chats have always
+// stored. Kept as an object so the projection can hand back what readers expect.
+export const normalizeMember = (value) => {
+    if (!value) return null;
+    if (typeof value === "string") {
+        const name = asText(value);
+        return name ? { code: "", name } : null;
+    }
+    if (typeof value !== "object") return null;
+    const name = asText(value.name ?? value.label ?? value.country);
+    const code = asText(value.code ?? value.id);
+    if (!name && !code) return null;
+    return { code, name: name || code };
+};
+
+const sameMember = (left, right) => fold(left?.name) === fold(right?.name)
+    || (Boolean(asText(left?.code)) && fold(left?.code) === fold(right?.code));
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+export const normalizeChatEvent = (entry, index = 0) => {
+    if (!entry || typeof entry !== "object") return null;
+    const kind = fold(entry.kind ?? entry.type);
+    if (!CHAT_EVENT_KINDS.includes(kind)) return null;
+    const base = {
+        id: asText(entry.id) || `chat-event-${index + 1}`,
+        kind,
+        // In-game date, as messages have always carried.
+        time: asText(entry.time ?? entry.date),
+        // Who did it: a polity name, or "" for the engine/system.
+        by: asText(entry.by ?? entry.actor ?? entry.speaker),
+    };
+
+    if (kind === "chat_created") {
+        return { ...base, title: asText(entry.title), source: asText(entry.source) || "manual", linkedEventId: asText(entry.linkedEventId) };
+    }
+    if (kind === "member_joined" || kind === "member_left") {
+        const member = normalizeMember(entry.member ?? entry.country ?? entry.target);
+        return member ? { ...base, member } : null;
+    }
+    if (kind === "title_changed") {
+        const title = asText(entry.title);
+        return title ? { ...base, title } : null;
+    }
+    if (kind === "message") {
+        const text = asText(entry.text ?? entry.message ?? entry.content);
+        if (!text) return null;
+        return {
+            ...base,
+            role: asText(entry.role) || (base.by ? "leader" : "system"),
+            code: asText(entry.code),
+            text,
+            memorySummary: asText(entry.memorySummary),
+        };
+    }
+    if (kind === "reaction") {
+        const emoji = asText(entry.emoji);
+        const target = asText(entry.target ?? entry.targetId ?? entry.messageId);
+        return emoji && target ? { ...base, target, emoji, code: asText(entry.code) } : null;
+    }
+    if (kind === "poll_created") {
+        const pollId = asText(entry.pollId ?? entry.id);
+        const question = clip(asText(entry.question), POLL_QUESTION_MAX_CHARS);
+        const options = asArray(entry.options)
+            .map((option, optionIndex) => ({
+                id: asText(option?.id ?? option?.optionId) || `option-${optionIndex + 1}`,
+                label: clip(asText(option?.label ?? option), POLL_LABEL_MAX_CHARS),
+            }))
+            .filter((option) => option.label)
+            .slice(0, POLL_OPTION_LIMIT);
+        if (!pollId || !question || options.length < 2) return null;
+        return { ...base, pollId, question, options, allowCustom: entry.allowCustom === true };
+    }
+    if (kind === "poll_option_added") {
+        const pollId = asText(entry.pollId);
+        const label = clip(asText(entry.label), POLL_LABEL_MAX_CHARS);
+        return pollId && label ? { ...base, pollId, optionId: asText(entry.optionId) || mintId("option"), label } : null;
+    }
+    // poll_vote_cast
+    const pollId = asText(entry.pollId);
+    const optionId = asText(entry.optionId);
+    return pollId && optionId && base.by ? { ...base, pollId, optionId } : null;
+};
+
+export const normalizeChatEvents = (events) => {
+    const seen = new Set();
+    const list = [];
+    asArray(events).forEach((entry, index) => {
+        const event = normalizeChatEvent(entry, index);
+        if (!event || seen.has(event.id)) return;
+        seen.add(event.id);
+        list.push(event);
+    });
+    // The newest events are the ones a negotiation needs; an ancient join is
+    // still needed to know who is in the room, so those are never dropped.
+    if (list.length <= CHAT_EVENTS_LIMIT) return list;
+    const structural = new Set(["chat_created", "member_joined", "member_left", "title_changed"]);
+    const keep = list.filter((event) => structural.has(event.kind));
+    const rest = list.filter((event) => !structural.has(event.kind)).slice(-(CHAT_EVENTS_LIMIT - keep.length));
+    return list.filter((event) => keep.includes(event) || rest.includes(event));
+};
+
+// ---------------------------------------------------------------------------
+// Migration: the old shape becomes a log
+// ---------------------------------------------------------------------------
+
+// A thread stored before the log existed: its countries joined at the start and
+// its messages were said in order. Idempotent — a thread that already has a log
+// is returned untouched — so this can run on every read.
+export const eventsFromLegacyChat = (chat) => {
+    const created = {
+        id: `${asText(chat?.id) || "chat"}-created`,
+        kind: "chat_created",
+        time: asText(asArray(chat?.messages)[0]?.time),
+        by: "",
+        title: asText(chat?.title),
+        source: asText(chat?.source) || "manual",
+        linkedEventId: asText(chat?.linkedEventId ?? chat?.eventId),
+    };
+    const joins = asArray(chat?.countries ?? chat?.participants)
+        .map(normalizeMember)
+        .filter(Boolean)
+        .map((member, index) => ({
+            id: `${created.id}-join-${index + 1}`,
+            kind: "member_joined",
+            time: created.time,
+            by: "",
+            member,
+        }));
+    const messages = [];
+    asArray(chat?.messages).forEach((message, index) => {
+        const text = asText(message?.text ?? message?.message ?? message?.content);
+        if (!text) return;
+        const id = asText(message?.id) || `${created.id}-message-${index + 1}`;
+        messages.push({
+            id,
+            kind: "message",
+            time: asText(message?.time ?? message?.date),
+            by: asText(message?.speaker ?? message?.senderName),
+            role: asText(message?.role ?? message?.sender) || "system",
+            code: asText(message?.code),
+            text,
+            memorySummary: asText(message?.memorySummary ?? message?.diplomaticMemorySummary),
+        });
+        // Reactions were a map on the message; each becomes its own event.
+        const reactions = message?.reactions && typeof message.reactions === "object" ? message.reactions : {};
+        Object.entries(reactions).forEach(([by, value], reactionIndex) => {
+            const emoji = asText(typeof value === "object" ? value?.emoji : value);
+            if (!emoji) return;
+            messages.push({
+                id: `${id}-reaction-${reactionIndex + 1}`,
+                kind: "reaction",
+                time: asText(message?.time),
+                by: asText(by),
+                target: id,
+                emoji,
+                code: asText(typeof value === "object" ? value?.code : ""),
+            });
+        });
+    });
+    return normalizeChatEvents([created, ...joins, ...messages]);
+};
+
+// ---------------------------------------------------------------------------
+// The projection
+// ---------------------------------------------------------------------------
+
+// Everything a reader wants, derived from the log: the participants as they
+// stand, the messages with their reactions folded back on, the polls with their
+// tallies, and — new — which members were present for each message.
+export const projectChatThread = (events) => {
+    const log = normalizeChatEvents(events);
+    let title = "";
+    let source = "manual";
+    let linkedEventId = "";
+    const members = [];
+    const messages = [];
+    const messageById = new Map();
+    const polls = new Map();
+
+    for (const event of log) {
+        if (event.kind === "chat_created") {
+            title = event.title || title;
+            source = event.source || source;
+            linkedEventId = event.linkedEventId || linkedEventId;
+            continue;
+        }
+        if (event.kind === "title_changed") { title = event.title; continue; }
+        if (event.kind === "member_joined") {
+            if (!members.some((member) => sameMember(member, event.member))) members.push({ ...event.member });
+            continue;
+        }
+        if (event.kind === "member_left") {
+            const index = members.findIndex((member) => sameMember(member, event.member));
+            if (index >= 0) members.splice(index, 1);
+            continue;
+        }
+        if (event.kind === "message") {
+            const message = {
+                id: event.id,
+                code: event.code,
+                role: event.role,
+                speaker: event.by,
+                text: event.text,
+                time: event.time,
+                memorySummary: event.memorySummary,
+                reactions: {},
+                // Who was in the room when this was said (E5): a member added
+                // later did not hear it, and must not be written as though it did.
+                heardBy: members.map((member) => member.name),
+            };
+            messages.push(message);
+            messageById.set(event.id, message);
+            continue;
+        }
+        if (event.kind === "reaction") {
+            const message = messageById.get(event.target);
+            if (message && event.by) message.reactions[event.by] = { emoji: event.emoji, code: event.code };
+            continue;
+        }
+        if (event.kind === "poll_created") {
+            polls.set(event.pollId, {
+                id: event.pollId,
+                question: event.question,
+                options: event.options.map((option) => ({ ...option })),
+                allowCustom: event.allowCustom,
+                openedBy: event.by,
+                time: event.time,
+                votes: {},
+            });
+            continue;
+        }
+        if (event.kind === "poll_option_added") {
+            const poll = polls.get(event.pollId);
+            if (poll && poll.options.length < POLL_OPTION_LIMIT && !poll.options.some((option) => option.id === event.optionId)) {
+                poll.options.push({ id: event.optionId, label: event.label });
+            }
+            continue;
+        }
+        // poll_vote_cast — the first vote an actor casts on a poll is final.
+        const poll = polls.get(event.pollId);
+        if (!poll || poll.votes[event.by] || !poll.options.some((option) => option.id === event.optionId)) continue;
+        poll.votes[event.by] = event.optionId;
+    }
+
+    return {
+        title,
+        source,
+        linkedEventId,
+        countries: members,
+        messages,
+        polls: [...polls.values()].map((poll) => ({
+            ...poll,
+            tally: poll.options.map((option) => ({
+                ...option,
+                votes: Object.values(poll.votes).filter((optionId) => optionId === option.id).length,
+            })),
+        })),
+    };
+};
+
+// The members present at a point in the log — what a newcomer may be shown of
+// what was said before it arrived (nothing), and what the roster was then.
+export const membersAtEvent = (events, eventId) => {
+    const log = normalizeChatEvents(events);
+    const members = [];
+    for (const event of log) {
+        if (event.kind === "member_joined" && !members.some((member) => sameMember(member, event.member))) members.push({ ...event.member });
+        else if (event.kind === "member_left") {
+            const index = members.findIndex((member) => sameMember(member, event.member));
+            if (index >= 0) members.splice(index, 1);
+        }
+        if (event.id === eventId) break;
+    }
+    return members;
+};
+
+// What one participant may be shown of a thread: everything said while it was a
+// member. A polity that joined on turn six is not shown turn two — it was not
+// there, and showing it is how a model comes to write as though it had been.
+export const threadAsSeenBy = (events, polity) => {
+    const log = normalizeChatEvents(events);
+    const wanted = fold(polity);
+    if (!wanted) return projectChatThread(log);
+    let inside = false;
+    const visible = [];
+    for (const event of log) {
+        if (event.kind === "chat_created") { visible.push(event); continue; }
+        if (event.kind === "member_joined") {
+            if (fold(event.member?.name) === wanted || fold(event.member?.code) === wanted) inside = true;
+            visible.push(event);
+            continue;
+        }
+        if (event.kind === "member_left") {
+            if (fold(event.member?.name) === wanted || fold(event.member?.code) === wanted) inside = false;
+            visible.push(event);
+            continue;
+        }
+        if (inside) visible.push(event);
+    }
+    return projectChatThread(visible);
+};

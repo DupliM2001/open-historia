@@ -1385,6 +1385,79 @@ export const NEXT_SPEAKER_SCHEMA = {
   additionalProperties: false,
 };
 
+// One turn of a diplomatic thread, acting for EVERY AI participant at once
+// (AI/chatActions.js). A four-way chat used to cost four requests for one
+// player message — one to pick the speaker, one per leader who answered — and
+// this is all of it in a single answer.
+//
+// Actors are named by their exact display name: an id would have to be shown
+// and copied, and the model already has the names in front of it. `pollRef` and
+// `optionRef` are the batch's OWN labels for a poll it invents, so it can be
+// created and voted in the same answer; the engine mints the real ids.
+// ONE object with a `type` enum and all-optional fields, exactly as
+// projectOpSchema is, and for a harder reason: Gemini refuses a function
+// declaration whose anyOf has more than six branches outright (400 "Request
+// contains an invalid argument", bisected against the live API — six branches
+// passed, seven did not), and this vocabulary has eight. Nothing is lost:
+// what each type actually needs is enforced by normalizeChatAction
+// (AI/chatActions.js) before a single action is applied, and a malformed one
+// costs only itself.
+const chatActionSchema = {
+  type: "object",
+  description: "One action by one AI participant. Fill the fields that type needs and leave the rest out.",
+  properties: {
+    type: {
+      type: "string",
+      description:
+        "send_message = speak. add_reaction = react to a message instead of speaking. rename_chat = the conversation has become about something else. "
+        + "add_member / remove_member = bring a polity in, or put one out. create_poll = call a binding vote. add_poll_option = add a choice to one. poll_vote = cast a vote.",
+      enum: ["send_message", "add_reaction", "rename_chat", "add_member", "remove_member", "create_poll", "add_poll_option", "poll_vote"],
+    },
+    actorName: nonEmptyTextSchema("The AI participant acting, by exact display name. NEVER a human-controlled one."),
+    content: textSchema("send_message: what it says, in its leader's voice. Match the length and tone of what it answers."),
+    targetEntryId: textSchema("add_reaction: the id of the message reacted to, copied from the transcript."),
+    emoji: textSchema("add_reaction: one emoji."),
+    title: textSchema("rename_chat: the new title."),
+    targetName: textSchema("add_member / remove_member: the polity, by exact FULL name. Never a human-controlled participant."),
+    pollRef: textSchema("create_poll: your own short label for the poll, so you can vote on it in this same answer. add_poll_option / poll_vote: that label, or the id of a poll already open."),
+    question: textSchema("create_poll: the binding question — a treaty, an armistice, war credits, a conference resolution. Never a mood check."),
+    options: {
+      type: "array",
+      description: "create_poll: two or more choices to vote on.",
+      items: {
+        type: "object",
+        properties: {
+          optionRef: nonEmptyTextSchema("Your own short label for this option."),
+          label: nonEmptyTextSchema("What it says on the ballot."),
+        },
+        required: ["optionRef", "label"],
+        additionalProperties: false,
+      },
+    },
+    optionRef: textSchema("add_poll_option: your own label for the new choice. poll_vote: the option's ref, or the exact label of an option already open."),
+    label: textSchema("add_poll_option: what the new choice says on the ballot."),
+    allowCustom: { type: "boolean", description: "create_poll: whether a participant may add a choice of its own." },
+  },
+  required: ["type", "actorName"],
+  additionalProperties: false,
+};
+
+export const CHAT_ACTIONS_SCHEMA = {
+  type: "object",
+  description: "One turn of a diplomatic conversation, acting for every AI-controlled participant at once, in the order it happens.",
+  properties: {
+    actions: {
+      type: "array",
+      description: "The actions, in order. An empty list is a valid answer: silence is an answer.",
+      maxItems: 16,
+      items: chatActionSchema,
+    },
+    memorySummary: textSchema("The thread's rolling memory, rewritten: what has been agreed, threatened, offered and left unresolved. Two or three sentences."),
+  },
+  required: ["actions"],
+  additionalProperties: false,
+};
+
 export const EVENT_CONSOLIDATOR_SCHEMA = {
   type: "object",
   description: "A continuity-safe summary of the supplied events and diplomatic chats, and the campaign's living history document revised to include them.",
@@ -2469,6 +2542,7 @@ export const GAMEPLAY_SCHEMAS = Object.freeze({
   autoJumpForward: AUTO_JUMP_FORWARD_SCHEMA,
   descriptionToAction: DESCRIPTION_TO_ACTION_SCHEMA,
   nextSpeaker: NEXT_SPEAKER_SCHEMA,
+  chatActions: CHAT_ACTIONS_SCHEMA,
   eventConsolidator: EVENT_CONSOLIDATOR_SCHEMA,
   catalystCreation: CATALYST_CREATION_SCHEMA,
   catalystExecutor: CATALYST_EXECUTOR_SCHEMA,
@@ -2509,6 +2583,12 @@ export const DESCRIPTION_TO_ACTION_TOOL = makeTool(
   "submit_description_to_action",
   "Submit the structured action or diplomatic chat command derived from the player's freeform intent.",
   DESCRIPTION_TO_ACTION_SCHEMA,
+);
+
+export const CHAT_ACTIONS_TOOL = makeTool(
+  "submit_chat_actions",
+  "Submit this turn of the conversation: every AI-controlled participant's actions, in order.",
+  CHAT_ACTIONS_SCHEMA,
 );
 
 export const NEXT_SPEAKER_TOOL = makeTool(
@@ -2623,6 +2703,7 @@ export const GAMEPLAY_TOOLS = Object.freeze({
   autoJumpForward: AUTO_JUMP_FORWARD_TOOL,
   descriptionToAction: DESCRIPTION_TO_ACTION_TOOL,
   nextSpeaker: NEXT_SPEAKER_TOOL,
+  chatActions: CHAT_ACTIONS_TOOL,
   eventConsolidator: EVENT_CONSOLIDATOR_TOOL,
   catalystCreation: CATALYST_CREATION_TOOL,
   catalystExecutor: CATALYST_EXECUTOR_TOOL,

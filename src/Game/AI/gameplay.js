@@ -65,7 +65,7 @@ import {
   buildJumpProjectsDirective,
 } from "./projectsDirective.js";
 import { extractJsonPayload, unwrapMimickedToolCall } from "./jsonSalvage.js";
-import { withoutPlayerParticipant } from "./chatVisibility.js";
+import { isChatVisibleTo, withoutPlayerParticipant } from "./chatVisibility.js";
 import { SIMULATION_AUDIENCE } from "./audience.js";
 import { buildTargetStatsTerritorialBasisKernel } from "./countryStatsWorkerKernel.js";
 import { decodeGameMasterTransportPayload, getGameplayTool, normalizeGameplayPayload, validateGameplayPayload } from "./gameplaySchemas.js";
@@ -231,6 +231,14 @@ import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
+import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
+import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
+import {
+  eventsFromLegacyChat,
+  normalizeChatEvents,
+  projectChatThread,
+  threadAsSeenBy,
+} from "../../runtime/chatThreads.js";
 import { REPORT_VOICE_DIRECTIVE, describeReportsForPrompt, normalizeReportOp } from "../../runtime/reports.js";
 import {
   applyTerritoryTempo,
@@ -10212,6 +10220,131 @@ export const refinePlayerAction = async (rawInput, { persist = true, signal } = 
   }
 
   return action;
+};
+
+// ---- One turn of a chat, for every AI participant, in ONE request -----------
+//
+// The old shape of a group turn: `chooseNextDiplomaticSpeaker` (a request) and
+// then one request per leader who answered, capped at three — four requests for
+// one player message. This is all of it in a single answer
+// (AI/chatActions.js), applied to the thread's event log
+// (runtime/chatThreads.js) with per-action feedback carried into the next turn.
+//
+// Who acts is settled HERE, natively: the AI participants of this thread. The
+// model is told the roster is authoritative and may never act for the human.
+export const runChatActionBatch = async ({
+  chat,
+  playerMessage = "",
+  playerCountry = "",
+  signal = null,
+  requestKind = undefined,
+} = {}) => {
+  const bundle = await readGameStateBundle({ force: true });
+  const player = normalizeString(playerCountry) || normalizeString(bundle.game?.country);
+  const stored = normalizeChats([chat])[0];
+  if (!stored) return { events: [], applied: [], rejected: [], actions: [] };
+
+  // The log is the truth; a thread saved before it existed is migrated on read.
+  const events = normalizeArray(chat?.events).length
+    ? normalizeChatEvents(chat.events)
+    : eventsFromLegacyChat(stored);
+  const projected = projectChatThread(events);
+  const aiParticipants = projected.countries
+    .map((country) => normalizeString(country?.name))
+    .filter((name) => name && regionKey(name) !== regionKey(player));
+  if (!aiParticipants.length) return { events: [], applied: [], rejected: [], actions: [] };
+
+  // What this polity has heard in its OTHER threads since it last spoke here —
+  // fenced, cursored and scoped by membership (AI/crossChatKnowledge.js). One
+  // block per AI participant, each labelled with whose knowledge it is.
+  const cursors = normalizeWorldState(bundle.world).chatKnowledgeCursors ?? {};
+  const otherThreads = normalizeChats(bundle.chats)
+    .filter((entry) => normalizeString(entry?.id) !== normalizeString(stored.id))
+    .map((entry) => ({ id: entry.id, title: entry.title, events: eventsFromLegacyChat(entry) }));
+  const nextCursors = { ...cursors };
+  const knowledgeBlocks = [];
+  for (const speaker of aiParticipants) {
+    const visible = otherThreads.filter((entry) => isChatVisibleTo(
+      { countries: projectChatThread(entry.events).countries },
+      speaker,
+    ));
+    const knowledge = buildCrossChatKnowledge({
+      threads: visible,
+      polity: speaker,
+      cursors: nextCursors,
+      projectAsSeenBy: threadAsSeenBy,
+    });
+    Object.assign(nextCursors, knowledge.cursors);
+    if (knowledge.text) knowledgeBlocks.push(`### ${speaker}'s own cables\n${knowledge.text}`);
+  }
+  const crossChatKnowledge = knowledgeBlocks.length
+    ? `${knowledgeBlocks.join("\n\n")}\n\nEach block above belongs to ONE polity. What is in another polity's block is not known to this one: write each leader from its own cables alone.`
+    : "";
+
+  const openPolls = projected.polls.filter((poll) => poll.options.length);
+  const pollText = openPolls.length
+    ? `\n[Polls open in this conversation]\n${openPolls.map((poll) => (
+      `- ${poll.id}: "${poll.question}" — ${poll.tally.map((option) => `${option.label} (${option.id}): ${option.votes}`).join("; ")}`
+      + `${Object.keys(poll.votes).length ? `; voted: ${Object.keys(poll.votes).join(", ")}` : "; nobody has voted"}`
+    )).join("\n")}`
+    : "";
+
+  const transcript = projected.messages.slice(-24)
+    .map((message) => `[${message.id}] ${message.speaker || (message.role === "user" ? player : "someone")}: ${message.text}`)
+    .join("\n");
+  const rosterText = [
+    ...aiParticipants.map((name) => `- ${name} — AI-controlled: you act for it`),
+    `- ${player} — HUMAN-controlled (the player): never speak or act for it`,
+  ].join("\n");
+
+  const variables = {
+    ...(await buildTemplateVariables(bundle, { taskKey: "chatActions" })),
+    chatParticipants: rosterText,
+    chatHistory: transcript || "(nothing said yet)",
+    CHAT_OPEN_POLLS: pollText,
+    CROSS_CHAT_KNOWLEDGE: crossChatKnowledge ? `\n${crossChatKnowledge}` : "",
+    CHAT_ACTION_FEEDBACK: normalizeString(chat?.actionFeedback) ? `\n${chat.actionFeedback}` : "",
+  };
+
+  const { payload } = await runJsonTask("chatActions", {
+    fallback: () => ({ actions: [] }),
+    signal,
+    userMessage: [
+      playerMessage
+        ? `${player} has just said: ${playerMessage}`
+        : "Nobody has spoken since your last turn; decide whether anyone would speak now.",
+      "Return this turn's actions as JSON only.",
+    ].join("\n\n"),
+    variables,
+    ...(requestKind ? { requestKind } : {}),
+  });
+
+  const known = mergePolityCatalog(await loadCountryNames(), bundle.world).map((entry) => entry.name).filter(Boolean);
+  const outcome = applyChatActionBatch(normalizeArray(payload?.actions), {
+    aiParticipants,
+    humanParticipants: [player],
+    knownPolities: known,
+    messageIds: projected.messages.map((message) => message.id),
+    polls: projected.polls,
+  }, { time: normalizeString(bundle.game?.gameDate) });
+
+  const memorySummary = normalizeString(payload?.memorySummary);
+  if (memorySummary) {
+    const lastMessage = [...outcome.events].reverse().find((event) => event.kind === "message");
+    if (lastMessage) lastMessage.memorySummary = memorySummary;
+  }
+  logDebugEvent("diplomacy",
+    `Chat #${stored.id}: one request acted for ${aiParticipants.length} participant(s) — ${outcome.applied.length} action(s) applied, ${outcome.rejected.length} refused.`,
+    { applied: outcome.applied.map((action) => `${action.actorName}:${action.type}`), rejected: outcome.rejected.map((entry) => entry.reason) });
+
+  return {
+    ...outcome,
+    events: [...events, ...outcome.events],
+    newEvents: outcome.events,
+    feedback: describeChatActionFeedback(outcome),
+    cursors: nextCursors,
+    actions: normalizeArray(payload?.actions),
+  };
 };
 
 export const chooseNextDiplomaticSpeaker = async ({
