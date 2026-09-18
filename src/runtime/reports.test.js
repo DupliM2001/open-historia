@@ -119,3 +119,20 @@ test("the directive says what a report is, who holds it, and the boundary with t
     assert.match(REPORT_VOICE_DIRECTIVE, /visibleTo/);
     assert.match(REPORT_VOICE_DIRECTIVE, /anything that moved the map/);
 });
+
+test("a document keeps who sent it, and a copy passed on keeps who passed it", () => {
+  const created = applyReportOps([], [{ op: "create", reportId: "pact", title: "Secret Protocol", body: "Article I.", visibleTo: ["France", "Germany"], from: "Germany" }]);
+  assert.equal(created.reports[0].from, "Germany");
+  const shared = applyReportOps(created.reports, [{ op: "share", reportId: "pact", visibleTo: ["Italy"], from: "Germany" }]);
+  assert.deepEqual(shared.reports[0].receivedFrom, { Italy: "Germany" });
+  const byOutsider = applyReportOps(created.reports, [{ op: "share", reportId: "pact", visibleTo: ["Spain"], from: "Portugal" }]);
+  assert.equal(byOutsider.reports[0].receivedFrom, undefined, "a giver who never held it is not recorded");
+  const round = normalizeReports(JSON.parse(JSON.stringify(shared.reports)));
+  assert.deepEqual([round[0].from, round[0].receivedFrom], ["Germany", { Italy: "Germany" }], "both survive a save");
+});
+
+test("the narrator is told who stole a copy; a holder reading its own file is not", () => {
+  const reports = [{ id: "pact", title: "Secret Protocol", body: "Article I.", visibleTo: ["France", "Germany"], interceptedBy: ["Italy"] }];
+  assert.match(describeReportsForPrompt(reports), /a copy stolen by Italy/);
+  assert.doesNotMatch(describeReportsForPrompt(reports, { sees: (visibleTo) => visibleTo === null || visibleTo.includes("France") }), /stolen/);
+});

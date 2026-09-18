@@ -13,7 +13,7 @@ import { normalizeApplicationReceipt } from "./applicationReceipt.js";
 import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
 import { normalizeGmChanges, normalizeReminders } from "./gmChanges.js";
 import { normalizeSpyOp } from "./spycraft.js";
-import { normalizeChatEvents, projectChatThread } from "./chatThreads.js";
+import { normalizeChatEvents, projectChatThread, withUnloggedMessages } from "./chatThreads.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -629,8 +629,11 @@ export const normalizeChatEntry = (entry, index = 0) => {
   // joined, who left, who said what, who voted. It is the TRUTH of the thread;
   // countries, messages and title are its projection, kept beside it so every
   // existing reader of a chat goes on working unchanged. A thread saved before
-  // the log existed simply has none, and is migrated where it is read.
-  const events = normalizeChatEvents(entry.events);
+  // the log existed simply has none, and is migrated where it is read. Messages
+  // a writer added beside the log (the one-on-one panel, a note a turn folded
+  // in, the player's line before a group turn) are folded into it here, or the
+  // projection would drop them.
+  const events = withUnloggedMessages(normalizeChatEvents(entry.events), entry.messages, { threadId: entry.id });
   const projected = events.length ? projectChatThread(events) : null;
 
   return {

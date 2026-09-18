@@ -97,6 +97,8 @@ Because the advisor/leader path skips `buildTemplateVariables`, `playerPolityRep
 
 **Both get the Game Master's reminders** (`renderReminders`, `runtime/gmChanges.js`): the advisor among its directives before the formatting rules, a leader after its intelligence block.
 
+**Both read the documents file** (`world.reports`), bounded to eight, each body cut to 220 characters: the advisor `[Documents Our Government Holds]` — every paper the player's government can read, saying how it came by each (held with whom, ours alone, published, or a copy its agents took, which the holders do not know it has; `describeDocumentsForAdvisor`, `runtime/reportDelivery.js`); a leader `[Documents Your Government Holds]` — its own and the published ones, by the audience rule, never who stole a copy.
+
 ---
 
 ## 4. Placeholder → variable helper map
@@ -402,7 +404,7 @@ Shared `impacts` object (`impactsSchema` `gameplaySchemas.js`) carried by jump/a
 | `createdChats` | `{ countries[≥1], title, openingMessage, speaker }` | Initiating polity speaks first, never the player. `validateChatOpener` requires title + opening. Built into a real chat by `buildGeneratedChat`. |
 | `unitOps` | `spawn{unit{name,type∈enum,ownerCode,strength 1–100,composition,at\|lng+lat,regionId?,posture?,note?}}` · `move{unitId,at\|toLng+toLat,regionId?,posture?,note?}` · `strength{unitId,strength 0–100}` · `remove{unitId}` | `unitOpSchema`. **`at` is where, in words** ("near Kharkiv", "off Sevastopol"), resolved to a point at validation by `placement.js` and then spaced off whatever already stands there (`runtime/featureSpacing.js`); see [placing things by name](ai-overview.md#placing-things-by-name-and-keeping-them-apart). Ops on unknown unit ids: strict error / salvage drop. `strength:0` or `remove` deletes the unit. |
 | `markerOps` | `build{marker{name,kind(free lowercase),ownerCode?,status?,at\|lng+lat,note?,foundedAt?}}` (or flat beside `op`) · `update{markerId\|name, …, at?}` · `remove{name}` | `markerOpSchema`. `at` as for units. Structures never move borders (no `regionTransfers`). |
-| `reports` | `create{reportId?,title,body,visibleTo[],dateline?}` · `share{reportId,visibleTo[]}` | `reportOpSchema`. The document itself, in its own voice, held by the polities named; `visibleTo` empty = published. Holders are resolved at validation against the country catalog (unknown: strict error / receipt note; none known: dropped). `[Reports — documents, not summaries]` + `[Reports on File]` ride on the jump. |
+| `reports` | `create{reportId?,title,body,visibleTo[],from?,dateline?}` · `share{reportId,visibleTo[],from?}` | `reportOpSchema`. The document itself, in its own voice, held by the polities named; `visibleTo` empty = published; `from` whose it is (or, on a share, who passed it on). Holders are resolved at validation against the country catalog (unknown: strict error / receipt note; none known: dropped). `[Reports — documents, not summaries]` + `[Reports on File]` (with who stole a copy) ride on the jump; a leader gets `[Documents Your Government Holds]`, the advisor `[Documents Our Government Holds]`. |
 
 Jump payloads also carry a top-level `diplomaticOutreach[]` (same shape as `createdChats`, not tied to an event) and a nullable `catalyst`. The schema validator (`validateGameplayPayload` `852`) additionally enforces non-blank `stopDate`/event fields, "at least one event, summary, or meaningful catalyst," and distinct catalyst choices.
 

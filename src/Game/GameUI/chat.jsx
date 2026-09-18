@@ -14,8 +14,8 @@ import { isSeal, newSeal, openExchange } from "../../runtime/spySeal.js";
 import { useActiveFeatures } from "../../runtime/gameFeatures.js";
 import { Actions } from "./actions";
 import { Projects } from "./projects";
-import { Dossier } from "./dossier.jsx";
 import { DOCK_BOTTOM_REM, DOCK_GAP_REM, DOCK_HEIGHT_REM, DOCK_LEFT_REM, DOCK_WIDTH } from "./hudDock.js";
+import { isDocumentExchange } from "../../runtime/reportDelivery.js";
 import { Presence } from "./presence.jsx";
 import { useMainMenuOpen } from "./libraryBar";
 import {
@@ -469,7 +469,9 @@ const MessageBubble = ({ msg, onRetry }) => {
 
         {!isPlayer && msg.time && (
             <span style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.3)", marginTop: "0.25rem", display: "block" }}>
-            {new Date(msg.time).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" })}
+            {/* Through gameDates.js: new Date("2016-01-01") is UTC midnight, shown a
+                day early west of Greenwich (the separator above always did this). */}
+            {formatGameDateReadable(msg.time, "MMM D, YYYY") || msg.time}
             </span>
         )}
         </div>
@@ -1849,7 +1851,8 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries }) => {
         {targets.map((target) => intercepts[target].exchanges.map((exchange) => (
             <button key={exchange.id} onClick={() => { setOpen({ target, exchange }); void ensureCountryAssessed(target, { reason: "intercept read" }); }}
                 style={{ width: "100%", padding: "0.6rem 0.8rem", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", gap: "0.6rem", cursor: "pointer", fontFamily: "sans-serif", textAlign: "left", color: "white" }}>
-            <span aria-hidden="true" style={{ fontSize: "1rem" }}>📡</span>
+            {/* A stolen document (runtime/reportDelivery.js) beside the agent's traffic. */}
+            <span aria-hidden="true" style={{ fontSize: "1rem" }}>{isDocumentExchange(exchange) ? "📄" : "📡"}</span>
             <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{target} ↔ {exchange.counterpart}</span>
             <span style={{ display: "block", fontSize: "0.68rem", color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{exchange.subject}{exchange.date ? " · " + exchange.date : ""}</span>
@@ -3142,7 +3145,6 @@ const Toolbar = memo(({ onOpenAdvisor, activePanel, onTogglePanel, mapRef }) => 
     const [hoveredChat, setHoveredChat]       = useState(false);
     const [hoveredActions, setHoveredActions] = useState(false);
     const [hoveredProjects, setHoveredProjects] = useState(false);
-    const [hoveredDossier, setHoveredDossier] = useState(false);
     // The dock grows by one button per launcher; its geometry lives in hudDock.js
     // so the Search control beside it moves with it.
     return (
@@ -3150,7 +3152,6 @@ const Toolbar = memo(({ onOpenAdvisor, activePanel, onTogglePanel, mapRef }) => 
         <Chat hovered={hoveredChat} setHovered={setHoveredChat} isOpen={activePanel === "chat"} onToggle={() => onTogglePanel("chat")} />
         <Actions onOpenAdvisor={onOpenAdvisor} hovered={hoveredActions} setHovered={setHoveredActions} isOpen={activePanel === "actions"} onToggle={() => onTogglePanel("actions")} />
         <Projects onOpenAdvisor={onOpenAdvisor} mapRef={mapRef} hovered={hoveredProjects} setHovered={setHoveredProjects} isOpen={activePanel === "projects"} onToggle={() => onTogglePanel("projects")} />
-        <Dossier hovered={hoveredDossier} setHovered={setHoveredDossier} isOpen={activePanel === "dossier"} onToggle={() => onTogglePanel("dossier")} />
         </div>
     );
 });
