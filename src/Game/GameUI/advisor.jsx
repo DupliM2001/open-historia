@@ -8,7 +8,7 @@ import { formatReportFields, logDebugEvent } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { chatLanguageDiffersFromUi, isRtlLanguage, resolveChatLanguage } from "../../runtime/i18n.js";
-import { applyProjectOpsToWorld, normalizeActionEntry, readActionsState, readWorldState, writeActionsState, writeWorldState } from "../../runtime/gameState.js";
+import { applyProjectOpsToWorld, normalizeActionEntry, readActionsState, readWorldState, viewAsSeen, writeActionsState, writeWorldState } from "../../runtime/gameState.js";
 import { describeReplyProblems, extractFencedJson, looksLikeProjectOps, validateChartConfig } from "./advisorBlocks.js";
 import { buildMessageDrafts, splitAtBlockquotes } from "./advisorDrafts.js";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
@@ -727,22 +727,37 @@ const AdvisorReplyBody = ({ text, drafts, onDraftMessage }) => {
     );
 };
 
-// What the world did since the conversation last spoke (AI/conversationCatchUp.js):
-// the time that passed, the newest events since, and the Game Master's changes by
-// hand. A fresh conversation has nothing to catch up on — it reads the present.
-// A note that cannot be built is no note: the question still goes.
-const buildAdvisorCatchUp = async (messages, gameDate) => {
-    const previous = [...(Array.isArray(messages) ? messages : [])].reverse()
-        .find((msg) => (msg.role === "user" || msg.role === "advisor") && !msg.streaming);
-    if (!previous) return { text: "", label: "" };
+// The moment the player is asking from: the events they have been shown and the
+// date of the last of them — while a skip is being revealed, the reveal's front,
+// not the end of the finished turn (runtime/unseenEvents.js, gameState.js
+// viewAsSeen). The question is dated there, so the next one's catch-up picks up
+// what the rest of the reveal showed.
+const readSeenMoment = async (gameDate) => {
     try {
         const [events, world] = await Promise.all([
             readJson(JSON_URLS.events, { defaultValue: [] }),
             readJson(JSON_URLS.world, { defaultValue: {}, clone: false }),
         ]);
+        const seen = await viewAsSeen({ world, events, game: { gameDate } });
+        return { events: seen.events, world, date: seen.game?.gameDate || gameDate || "" };
+    } catch {
+        return { events: [], world: {}, date: gameDate || "" };
+    }
+};
+
+// What the world did since the conversation last spoke (AI/conversationCatchUp.js):
+// the time that passed, the newest events since, and the Game Master's changes by
+// hand. A fresh conversation has nothing to catch up on — it reads the present.
+// A note that cannot be built is no note: the question still goes.
+const buildAdvisorCatchUp = async (messages, moment) => {
+    const previous = [...(Array.isArray(messages) ? messages : [])].reverse()
+        .find((msg) => (msg.role === "user" || msg.role === "advisor") && !msg.streaming);
+    if (!previous) return { text: "", label: "" };
+    try {
+        const { events, world, date } = moment;
         return buildCatchUpNote({
             previousDate: previous.time || "",
-            currentDate: gameDate || "",
+            currentDate: date || "",
             events,
             gmChanges: previous.at ? gmChangesSince(world, previous.at) : [],
             // The advisor's receipt for its own last reply: a chart not drawn, a
@@ -1032,9 +1047,11 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
         const askedBefore = replaceTrailingError
             ? [...messagesRef.current].reverse().find((msg) => msg.role === "user")
             : null;
+        const moment = await readSeenMoment(gameDate);
+        const askedOn = moment.date || gameDate;
         const catchUp = replaceTrailingError
             ? { text: askedBefore?.catchUp || "", label: askedBefore?.catchUpLabel || "" }
-            : await buildAdvisorCatchUp(messagesRef.current, gameDate);
+            : await buildAdvisorCatchUp(messagesRef.current, moment);
 
         // A fresh question re-engages auto-scroll even if the player had
         // paused it reading up through history — the pause is scoped to the
@@ -1045,7 +1062,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             : [...prev, {
                 role: "user",
                 text,
-                time: gameDate,
+                time: askedOn,
                 // When it was asked, by the clock: the next question's catch-up
                 // counts the Game Master's changes from here.
                 at: new Date().toISOString(),
@@ -1062,7 +1079,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             if (last && last.role === "advisor" && last.streaming) {
                 next[next.length - 1] = { ...last, text: fullText };
             } else {
-                next.push({ role: "advisor", text: fullText, time: gameDate, streaming: true });
+                next.push({ role: "advisor", text: fullText, time: askedOn, streaming: true });
             }
             return next;
         });
@@ -1135,7 +1152,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             setMessages(prev => {
                 const next = prev.slice();
                 const last = next[next.length - 1];
-                const finalMessage = { role: "advisor", text: reply, time: gameDate, at: new Date().toISOString(), ...(chartProblem ? { chartProblem } : {}), ...(actionsProblems.length ? { actionsProblems } : {}), ...(actionsSummary ? { actionsSummary } : {}), ...(projectsSummary ? { projectsSummary } : {}), ...(projectsProblem ? { projectsProblem } : {}), ...(projectsDetail ? { projectsDetail } : {}), ...(projectsExcerptText ? { projectsExcerpt: projectsExcerptText } : {}) };
+                const finalMessage = { role: "advisor", text: reply, time: askedOn, at: new Date().toISOString(), ...(chartProblem ? { chartProblem } : {}), ...(actionsProblems.length ? { actionsProblems } : {}), ...(actionsSummary ? { actionsSummary } : {}), ...(projectsSummary ? { projectsSummary } : {}), ...(projectsProblem ? { projectsProblem } : {}), ...(projectsDetail ? { projectsDetail } : {}), ...(projectsExcerptText ? { projectsExcerpt: projectsExcerptText } : {}) };
                 // Finalise the streaming bubble, or append the full reply if the
                 // provider never streamed a chunk.
                 if (last && last.role === "advisor" && last.streaming) {
@@ -1155,7 +1172,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
                 const updated = [...base, {
                     role: "error",
                     text: err.message,
-                    time: gameDate,
+                    time: askedOn,
                     ...(err?.diagnostics ? { diagnostics: err.diagnostics } : {}),
                 }];
                 saveMessages(updated);

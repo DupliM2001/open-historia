@@ -59,9 +59,10 @@ const changesBetween = (before, after) => {
   return changes;
 };
 
-// [{ channel, report, ... }] for one turn. `agents` are the player's agents in
-// place after the turn, as { target } (a turned one is its handlers' creature
-// and brings nothing real).
+// [{ channel, report, created, ... }] for one turn. `agents` are the player's
+// agents in place after the turn, as { target } (a turned one is its handlers'
+// creature and brings nothing real). `created` says the turn wrote the document
+// rather than passed on a copy of an older one — which event it arrived with.
 export const planReportDeliveries = ({ before = [], after = [], player = "", agents = [] } = {}) => {
   const me = asText(player);
   if (!me) return [];
@@ -69,25 +70,25 @@ export const planReportDeliveries = ({ before = [], after = [], player = "", age
   for (const { report, created, added } of changesBetween(before, after)) {
     // Published: everyone reads it, with the event that published it.
     if (report.visibleTo === null) {
-      if (created) deliveries.push({ channel: "event", report });
+      if (created) deliveries.push({ channel: "event", report, created });
       continue;
     }
     // The player's government holds it now, and did not before.
     if (has(added, me) || (created && has(report.visibleTo, me))) {
       const others = asArray(report.visibleTo).filter((name) => fold(name) !== fold(me));
       if (!others.length) {
-        deliveries.push({ channel: "event", report });
+        deliveries.push({ channel: "event", report, created });
         continue;
       }
       // A copy passed on by one holder comes from that holder alone, in the
       // thread with them — not from every government that ever held it.
       const giver = created ? "" : giverOf(report, me);
       if (giver && others.some((name) => fold(name) === fold(giver))) {
-        deliveries.push({ channel: "diplomacy", report, with: [giver], sender: giver });
+        deliveries.push({ channel: "diplomacy", report, created, with: [giver], sender: giver });
         continue;
       }
       const sender = others.find((name) => fold(name) === fold(report.from)) ?? others[0];
-      deliveries.push({ channel: "diplomacy", report, with: others, sender });
+      deliveries.push({ channel: "diplomacy", report, created, with: others, sender });
       continue;
     }
     // Not the player's: stolen, if an agent sits in a government that holds it.
@@ -97,16 +98,24 @@ export const planReportDeliveries = ({ before = [], after = [], player = "", age
     const target = asArray(report.visibleTo).find((name) => fold(name) === fold(agent.target));
     const counterparts = asArray(report.visibleTo).filter((name) => fold(name) !== fold(target));
     // The agent's own spelling of where it sits is the key its file is kept under.
-    deliveries.push({ channel: "intelligence", report, target, agentTarget: asText(agent.target), counterparts });
+    deliveries.push({ channel: "intelligence", report, created, target, agentTarget: asText(agent.target), counterparts });
   }
   return deliveries;
 };
+
+// The event a delivery is shown with (runtime/unseenEvents.js): the one that
+// wrote the document, or — for a copy passed on or taken from an older one —
+// the turn's last, since the change is only known to have happened by its end.
+export const deliveryEventId = (delivery, lastEventId = "") => (delivery?.created && asText(delivery.report?.sourceEventId)
+  ? asText(delivery.report.sourceEventId)
+  : asText(lastEventId));
 
 const datelineOf = (report) => (asText(report.dateline) ? ` — ${asText(report.dateline)}` : "");
 
 // The note a diplomatic document becomes: one message in the thread with the
 // other holders, spoken by its sender, the document in full beneath its heading.
-export const documentNote = (delivery) => {
+// `eventId` is the event it is shown with (deliveryEventId).
+export const documentNote = (delivery, { eventId = "" } = {}) => {
   const { report } = delivery;
   return {
     countries: asArray(delivery.with),
@@ -118,6 +127,7 @@ export const documentNote = (delivery) => {
       speaker: delivery.sender,
       text: `📄 **${report.title}**${datelineOf(report)}\n\n${report.body}`,
       reportId: report.id,
+      ...(asText(eventId) ? { eventId: asText(eventId) } : {}),
     }],
   };
 };
@@ -127,7 +137,8 @@ export const documentNote = (delivery) => {
 export const documentExchangeId = (reportId) => `doc-${asText(reportId)}`.toLowerCase().replace(/\s+/g, "-");
 
 // The intercept a stolen document becomes, beside the agent's other traffic.
-export const documentExchange = (delivery, { date = "" } = {}) => {
+// `eventId` is the event it is shown with (deliveryEventId).
+export const documentExchange = (delivery, { date = "", eventId = "" } = {}) => {
   const { report } = delivery;
   // Its sender when that is one of its holders; otherwise the government the
   // agent took it from.
@@ -138,6 +149,7 @@ export const documentExchange = (delivery, { date = "" } = {}) => {
     date: asText(report.dateline) || asText(date),
     subject: report.title,
     messages: [{ speaker, text: report.body }],
+    ...(asText(eventId) ? { eventId: asText(eventId) } : {}),
   };
 };
 

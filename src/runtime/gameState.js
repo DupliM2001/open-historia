@@ -14,6 +14,7 @@ import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.j
 import { normalizeGmChanges, normalizeReminders } from "./gmChanges.js";
 import { normalizeSpyOp } from "./spycraft.js";
 import { normalizeChatEvents, projectChatThread, withUnloggedMessages } from "./chatThreads.js";
+import { latestTurnEventIds, unseenEvents, withoutUnseenChats, withoutUnseenEvents, withoutUnseenReports } from "./unseenEvents.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -567,6 +568,9 @@ const normalizeChatMessage = (message, index = 0) => {
   if (!text) {
     return null;
   }
+  // The event a turn wrote this message with: it is shown when that event is
+  // revealed (runtime/unseenEvents.js). Only a turn's own messages carry one.
+  const eventId = normalizeOptionalString(message.eventId);
 
   return {
     code: normalizeOptionalString(message.code),
@@ -580,6 +584,7 @@ const normalizeChatMessage = (message, index = 0) => {
     memorySummary: normalizeOptionalString(message.memorySummary || message.diplomaticMemorySummary),
     text,
     time: normalizeOptionalString(message.time || message.date),
+    ...(eventId ? { eventId } : {}),
   };
 };
 
@@ -2758,6 +2763,23 @@ export const enforceUnitVolume = (world, { playerCode = "" } = {}) => {
   };
 };
 
+// A chat an event opens is written as an opener — who speaks first and what they
+// say (the jump's CHAT_OPENER schema) — and turned into a thread only when the
+// turn is applied (gameplay.js buildGeneratedChat). The chat normalizer knows
+// threads, not openers, and used to drop both fields, so every chat an event
+// opened reached the turn with nothing to say and was never opened at all.
+const normalizeCreatedChat = (entry, index) => {
+  const chat = normalizeChatEntry(entry, index);
+  if (!chat) return null;
+  const openingMessage = normalizeOptionalString(entry?.openingMessage);
+  const speaker = normalizeOptionalString(entry?.speaker);
+  return {
+    ...chat,
+    ...(openingMessage ? { openingMessage } : {}),
+    ...(speaker ? { speaker } : {}),
+  };
+};
+
 const normalizeEventImpacts = (value) => {
   if (!value || typeof value !== "object") {
     return {
@@ -2777,7 +2799,7 @@ const normalizeEventImpacts = (value) => {
 
   return {
     actionIds: normalizeActionParticipants(value.actionIds),
-    createdChats: normalizeChats(value.createdChats),
+    createdChats: normalizeArray(value.createdChats).map(normalizeCreatedChat).filter(Boolean),
     markerOps: normalizeArray(value.markerOps).map(normalizeMarkerOp).filter(Boolean),
     polityChanges: normalizeArray(value.polityChanges).map(normalizePolityChange).filter(Boolean),
     projectOps: normalizeArray(value.projectOps).map(normalizeProjectOp).filter(Boolean),
@@ -3790,6 +3812,62 @@ export const readGameStateBundle = async ({ force = false } = {}) => {
     events,
     game,
     world,
+  };
+};
+
+// What of the finished world belongs to no turn: the Game Master's standing
+// facts and log, the seal, what each leader has been shown, the player's goal.
+// The world as seen keeps today's.
+const STATE_OUTSIDE_THE_TURN = ["simulationReminders", "gmChanges", "spySeal", "chatKnowledgeCursors", "playerGoals"];
+
+// The campaign as the player has been shown it (runtime/unseenEvents.js). While
+// a skip is being revealed the save already holds all of it, and whatever
+// speaks to the player — the advisor, a leader, a suggestion — must be built
+// from what the player has seen: the events up to the reveal's front, the world
+// as those events left it (the turn's restore point with them applied, exactly
+// as the map is showing it), the threads without what the unseen events wrote,
+// and the date of the last event shown. With nothing unseen everything comes
+// back as given; without a restore point the finished world is kept, less the
+// papers the unseen events wrote.
+export const viewAsSeen = async ({ world, events, chats, game } = {}, { unseen = null } = {}) => {
+  const hidden = unseen instanceof Set ? unseen : unseenEvents.unseenFor(world);
+  if (!hidden.size) return { world, events, chats, game, unseen: hidden };
+  const turn = world?.simulationHistory?.[0] ?? {};
+  const byId = new Map(normalizeArray(events).map((event) => [String(event?.id ?? ""), event]));
+  const seenTurnEvents = latestTurnEventIds(world)
+    .filter((id) => !hidden.has(id))
+    .map((id) => byId.get(id))
+    .filter(Boolean);
+  let seenWorld = null;
+  try {
+    const snapshots = await readJson(JSON_URLS.snapshots, { defaultValue: [], force: false });
+    const toDate = turn.toDate || turn.date;
+    const snap = normalizeArray(snapshots).find((entry) => entry?.state?.world
+      && entry.fromDate === turn.fromDate && entry.toDate === toDate);
+    if (snap) {
+      const staged = applyEventImpactsToWorld({
+        colors: {},
+        events: normalizeEvents(seenTurnEvents),
+        motion: { originDate: snap.fromDate || turn.fromDate || "", round: Number(turn.round) || Number(snap.round) || 0, tick: 0 },
+        world: normalizeWorldState(snap.state.world),
+      }).world;
+      const stolenBy = new Map(normalizeArray(world?.reports).map((report) => [report?.id, report?.interceptedBy]));
+      seenWorld = {
+        ...staged,
+        ...Object.fromEntries(STATE_OUTSIDE_THE_TURN.filter((key) => world?.[key] !== undefined).map((key) => [key, world[key]])),
+        reports: normalizeArray(staged.reports).map((report) => (normalizeArray(stolenBy.get(report.id)).length
+          ? { ...report, interceptedBy: stolenBy.get(report.id) }
+          : report)),
+      };
+    }
+  } catch { /* no restore point to stage from: the finished world, less the unseen papers */ }
+  const seenDate = normalizeOptionalString(seenTurnEvents.at(-1)?.date) || normalizeOptionalString(turn.fromDate);
+  return {
+    world: seenWorld ?? { ...world, reports: withoutUnseenReports(world?.reports, hidden) },
+    events: withoutUnseenEvents(events, hidden),
+    chats: withoutUnseenChats(chats, hidden),
+    game: game && seenDate ? { ...game, gameDate: seenDate } : game,
+    unseen: hidden,
   };
 };
 

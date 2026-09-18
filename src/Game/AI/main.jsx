@@ -81,6 +81,7 @@ import { foreignAgentBrief } from "../../runtime/spycraft.js";
 import { renderReminders } from "../../runtime/gmChanges.js";
 import { describeReportsForPrompt, normalizeReports } from "../../runtime/reports.js";
 import { describeDocumentsForAdvisor } from "../../runtime/reportDelivery.js";
+import { viewAsSeen } from "../../runtime/gameState.js";
 import { withCatchUp } from "./conversationCatchUp.js";
 
 // main.jsx - AI chat module
@@ -2731,7 +2732,7 @@ export const CONVERSATION_IN_TURNS = "(given below as the message turns, oldest 
 
 async function buildAdvisorSystemPrompt() {
     await ensurePromptsLoaded();
-    const [gameData, actionData, chatData, worldData, eventData, advisorData] = await Promise.all([
+    const [savedGame, actionData, savedChats, savedWorld, savedEvents, advisorData] = await Promise.all([
         readJson(JSON_URLS.game, { defaultValue: {} }),
         readJson(JSON_URLS.actions, { defaultValue: [] }),
         readJson(JSON_URLS.chat, { defaultValue: [] }),
@@ -2739,6 +2740,12 @@ async function buildAdvisorSystemPrompt() {
         readJson(JSON_URLS.events, { defaultValue: [] }),
         readJson(JSON_URLS.advisor, { defaultValue: [] }),
     ]);
+    // While a skip is being revealed, the advisor knows what the player has been
+    // shown and no more (runtime/unseenEvents.js): an event still to come — or
+    // one Intervene may yet discard — is not something its staff can speak of.
+    const { game: gameData, chats: chatData, world: worldData, events: eventData } = await viewAsSeen({
+        game: savedGame, chats: savedChats, world: savedWorld, events: savedEvents,
+    });
 
     const variables = {
         ...(await buildPromptVariables({
@@ -2790,7 +2797,7 @@ async function buildAdvisorSystemPrompt() {
 export async function buildDiplomaticSystemPrompt(countries, playerCountry, speakingAs = "", { chatId = "" } = {}) {
     await ensurePromptsLoaded();
     const participantList = countries.map((country) => `- ${country}`).join("\n");
-    const [gameData, actionData, chatData, worldData, eventData, advisorData] = await Promise.all([
+    const [savedGame, actionData, savedChats, savedWorld, savedEvents, advisorData] = await Promise.all([
         readJson(JSON_URLS.game, { defaultValue: {} }),
         readJson(JSON_URLS.actions, { defaultValue: [] }),
         readJson(JSON_URLS.chat, { defaultValue: [] }),
@@ -2798,6 +2805,11 @@ export async function buildDiplomaticSystemPrompt(countries, playerCountry, spea
         readJson(JSON_URLS.events, { defaultValue: [] }),
         readJson(JSON_URLS.advisor, { defaultValue: [] }),
     ]);
+    // A leader answering the player mid-reveal speaks from the world the player
+    // has been shown (runtime/unseenEvents.js), not the one the turn finished.
+    const { game: gameData, chats: chatData, world: worldData, events: eventData } = await viewAsSeen({
+        game: savedGame, chats: savedChats, world: savedWorld, events: savedEvents,
+    });
 
     // A leader only knows the conversations they are actually in. The leader
     // prompt carries the recent chat history, and this used to hand it EVERY

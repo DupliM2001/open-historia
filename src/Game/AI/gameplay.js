@@ -172,6 +172,7 @@ import {
   applyCountryStatPatchToWorld,
   readWorldState,
   resumeStandingOrders,
+  viewAsSeen,
   writeActionsState,
   writeChatsState,
   writeEventsState,
@@ -234,7 +235,8 @@ import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js"
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
-import { documentExchange, documentNote, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments } from "../../runtime/reportDelivery.js";
+import { deliveryEventId, documentExchange, documentNote, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments } from "../../runtime/reportDelivery.js";
+import { unseenEvents, withoutUnseenMessages } from "../../runtime/unseenEvents.js";
 import { canRewindCatalystTo, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
@@ -3741,8 +3743,17 @@ const fallbackNextSpeaker = ({ chat, excludedSpeaker }) => {
   };
 };
 
-export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbackTitle = "", playerName = "" } = {}) => {
+// `revealWith` is the event a turn's note is shown with (runtime/unseenEvents.js):
+// every message the note brings carries it, so a thread it opens or writes into
+// shows it only once the player's reveal has reached that event.
+export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbackTitle = "", playerName = "", revealWith = "" } = {}) => {
   const countriesInput = Array.isArray(chatLike?.countries) ? chatLike.countries : [];
+  const revealEventId = normalizeString(revealWith);
+  const withReveal = (messages) => (revealEventId
+    ? messages.map((message) => (typeof message === "string"
+      ? { role: "system", text: message, eventId: revealEventId }
+      : { ...message, eventId: revealEventId }))
+    : messages);
   // A chat's countries are the OTHER side; the player is implicit
   // (chatVisibility.js). A note naming the player among them is a note to the
   // player, and keeping them there forks a duplicate of the thread already open.
@@ -3763,7 +3774,7 @@ export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbac
     countries,
     id: chatLike?.id,
     linkedEventId: linkEventId,
-    messages:
+    messages: withReveal(
       Array.isArray(chatLike?.messages) && chatLike.messages.length > 0
         ? chatLike.messages
         : chatLike?.openingMessage
@@ -3776,7 +3787,7 @@ export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbac
               time: "",
             },
           ]
-        : [],
+        : []),
     source: normalizeString(chatLike?.source) || "invitation",
     status: "open",
     // A chat must say why it exists: the model's title, else the causing
@@ -5835,6 +5846,9 @@ export const rollBackToSnapshot = async (index = 0) => {
     if (snapshotIntercepts || reconciledIntercepts !== filedIntercepts) {
       await writeInterceptsState(reconciledIntercepts);
     }
+    // Whatever was left of the undone turn's reveal went with it; the turn now
+    // newest was seen before the one after it was made.
+    unseenEvents.clear();
     await writeJson(JSON_URLS.snapshots, snapshots.slice(index + 1));
     const bundle = await readGameStateBundle({ force: true });
     // A rollback is the one event that legitimately moves the clock BACKWARDS.
@@ -5897,6 +5911,8 @@ export const interveneAfterEvent = async (keptCount) => {
       baseGame: bundle.game,
       baseWorld: bundle.world,
       campaignId: activeCampaignId(),
+      // Every kept event is one the player had already been shown.
+      reveal: "shown",
       result: {
         ...truncated,
         generation: { source: "ai", fallbackReason: "" },
@@ -5949,7 +5965,9 @@ export const sendAdvisorDraftedMessage = async ({ countryName, text }) => {
     const recipientKey = chatParticipantKey([recipient]);
     const existing = chats.find((chat) =>
       chat.status !== "closed" && chatParticipantKey(chat.countries) === recipientKey);
-    const priorMessages = existing?.messages ?? [];
+    // The leader reads the thread as the player has been shown it
+    // (runtime/unseenEvents.js); the stored thread is what the fold writes into.
+    const priorMessages = withoutUnseenMessages(existing?.messages ?? [], unseenEvents.unseenFor(bundle.world));
 
     const gameDate = normalizeString(bundle.game?.gameDate);
     const { reply, reaction, memorySummary } = await sendDiplomaticMessageOnceOff({
@@ -6035,6 +6053,9 @@ const applySimulationResult = async ({
   // The skip's phase tracker (skipPhases.js), when a time skip is applying: the
   // board and the history each announce themselves. Null everywhere else.
   phases = null,
+  // "staged": a time skip the player will be shown event by event. "shown":
+  // events they have already seen (an Intervene re-applying the kept ones).
+  reveal = "staged",
   baseWorld,
   result,
 }) => {
@@ -6701,11 +6722,17 @@ const applySimulationResult = async ({
 
   let nextWorld = worldWithImpacts;
 
+  // Everything this turn writes into a thread or a file is shown with an event
+  // (runtime/unseenEvents.js): a chat an event opened with that event, and what
+  // belongs to the period rather than to one event with its last.
+  const lastTurnEventId = normalizeString(normalizeArray(worldWithImpacts.simulationHistory?.[0]?.eventIds).at(-1));
+
   for (const event of freshEvents) {
     for (const createdChat of event.impacts.createdChats) {
       const nextChat = await buildGeneratedChat(createdChat, event.id, worldWithImpacts, {
         fallbackTitle: event.title,
         playerName: baseGame.country,
+        revealWith: event.id,
       });
       if (nextChat) { nextChats.unshift(nextChat); generatedChats.push(nextChat); }
     }
@@ -6717,6 +6744,7 @@ const applySimulationResult = async ({
   for (const chatLike of normalizeArray(result.outreach)) {
     const nextChat = await buildGeneratedChat({ ...chatLike, source: "outreach" }, "", worldWithImpacts, {
       playerName: baseGame.country,
+      revealWith: lastTurnEventId,
     });
     if (nextChat) { nextChats.unshift(nextChat); generatedChats.unshift(nextChat); }
   }
@@ -6725,8 +6753,10 @@ const applySimulationResult = async ({
   // thread with them, spoken by its sender — folded like any note, so a thread
   // already open is where it lands.
   for (const delivery of reportDeliveries.filter((entry) => entry.channel === "diplomacy")) {
-    const nextChat = await buildGeneratedChat(documentNote(delivery), normalizeString(delivery.report.sourceEventId), worldWithImpacts, {
+    const revealWith = deliveryEventId(delivery, lastTurnEventId);
+    const nextChat = await buildGeneratedChat(documentNote(delivery, { eventId: revealWith }), normalizeString(delivery.report.sourceEventId), worldWithImpacts, {
       playerName: baseGame.country,
+      revealWith,
     });
     if (nextChat) { nextChats.unshift(nextChat); generatedChats.push(nextChat); }
   }
@@ -6801,15 +6831,27 @@ const applySimulationResult = async ({
   // rather than written over whichever campaign they opened instead.
   assertCampaignUnchanged(campaignId, activeCampaignId());
 
+  // A time skip is shown one event at a time (time.jsx), its first on screen as
+  // it lands; until the reveal reaches an event, nothing the player or the AI
+  // speaking to them is shown may contain it (runtime/unseenEvents.js). Marked
+  // before anything is written, so no reader of the new files ever finds the
+  // turn without its reveal. An Intervene re-applies events already seen.
+  if (reveal === "staged" && (result.mode === "jump" || result.mode === "auto")) {
+    unseenEvents.markTurnUnseen(normalizeArray(nextWorld.simulationHistory?.[0]?.eventIds));
+  }
+
+  // The chats go last: whatever hears of a new letter — the toolbar's watcher —
+  // reads the world to know whether its event has been revealed, and must find
+  // the turn that wrote it already there.
   await Promise.all([
     writeActionsState(nextActions),
-    writeChatsState(chatsToWrite),
     writeEventsState(nextEvents),
     writeGameData(nextGame),
     writeJson(JSON_URLS.colors, nextColors, { pretty: true }),
     ...(renamedFlags ? [writeJson(JSON_URLS.flags, renamedFlags, { pretty: true })] : []),
     writeWorldState(nextWorld),
   ]);
+  await writeChatsState(chatsToWrite);
 
   // The turn's new state is now persisted. Web-mode encrypted sync listens for this
   // to back up the turn (replacing a fixed 20s poll); it is a no-op in desktop mode
@@ -6832,7 +6874,7 @@ const applySimulationResult = async ({
   if (review) await fileReviewedAgentReports(review);
   else if (!savingRequests()) await refreshSpyIntercepts();
   // And what the player's agents stole this turn, beside their traffic.
-  await fileStolenDocuments(reportDeliveries, { world: nextWorld, game: nextGame });
+  await fileStolenDocuments(reportDeliveries, { world: nextWorld, game: nextGame, lastEventId: lastTurnEventId });
 
   // Snapshot the state we just replaced so it can be rolled back to (best-effort),
   // with what this turn applied beside it, in the order the reveal shows it, so
@@ -6879,8 +6921,19 @@ const applySimulationResult = async ({
   };
 };
 
+// The campaign as the player has been shown it, for whatever speaks to them while
+// a skip is being revealed (gameState.js viewAsSeen): the events up to the
+// reveal's front and the world as they left it. Read-only — never written back;
+// a writer re-reads what is stored.
+const readSeenGameStateBundle = async (options) => {
+  const saved = await readGameStateBundle(options);
+  const seen = await viewAsSeen(saved);
+  return { ...saved, world: seen.world, events: seen.events, chats: seen.chats, game: seen.game, savedGame: saved.game, unseen: seen.unseen };
+};
+
 export const generateActionSuggestions = async ({ force = true } = {}) => {
-  const bundle = await readGameStateBundle({ force });
+  // Suggestions answer the moment the player is looking at (readSeenGameStateBundle).
+  const bundle = await readSeenGameStateBundle({ force });
   const variables = await buildTemplateVariables(bundle, { lookups: true });
   const { payload } = await runJsonTask("actions", {
     lookups: buildTaskLookups(bundle),
@@ -9453,7 +9506,7 @@ const STOLEN_DOCUMENTS_KEPT = 8;
 // among each agent's intercepts — sealed like the rest, and decoded in the Spies
 // tab only as far as the player's service can read the target's. Filing one
 // twice files it once (its id comes from the report). Never costs the turn.
-const fileStolenDocuments = async (deliveries, { world, game }) => {
+const fileStolenDocuments = async (deliveries, { world, game, lastEventId = "" }) => {
   const stolen = normalizeArray(deliveries).filter((delivery) => delivery?.channel === "intelligence");
   if (!stolen.length) return;
   try {
@@ -9462,7 +9515,8 @@ const fileStolenDocuments = async (deliveries, { world, game }) => {
     const next = { ...current };
     for (const delivery of stolen) {
       const key = normalizeString(delivery.agentTarget || delivery.target);
-      const exchange = documentExchange(delivery, { date: game?.gameDate });
+      // Shown in the Spies tab once the reveal reaches the event it came with.
+      const exchange = documentExchange(delivery, { date: game?.gameDate, eventId: deliveryEventId(delivery, lastEventId) });
       const entry = next[key] ?? { gatheredAt: normalizeString(game?.gameDate), round: Number(game?.round) || 0, planted: false, exchanges: [] };
       if (entry.exchanges.some((existing) => existing.id === exchange.id)) continue;
       const documents = entry.exchanges.filter(isDocumentExchange);
@@ -9522,6 +9576,17 @@ export const readOpenedIntercepts = async () => {
 const SPY_REPORT_CHANCE = 1 / 20;
 let spyReportInFlight = false;
 
+// A skip is being revealed (runtime/unseenEvents.js). Background writers wait
+// for it to finish: a note or a report written from the finished world would
+// tell the player what they are about to read — or what Intervene may discard.
+const revealInProgress = async () => {
+  try {
+    return unseenEvents.unseenFor(await readWorldStateView()).size > 0;
+  } catch {
+    return false;
+  }
+};
+
 // Called on a timer by the UI. Picks ONE live agent and has it report, or does
 // nothing at all — every failure is silent, exactly like the diplomacy drip.
 export const maybeGatherIntelligence = async ({ chance = SPY_REPORT_CHANCE } = {}) => {
@@ -9532,6 +9597,7 @@ export const maybeGatherIntelligence = async ({ chance = SPY_REPORT_CHANCE } = {
   // still report after every time skip either way.
   if (!backgroundAiAllowance().allowed) return null;
   if (Math.random() >= chance) return null;
+  if (await revealInProgress()) return null;
   spyReportInFlight = true;
   try {
     const world = normalizeWorldState(await readWorldState({ force: true }));
@@ -10323,7 +10389,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
 
 
 export const refinePlayerAction = async (rawInput, { persist = true, signal } = {}) => {
-  const bundle = await readGameStateBundle({ force: true });
+  const bundle = await readSeenGameStateBundle({ force: true });
   const variables = await buildTemplateVariables(bundle, { actionInput: rawInput, lookups: true });
   const { payload } = await runJsonTask("descriptionToAction", {
     lookups: buildTaskLookups(bundle),
@@ -10378,7 +10444,10 @@ export const runChatActionBatch = async ({
   signal = null,
   requestKind = undefined,
 } = {}) => {
-  const bundle = await readGameStateBundle({ force: true });
+  // The table is told what the player has been shown (readSeenGameStateBundle);
+  // the thread's own log is applied to in full, so nothing unseen is lost from it.
+  const bundle = await readSeenGameStateBundle({ force: true });
+  const unseen = bundle.unseen ?? new Set();
   const player = normalizeString(playerCountry) || normalizeString(bundle.game?.country);
   const stored = normalizeChats([chat])[0];
   if (!stored) return { events: [], applied: [], rejected: [], actions: [] };
@@ -10439,7 +10508,8 @@ export const runChatActionBatch = async ({
     const heard = normalizeArray(message.heardBy).map(regionKey);
     return heard.length ? aiParticipants.filter((name) => !heard.includes(regionKey(name))) : [];
   };
-  const recent = projected.messages.slice(-24);
+  const shownMessages = withoutUnseenMessages(projected.messages, unseen);
+  const recent = shownMessages.slice(-24);
   const lines = recent.map((message) => {
     const absent = absentFrom(message);
     return `[${message.id}] ${message.speaker || (message.role === "user" ? player : "someone")}: ${message.text}`
@@ -10483,9 +10553,9 @@ export const runChatActionBatch = async ({
     aiParticipants,
     humanParticipants: [player],
     knownPolities: known,
-    messageIds: projected.messages.map((message) => message.id),
+    messageIds: shownMessages.map((message) => message.id),
     polls: projected.polls,
-  }, { time: normalizeString(bundle.game?.gameDate) });
+  }, { time: normalizeString((bundle.savedGame ?? bundle.game)?.gameDate) });
 
   const memorySummary = normalizeString(payload?.memorySummary);
   if (memorySummary) {
@@ -10510,11 +10580,12 @@ export const chooseNextDiplomaticSpeaker = async ({
   chat,
   excludeSpeaker = "",
 } = {}) => {
-  const bundle = await readGameStateBundle({ force: true });
-  const normalizedChat = normalizeChats([chat])[0];
-  if (!normalizedChat) {
+  const bundle = await readSeenGameStateBundle({ force: true });
+  const storedChat = normalizeChats([chat])[0];
+  if (!storedChat) {
     return "";
   }
+  const normalizedChat = { ...storedChat, messages: withoutUnseenMessages(storedChat.messages, bundle.unseen) };
 
   const variables = await buildTemplateVariables(bundle, { chat: normalizedChat });
   const { payload } = await runJsonTask("nextSpeaker", {
@@ -13225,6 +13296,12 @@ export const processPendingEventOutreach = async ({ debug = false } = {}) => {
     const dueQueueId = normalizeString(due?.id);
     const findCurrentEvent = (events) => normalizeArray(events).find((event) => eventReactionKey(event) === dueKey);
     let event = findCurrentEvent(bundle.events);
+    // A reaction to an event the player has not been shown yet waits for the
+    // reveal to reach it (runtime/unseenEvents.js): its note would say what the
+    // player is about to read.
+    if (event && unseenEvents.unseenFor(bundle.world).has(normalizeString(event.id))) {
+      return debug ? { processed: 0, reason: "event-not-yet-revealed", retryAfterMs: 5000 } : null;
+    }
 
     const removeQueueEntry = async (worldInput, { events = null, reactionResult = "", chatId = "" } = {}) => {
       const nextWorld = {
@@ -14052,6 +14129,7 @@ export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
   if (!(pulseChance > 0)) return null;
   const roll = Math.random();
   if (roll >= pulseChance) return null;
+  if (await revealInProgress()) return null;
   // One call, both halves: whether a polity would write, and whether any forces
   // would visibly move. A caller's own roll does not switch on notes the game has
   // switched off.
