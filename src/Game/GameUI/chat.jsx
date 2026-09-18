@@ -4,7 +4,7 @@ import { dedupeByName } from "../../runtime/countryList.js";
 import ReactDOM from "react-dom";
 import { sendDiplomaticMessage, startDiplomaticChat, loadDiplomaticHistory } from "../AI/main.jsx";
 import { chooseNextDiplomaticSpeaker, ensureCountryAssessed, processPendingEventOutreach, runChatActionBatch } from "../AI/gameplayLazy.js";
-import { projectChatThread } from "../../runtime/chatThreads.js";
+import { eventsFromLegacyChat, projectChatThread } from "../../runtime/chatThreads.js";
 import { isChatGenerationLikely } from "../AI/simulationStatus.js";
 import {
     MAX_ACTIVE_SPIES, activeSpies, deploySpy, expelSpy, foreignSpies, intelligenceOf, normalizeIntercepts, normalizeSpies,
@@ -334,6 +334,67 @@ const EnvelopeIcon = ({ filled }) => (
 
 
 // ── Message bubble ────────────────────────────────────────────────────────────
+
+// A binding vote in a conversation (AI/chatActions.js). The AI participants
+// vote in the same answer that opens one; the player casts their own, once.
+// A poll is a record, not a control panel: there is no closing it and no
+// changing a vote, because neither is a thing a government gets to do.
+const PollCard = ({ poll, playerCountry, onVote }) => {
+    const votes = poll?.votes ?? {};
+    const mine = Object.entries(votes).find(([voter]) => voter.toLowerCase() === String(playerCountry ?? "").toLowerCase())?.[1] ?? "";
+    const total = Object.keys(votes).length;
+    return (
+        <div style={{
+            background: "rgba(59,130,246,0.08)",
+            border: "1px solid rgba(96,165,250,0.30)",
+            borderRadius: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.45rem",
+            margin: "0.35rem 0",
+            padding: "0.7rem 0.85rem",
+        }}>
+            <span style={{ fontSize: "0.68rem", letterSpacing: "0.04em", color: "rgba(147,197,253,0.9)", textTransform: "uppercase" }}>
+                Vote{poll?.openedBy ? ` · called by ${poll.openedBy}` : ""}
+            </span>
+            <span style={{ fontSize: "0.85rem", fontWeight: 700, lineHeight: 1.35 }}>{poll?.question}</span>
+            {(poll?.tally ?? []).map((option) => {
+                const chosen = mine === option.id;
+                const share = total ? Math.round((option.votes / total) * 100) : 0;
+                const voters = Object.entries(votes).filter(([, id]) => id === option.id).map(([voter]) => voter);
+                return (
+                    <button
+                        key={option.id}
+                        type="button"
+                        disabled={Boolean(mine)}
+                        onClick={() => onVote?.(option.id)}
+                        title={voters.length ? voters.join(", ") : "No vote yet"}
+                        style={{
+                            background: `linear-gradient(to right, rgba(96,165,250,0.28) ${share}%, rgba(255,255,255,0.05) ${share}%)`,
+                            border: chosen ? "1px solid rgba(96,165,250,0.85)" : "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: "8px",
+                            color: "white",
+                            cursor: mine ? "default" : "pointer",
+                            display: "flex",
+                            fontFamily: "inherit",
+                            fontSize: "0.78rem",
+                            justifyContent: "space-between",
+                            padding: "0.4rem 0.6rem",
+                            textAlign: "left",
+                        }}
+                    >
+                        <span>{option.label}{chosen ? " ✓" : ""}</span>
+                        <span data-no-translate style={{ color: "rgba(255,255,255,0.55)" }}>{option.votes}</span>
+                    </button>
+                );
+            })}
+            <span data-no-translate style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem" }}>
+                {total === 0 ? "Nobody has voted yet" : `${total} vote${total === 1 ? "" : "s"} cast`}
+                {mine ? "" : " · your vote is yours to cast"}
+            </span>
+        </div>
+    );
+};
 
 const MessageBubble = ({ msg, onRetry }) => {
     const isPlayer = msg.role === "user";
@@ -878,6 +939,22 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
             }
         };
 
+        // The player's own vote. Appended to the thread's log like any other
+        // event, and never cast for them by a model (chatActions.js refuses an
+        // action whose actor is human-controlled).
+        const handlePlayerVote = (poll, optionId) => {
+            if (!poll?.id || !optionId) return;
+            const already = Object.keys(poll.votes ?? {}).some((voter) => voter.toLowerCase() === String(playerCountry ?? "").toLowerCase());
+            if (already) return;
+            const events = [
+                ...(chat.events?.length ? chat.events : eventsFromLegacyChat({ ...chat, messages: messagesRef.current })),
+                { id: `vote-${poll.id}-${playerCountry}`, kind: "poll_vote_cast", time: gameDate, by: playerCountry, pollId: poll.id, optionId },
+            ];
+            const projected = projectChatThread(events);
+            onThreadUpdate?.(chat.id, { events, countries: projected.countries, title: projected.title, polls: projected.polls });
+            logDebugEvent("diplomacy", `${playerCountry} voted in chat #${chat.id}.`, { poll: poll.question, optionId }, { verbose: true });
+        };
+
         const handlePlayerSubmit = async () => {
             const text = playerInput.trim();
             if (!text || isLoading) return;
@@ -1023,6 +1100,17 @@ const ConversationView = ({ chat, playerCountry, gameDate, onDelete, onBack, onM
                     </React.Fragment>
                 );
             })}
+            {/* Binding votes opened in this conversation (AI/chatActions.js).
+                The AI participants vote in the same answer that opens one; the
+                player votes here, and their vote is theirs alone to cast. */}
+            {(chat.polls ?? []).map((poll) => (
+                <PollCard
+                    key={poll.id}
+                    poll={poll}
+                    playerCountry={playerCountry}
+                    onVote={(optionId) => handlePlayerVote(poll, optionId)}
+                />
+            ))}
             {isLoading && typingSpeaker && <TypingBubble speaker={typingSpeaker.name} code={typingSpeaker.code} />}
             <div ref={messagesEndRef} />
             </div>
