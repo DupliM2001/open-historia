@@ -456,25 +456,31 @@ const JSON_ASSET_DEFAULTS = {
   intercepts: {},
 };
 
+// The world keys a fresh game inherits from its scenario. MIRRORED in
+// src/runtime/web/storeConstants.js — the two stores cannot share code (Node with a
+// filesystem vs a browser with an object store), so gameBundleParity.test.js holds
+// them to the same list. A key on one side only is silent: the game simply stops
+// carrying that piece of its scenario on one platform.
 const TEMPLATE_WORLD_OVERRIDE_KEYS = [
   "allowedUnitTypes",
-"author",
-"background",
-"basemap",
-"customCities",
-"customRegions",
-"difficulty",
-"language",
-"mapCredit",
-"notes",
-"ownerCodes",
-"polityOverrides",
-"units",
-"regionClaimants",
-"regionOwnershipOverrides",
-"regionSovereigntyOverrides",
-"simulationRules",
-"startingTimelineText",
+  "author",
+  "background",
+  "basemap",
+  "customCities",
+  "customGeometry",
+  "customRegions",
+  "difficulty",
+  "language",
+  "mapCredit",
+  "notes",
+  "ownerCodes",
+  "polityOverrides",
+  "units",
+  "regionClaimants",
+  "regionOwnershipOverrides",
+  "regionSovereigntyOverrides",
+  "simulationRules",
+  "startingTimelineText",
 ];
 
 const COLORS_ASSET_CANDIDATES = [

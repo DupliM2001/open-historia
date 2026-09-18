@@ -750,30 +750,47 @@ const validateSegmentLedgers = (candidate, { world, strict, segmentIndex = 0, re
   let warError = validateWarLedgerPayload(candidate, { world });
 
   if (warError && !strict && combatWarRepair.unresolved.length) {
-    const dropIndexes = new Set(combatWarRepair.unresolved.map((entry) => entry.index));
+    // What FAILS CLOSED here is the belligerency, not the event. This used to
+    // delete the whole event, and a live run showed what that costs: "Tragic
+    // Clashes and Fire in Odessa" and "Explosion Rocks Regional Administration
+    // Building in Luhansk" — real, dated, consequential events the model wrote
+    // and the player never saw, because a riot and a bombing read as hard combat
+    // to the detector and neither named two belligerents. Under salvage-first
+    // there is no second attempt to correct them, so the loss was permanent.
+    //
+    // Now the event stays as narrative and loses only what it could not support:
+    // its warId and its combatants. No war is created, no ledger record binds to
+    // it, and nothing about the canonical war state is guessed — which is the
+    // whole point of the guard. The same rule reconcileCombatWarState already
+    // applies to a non-combat event carrying an impossible warId.
+    const unboundIndexes = new Set(combatWarRepair.unresolved.map((entry) => entry.index));
     // A war record is causal with the event that established it: if every
-    // establishing event of a record is being dropped, the record goes too.
+    // establishing event of a record is being unbound, the record goes too.
     const boundBefore = decodeWarUpdates(candidate?.warUpdates);
     const orphaned = new Set();
     boundBefore.forEach((update, updateIndex) => {
       const eventIndexes = normalizeArray(update?.eventIndexes)
         .map(Number)
         .filter((index) => Number.isInteger(index) && index >= 0);
-      if (eventIndexes.length && eventIndexes.every((index) => dropIndexes.has(index))) orphaned.add(updateIndex);
+      if (eventIndexes.length && eventIndexes.every((index) => unboundIndexes.has(index))) orphaned.add(updateIndex);
     });
     for (const entry of combatWarRepair.unresolved) {
       noteReceipt(
         receipt,
-        "withheld",
-        `"${normalizeString(entry?.title) || `event ${Number(entry?.index) + 1}`}" — removed: it narrated combat that could not be tied to a war (${firstComplaintLine(entry?.reason, 90) || "no matching war"}). `
-          + "Combat needs event.combatants naming both sides plus a matching warUpdates record.",
+        "adjusted",
+        `"${normalizeString(entry?.title) || `event ${Number(entry?.index) + 1}`}" — kept, but its war link was removed: it narrated combat that could not be tied to a war (${firstComplaintLine(entry?.reason, 90) || "no matching war"}). `
+          + "The event stands as history; nothing about the war ledger was assumed from it. Combat that IS part of a war needs event.combatants naming both sides plus a matching warUpdates record.",
       );
     }
-    candidate.events = normalizeArray(candidate.events).filter((_, index) => !dropIndexes.has(index));
+    candidate.events = normalizeArray(candidate.events).map((event, index) => (
+      unboundIndexes.has(index) && event && typeof event === "object"
+        ? { ...event, warId: "", combatants: [] }
+        : event
+    ));
     if (orphaned.size) candidate.warUpdates = boundBefore.filter((_, index) => !orphaned.has(index));
     console.warn(
-      `[ai] war ledger salvage: dropped ${dropIndexes.size} ambiguous hard-combat event(s) and ${orphaned.size} orphaned war record(s) ` +
-      "after the model failed its corrective retry; keeping the rest of the segment.",
+      `[ai] war ledger salvage: unbound ${unboundIndexes.size} hard-combat event(s) from the war ledger and dropped ${orphaned.size} orphaned war record(s) ` +
+      "after the model failed its corrective retry; the events themselves are kept.",
     );
     normalizeWorldWarEventLinks(candidate);
     warError = validateWarLedgerPayload(candidate, { world });

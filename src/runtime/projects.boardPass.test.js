@@ -129,3 +129,44 @@ test("the player's own HIGH PRIORITY entry is assessed at least every second ski
 test("an entry that has never carried a round is looked at once", () => {
   assert.match(boardPassReasons({ ...NOW, board: [entry({ targetDate: "2014-01-01", updatedRound: 0 })] })[0], /past its target date/);
 });
+
+// The false positive a live run turned up (2026-09-17): the engine's own covert
+// entry is called "Agent in <country>", so in a campaign fought over that
+// country every event naming it matched, and the board job bought a request a
+// skip. The engine syncs those entries itself, before the board pass runs.
+test("the engine's own covert entries never buy the board a request", () => {
+  const covertEntry = {
+    id: "proj-spy-1",
+    name: "Agent in Ukraine",
+    kind: "operation",
+    secrecy: "covert",
+    status: "active",
+    ongoing: true,
+    summary: "An agent of ours is in place inside Ukraine, reading its private diplomacy.",
+    linkedSpyIds: ["spy-1"],
+    updatedRound: 1,
+  };
+  const event = {
+    title: "Fighting spreads in eastern Ukraine",
+    description: "Separatist columns push west of Donetsk; Ukraine mobilises two more brigades.",
+  };
+
+  assert.deepEqual(
+    boardPassReasons({ board: [covertEntry], events: [event], round: 9, reviewedRound: 0, playerCountry: "Poland" }),
+    [],
+    "an ordinary war event must not wake the board just because the agent's entry names the country",
+  );
+  // ...and the calendar does not wake it for one either: it is never overdue,
+  // never stale in a way the model could fix, and the engine closes it itself.
+  assert.deepEqual(
+    boardPassReasons({ board: [{ ...covertEntry, updatedRound: 1 }], events: [], round: 30, reviewedRound: 0, playerCountry: "Poland" }),
+    [],
+  );
+
+  // A real entry of the player's own, with the same words, still does.
+  const realEntry = { ...covertEntry, id: "proj-2", name: "Ukraine Support Programme", linkedSpyIds: [], summary: "Arms and training for Ukraine's brigades." };
+  assert.ok(
+    boardPassReasons({ board: [realEntry], events: [event], round: 9, reviewedRound: 0, playerCountry: "Poland" }).length > 0,
+    "a genuine entry the model owns is still a reason",
+  );
+});

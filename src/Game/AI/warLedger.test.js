@@ -10,6 +10,7 @@ import {
   decodeWarUpdates,
   eventNarratesHardCombat,
   reconcileCombatWarState,
+  repairWarLedgerPayload,
   validateWarLedgerPayload,
 } from "./nativeWarLedger.js";
 
@@ -173,4 +174,44 @@ test("ceasefire, resume and end move the status; a second start on a live war is
   assert.equal(ended.wars[0].status, "ended");
   assert.equal(ended.wars[0].endedDate, "1901-01-01");
   assert.match(buildCanonicalWarContext(ended.world), /No active or ceasefire canonical wars/);
+});
+
+// A live run (2026-09-17) lost two real events to this: "Tragic Clashes and Fire
+// in Odessa" and "Explosion Rocks Regional Administration Building in Luhansk"
+// read as hard combat to the detector, named no two belligerents, and were
+// DELETED by the salvage path — and under salvage-first there is no second
+// attempt to correct them, so the player simply never saw them. What must fail
+// closed is the belligerency, not the event.
+test("an unbindable combat event is reported for unbinding, never for deletion", () => {
+  const riot = {
+    id: "e1",
+    date: "2014-05-02",
+    title: "Tragic Clashes and Fire in Odessa",
+    description: "Street clashes between rival demonstrators end with a building alight; dozens are killed.",
+    kind: "world",
+    combatants: [],
+  };
+  const candidate = { events: [riot], warUpdates: "" };
+  const outcome = reconcileCombatWarState(candidate, { world });
+
+  assert.equal(outcome.unresolved.length, 1, "the engine cannot tie it to a war, and says so");
+  assert.equal(outcome.unresolved[0].index, 0);
+  // reconcileCombatWarState itself never removes an event: it reports, and the
+  // caller (gameplay.js validateGeneratedWorldChanges) unbinds rather than drops.
+  assert.equal(candidate.events.length, 1, "the event is still there after reconciliation");
+  assert.equal(candidate.events[0].title, "Tragic Clashes and Fire in Odessa");
+
+  // What the caller then does (gameplay.js validateGeneratedWorldChanges): strip
+  // the war metadata and keep the event. The ledger still complains that prose
+  // reading as combat carries no warId — a riot IS written like a battle — and
+  // that complaint is only ever logged: repairWarLedgerPayload, the last stage,
+  // strips bindings and drops records but NEVER removes an event. So the event
+  // reaches the player either way, with no belligerency invented for it.
+  candidate.events = candidate.events.map((event) => ({ ...event, warId: "", combatants: [] }));
+  const repair = repairWarLedgerPayload(candidate, { world });
+  assert.equal(candidate.events.length, 1, "the repair keeps the event");
+  assert.equal(candidate.events[0].warId, "", "and invents no war for it");
+  assert.deepEqual(candidate.events[0].combatants, []);
+  assert.deepEqual(decodeWarUpdates(candidate.warUpdates), [], "no war record was conjured either");
+  assert.match(repair.residual, /no event.warId/, "the residual complaint is about the ledger, and is only logged");
 });

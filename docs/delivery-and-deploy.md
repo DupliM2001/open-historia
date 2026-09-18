@@ -338,5 +338,5 @@ Key asymmetries a newcomer should internalize:
 ### See also
 
 - [World state](world-state.md) — the `world.json` shape that scenarios and the web seed carry
-- [Web mode & content nodes](web-mode.md) — how the browser build resolves map data from the signed directory
-- [Scenario hub](hub-and-scenarios.md) — the import flow that feeds the import counter
+- [Web mode & content nodes](web-build.md) — how the browser build resolves map data from the signed directory
+- [Scenario hub](runtime-services.md) — the import flow that feeds the import counter

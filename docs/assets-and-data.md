@@ -236,7 +236,7 @@ Under `import.meta.env.VITE_OH_WEB` there is no node server:
 - **Worker fetches:** the `window.fetch` patch is invisible to workers — MapLibre's tile workers and the political-cartography worker (`src/Game/Map/vnext/polityBoundariesWorker.js`) fetch with their own global — so the scenario's regions GeoJSON is re-served to the `custom-regions-source` and the worker through a `blob:` URL: `prepareWorkerFetchableUrl(url)` (`assets.js`) fetches the runtime URL on the page and stages the bytes as a blob; `useWorkerFetchableUrl` (`src/Game/Map/useWorkerFetchableUrl.js`) hands that URL to `Nations.jsx`, which keeps the runtime URL as the identity for geometry epochs, catalog keys and readiness. MapLibre forwards a non-http(s) URL from its workers to the main thread, and a dedicated worker resolves a blob URL its page created. Copies are released (revoked after a grace period) when the token rotates or the asset is written. The desktop keeps the plain URL.
 - **Origin check:** the origin fallback in `warmPmtilesArchive` is held to the same signed manifest through `verifyOriginBuffer(url, buffer)` (`contentTrust.js`): `checked` is false — the bytes trusted as before — when the manifest is unsigned or missing, does not list the asset, or the active scenario serves its own archive under the runtime URL (`hasScenarioPmtilesOverride`, `libraryStore.js`); a scenario's own archive is never fetched from the swarm either. Only a signed hash that contradicts the bytes fails the archive.
 
-See the [Node network](node-network.md) notes for the swarm/registry architecture.
+See the [Node network](delivery-and-deploy.md) notes for the swarm/registry architecture.
 
 ---
 
@@ -254,7 +254,7 @@ See the [Node network](node-network.md) notes for the swarm/registry architectur
 | 6 | `cities` | Caching city layer | 10 | `cities.pmtiles` (~1.5 MB) | no |
 | 7 | `regions` | Caching regional borders | 24 | `regions.pmtiles` (~105.8 MB) | **no** — paints owners above z6.5 even on custom maps |
 
-**The ~162 MB prime:** warming tasks 3+6+7 pulls all three archives fully into `binaryValueCache` as in-memory `ArrayBuffer`s — the code cites regions ≈101 MB + countries ≈60 MB + cities ≈1.5 MB ≈ **162 MB** resident (`assets.js:231`; on-disk manifest sizes total ~170 MB). This is a deliberate memory-for-latency trade: a fully-warmed `MemorySource` archive answers tile requests without further network I/O. The cost is that this ~162 MB must be **freed on scenario switch** — which is exactly what the PMTiles cache rotation in `setRuntimeAssetEndpoints` (§5) does. See the [RAM & paint audit](performance.md) notes for the broader memory backlog (the geojson double-store, pinned PMTiles).
+**The ~162 MB prime:** warming tasks 3+6+7 pulls all three archives fully into `binaryValueCache` as in-memory `ArrayBuffer`s — the code cites regions ≈101 MB + countries ≈60 MB + cities ≈1.5 MB ≈ **162 MB** resident (`assets.js:231`; on-disk manifest sizes total ~170 MB). This is a deliberate memory-for-latency trade: a fully-warmed `MemorySource` archive answers tile requests without further network I/O. The cost is that this ~162 MB must be **freed on scenario switch** — which is exactly what the PMTiles cache rotation in `setRuntimeAssetEndpoints` (§5) does. See the [RAM & paint audit](architecture.md) notes for the broader memory backlog (the geojson double-store, pinned PMTiles).
 
 Task results feed a weighted progress bar: `normalizeTaskResult` (`preload.js:165`) sums the `.size` of each warmed asset into `loadedBytes`, and `progress = completedWeight / TOTAL_WEIGHT`.
 
@@ -312,4 +312,4 @@ Raster tiles are warmed via `warmRemoteResources` / `warmRemoteResource` (`asset
 | `server/libraryStore.js` | Server-side asset resolution (scenario override → data-dir → bundle) |
 | `server/dataDir.js` | `DATA_DIR` / `OH_DATA_DIR` resolver |
 
-Related pages: [World state](world-state.md) · [Node network](node-network.md) · [Performance / RAM](performance.md)
+Related pages: [World state](world-state.md) · [Node network](delivery-and-deploy.md) · [Performance / RAM](architecture.md)

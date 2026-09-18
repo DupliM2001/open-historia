@@ -2,7 +2,7 @@
 
 The `src/runtime/` folder holds the framework-light services that sit between the server API and the React UI: the library/scenario/game catalog stores, the AI-powered UI translator and its language setting, the country-name resolver, and the small tag/label/flag/map-setting helpers. Most of these are plain modules with module-scope state plus a `useSyncExternalStore`/`useState` React hook, deliberately kept free of OpenLayers/heavy deps so the **editor**, the **game**, and the **server** can all import the same rules. This page maps each service, its exported API, and — most importantly — how data flows in from `/api/*` and back out to the components.
 
-Related pages: [World state](world-state.md) · [Game state](game-state.md) · [Assets](assets.md) · [AI system](ai-system.md)
+Related pages: [World state](world-state.md) · [Game state](world-state.md) · [Assets](assets-and-data.md) · [AI system](ai-overview.md)
 
 ---
 
@@ -142,7 +142,7 @@ Codes (`"RUS"`, `"KHAL"`) are the load-bearing identifiers in the data; the play
 
 Default resolver is identity (`countryNameResolver = (name) => name`, `assets.js:40`) until a store installs one. `loadCountryNames` (`assets.js:965`) and `loadRegionCatalog` decode the countries PMTiles z0 tile and run each raw `Country/NAME` through `resolveCountryDisplayName(name, code)`, so scenario renames flow into the country dropdowns and map labels without those modules knowing about scenarios.
 
-**Token sweep (memory + correctness).** When the token changes, `setRuntimeAssetEndpoints` deletes the previous generation's entries from `jsonValueCache`, `jsonRequestCache`, `jsonLoadedUrls`, the PMTiles archive/header/directory caches, and clears the key-based `runtimeJsonValueCache`/`runtimeJsonRequestCache` — **before** rebuilding the URLs, because the old URL strings are the only handles to those entries. This prevents both the ~190 MB-per-switch GeoJSON leak and serving one scenario's bytes under another's cached PMTiles header. See [Assets](assets.md) for the full cache model.
+**Token sweep (memory + correctness).** When the token changes, `setRuntimeAssetEndpoints` deletes the previous generation's entries from `jsonValueCache`, `jsonRequestCache`, `jsonLoadedUrls`, the PMTiles archive/header/directory caches, and clears the key-based `runtimeJsonValueCache`/`runtimeJsonRequestCache` — **before** rebuilding the URLs, because the old URL strings are the only handles to those entries. This prevents both the ~190 MB-per-switch GeoJSON leak and serving one scenario's bytes under another's cached PMTiles header. See [Assets](assets-and-data.md) for the full cache model.
 
 ### Sibling resolver — `src/runtime/polityNames.js`
 
@@ -172,7 +172,7 @@ Owns the UI-language *choice* and static catalog. The choice is stored on the **
 | `isRtlLanguage(code)` | Membership in `RTL_LANGUAGES` = `{ ar, he, fa, ur }` |
 | `languageDirective()` | System-prompt fragment appended to every AI call so replies arrive natively in-language |
 
-Storage rule: writing `en` (or empty) **removes** the key rather than storing it (`writeLocalLanguage`, `i18n.js:81`), so "English" is represented by absence. `languageDirective()` returns `""` for English; otherwise it instructs the model to write all natural-language text in the target language while keeping JSON keys/ISO codes/date formats intact — this is why AI output does not need re-translation (see [AI system](ai-system.md)).
+Storage rule: writing `en` (or empty) **removes** the key rather than storing it (`writeLocalLanguage`, `i18n.js:81`), so "English" is represented by absence. `languageDirective()` returns `""` for English; otherwise it instructs the model to write all natural-language text in the target language while keeping JSON keys/ISO codes/date formats intact — this is why AI output does not need re-translation (see [AI system](ai-overview.md)).
 
 ---
 
@@ -209,14 +209,15 @@ Boot order inside `startTranslator` (`translator.js:587`): `syncLanguageFromServ
 
 ### Translation engine + config
 
-`translateBatch()` (`translator.js:305`) late-imports `callAI` from `../Game/AI/main.jsx` and sends a strict JSON-array prompt (same length/order, keep numbers/emoji/placeholders, proper names unchanged). `processQueue()` runs up to `MAX_CONCURRENT_BATCHES` batches in parallel, writes results into both `cache` and `unsyncedEntries`, and backs off on repeated failure.
+`translateBatch()` (`translator.js:305`) late-imports `callAI` from `../Game/AI/main.jsx` and sends a strict JSON-array prompt (same length/order, keep numbers/emoji/placeholders, proper names unchanged). `processQueue()` sends **one batch at a time** (`planTranslationBatch`), writes results into both `cache` and `unsyncedEntries`, and backs off on repeated failure. It used to send 60 strings × 3 batches in parallel, which made a first pass over a new language dozens of requests nobody pressed a button for — on a free key, where a few hundred a day is the whole allowance, and where three concurrent requests is also the surest way to trip the per-MINUTE limit. A batch is now up to 240 strings or 6,000 source characters, whichever comes first: a quarter of the requests for the same language, one request in flight. On a failure the size halves (down to `BATCH_MIN_STRINGS`) and recovers on the next success, so a model that cannot hold a big batch still finishes. Live check (`.lab/probes/live-translation-probe.mjs`, Gemini, Japanese — the worst case for output tokens): 240 strings, 9.3 KB in, a complete 240-entry array back in 9 s.
 
 | Constant | Value | Meaning |
 |---|---|---|
 | `CACHE_PREFIX` | `i18n_cache_` | localStorage key prefix (`+language`) |
 | `CACHE_LIMIT` | `8000` | Max cached entries persisted (most-recent kept) |
-| `BATCH_SIZE` | `60` | Strings per AI call |
-| `MAX_CONCURRENT_BATCHES` | `3` | Parallel batches per pump |
+| `BATCH_MAX_STRINGS` | `240` | Strings per AI call, at most |
+| `BATCH_MAX_CHARS` | `6000` | Source characters per call, at most (whichever ceiling binds first) |
+| `BATCH_MIN_STRINGS` | `30` | What the batch halves down to after a failure, recovering on the next success |
 | `SCAN_DEBOUNCE_MS` | `350` | Debounce before a DOM scan |
 | `MAX_CONSECUTIVE_FAILURES` | `3` | Failures before a 60 s cooldown |
 | `TRANSLATED_ATTRIBUTES` | `placeholder, title, aria-label` | Attributes also translated |
@@ -255,7 +256,7 @@ Builds the GeoJSON that draws country **names** on the map (not the DOM). Reads 
 
 - **Names** run through `translateLabel(resolveCountryDisplayName(rawName, code))` (`countryLabels.js:499`) — so labels honor both the scenario country-name overrides *and* the UI language.
 - **`ownedCodes`** (a `Set`): when non-empty, countries owning no territory in the scenario are skipped, so a nonexistent-era nation doesn't float its modern name over unclaimed land. A distinct owner set caches separately (owner-hash suffix on the cache key).
-- **Cache key** (`computeCountryLabelCacheKey`, `countryLabels.js:461`) folds tile-byte FNV hash + byte length + archive URL + **`getStoredLanguage()`**, so caches never leak across UI languages. Persisted via `writeRuntimeJson` / read via `readRuntimeJson` (see [Assets](assets.md)). Cache version is `country-labels-v3` (bumped to v3 when glyph `lat` was added for the globe text-size fix, issue #6).
+- **Cache key** (`computeCountryLabelCacheKey`, `countryLabels.js:461`) folds tile-byte FNV hash + byte length + archive URL + **`getStoredLanguage()`**, so caches never leak across UI languages. Persisted via `writeRuntimeJson` / read via `readRuntimeJson` (see [Assets](assets-and-data.md)). Cache version is `country-labels-v3` (bumped to v3 when glyph `lat` was added for the globe text-size fix, issue #6).
 - **Empty-result guard** (`countryLabels.js:642`): an empty build is treated as a degraded z0 read — served once, never cached — so a transient miss can't poison every future boot.
 
 Geometry helpers (`getCentroid`, `getPrincipalAxisAngle`, `buildCurvedLabelPath`, `buildCurvedLabelGlyphFeatures`, `tileToLngLat`, …) convert tile coordinates to lng/lat and decide curved-vs-point; each glyph carries its own `lat` so `Nations.jsx` can correct globe-projection text inflation at high latitude.
