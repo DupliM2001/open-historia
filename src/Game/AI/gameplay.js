@@ -233,6 +233,7 @@ import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureE
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
+import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
   eventsFromLegacyChat,
@@ -6014,6 +6015,9 @@ const applySimulationResult = async ({
   baseGame,
   campaignId = "",
   projects = null,
+  // The skip's phase tracker (skipPhases.js), when a time skip is applying: the
+  // board and the history each announce themselves. Null everywhere else.
+  phases = null,
   baseWorld,
   result,
 }) => {
@@ -6529,6 +6533,7 @@ const applySimulationResult = async ({
   // stall the operation it belonged to, and BEFORE anything is written so its ops
   // ride in on the events that caused them.
   if (projects) {
+    phases?.enter("board");
     // Every Canonical event the timeline left out, minus anything the log or this
     // turn's own timeline already holds (the de-dup that visible events had).
     const boardHiddenEvents = dedupeGeneratedEvents(
@@ -6654,6 +6659,7 @@ const applySimulationResult = async ({
       logDebugEvent("turn", "Turn HELD: the board did not update, so nothing was written.", error);
       throw projectsHeldError(error);
     }
+    phases?.enter("applying");
   }
 
   let nextWorld = worldWithImpacts;
@@ -6680,6 +6686,7 @@ const applySimulationResult = async ({
 
   if (result.mode === "jump" || result.mode === "auto") {
     try {
+      phases?.enter("history");
       nextWorld = await compactHistoryIfNeeded({
         actions: nextActions,
         chats: nextChats,
@@ -6690,6 +6697,8 @@ const applySimulationResult = async ({
     } catch (error) {
       console.warn("[ai] campaign history consolidation failed; the completed turn will still be saved.", error);
     }
+    // Everything after this is the writing of the turn itself.
+    phases?.enter("applying");
   }
 
   // Bounded automatic Stats tracking: only when the player's configured calendar
@@ -10666,16 +10675,16 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
   const segmentCount = segmentDays.length;
 
   // A segmented jump takes as long as the segments put together, so the spinner
-  // has to say which one is running or a correct turn looks like a hung one.
-  // Wrapped because a throwing UI callback must never cost the player a turn -
-  // the same rule the streaming onChunk callbacks follow.
+  // has to say which one is running or a correct turn looks like a hung one. The
+  // skip's phases (skipPhases.js) carry it to the panel; a retry of a held
+  // segment brings its own, since the panel that started the skip may be gone.
+  if (!state.phases) state.phases = createSkipPhases({ requestsUsed: () => state.requests?.used ?? 0, onChange: onProgress });
+  const writingLabel = `Writing ${formatDurationLabel(safeDays)} of events`;
   const reportProgress = (segmentIndex) => {
-    if (segmentCount <= 1 || typeof onProgress !== "function") return;
-    try {
-      onProgress({ segment: segmentIndex + 1, segmentCount });
-    } catch (error) {
-      console.warn("[ai] a jump progress callback threw; continuing.", error);
-    }
+    state.phases.enter("writing", {
+      label: writingLabel,
+      detail: segmentCount > 1 ? `part ${segmentIndex + 1} of ${segmentCount}` : "",
+    });
   };
 
   // What the engine did with the PREVIOUS turn's answer, as the first thing this
@@ -11329,6 +11338,8 @@ const runTurnReview = async ({ context, merged, signal, state }) => {
   const systemPrompt = [buildTurnReviewPrompt(shared), await gmRemindersBlock()].filter(Boolean).join("\n\n");
   const tool = buildTurnReviewTool(shared);
   review.asked = true;
+  // The panel says what this one request is doing, by the jobs it carries.
+  state.phases?.enter("checking", { label: describeReviewJobs(shared.map((job) => job.key)) });
   logDebugEvent("turn", `Turn review: ${shared.map((job) => job.key).join(", ")} in one request.`, {
     reasons,
     promptChars: systemPrompt.length,
@@ -11447,6 +11458,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
   // only the plausible ones, and they ride the same application path as the
   // simulator's own unitOps (a long move becomes a standing order). A failed or
   // unavailable director never costs the turn — the events pass through as written.
+  state.phases?.enter("placing");
   let directedEvents = merged.events;
   try {
     directedEvents = await directGeneratedUnitOps({
@@ -11549,10 +11561,18 @@ const finishTimelineJump = async ({ context, signal, state }) => {
   // `review` carries the turn review's answers (null when requests are not being
   // saved) and `requests` the skip's budget, for everything the apply still asks.
   applyArgs.projects = { bundle, signal, review, requests: state.requests };
+  applyArgs.phases = state.phases;
+  state.phases?.enter("applying");
   try {
     const applied = await applySimulationResult(applyArgs);
     reportJumpRequests(state.requests);
-    return applied;
+    // Where the skip's time and requests went, in one line (skipPhases.js),
+    // and on the result for the panel's own log entry.
+    const phaseSummary = state.phases?.finish();
+    if (phaseSummary?.phases?.length) {
+      logDebugEvent("turn", `Time skip phases: ${formatSkipPhases(phaseSummary)}.`, phaseSummary);
+    }
+    return phaseSummary ? { ...applied, phases: phaseSummary } : applied;
   } catch (error) {
     if (error?.projectsHeld) setPendingProjectsJump({ applyArgs });
     throw error;
@@ -11566,6 +11586,12 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
   discardPendingProjectsJump();
   discardPendingJumpSegment();
   beginSimulation();
+  // The skip's phases (skipPhases.js): said to the panel as each starts, timed
+  // and counted into one log line when the skip lands. The request count comes
+  // from the skip's budget once there is one.
+  let budgetForPhases = null;
+  const phases = createSkipPhases({ requestsUsed: () => budgetForPhases?.used ?? 0, onChange: onProgress });
+  phases.enter("reading");
   try {
   const bundle = withDiplomaticLedgerMigration(await readGameStateBundle({ force: true }));
   const baseColors = await readJson(JSON_URLS.colors, { defaultValue: {}, force: true });
@@ -11663,7 +11689,9 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
     // request where it can be, never more than the cap, while requests are
     // being saved.
     requests: createJumpRequests({ segments: segmentCount }),
+    phases,
   };
+  budgetForPhases = jumpState.requests;
 
   await runJumpSegments({ context: jumpContext, onProgress, signal, state: jumpState });
   return await finishTimelineJump({ context: jumpContext, signal, state: jumpState });
@@ -11692,6 +11720,8 @@ export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
       used: spentSoFar.used,
       refused: spentSoFar.refused,
     };
+    // A retry is timed on its own, and tells the panel that asked for it.
+    state.phases = createSkipPhases({ requestsUsed: () => state.requests?.used ?? 0, onChange: onProgress });
     // Re-holds itself on another failure, so the player can retry again or
     // discard — exactly as they could the first time.
     await runJumpSegments({ context, onProgress, signal, state });
@@ -11701,8 +11731,8 @@ export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
   }
 };
 
-export const simulateAutoJump = async ({ days = 365, signal } = {}) =>
-  simulateTimelineJump({ days, mode: "auto", signal });
+export const simulateAutoJump = async ({ days = 365, signal, onProgress } = {}) =>
+  simulateTimelineJump({ days, mode: "auto", signal, onProgress });
 
 // ---- GM Console: previewable, revalidated, audited transactions ------------
 // The AI plans a structured transaction; native code validates it against the

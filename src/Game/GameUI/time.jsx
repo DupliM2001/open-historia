@@ -1729,6 +1729,9 @@ const DateWidget = ({
     // the notice falls back to its own wording — and set per segment when a long
     // skip is generated in pieces (AI/jumpSegments.js).
     const [jumpProgress, setJumpProgress] = useState("");
+    // A phase of the skip as it starts: "Writing 1 month of events… (part 2 of 3)".
+    const showSkipPhase = ({ label, detail } = {}) =>
+        setJumpProgress(label ? `${label}…${detail ? ` (${detail})` : ""}` : "");
     const [error, setError] = useState("");
     const [fallbackWarning, setFallbackWarning] = useState("");
     // A turn that is generated and valid but NOT written, because the Projects &
@@ -1918,15 +1921,14 @@ const DateWidget = ({
         jumpAbortRef.current = controller;
         try {
             const result = mode === "auto"
-            ? await simulateAutoJump({ days, signal: controller.signal })
+            ? await simulateAutoJump({ days, signal: controller.signal, onProgress: showSkipPhase })
             : await simulateTimelineJump({
                 days,
                 signal: controller.signal,
-                // A long skip is generated in segments (AI/jumpSegments.js) and can
-                // run for many minutes. Without this the spinner says the same
-                // thing throughout and a working turn reads as a frozen one.
-                onProgress: ({ segment, segmentCount }) =>
-                    setJumpProgress(`Simulating… segment ${segment} of ${segmentCount}`),
+                // What the skip is doing right now, in its own words
+                // (AI/skipPhases.js). Without this the spinner said the same
+                // thing throughout and a working turn read as a frozen one.
+                onProgress: showSkipPhase,
             });
             setGameData(result.game);
             setEvents(result.events);
@@ -2073,8 +2075,7 @@ const DateWidget = ({
         try {
             const result = await retryPendingJumpSegment({
                 signal: controller.signal,
-                onProgress: ({ segment, segmentCount }) =>
-                    setJumpProgress(`Simulating… segment ${segment} of ${segmentCount}`),
+                onProgress: showSkipPhase,
             });
             setGameData(result.game);
             setEvents(result.events);
