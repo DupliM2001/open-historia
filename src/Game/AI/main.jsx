@@ -12,6 +12,15 @@ import {
 } from "./providerConfig.js";
 import { formatResetTime, runWithFallback } from "./fallbackRunner.js";
 import { BACKGROUND_REQUEST, PLAYER_REQUEST, requestLedger } from "./requestBudget.js";
+import {
+    DEFAULT_ANSWER_RESERVE_TOKENS,
+    contextWindowKey,
+    createContextWindowMemory,
+    estimateTokens,
+    nothingFitsMessage,
+    parseContextWindowError,
+    requestChars,
+} from "./contextWindow.js";
 import { splitSystemPromptForCache } from "./promptLayout.js";
 import { looksLikeModelFilePath, resolveServedModelId } from "./modelIds.js";
 import { attachLookupRound, attachCallMetrics, finishAiRecord, isTelemetryEnabled, startAiRecord  } from "./telemetry.js";
@@ -76,6 +85,16 @@ import { foreignAgentBrief } from "../../runtime/spycraft.js";
 
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5";
+
+// What each model has said about its context window (contextWindow.js), kept
+// with the other AI settings. Storage is reached at every call rather than
+// once: the harness installs its localStorage after this module has loaded,
+// and a browser that refuses storage simply forgets between sessions.
+export const contextWindows = createContextWindowMemory({
+    getItem: (key) => { try { return localStorage.getItem(key); } catch { return null; } },
+    setItem: (key, value) => { try { localStorage.setItem(key, value); } catch { /* this session only */ } },
+    removeItem: (key) => { try { localStorage.removeItem(key); } catch { /* nothing to forget */ } },
+});
 const OPENAI_API_ENDPOINT = "https://api.openai.com/v1";
 const ANTHROPIC_API_ENDPOINT = "https://api.anthropic.com/v1";
 
@@ -690,6 +709,14 @@ function providerFailureError(message, failure, extra = {}) {
     return error;
 }
 
+// The same, for a response the provider refused outright: a request too big
+// for the model's window gets the message that says so and names the fix
+// (contextWindowMessage), whatever words the provider used.
+const refusedRequestError = (providerLabel, message, failure, requestChars = 0) => providerFailureError(
+    failure?.kind === "tooBig" ? contextWindowMessage(providerLabel, message, requestChars) : message,
+    failure,
+);
+
 // Spent and Unusable: no retry, and none of a provider's own concessions
 // (streaming off, a lower structured-output rung) can fix them either.
 const waitingCannotFix = (failure) => failure.kind === "unusable" || failure.kind === "spent";
@@ -894,7 +921,7 @@ async function callGemini(systemPrompt, history, {
             if (failure.kind === "busy") {
                 throw providerFailureError(`Gemini is temporarily unavailable after ${attempt} attempt${attempt === 1 ? "" : "s"}. Try again in a minute.`, failure);
             }
-            throw providerFailureError(extractErrorMessage(payload, `Gemini API request failed (${response.status})`), failure);
+            throw refusedRequestError("Gemini", extractErrorMessage(payload, `Gemini API request failed (${response.status})`), failure);
         }
         console.warn(`[ai] Gemini ${failure.kind === "rateLimited" ? "rate limited" : "is busy"}. Retrying in ${wait / 1000}s... (attempt ${attempt}/${retries})`);
         await sleep(wait, signal);
@@ -933,7 +960,7 @@ async function callGemini(systemPrompt, history, {
             }
             if (!response.ok) {
                 const payload = await readErrorPayload(response);
-                throw providerFailureError(
+                throw refusedRequestError("Gemini",
                     extractErrorMessage(payload, `Gemini API request failed (${response.status})`),
                     classifyProviderFailure({ status: response.status, payload }),
                 );
@@ -1016,7 +1043,7 @@ async function callGemini(systemPrompt, history, {
 
         if (!response.ok) {
             const payload = await readErrorPayload(response);
-            throw providerFailureError(
+            throw refusedRequestError("Gemini",
                 extractErrorMessage(payload, `Gemini API request failed (${response.status})`),
                 classifyProviderFailure({ status: response.status, payload }),
             );
@@ -1258,6 +1285,9 @@ async function callOpenAIStyleChatCompletions({
             // too; none of the concessions below would fix those.
             const failure = classifyProviderFailure({ status: response.status, payload });
             if (waitingCannotFix(failure)) throw providerFailureError(errorMessage, failure);
+            // Too big for the window: no concession below shrinks the request, and
+            // walking the ladder would spend a request per rung finding that out.
+            if (failure.kind === "tooBig") throw providerFailureError(contextWindowMessage(providerLabel, errorMessage, requestChars), failure);
 
             // Cheapest concession first. A gateway that refuses stream+tools still
             // does tools, it just stops keeping the connection warm — whereas
@@ -1313,9 +1343,11 @@ async function callOpenAIStyleChatCompletions({
             const payload = await readErrorPayload(response);
             const detail = extractErrorMessage(payload, `${providerLabel} request failed (${response.status})`);
             // Too big for the model: say so, with the size, and do not let it be
-            // mistaken for a busy provider or a broken answer.
+            // mistaken for a busy provider or a broken answer. "tooBig" lets the
+            // Fallback list try an entry with a larger window, and remembers
+            // this one's (contextWindow.js).
             if (isContextWindowErrorPayload(payload?.error ?? payload)) {
-                throw new Error(contextWindowMessage(providerLabel, detail, requestChars));
+                throw providerFailureError(contextWindowMessage(providerLabel, detail, requestChars), { kind: "tooBig", reason: detail });
             }
             throw providerFailureError(detail, classifyProviderFailure({ status: response.status, payload }));
         }
@@ -1383,7 +1415,8 @@ async function callOpenAIStyleChatCompletions({
         // (the retry carries the failed answer too), so say what happened rather
         // than letting it fail downstream as "did not contain parseable JSON".
         if (isContextWindowErrorText(text) || isContextWindowErrorPayload(data?.error)) {
-            throw new Error(contextWindowMessage(providerLabel, text || errorPayloadText(data?.error), requestChars));
+            const detail = text || errorPayloadText(data?.error);
+            throw providerFailureError(contextWindowMessage(providerLabel, detail, requestChars), { kind: "tooBig", reason: detail });
         }
 
         if (tool) {
@@ -1750,7 +1783,7 @@ async function callAnthropic(systemPrompt, history, {
                 console.warn("[ai] Anthropic refused a streamed request; retrying buffered — long turns may time out.");
                 continue;
             }
-            throw providerFailureError(message, failure);
+            throw refusedRequestError("Anthropic", message, failure);
         }
 
         if (onChunk && !tool && String(response.headers.get("content-type") || "").includes("text/event-stream")) {
@@ -1981,7 +2014,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
                 console.warn("[ai] Anthropic-compatible refused a streamed request; retrying buffered — long turns may time out.");
                 continue;
             }
-            throw providerFailureError(message, failure);
+            throw refusedRequestError("The Anthropic-compatible endpoint", message, failure);
         }
 
         if (onChunk && !tool && String(response.headers.get("content-type") || "").includes("text/event-stream")) {
@@ -2205,16 +2238,20 @@ const describeFailure = (entry, failure) => {
     case "spent": return entry.provider === "gemini" ? "has used today's allowance" : "has used its allowance";
     case "unusable": return `can't be used: ${failure.reason}`;
     case "rateLimited": return "is rate limited";
+    case "tooBig": return `cannot take a request this size (${failure.reason})`;
     default: return failure?.reason === "could not be reached" ? "could not be reached" : "is busy";
     }
 };
 
 // Every mark, into the Diagnostics log with when it clears: a turn answered by
-// three models is otherwise impossible to read back.
+// three models is otherwise impossible to read back. A request passed over for
+// its size leaves no mark (`state` null): the entry is skipped for this request only.
 function logFallbackMark(label, entry, failure, state) {
-    const clears = state.unusable
-        ? "until it is edited"
-        : `until ${formatResetTime(state.spentUntil ?? state.skipUntil)}`;
+    const clears = !state
+        ? "for this request only"
+        : state.unusable
+            ? "until it is edited"
+            : `until ${formatResetTime(state.spentUntil ?? state.skipUntil)}`;
     logDebugEvent("ai", `${label}: Fallback list — ${entry.label} ${describeFailure(entry, failure)}; skipped ${clears}.`, {
         provider: entry.provider,
         kind: failure.kind,
@@ -2332,20 +2369,52 @@ export async function callAI(systemPrompt, history, opts = {}) {
     let lookupRounds = 0;
     let lookupCalls = 0;
 
+    // The context preflight (contextWindow.js). How big this request is, in
+    // tokens as near as four characters a token can say; an entry whose window
+    // is known to be too small for it is passed over WITHOUT a request, and one
+    // that refuses it teaches its window for next time.
+    const requestTokens = estimateTokens(requestChars({
+        systemPrompt,
+        history,
+        tools: [providerOpts.tool, ...(Array.isArray(lookups?.tools) ? lookups.tools : [])].filter(Boolean),
+    }));
+    const answerReserve = Number(providerOpts.maxTokens) > 0 ? Number(providerOpts.maxTokens) : DEFAULT_ANSWER_RESERVE_TOKENS;
+    const rememberContextWindow = (entry, error) => {
+        const failure = error?.providerFailure;
+        if (failure?.kind !== "tooBig") return;
+        try {
+            const stated = parseContextWindowError(failure.reason);
+            const learned = contextWindows.learn(contextWindowKey(entry), {
+                limitTokens: stated.limitTokens,
+                requestTokens: stated.requestedTokens ?? requestTokens,
+            });
+            logDebugEvent("ai", `${label}: ${entry.label} refused the request as too big for its context window; `
+                + (learned?.limitTokens ? `its window is ${learned.limitTokens} tokens, remembered.` : `a request of ~${requestTokens} tokens is remembered as too big for it.`),
+                { reason: failure.reason, requestTokens }, { problem: true });
+        } catch (memoryError) {
+            console.warn("[ai] the model's context window could not be remembered; continuing.", memoryError);
+        }
+    };
+
     try {
         // The Fallback list (fallbackRunner.js): the task's own pick first,
         // then the list from the top, moving down only past an entry that is
-        // Spent, Unusable or busy. Each attempt runs the whole lookup
-        // conversation (runWithLookups) against that one entry.
+        // Spent, Unusable or busy — or one this request cannot fit. Each attempt
+        // runs the whole lookup conversation (runWithLookups) against that one entry.
         const { result, entry: answeredBy } = await runWithFallback({
             entries,
             preferredEntryId,
             store: fallbackStateStore,
             rateLimitPolicy: getRateLimitPolicy(),
             onChunk: providerOpts.onChunk,
+            canAttempt: (entry) => contextWindows.refusal(contextWindowKey(entry), requestTokens, { reserveTokens: answerReserve }),
+            tooBigError: (refused) => providerFailureError(
+                nothingFitsMessage(refused.map(({ entry, reason }) => ({ label: entry.label, reason })), requestTokens),
+                { kind: "tooBig", reason: "no entry in the Fallback list can fit this request" },
+            ),
             attempt: (entry, { canFallBack, onChunk }) => {
                 if (record) record.provider = entry.provider;
-                logDebugEvent("ai-call", `${label}: request to ${entry.label} [${entry.provider}].`, callShape, { verbose: true });
+                logDebugEvent("ai-call", `${label}: request to ${entry.label} [${entry.provider}] (~${requestTokens} tokens).`, callShape, { verbose: true });
                 return runWithLookups(lookups, history, (roundHistory, roundOpts) => dispatchToProvider(entry.provider, systemPrompt, roundHistory, {
                     ...providerOpts,
                     ...roundOpts,
@@ -2363,7 +2432,7 @@ export async function callAI(systemPrompt, history, opts = {}) {
                     },
                     // The model the provider actually resolved (overrides, discovery).
                     onModel: (model) => { if (record) record.model = String(model ?? ""); },
-                }).catch((error) => { throw asUnreachable(error, providerOpts.signal); }), {
+                }).catch((error) => { rememberContextWindow(entry, error); throw asUnreachable(error, providerOpts.signal); }), {
                     label,
                     provider: entry.provider,
                     onRound: ({ round, calls, elapsedMs }) => {

@@ -66,7 +66,9 @@ const eventInvolvesCountry = (event, code, name) => {
     if ((impacts.regionTransfers ?? []).some((transfer) => transfer?.toCode === code || transfer?.fromCode === code)) return true;
     if ((impacts.regionControlOps ?? []).some((op) =>
         [op?.fromCode, op?.toCode, op?.actorCode, op?.claimantCode].some((value) => value === code || value === name))) return true;
-    if ((impacts.createdChats ?? []).some((chat) => (chat?.countries ?? []).some((country) => country?.code === code || country?.name === name))) return true;
+    if ((impacts.createdChats ?? []).some((chat) => (chat?.countries ?? []).some((country) => (typeof country === "string"
+        ? country === code || country === name
+        : country?.code === code || country?.name === name)))) return true;
     const haystack = `${event?.title ?? ""} ${event?.description ?? ""}`.toLowerCase();
     return Boolean(name) && haystack.includes(String(name).toLowerCase());
 };

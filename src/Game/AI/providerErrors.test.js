@@ -421,8 +421,14 @@ test("a rejected key or an unknown model is Unusable, with a reason the player c
   });
 });
 
+test("a request too big for this model's window is 'tooBig' — the next entry's window may take it — with the wording kept", () => {
+  assert.deepEqual(
+    classifyProviderFailure({ status: 400, payload: { error: { code: "context_length_exceeded", message: "This model's maximum context length is 4096 tokens." } } }),
+    { kind: "tooBig", reason: "This model's maximum context length is 4096 tokens." },
+  );
+});
+
 test("a failure that would happen on any model is not a reason to fall back", () => {
-  assert.equal(classifyProviderFailure({ status: 400, payload: { error: { code: "context_length_exceeded", message: "This model's maximum context length is 4096 tokens." } } }).kind, "other");
   assert.equal(classifyProviderFailure({ status: 400, payload: { error: { message: "Invalid JSON payload received. Unknown name \"foo\"." } } }).kind, "other");
   assert.equal(classifyProviderFailure({ status: 500, payload: { error: { message: "Internal error" } } }).kind, "other");
   assert.equal(classifyProviderFailure({}).kind, "other");

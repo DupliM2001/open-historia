@@ -36,88 +36,57 @@ const actionSchema = {
   additionalProperties: false,
 };
 
-const chatCountrySchema = {
-  type: "object",
-  description: "A polity participating in a generated diplomatic chat.",
-  properties: {
-    code: textSchema("Polity's FULL country name (\"Spain\"), never a country code."),
-    name: nonEmptyTextSchema("Exact polity name."),
-  },
-  required: ["name"],
-  additionalProperties: false,
-};
-
-const chatMessageSchema = {
-  type: "object",
-  description: "An opening or follow-up message in a generated diplomatic chat.",
-  properties: {
-    code: textSchema("Speaker polity's FULL country name (\"Spain\"), never a country code."),
-    role: textSchema("Message role, such as leader or system."),
-    speaker: textSchema("Exact name of the speaker."),
-    text: textSchema("Message body."),
-    time: textSchema("In-game date or time, when relevant."),
-  },
-  required: ["text"],
-  additionalProperties: false,
-};
-
+// A chat's participants are polity NAMES — what the actions reference has always
+// shown ({"countries":["..."]}) and what resolveInvitees (gameplay.js) has always
+// read. The schema used to demand {code, name} objects, so a model that followed
+// the prose failed the schema; normalizeChatShape below still folds an object
+// to its name for a campaign whose frozen prompt shows the old shape. The
+// message list, source and status the schema once carried were never taught
+// and are the engine's to fill (buildGeneratedChat); they rode on every jump.
 const createdChatSchema = {
   type: "object",
-  description:
-    "A diplomatic chat opened toward the player. The initiating polity ALWAYS "
-    + "speaks first: title and openingMessage are required - a blank, untitled "
-    + "chat tells the player nothing about why they were contacted.",
+  description: "A chat opened toward the player. The initiating polity speaks first, so title and openingMessage are required.",
   properties: {
-    id: textSchema("Optional stable chat identifier."),
-    title: nonEmptyTextSchema("Short title naming the purpose of the chat (e.g. 'French mediation offer')."),
+    title: nonEmptyTextSchema("Short title naming the purpose (e.g. 'French mediation offer')."),
     countries: {
       type: "array",
-      description: "Participating polities.",
+      description: "The other side: one or more polities' FULL names, never the player's.",
       minItems: 1,
-      items: chatCountrySchema,
+      items: nonEmptyTextSchema("A polity's FULL name (\"Spain\"), never a code."),
     },
-    messages: {
-      type: "array",
-      description: "Messages with which the chat begins.",
-      items: chatMessageSchema,
-    },
-    openingMessage: nonEmptyTextSchema(
-      "The initiating polity's first message, in its leader's voice - why it "
-      + "reached out and what it wants. Never written as the player.",
-    ),
-    speaker: nonEmptyTextSchema("Name of the polity sending the opening message. Never the player's polity."),
-    linkedEventId: textSchema("Optional event identifier linking this chat to its cause."),
-    source: textSchema("Optional source label."),
-    status: textSchema("Optional chat status."),
+    openingMessage: nonEmptyTextSchema("The initiator's first message, in its leader's voice. Never written as the player."),
+    speaker: nonEmptyTextSchema("The polity sending the opening message. Never the player's."),
+    linkedEventId: textSchema("The event that caused it, when one did."),
   },
   required: ["countries", "title", "speaker", "openingMessage"],
   additionalProperties: false,
 };
 
+// Field descriptions are kept to a line. The jump's schema rides on every
+// request and a test holds it to a size (projectOpSchema.test.js); the long form
+// of every lever is in the actions reference and the directives the jump is
+// always given, so a description here only has to say what the field IS.
+const regionIdSchema = textSchema("The region's id, or its plain name.");
+const regionNameSchema = textSchema("Region name, when known.");
+
 const regionTransferSchema = {
   type: "object",
-  description: "A LEGAL sovereignty transfer of one map region to a new polity. Temporary wartime occupation belongs in regionControlOps. " + "A transfer of one map region to a new polity owner.",
+  description: "Legal sovereignty of one region passes to a polity. Wartime occupation is regionControlOps.",
   properties: {
-    regionId: textSchema(
-      "Exact map region identifier when known; otherwise the region's plain name "
-      + "(the engine resolves names to ids).",
-    ),
-    regionName: textSchema("Human-readable region name, when known."),
-    fromCode: textSchema("Previous owner's FULL country name (\"Spain\"), never a country code."),
-    toCode: textSchema("New owner's FULL country name (\"Spain\"), never a country code such as \"ESP\"."),
-    note: textSchema("Brief reason for the transfer."),
+    regionId: regionIdSchema,
+    regionName: regionNameSchema,
+    fromCode: textSchema("Previous owner's FULL name (\"Spain\"), never a code."),
+    toCode: textSchema("New owner's FULL name (\"Spain\"), never a code."),
+    note: textSchema("Brief reason."),
     // Optional in the contract so an older payload still validates; the actions
     // reference asks for it on every entry. See runtime/territoryBasis.js.
     basis: { type: "string", enum: [...TERRITORY_BASIS_ENUM], description: TERRITORY_BASIS_DESCRIPTION },
     wholeCountry: {
       type: "boolean",
       description:
-        "Set true ONLY for a total conquest, annexation, unification or partition in "
-        + "which one polity takes EVERY region another still holds. fromCode is the "
-        + "authoritative losing polity and MUST contain its full current name; regionId "
-        + "must repeat that same polity name rather than naming one province/colony. "
-        + "This single entry is expanded natively to every region the losing polity "
-        + "still holds. Leave unset (the normal case) to transfer one named region.",
+        "True ONLY when one polity takes EVERY region another still holds (total conquest, "
+        + "annexation, unification, partition): fromCode is the losing polity's full name and "
+        + "regionId repeats it; the engine expands this to every region it holds. Unset transfers one region.",
     },
   },
   required: ["regionId", "toCode"],
@@ -126,27 +95,16 @@ const regionTransferSchema = {
 
 const regionClaimSchema = {
   type: "object",
-  description:
-    "One polity asserting a claim over a region it does not hold and has not been "
-    + "given. The region renders as DISPUTED on the map - striped in every "
-    + "claimant's colour - without its ownership changing, and stays that way until "
-    + "the claim is settled by a regionTransfers entry (someone won or conceded it) "
-    + "or dropped.",
+  description: "One polity's claim on a region it neither holds nor was given.",
   properties: {
-    regionId: textSchema(
-      "Exact map region identifier when known; otherwise the region's plain name "
-      + "(the engine resolves names to ids).",
-    ),
-    regionName: textSchema("Human-readable region name, when known."),
-    claimantCode: textSchema("Claiming polity's FULL country name (\"Spain\"), never a country code."),
+    regionId: regionIdSchema,
+    regionName: regionNameSchema,
+    claimantCode: textSchema("Claiming polity's FULL name (\"Spain\"), never a code."),
     drop: {
       type: "boolean",
-      description:
-        "True to WITHDRAW this polity's claim - it was renounced, traded away, or "
-        + "the claimant was defeated and has given it up. Clears their stripe. Leave "
-        + "unset to assert a claim.",
+      description: "True to WITHDRAW the claim (renounced, traded away, given up in defeat). Unset asserts it.",
     },
-    note: textSchema("Brief reason for the claim or its withdrawal."),
+    note: textSchema("Brief reason."),
   },
   required: ["regionId", "claimantCode"],
   additionalProperties: false,
@@ -159,10 +117,7 @@ const regionClaimSchema = {
 const statPct = (description) => ({ type: "integer", minimum: 0, maximum: 100, description });
 const statsUpdateSchema = {
   type: "object",
-  description:
-    "Updated national statistics for this polity. Include ONLY the fields that changed this period "
-    + "(a coup changes leader/government/stability; a war changes reputation/economy) — every field you "
-    + "omit keeps its previous value. Values are absolute, not deltas.",
+  description: "Only the fields that changed this period; every omitted field keeps its value. Absolute values, not deltas.",
   properties: {
     capital: textSchema("Capital, only when it changes."),
     continent: textSchema("Continent / broad region, only when it changes."),
@@ -209,22 +164,19 @@ const statsUpdateSchema = {
   additionalProperties: false,
 };
 
+const controlRegionIdSchema = nonEmptyTextSchema("The region's id or name, or the exact place the event names.");
 const regionControlOpSchema = {
-  description:
-    "A de-facto territorial control mutation. This is NOT legal sovereignty: use contest for an active disputed front, "
-    + "control for wartime capture/occupation/retaking, and clear_contest when a ceasefire/withdrawal/settlement ends an active contest.",
+  description: "One de-facto control operation.",
   anyOf: [
     {
       type: "object",
       properties: {
         op: { type: "string", enum: ["contest"] },
-        regionId: nonEmptyTextSchema(
-          "Exact map region id/name when known; otherwise the exact grounded city/historical-area wording from the event for bounded native resolution.",
-        ),
-        regionName: textSchema("Human-readable region/place wording, when useful."),
-        fromCode: nonEmptyTextSchema("Current controller/defending polity's FULL name; used to bound geography resolution."),
-        actorCode: nonEmptyTextSchema("Challenging/attacking polity's FULL name."),
-        note: textSchema("Brief reason the region is actively contested."),
+        regionId: controlRegionIdSchema,
+        regionName: regionNameSchema,
+        fromCode: nonEmptyTextSchema("Defending controller's FULL name."),
+        actorCode: nonEmptyTextSchema("Attacking polity's FULL name."),
+        note: textSchema("Brief reason."),
       },
       required: ["op", "regionId", "fromCode", "actorCode"],
       additionalProperties: false,
@@ -233,17 +185,15 @@ const regionControlOpSchema = {
       type: "object",
       properties: {
         op: { type: "string", enum: ["control"] },
-        regionId: nonEmptyTextSchema(
-          "Exact map region id/name when known; otherwise the exact grounded city/historical-area wording from the event for bounded native resolution.",
-        ),
-        regionName: textSchema("Human-readable region/place wording, when useful."),
-        fromCode: nonEmptyTextSchema("Previous de-facto controller's FULL polity name."),
-        toCode: nonEmptyTextSchema("New de-facto controller's FULL polity name."),
-        note: textSchema("Brief reason control changed."),
+        regionId: controlRegionIdSchema,
+        regionName: regionNameSchema,
+        fromCode: nonEmptyTextSchema("Previous controller's FULL name."),
+        toCode: nonEmptyTextSchema("New controller's FULL name."),
+        note: textSchema("Brief reason."),
         basis: { type: "string", enum: [...TERRITORY_BASIS_ENUM], description: TERRITORY_BASIS_DESCRIPTION_SHORT },
         wholeCountry: {
           type: "boolean",
-          description: "True only for a total military occupation/collapse where the new controller takes every region the previous controller still holds. fromCode is the authoritative losing/current controller and regionId must repeat that polity name, never one province/colony.",
+          description: "True only when the new controller takes EVERY region the previous one still holds; regionId repeats that polity's name.",
         },
       },
       required: ["op", "regionId", "fromCode", "toCode"],
@@ -253,14 +203,12 @@ const regionControlOpSchema = {
       type: "object",
       properties: {
         op: { type: "string", enum: ["clear_contest"] },
-        regionId: nonEmptyTextSchema(
-          "Exact map region id/name when known; otherwise the exact grounded place wording from the event.",
-        ),
-        regionName: textSchema("Human-readable region/place wording, when useful."),
-        fromCode: textSchema("Current controller's FULL polity name, strongly preferred to bound geography resolution."),
-        claimantCode: textSchema("Specific claimant/contender to remove. Omit only when clearAll=true."),
-        clearAll: { type: "boolean", description: "Clear all claimants only when a final settlement explicitly resolves the territorial dispute; ordinary ceasefires should remove a specific claimantCode." },
-        note: textSchema("Brief reason the contest ended."),
+        regionId: controlRegionIdSchema,
+        regionName: regionNameSchema,
+        fromCode: textSchema("Current controller's FULL name, preferred."),
+        claimantCode: textSchema("The contender to remove. Omit only with clearAll."),
+        clearAll: { type: "boolean", description: "Remove every contender — only for a final settlement; a ceasefire removes one claimantCode." },
+        note: textSchema("Brief reason."),
       },
       required: ["op", "regionId"],
       additionalProperties: false,
@@ -270,53 +218,39 @@ const regionControlOpSchema = {
 
 const polityChangeSchema = {
   type: "object",
-  description:
-    "One explicit polity lifecycle or metadata operation. Ordinary updates MUST target an existing polity; "
-    + "new identities are authorized only by create/restore, so a stale or sloppy name cannot silently mint a country.",
+  description: "One polity operation. update targets an EXISTING polity; only create and restore may introduce one.",
   properties: {
     operation: {
       type: "string",
       description:
-        "What this entry actually does. update = metadata/stats only on an existing polity; "
-        + "create = establish a genuinely new current polity, including an independence/breakaway actor; "
-        + "rename = reconstitute an existing polity under a new full display/current name while keeping its stable campaign identity; "
-        + "restore = bring back a dormant/dissolved historical polity as a current actor; "
-        + "dissolve = explicitly end a polity's current existence after its territory is separately settled.",
+        "update = metadata or stats of an existing polity; create = a genuinely new polity (a breakaway, an independence); "
+        + "rename = a new full name, same polity; restore = a dormant or dissolved polity returns; "
+        + "dissolve = a polity ends, once its territory is settled.",
       enum: ["update", "create", "rename", "restore", "dissolve"],
     },
-    code: textSchema(
-      "Exact FULL polity name, never a country code. For update/rename/dissolve this identifies the CURRENT/source polity. "
-      + "For create/restore this is the exact polity identity being established."
-    ),
-    name: textSchema(
-      "For rename, the NEW full polity name and it must be nonblank. For create/restore it may repeat the established name. "
-      + "For update omit it unless the display/current name itself intentionally changes without a lifecycle rename."
-    ),
-    color: textSchema("New six-digit hexadecimal color, only when it changes."),
-    aliases: stringArraySchema("Alternative polity names."),
+    code: textSchema("The polity's exact FULL current name, never a code — the one changed, renamed or dissolved; for create/restore, the identity established."),
+    name: textSchema("rename: the NEW full name (required). create/restore: may repeat code. update: only when the display name itself changes."),
+    color: textSchema("New six-digit hex colour, only when it changes."),
+    aliases: stringArraySchema("Alternative names."),
     // The prompt asks for this and gameState normalizes/clamps/writes it, but it
     // was missing here — and additionalProperties:false means a json_schema
     // provider could never emit it, so international reputation silently never
     // moved. Declaring it is what actually connects that feature.
     reputation: {
       type: "number",
-      description:
-        "International reputation 0-100, only when it changes. 0 is a pariah state, 100 is universally trusted.",
+      description: "International reputation 0-100, only when it changes: 0 a pariah, 100 universally trusted.",
     },
     intelligence: {
       type: "number",
       description:
-        "Intelligence service capability 0-100, only when it changes: a purge, a new bureau, a defector, "
-        + "funding, a foreign penetration exposed. Decides how much of others' diplomacy this polity can "
-        + "read, and how much of its own it can keep secret.",
+        "Intelligence service capability 0-100, only when it changes (a purge, a defector, a new bureau, funding). "
+        + "Decides how much of others' diplomacy it reads and how much of its own it keeps secret.",
     },
     tags: stringArraySchema(
-      "The country's defining traits after this change — ideology, alignment, posture "
-      + "(e.g. socialist, authoritarian, anti-nato). Only when they change: send the "
-      + "COMPLETE new list, not a delta. A revolution or a change of alignment should "
-      + "rewrite these.",
+      "Defining traits after this change — ideology, alignment, posture (socialist, authoritarian, anti-nato). "
+      + "Only when they change, and then the COMPLETE list, not a delta.",
     ),
-    note: textSchema("Brief reason for the change."),
+    note: textSchema("Brief reason."),
     stats: statsUpdateSchema,
   },
   required: ["operation", "code"],
@@ -351,23 +285,15 @@ const unitSchema = {
     ownerCode: nonEmptyTextSchema("Owning polity's FULL country name (\"Spain\"), never a country code."),
     strength: {
       type: "integer",
-      description:
-        "How much of its ESTABLISHED strength this formation actually has, as a "
-        + "percentage. 100 is a fresh full-strength formation; 60 is worn down; 20 is "
-        + "a shell. This is not a power score - put the formation's real size in "
-        + "`composition`.",
+      description: "Percentage of ESTABLISHED strength: 100 fresh, 60 worn down, 20 a shell. Not a power score — the real size goes in composition.",
       minimum: 1,
       maximum: 100,
     },
-    composition: nonEmptyTextSchema(
-      "What the formation is actually made of, in a few words - \"1 aircraft carrier, "
-      + "2 frigates\", \"3 tank regiments\", \"two rifle divisions\". A counter with no "
-      + "composition tells the player nothing.",
-    ),
+    composition: nonEmptyTextSchema("What it is made of, in a few words: \"1 carrier, 2 frigates\", \"3 tank regiments\"."),
     at: atSchema,
     lng: { type: "number", description: "Only with no `at`.", minimum: -180, maximum: 180 },
     lat: { type: "number", description: "Only with no `at`.", minimum: -90, maximum: 90 },
-    regionId: textSchema("Map region identifier, when known."),
+    regionId: textSchema("Region id, when known."),
     status: {
       type: "string",
       description: "Optional unit status.",
@@ -375,16 +301,10 @@ const unitSchema = {
     },
     posture: {
       type: "string",
-      description:
-        "What this formation is DOING, which is how the player reads intent off the "
-        + "map. \"patrol\" is special: the engine keeps a patrolling unit working its "
-        + "station on its own, turn after turn, so state it once and leave it.",
+      description: "What it is DOING. patrol is special: the engine keeps a patrolling unit on station turn after turn, so say it once.",
       enum: ["holding", "massing", "patrol", "transit", "exercise", "blockade", "withdrawing", "assaulting"],
     },
-    note: textSchema(
-      "One short present-tense sentence on what this formation is doing and where - "
-      + "\"Patrolling the North Atlantic approaches\". Shown to the player verbatim.",
-    ),
+    note: textSchema("One present-tense sentence on what it is doing and where; shown to the player."),
   },
   required: ["name", "type", "ownerCode", "strength", "composition"],
   additionalProperties: false,
@@ -417,15 +337,13 @@ const unitOpSchema = {
         at: atSchema,
         toLng: { type: "number", minimum: -180, maximum: 180 },
         toLat: { type: "number", minimum: -90, maximum: 90 },
-        regionId: textSchema("Destination region identifier, when known."),
+        regionId: textSchema("Destination region id, when known."),
         posture: {
           type: "string",
-          description:
-            "Re-state what the formation is doing if the move changes it - a force "
-            + "that was in transit and is now massing on a border, say.",
+          description: "Only when the move changes what it is doing.",
           enum: ["holding", "massing", "patrol", "transit", "exercise", "blockade", "withdrawing", "assaulting"],
         },
-        note: textSchema("Brief explanation of the operation."),
+        note: textSchema("Brief explanation."),
       },
       required: ["op", "unitId"],
       additionalProperties: false,
@@ -467,20 +385,18 @@ const markerStatusSchema = {
 
 const markerSchema = {
   type: "object",
-  description:
-    "A named structure on the map. kind is free-form lowercase - city, military base, "
-    + "bunker, missile silo, embassy, port, airfield, factory, monument, or anything else.",
+  description: "A named structure. kind is free-form lowercase: city, military base, silo, embassy, port, airfield…",
   properties: {
     id: textSchema("Stable marker identifier."),
-    name: nonEmptyTextSchema("Display name of the structure."),
-    kind: nonEmptyTextSchema("What the structure is, as a short lowercase noun phrase."),
-    ownerCode: textSchema("Owning polity's FULL country name (\"Spain\") when owned, never a country code."),
+    name: nonEmptyTextSchema("Display name."),
+    kind: nonEmptyTextSchema("What it is, as a short lowercase noun phrase."),
+    ownerCode: textSchema("Owning polity's FULL name (\"Spain\") when owned, never a code."),
     status: markerStatusSchema,
     at: atSchema,
     lng: { type: "number", description: "Only with no `at`.", minimum: -180, maximum: 180 },
     lat: { type: "number", description: "Only with no `at`.", minimum: -90, maximum: 90 },
-    note: textSchema("Brief description shown when the structure is inspected."),
-    foundedAt: textSchema("In-game date the structure was built or founded."),
+    note: textSchema("Brief description, shown when inspected."),
+    foundedAt: textSchema("In-game date it was built or founded."),
   },
   required: ["name", "kind"],
   additionalProperties: false,
@@ -502,10 +418,7 @@ const spyOpSchema = {
 };
 
 const markerOpSchema = {
-  description:
-    "Persistent physical-world mutation. Use build for a genuinely new feature; update or rename for an "
-    + "existing stable object; remove only for canonical deletion; population when a city's population changes. "
-    + "Fill the fields that op needs.",
+  description: "build a genuinely new structure; update or rename an existing one; remove only when it ceases to exist; population when a city's population changes.",
   anyOf: [
     {
       type: "object",
@@ -529,11 +442,11 @@ const markerOpSchema = {
         id: textSchema("Stable marker identifier."),
         name: nonEmptyTextSchema("Name of the structure or place."),
         kind: textSchema("What it is: city, base, bunker, silo, embassy, port."),
-        ownerCode: textSchema("Owning polity's FULL country name (\"Spain\"), never a country code."),
+        ownerCode: textSchema("Owning polity's FULL name (\"Spain\"), never a code."),
         status: markerStatusSchema,
         at: atSchema,
-        lng: { type: "number", description: "Longitude.", minimum: -180, maximum: 180 },
-        lat: { type: "number", description: "Latitude.", minimum: -90, maximum: 90 },
+        lng: { type: "number", description: "Only with no `at`.", minimum: -180, maximum: 180 },
+        lat: { type: "number", description: "Only with no `at`.", minimum: -90, maximum: 90 },
         note: textSchema("Brief explanation."),
       },
       required: ["op", "name"],
@@ -543,15 +456,15 @@ const markerOpSchema = {
       type: "object",
       properties: {
         op: { type: "string", enum: ["update"] },
-        markerId: textSchema("Existing stable marker id. Prefer this whenever the current map structures list one."),
-        name: textSchema("Existing feature name, only as a fallback when markerId is unavailable."),
-        kind: textSchema("New/current feature kind when materially changed."),
-        ownerCode: textSchema("New/current operating polity's FULL country name when control or ownership changes."),
+        markerId: textSchema("Existing marker id, preferred when the structures list shows one."),
+        name: textSchema("Existing name, only when markerId is unavailable."),
+        kind: textSchema("New kind, when it materially changed."),
+        ownerCode: textSchema("New operating polity's FULL name, when control changes."),
         status: markerStatusSchema,
         at: { type: "string", description: "New place, only when it genuinely relocates." },
         lng: { type: "number", description: "New longitude, only with no `at`.", minimum: -180, maximum: 180 },
         lat: { type: "number", description: "New latitude, only with no `at`.", minimum: -90, maximum: 90 },
-        note: textSchema("Updated brief current description after this event."),
+        note: textSchema("Updated brief description."),
       },
       required: ["op"],
       additionalProperties: false,
@@ -560,9 +473,9 @@ const markerOpSchema = {
       type: "object",
       properties: {
         op: { type: "string", enum: ["remove"] },
-        markerId: textSchema("Existing stable marker identifier, preferred when known."),
-        name: textSchema("Existing feature name when markerId is unavailable."),
-        note: textSchema("Brief explanation of the canonical deletion or correction."),
+        markerId: textSchema("Existing marker id, preferred when known."),
+        name: textSchema("Existing name, when markerId is unavailable."),
+        note: textSchema("Brief explanation."),
       },
       required: ["op"],
       additionalProperties: false,
@@ -571,10 +484,10 @@ const markerOpSchema = {
       type: "object",
       properties: {
         op: { type: "string", enum: ["rename"] },
-        markerId: textSchema("Existing marker identifier, when known."),
-        name: nonEmptyTextSchema("Current name of the structure or city to rename."),
+        markerId: textSchema("Existing marker id, when known."),
+        name: nonEmptyTextSchema("Current name of the structure or city."),
         newName: nonEmptyTextSchema("New display name."),
-        note: textSchema("Brief explanation of the rename."),
+        note: textSchema("Brief explanation."),
       },
       required: ["op", "name", "newName"],
       additionalProperties: false,
@@ -583,14 +496,14 @@ const markerOpSchema = {
       type: "object",
       properties: {
         op: { type: "string", enum: ["population"] },
-        markerId: textSchema("Existing marker identifier, when known."),
-        name: nonEmptyTextSchema("Name of the city whose population changed."),
+        markerId: textSchema("Existing marker id, when known."),
+        name: nonEmptyTextSchema("The city."),
         population: {
           type: "integer",
-          description: "The city's new total population, as a whole number of people.",
+          description: "New total population, a whole number of people.",
           minimum: 0,
         },
-        note: textSchema("Why it changed: siege, famine, industrial boom, refugees."),
+        note: textSchema("Why: siege, famine, industrial boom, refugees."),
       },
       required: ["op", "name", "population"],
       additionalProperties: false,
@@ -856,31 +769,32 @@ const projectOpSchema = {
 
 const impactsSchema = {
   type: "object",
-  description: "Optional structured world-state effects. Include only effect arrays that are relevant.",
+  description: "World-state effects; include only the arrays that apply.",
   properties: {
-    actionIds: stringArraySchema("Player action identifiers resolved by the event."),
+    actionIds: stringArraySchema("Player action ids this event resolves."),
     createdChats: {
       type: "array",
-      description: "Diplomatic chats opened by the event.",
+      description: "Chats this event opens toward the player.",
       items: createdChatSchema,
     },
     polityChanges: {
       type: "array",
-      description: "Polity metadata changes.",
+      description: "Polity changes.",
       items: polityChangeSchema,
     },
     regionTransfers: {
       type: "array",
       description:
-        "Map ownership changes. REQUIRED whenever the event text says territory was "
-        + "captured, occupied, annexed, ceded, liberated, or otherwise changed hands - "
-        + "one entry per affected region, or the map will not match the story.",
+        "Ownership changes — REQUIRED whenever the text says territory changed hands (captured, "
+        + "annexed, ceded, liberated), one entry per region, or the map will not match the story.",
       items: regionTransferSchema,
     },
     regionControlOps: {
       type: "array",
       description:
-        "DE-FACTO territorial control and active front disputes: wartime contest, capture/occupation/retaking, and clearing a contest, without pretending legal sovereignty changed. A settled dispute that merely stripes a region is a regionClaims entry; a border that legally moves is a regionTransfers entry.",
+        "DE-FACTO control, not sovereignty: contest = an active disputed front; control = capture, occupation "
+        + "or retaking; clear_contest = a ceasefire, withdrawal or settlement ends the contest. A border that "
+        + "legally moves is regionTransfers; a claim is regionClaims.",
       items: regionControlOpSchema,
     },
     unitOps: {
@@ -890,29 +804,20 @@ const impactsSchema = {
     },
     markerOps: {
       type: "array",
-      description:
-        "Structures built, destroyed, renamed or resized on the map. Use whenever "
-        + "the event founds, constructs, or destroys a named place - a city, military "
-        + "base, bunker, missile silo, embassy, port - so the map shows it, and "
-        + "whenever a city's POPULATION changes.",
+      description: "Structures built, destroyed, renamed or resized: whenever the event founds, builds or destroys a named place, or a city's population changes.",
       items: markerOpSchema,
     },
     spyOps: {
       type: "array",
-      description:
-        "The player's espionage orders this event executes: deploy an agent to a "
-        + "country or recall the one there. Only when the player's queued actions or "
-        + "explicit chat statements ordered it; never for other powers.",
+      description: "The player's own espionage orders this event executes (deploy or recall an agent), only when their queued actions or chat ordered it; never for other powers.",
       items: spyOpSchema,
     },
     regionClaims: {
       type: "array",
       description:
-        "Territory CLAIMED but not held. Use whenever a polity asserts a right to "
-        + "land it does not control and has not been given it - an irredentist "
-        + "declaration, a proclaimed union, a contested border, a government-in-"
-        + "exile's title. Marks the region disputed on the map WITHOUT moving the "
-        + "border; use regionTransfers for land that actually changed hands.",
+        "Territory CLAIMED but not held — an irredentist declaration, a proclaimed union, a contested border, "
+        + "a government-in-exile's title. The region shows as disputed WITHOUT the border moving; land that "
+        + "changed hands is regionTransfers.",
       items: regionClaimSchema,
     },
     projectOps: {
@@ -1061,10 +966,8 @@ export const JUMP_FORWARD_SCHEMA = {
     diplomaticOutreach: {
       type: "array",
       description:
-        "Polities reaching out to the player ON THEIR OWN initiative - treaty "
-        + "feelers, trade proposals, warnings, summit invitations - not tied to "
-        + "any single event. One-on-one or group. Empty when nobody would "
-        + "plausibly reach out this period.",
+        "Polities reaching out to the player on their OWN initiative (feelers, proposals, warnings, "
+        + "invitations), not tied to one event. Empty when nobody plausibly would.",
       items: createdChatSchema,
     },
     // The canonical ledgers (nativeWarLedger.js, nativeDiplomaticDirector.js)
@@ -1073,23 +976,19 @@ export const JUMP_FORWARD_SCHEMA = {
     // choke on, and the line formats are taught in the live prompt.
     storylineUpdates: {
       type: "string",
-      description:
-        "Compact newline-separated storyline records. Empty string when none. Persist unresolved multi-turn crises/processes here instead of letting a major crisis disappear after one event. Record format is documented in the live prompt.",
+      description: "Newline-separated storyline records, format in the prompt; unresolved multi-turn crises persist here. Empty string when none.",
     },
     warUpdates: {
       type: "string",
-      description:
-        "Compact newline-separated canonical war-state operations. Empty string when no belligerency changes. Record format is documented in the live prompt.",
+      description: "Newline-separated war-state records, format in the prompt. Empty string when belligerency did not change.",
     },
     relationUpdates: {
       type: "string",
-      description:
-        "Compact newline-separated bilateral relation updates. Empty string when no material bilateral political relation changes. Record format is documented in the live prompt.",
+      description: "Newline-separated bilateral relation records, format in the prompt. Empty string when none changed materially.",
     },
     agreementUpdates: {
       type: "string",
-      description:
-        "Compact newline-separated formal treaty/agreement lifecycle updates. Empty string when no formal commitment starts, changes, suspends, resumes, ends, or expires. Record format is documented in the live prompt.",
+      description: "Newline-separated treaty/agreement lifecycle records, format in the prompt. Empty string when none started, changed or ended.",
     },
   },
   // clearActions is deliberately NOT required: simulateTimelineJump already
@@ -1809,6 +1708,22 @@ const parseGameMasterTransportArray = (value, field) => {
   return parsed;
 };
 
+// The transport shows the GM no schema for a chat, so its countries arrive as
+// names or as {name} objects; the schema it is validated against takes names.
+const normalizeGameMasterChats = (payload) => {
+  if (!isPlainRecord(payload)) return payload;
+  const next = { ...payload };
+  if (Array.isArray(next.events)) {
+    next.events = next.events.map((event) => (
+      isPlainRecord(event) && isPlainRecord(event.impacts) && Array.isArray(event.impacts.createdChats)
+        ? { ...event, impacts: { ...event.impacts, createdChats: normalizeChatList(event.impacts.createdChats) } }
+        : event
+    ));
+  }
+  if (Array.isArray(next.diplomaticOutreach)) next.diplomaticOutreach = normalizeChatList(next.diplomaticOutreach);
+  return next;
+};
+
 export const decodeGameMasterTransportPayload = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { payload: value, error: "" };
@@ -1817,7 +1732,7 @@ export const decodeGameMasterTransportPayload = (value) => {
   const isTransport = GAME_MASTER_TRANSPORT_FIELDS.some(([field]) => Object.prototype.hasOwnProperty.call(value, field));
   if (!isTransport) {
     // Raw/local providers may already return the internal structured transaction.
-    return { payload: value, error: "" };
+    return { payload: normalizeGameMasterChats(value), error: "" };
   }
 
   try {
@@ -1828,7 +1743,7 @@ export const decodeGameMasterTransportPayload = (value) => {
     for (const [field, key] of GAME_MASTER_TRANSPORT_FIELDS) {
       payload[key] = parseGameMasterTransportArray(value[field], field);
     }
-    return { payload, error: "" };
+    return { payload: normalizeGameMasterChats(payload), error: "" };
   } catch (error) {
     return { payload: null, error: String(error?.message || error || "Invalid GM transport payload.") };
   }
@@ -2911,6 +2826,18 @@ const normalizeUnitOperationShape = (entry) => {
   return { ...entry, unit };
 };
 
+// A chat's countries are names. A model working from an older prompt copy (or
+// the one older schema) writes {"name": "France"} or {"code": "France"}; both
+// read as "France". Anything else in the entry is left as it is.
+const normalizeChatShape = (entry) => {
+  if (!isPlainRecord(entry) || !Array.isArray(entry.countries)) return entry;
+  const countries = entry.countries
+    .map((country) => (isPlainRecord(country) ? String(country.name ?? country.code ?? "").trim() : country))
+    .filter((country) => typeof country !== "string" || country);
+  return { ...entry, countries };
+};
+const normalizeChatList = (value) => (Array.isArray(value) ? value.map(normalizeChatShape) : value);
+
 const PAYLOAD_IMPACT_ARRAYS = [
   "actionIds",
   "createdChats",
@@ -2982,6 +2909,7 @@ const normalizeEventShape = (entry) => {
     if (Array.isArray(impacts.unitOps)) {
       impacts.unitOps = impacts.unitOps.map(normalizeUnitOperationShape);
     }
+    if (Array.isArray(impacts.createdChats)) impacts.createdChats = normalizeChatList(impacts.createdChats);
     event.impacts = impacts;
   }
   return event;
@@ -2996,6 +2924,7 @@ const normalizeIdleDiplomacyShape = (value) => {
   if (!isPlainRecord(value)) return value;
   const candidate = { ...value };
   if (typeof candidate.chat === "string") candidate.chat = null;
+  if (isPlainRecord(candidate.chat)) candidate.chat = normalizeChatShape(candidate.chat);
   if (Array.isArray(candidate.unitOps)) candidate.unitOps = candidate.unitOps.map(normalizeUnitOperationShape);
   return candidate;
 };
@@ -3068,6 +2997,7 @@ export const normalizeGameplayPayload = (taskKey, value) => {
   delete candidate.actionsResolved;
 
   if (Array.isArray(candidate.events)) candidate.events = candidate.events.map(normalizeEventShape);
+  if (Array.isArray(candidate.diplomaticOutreach)) candidate.diplomaticOutreach = normalizeChatList(candidate.diplomaticOutreach);
   return candidate;
 };
 

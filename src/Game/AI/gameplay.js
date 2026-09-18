@@ -230,7 +230,16 @@ import { isFallbackListConfigured } from "./providerConfig.js";
 import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
-import { buildWorldDirectionDirective, worldShareShortfall } from "./worldDirection.js";
+import {
+  applyTerritoryTempo,
+  buildScriptedEventsInstruction,
+  buildWorldDirectionDirective,
+  dateKey,
+  ensureScriptedEvents,
+  parseScriptedEvents,
+  scriptedBeatsInSpan,
+  worldShareShortfall,
+} from "./worldDirection.js";
 import { addGameDays, compareGameDates, diffGameDays, gameDateDayNumber, normalizeGameDate, parseGameDate } from "../../runtime/gameDates.js";
 import {
   NO_RESPONSE_BODY_NOTE,
@@ -2351,6 +2360,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   if (["jumpForward", "autoJumpForward"].includes(taskKey)) {
     const directionDirective = buildWorldDirectionDirective(getActiveWorldDirection(), {
       playerPolity: normalizeString(variables?.playerPolity),
+      spanDays: computeSimulatedDays(variables) || 30,
     });
     if (directionDirective) systemPrompt = `${systemPrompt}\n\n${directionDirective}`;
   }
@@ -2476,6 +2486,9 @@ const runJsonTask = async (taskKey, {
   // and the salvage pass below the loop.
   let firstFailureReason = "";
   let salvageCandidate = null;
+  // The call found no model whose context window takes this request
+  // (contextWindow.js): kept so a time skip can refuse rather than go canned.
+  let tooBigForEveryModel = null;
   // While requests are being saved (requestBudget.js) the FIRST answer is judged
   // the way the last one always was: the task validator repairs it in place
   // instead of sending it back, and a fault the schema names is cut out
@@ -2905,6 +2918,7 @@ const runJsonTask = async (taskKey, {
     }
   } catch (error) {
     const actualError = controller.signal.aborted ? controller.signal.reason : error;
+    if (actualError?.providerFailure?.kind === "tooBig") tooBigForEveryModel = actualError;
     const transportReason = normalizeString(actualError?.message || actualError);
     // The retry dying in transport used to ERASE why the first answer was
     // rejected, so the debug report the player copies out read "Internal server
@@ -2931,6 +2945,15 @@ const runJsonTask = async (taskKey, {
     throw signal.reason instanceof Error
       ? signal.reason
       : new DOMException("Timeline jump cancelled.", "AbortError");
+  }
+
+  // The request does not fit any model the player has (contextWindow.js). A
+  // canned turn would hide that behind fallback events skip after skip, and
+  // write them into the game's history; the time skip refuses instead, and the
+  // message says which model to pick. Every other task keeps its harmless
+  // "unavailable" fallback.
+  if (tooBigForEveryModel && ["jumpForward", "autoJumpForward"].includes(taskKey)) {
+    throw tooBigForEveryModel;
   }
 
   // Last chance before the canned fallback. An earlier answer that cleared the
@@ -5365,7 +5388,9 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         const chatError = validateChatOpener(createdChat, `${path}.createdChats[${index}]`);
         if (chatError) return chatError;
       }
-      keptChats.push(createdChat);
+      // The model names its participants; what is kept on the event is the
+      // resolved {code, name} list every reader of a stored chat expects.
+      keptChats.push({ ...createdChat, countries });
     }
     if (impacts && Array.isArray(impacts.createdChats)) impacts.createdChats = keptChats;
 
@@ -5500,7 +5525,7 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
         const chatError = validateChatOpener(candidate.diplomaticOutreach[index], `$.diplomaticOutreach[${index}]`);
         if (chatError) return chatError;
       }
-      keptOutreach.push(candidate.diplomaticOutreach[index]);
+      keptOutreach.push({ ...candidate.diplomaticOutreach[index], countries });
     }
     candidate.diplomaticOutreach = keptOutreach;
   }
@@ -10326,9 +10351,20 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
       // The scenario author's settings (worldDirection.js): the pace scales what
       // the period is asked for here, and the world's share is counted below.
       const direction = getActiveWorldDirection();
-      const [minEvents, maxEvents] = segmentCount > 1
+      // The author's scripted events that fall in this span (worldDirection.js):
+      // asked for by name, and each one a slot of its own on top of the range.
+      // The game's first skip covers its origin day too; after that the origin
+      // day belongs to the period before.
+      const scriptedBeats = scriptedBeatsInSpan(parseScriptedEvents(direction?.scriptedEvents), {
+        originDate: state.segmentOrigin,
+        targetDate: segmentTarget,
+        includeOrigin: normalizeArray(bundle.world?.simulationHistory).length === 0 && segmentIndex === 0,
+      });
+      const [pacedMin, pacedMax] = segmentCount > 1
         ? segmentEventRange(spanDays, plannedActionShare, { pace: direction?.eventPace })
         : segmentEventRange(safeDays, plannedActionCount, { pace: direction?.eventPace });
+      const minEvents = Math.max(pacedMin, scriptedBeats.length);
+      const maxEvents = Math.max(pacedMax, scriptedBeats.length + 1);
       // targetDate reaches only these two variables (promptContext.js), so the
       // expensive context — region catalog, city seed, territory index — is built
       // once for the whole jump and only the dates move per segment.
@@ -10407,7 +10443,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
           targetDate,
           segmentTargetDate: segmentTarget,
           priorEvents: state.generatedSoFar,
-        })].filter(Boolean).join("\n\n"),
+        }), buildScriptedEventsInstruction(scriptedBeats)].filter(Boolean).join("\n\n"),
         validatePayload: withReceiptDraft(async (candidate, { finalAttempt } = {}, draft) => {
           // Shape-of-story problems (event count, stray dates) are STRICT while a
           // retry remains — the model gets the exact error and usually fixes its
@@ -10463,6 +10499,38 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
               "adjusted",
               `Some event dates fell outside ${state.segmentOrigin} to ${segmentTarget} and were moved inside it — ${firstComplaintLine(dateError)}`,
             );
+          }
+          // The map's tempo, an author's ceiling on how many regions change hands
+          // in a period (worldDirection.js): counted in event order, before the
+          // resolver spends anything on entries the period cannot carry. Never a
+          // rejection — the front simply moves this far, and the model is told.
+          if (direction?.territoryTempo > 0) {
+            const tempo = applyTerritoryTempo(candidate?.events, { ceilingPerMonth: direction.territoryTempo, spanDays });
+            if (tempo.withheld > 0) {
+              candidate.events = tempo.events;
+              noteReceipt(
+                draft,
+                "withheld",
+                `${tempo.withheld} territorial change${tempo.withheld === 1 ? " was" : "s were"} withheld: this scenario's map moves no faster than ${Math.round(direction.territoryTempo)} region${Math.round(direction.territoryTempo) === 1 ? "" : "s"} per thirty days (${tempo.allowance} this period), counted in event order. `
+                  + "Carry the rest of that advance into the next period, or write the front as holding.",
+              );
+            }
+          }
+          // The author's scripted events (worldDirection.js): one the answer left
+          // out is written by the engine, in the author's words, and the model is
+          // told so it carries the consequences. An auto jump that stopped short
+          // owes only the beats up to where it stopped.
+          if (scriptedBeats.length) {
+            const stopKey = mode === "auto" ? dateKey(candidate?.stopDate) : null;
+            const due = stopKey === null ? scriptedBeats : scriptedBeats.filter((beat) => dateKey(beat.date) <= stopKey);
+            const scripted = ensureScriptedEvents(candidate?.events, due);
+            if (scripted.inserted.length) {
+              candidate.events = scripted.events;
+              sortTimelineEventsChronologically(candidate);
+              for (const beat of scripted.inserted) {
+                noteReceipt(draft, "adjusted", `The scripted event of ${beat.date} — "${beat.title}" — was not in your answer, so the engine wrote it in the author's words, with no impacts. It is history in this world: its consequences are yours to carry forward.`);
+              }
+            }
           }
           // The war ledger must see the sanitized impacts, so world changes go first.
           const worldChangeError = await validateGeneratedWorldChanges(candidate, bundle.world, {
@@ -10541,6 +10609,14 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
     // A deliberate cancel must still cancel.
     if (signal?.aborted || error?.name === "AbortError") throw error;
     const reason = normalizeString(error?.message) || `AI task "jumpForward" failed.`;
+
+    // The request fits no model the player has (contextWindow.js): canned events
+    // would hide that, skip after skip. The turn refuses instead, with the
+    // message that says which model to pick. Nothing was written.
+    if (error?.providerFailure?.kind === "tooBig" && segmentCount <= 1) {
+      logDebugEvent("warn", "[turn] The jump was refused: the request fits no model in the Fallback list. Nothing was written.", { reason });
+      throw error;
+    }
 
     // A single call reaching here has already exhausted its own fallback, so there
     // is no other segment to keep and nothing to retry piecemeal: it falls back

@@ -331,8 +331,10 @@ const collectEventTags = (event, { polityLookup, regionLookup }) => {
 
     for (const chat of event?.impacts?.createdChats ?? []) {
         for (const country of chat?.countries ?? []) {
-            if (country?.name) {
-                labels.add(country.name);
+            // A participant is {code, name} once resolved, a bare name before.
+            const label = typeof country === "string" ? country : country?.name;
+            if (label) {
+                labels.add(label);
             }
         }
     }
