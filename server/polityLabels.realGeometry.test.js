@@ -11,26 +11,48 @@ const MODERN_REGIONS = JSON.parse(
 );
 
 const REPRESENTATIVE_OWNERS = Object.freeze([
-  "United States of America",
+  "United States",
   "Canada",
-  "Russian Federation",
-  "People's Republic of China",
-  "French Republic",
-  "Federal Republic of Germany",
-  "Republic of Belarus",
-  "Republic of Poland",
+  "Russia",
+  "China",
+  "France",
+  "Germany",
+  "Belarus",
+  "Poland",
   "Ukraine",
-  "Republic of Austria",
-  "Slovak Republic",
+  "Austria",
+  "Slovakia",
   "Hungary",
-  "Italian Republic",
-  "Kingdom of Norway",
-  "Republic of Kazakhstan",
-  "Kingdom of Denmark",
-  "Hellenic Republic",
+  "Italy",
+  "Norway",
+  "Kazakhstan",
+  "Denmark",
+  "Greece",
   "New Zealand",
-  "Republic of Chile",
+  "Chile",
 ]);
+
+// The text each fixture is laid out with. The seed now calls these countries
+// by their common names; the thresholds below were measured on their former
+// formal names, which stay the typographic input so every measurement holds.
+const LABEL_TEXT = Object.freeze({
+  "United States": "United States of America",
+  Russia: "Russian Federation",
+  China: "People's Republic of China",
+  France: "French Republic",
+  Germany: "Federal Republic of Germany",
+  Belarus: "Republic of Belarus",
+  Poland: "Republic of Poland",
+  Austria: "Republic of Austria",
+  Slovakia: "Slovak Republic",
+  Italy: "Italian Republic",
+  Norway: "Kingdom of Norway",
+  Kazakhstan: "Republic of Kazakhstan",
+  Denmark: "Kingdom of Denmark",
+  Greece: "Hellenic Republic",
+  Chile: "Republic of Chile",
+});
+const labelText = (owner) => LABEL_TEXT[owner] ?? owner;
 
 const representativeRegions = {
   type: "FeatureCollection",
@@ -44,7 +66,7 @@ const geometryByOwner = new Map(
   representativeGeometry.features.map((feature) => [feature.properties.owner, feature]),
 );
 
-const layoutFor = (owner, name = owner) => {
+const layoutFor = (owner, name = labelText(owner)) => {
   const geometry = geometryByOwner.get(owner);
   assert.ok(geometry, `missing real-geometry fixture for ${owner}`);
   return buildPolityLabelCollections(
@@ -133,9 +155,9 @@ const screenPxAtZoom = (fontPxAtZoom4, zoom) => (
 );
 
 test("real-geometry harness preserves highly fragmented production polity inputs", () => {
-  const usa = geometryByOwner.get("United States of America");
-  const china = geometryByOwner.get("People's Republic of China");
-  const denmark = geometryByOwner.get("Kingdom of Denmark");
+  const usa = geometryByOwner.get("United States");
+  const china = geometryByOwner.get("China");
+  const denmark = geometryByOwner.get("Denmark");
 
   assert.ok(usa?.properties?.regionCount >= 250, `USA regionCount=${usa?.properties?.regionCount}`);
   assert.ok(usa?.geometry?.coordinates?.length > 64, "USA fixture must exceed the old 64-polygon fitting cap");
@@ -145,14 +167,14 @@ test("real-geometry harness preserves highly fragmented production polity inputs
 });
 
 test("PTR canonical logical records expose deterministic territorial baselines independent of legacy line eligibility", () => {
-  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: labelText });
   for (const owner of [
-    "Russian Federation",
-    "People's Republic of China",
-    "French Republic",
-    "Federal Republic of Germany",
-    "Republic of Belarus",
-    "Republic of Poland",
+    "Russia",
+    "China",
+    "France",
+    "Germany",
+    "Belarus",
+    "Poland",
     "Ukraine",
   ]) {
     const label = primaryLabelFor(collections, owner);
@@ -167,8 +189,8 @@ test("PTR canonical logical records expose deterministic territorial baselines i
 });
 
 test("production worker-safe label engine is deterministic on representative real geometry", () => {
-  const first = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
-  const second = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  const first = buildPolityLabelCollections(representativeGeometry, { nameResolver: labelText });
+  const second = buildPolityLabelCollections(representativeGeometry, { nameResolver: labelText });
 
   assert.deepEqual(second, first);
   for (const owner of REPRESENTATIVE_OWNERS) {
@@ -177,20 +199,20 @@ test("production worker-safe label engine is deterministic on representative rea
 });
 
 test("real-geometry harness exercises the production name resolver", () => {
-  const short = layoutFor("People's Republic of China", "CHINA");
-  const formal = layoutFor("People's Republic of China", "PEOPLE'S REPUBLIC OF CHINA");
+  const short = layoutFor("China", "CHINA");
+  const formal = layoutFor("China", "PEOPLE'S REPUBLIC OF CHINA");
 
-  assert.equal(primaryLabelFor(short, "People's Republic of China")?.properties?.name, "CHINA");
+  assert.equal(primaryLabelFor(short, "China")?.properties?.name, "CHINA");
   assert.equal(
-    primaryLabelFor(formal, "People's Republic of China")?.properties?.name,
+    primaryLabelFor(formal, "China")?.properties?.name,
     "PEOPLE'S REPUBLIC OF CHINA",
   );
 });
 
 test("CP2 real geometry: short/formal/localized names preserve anchor, axis and spine", () => {
   const variants = [
-    ["People's Republic of China", ["CHINA", "PEOPLE'S REPUBLIC OF CHINA", "中华人民共和国"]],
-    ["United States of America", ["USA", "UNITED STATES OF AMERICA"]],
+    ["China", ["CHINA", "PEOPLE'S REPUBLIC OF CHINA", "中华人民共和国"]],
+    ["United States", ["USA", "UNITED STATES OF AMERICA"]],
   ];
 
   for (const [owner, names] of variants) {
@@ -219,9 +241,9 @@ test("CP2 real geometry: short/formal/localized names preserve anchor, axis and 
 
 test("CP3 real geometry: selected components are fitted without administrative-piece truncation", () => {
   const checks = [
-    ["United States of America", 200],
-    ["People's Republic of China", 150],
-    ["Russian Federation", 250],
+    ["United States", 200],
+    ["China", 150],
+    ["Russia", 250],
   ];
 
   for (const [owner, minimumPieces] of checks) {
@@ -237,7 +259,7 @@ test("CP3 real geometry: selected components are fitted without administrative-p
 });
 
 test("CP4 real geometry: primary point anchors remain inside owner territory", () => {
-  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: labelText });
   for (const owner of REPRESENTATIVE_OWNERS) {
     const label = primaryLabelFor(collections, owner);
     const geometry = geometryByOwner.get(owner);
@@ -253,7 +275,7 @@ test("CP4 real geometry: primary point anchors remain inside owner territory", (
 });
 
 test("CP4 real geometry: every accepted line path remains inside owner territory", () => {
-  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: labelText });
   assert.ok(collections.lineLabelData.features.length > 0, "fixture must exercise curved labels");
   for (const line of collections.lineLabelData.features) {
     const owner = String(line?.properties?.sourceOwner ?? line?.properties?.owner ?? "");
@@ -269,20 +291,20 @@ test("CP4 real geometry: every accepted line path remains inside owner territory
 
 test("CP4.2 real geometry: Pax-style fixtures receive territorial baselines without country-specific rules", () => {
   const owners = [
-    "United States of America",
+    "United States",
     "Canada",
-    "Russian Federation",
-    "People's Republic of China",
-    "French Republic",
-    "Federal Republic of Germany",
-    "Republic of Belarus",
-    "Republic of Poland",
+    "Russia",
+    "China",
+    "France",
+    "Germany",
+    "Belarus",
+    "Poland",
     "Ukraine",
-    "Republic of Austria",
-    "Slovak Republic",
+    "Austria",
+    "Slovakia",
     "Hungary",
-    "Italian Republic",
-    "Kingdom of Norway",
+    "Italy",
+    "Norway",
   ];
 
   for (const owner of owners) {
@@ -302,12 +324,12 @@ test("CP4.2 real geometry: Pax-style fixtures receive territorial baselines with
 
 test("CP4.2 real geometry: subtle European flow and broad continental flow are both preserved", () => {
   const subtle = [
-    "Federal Republic of Germany",
-    "Republic of Belarus",
-    "Republic of Poland",
+    "Germany",
+    "Belarus",
+    "Poland",
     "Ukraine",
-    "Republic of Austria",
-    "Slovak Republic",
+    "Austria",
+    "Slovakia",
     "Hungary",
   ];
   for (const owner of subtle) {
@@ -318,7 +340,7 @@ test("CP4.2 real geometry: subtle European flow and broad continental flow are b
       `${owner} baseline should stay calm, max turn=${label.properties.warpMaxSegmentTurnDegrees}`);
   }
 
-  const russia = primaryLabelFor(layoutFor("Russian Federation"), "Russian Federation");
+  const russia = primaryLabelFor(layoutFor("Russia"), "Russia");
   assert.ok(russia.properties.placementBendRatio >= 0.045,
     `Russia should keep a broad continental arc, bend=${russia.properties.placementBendRatio}`);
   assert.ok(russia.properties.pathTurnDegrees >= 20,
@@ -329,16 +351,16 @@ test("CP4.2 real geometry: subtle European flow and broad continental flow are b
 
 test("CP4.3 line typography exposes the curved glyph-support span while keeping renderer headroom", () => {
   const owners = [
-    "United States of America",
-    "Russian Federation",
-    "People's Republic of China",
-    "French Republic",
-    "Federal Republic of Germany",
-    "Republic of Belarus",
-    "Republic of Poland",
+    "United States",
+    "Russia",
+    "China",
+    "France",
+    "Germany",
+    "Belarus",
+    "Poland",
     "Ukraine",
-    "Republic of Austria",
-    "Slovak Republic",
+    "Austria",
+    "Slovakia",
     "Hungary",
   ];
 
@@ -354,23 +376,23 @@ test("CP4.3 line typography exposes the curved glyph-support span while keeping 
   // The production A/B diagnostic established a hard USA failure at 20px and a
   // successful render at 18px at z2.25. CP4.3 must expose more of the curved
   // support without crossing that known renderer boundary.
-  const usa = primaryLabelFor(layoutFor("United States of America"), "United States of America");
+  const usa = primaryLabelFor(layoutFor("United States"), "United States");
   assert.ok(screenPxAtZoom(usa.properties.lineFontPxAtZoom4, 2.25) < 18,
     `USA z2.25 line size=${screenPxAtZoom(usa.properties.lineFontPxAtZoom4, 2.25)}`);
 });
 
 test("CP4.3 acceptance measures curvature under the actual centered text footprint", () => {
   const expectations = [
-    ["United States of America", 0.045],
-    ["Russian Federation", 0.045],
-    ["People's Republic of China", 0.045],
-    ["French Republic", 0.030],
-    ["Federal Republic of Germany", 0.030],
-    ["Republic of Poland", 0.025],
-    ["Republic of Belarus", 0.018],
+    ["United States", 0.045],
+    ["Russia", 0.045],
+    ["China", 0.045],
+    ["France", 0.030],
+    ["Germany", 0.030],
+    ["Poland", 0.025],
+    ["Belarus", 0.018],
     ["Ukraine", 0.018],
-    ["Republic of Austria", 0.018],
-    ["Slovak Republic", 0.018],
+    ["Austria", 0.018],
+    ["Slovakia", 0.018],
     ["Hungary", 0.018],
   ];
 
@@ -382,7 +404,7 @@ test("CP4.3 acceptance measures curvature under the actual centered text footpri
     );
   }
 
-  for (const owner of ["United States of America", "Russian Federation", "People's Republic of China"]) {
+  for (const owner of ["United States", "Russia", "China"]) {
     const label = primaryLabelFor(layoutFor(owner), owner);
     assert.ok(label.properties.warpMaxSegmentTurnDegrees <= 32,
       `${owner} world baseline exceeds renderer-safe turn headroom: ${label.properties.warpMaxSegmentTurnDegrees}`);
@@ -412,11 +434,11 @@ test.todo("real geometry: overview/detail presentations simplify one placement i
 
 test("PTR-1.5 publishes a bold typography envelope independent of the conservative legacy corridor", () => {
   const checks = [
-    "Russian Federation",
-    "People's Republic of China",
-    "United States of America",
-    "French Republic",
-    "Federal Republic of Germany",
+    "Russia",
+    "China",
+    "United States",
+    "France",
+    "Germany",
   ];
   for (const owner of checks) {
     const label = primaryLabelFor(layoutFor(owner), owner);
@@ -426,16 +448,16 @@ test("PTR-1.5 publishes a bold typography envelope independent of the conservati
     assert.ok(Number.isFinite(label.properties.ptrPreferredAngle), `${owner} missing PTR angle`);
   }
 
-  const france = primaryLabelFor(layoutFor("French Republic"), "French Republic");
+  const france = primaryLabelFor(layoutFor("France"), "France");
   assert.ok(
     Math.abs(france.properties.ptrPreferredAngle) >= 30
       && Math.abs(france.properties.ptrPreferredAngle) <= 48,
     `France should publish a diagonal typography axis, got ${france.properties.ptrPreferredAngle}`,
   );
 
-  const russia = primaryLabelFor(layoutFor("Russian Federation"), "Russian Federation");
-  const usa = primaryLabelFor(layoutFor("United States of America"), "United States of America");
-  const china = primaryLabelFor(layoutFor("People's Republic of China"), "People's Republic of China");
+  const russia = primaryLabelFor(layoutFor("Russia"), "Russia");
+  const usa = primaryLabelFor(layoutFor("United States"), "United States");
+  const china = primaryLabelFor(layoutFor("China"), "China");
   assert.ok(russia.properties.ptrAxisSpanWorld * 4096 > russia.properties.pathLength,
     "Russia PTR envelope should be broader than the legacy safe corridor");
   assert.ok(usa.properties.ptrAxisSpanWorld * 4096 > usa.properties.pathLength,
@@ -446,11 +468,11 @@ test("PTR-1.5 publishes a bold typography envelope independent of the conservati
 
 test("PTR-1.6 publishes a bounded ownership coverage field for renderer-side placement scoring", () => {
   for (const owner of [
-    "Russian Federation",
-    "People's Republic of China",
-    "United States of America",
-    "French Republic",
-    "Kingdom of Norway",
+    "Russia",
+    "China",
+    "United States",
+    "France",
+    "Norway",
   ]) {
     const label = primaryLabelFor(layoutFor(owner), owner);
     const grid = label?.properties?.ptrCoverageGrid;
@@ -463,7 +485,7 @@ test("PTR-1.6 publishes a bounded ownership coverage field for renderer-side pla
 });
 
 test("PTR-1.8 publishes multiple sovereign sites generically for significant disconnected landmasses", () => {
-  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: (owner) => owner });
+  const collections = buildPolityLabelCollections(representativeGeometry, { nameResolver: labelText });
   assert.ok(collections.ptrLabelData?.features?.length > collections.labelData.features.length,
     "fixture should expose at least one supplemental sovereign PTR site");
 
