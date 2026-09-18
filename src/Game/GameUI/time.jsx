@@ -1,5 +1,5 @@
 /*! Open Historia — portions (defensive date rendering) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import dayjs from "dayjs";
 import advancedFormat from "dayjs/plugin/advancedFormat";
@@ -7,6 +7,7 @@ import {
     PMTILES_ARCHIVES,
     decodeVectorTile,
     getPmtilesArchive,
+    getPrimedScenarioRegionCatalog,
     loadCountryNames,
     loadRegionCatalog,
     loadRollbackSnapshotCount,
@@ -29,6 +30,7 @@ import {
     buildFocusContext,
     buildPlaceCatalog,
     deriveEventFocusBounds,
+    deriveEventLinks,
     mergeFeatureParts,
     tileGeometryParts,
 } from "./eventFocus.js";
@@ -622,9 +624,43 @@ const ghostButtonStyle = {
     transition: "all 0.15s ease",
 };
 
+// What an event is about, as chips that fly the map there (eventFocus.js
+// deriveEventLinks). One glyph per kind, the same family as the map's own.
+const LINK_GLYPHS = { polity: "⚑", region: "⌖", unit: "⛊", structure: "▣" };
+
+const LinkPill = ({ link, onFocus }) => (
+    <button
+    type="button"
+    title={`Show ${link.label} on the map`}
+    onClick={() => onFocus?.(link.bounds)}
+    style={{
+        alignItems: "center",
+        background: "rgba(96,165,250,0.07)",
+        border: "1px solid rgba(96,165,250,0.2)",
+        borderRadius: "999px",
+        color: "rgba(219,234,254,0.86)",
+        cursor: "pointer",
+        display: "inline-flex",
+        font: "inherit",
+        fontSize: "0.68rem",
+        fontWeight: 600,
+        gap: "0.3rem",
+        padding: "0.24rem 0.55rem",
+    }}
+    >
+    <span aria-hidden="true" style={{ opacity: 0.7 }}>{LINK_GLYPHS[link.kind] || "⌖"}</span>
+    {link.label}
+    </button>
+);
+
 const EventCard = ({ event, footer = null, lookups }) => {
-    // The model's category tags first, then the participants the card derives.
-    const tags = [...(Array.isArray(event.tags) ? event.tags : []), ...collectEventTags(event, lookups)];
+    // The model's category tags, then what the event is about: links the map
+    // can fly to when the card has them, the participants it names otherwise.
+    const links = useMemo(
+        () => (typeof lookups?.eventLinks === "function" ? lookups.eventLinks(event) : null),
+        [event, lookups],
+    );
+    const tags = [...(Array.isArray(event.tags) ? event.tags : []), ...(links ? [] : collectEventTags(event, lookups))];
     const mapChanges = describeEventMapChanges(event, lookups);
     const mapChangeCount = mapChanges.length;
     const [showMapChanges, setShowMapChanges] = useState(false);
@@ -666,10 +702,13 @@ const EventCard = ({ event, footer = null, lookups }) => {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem", padding: "0.95rem 1rem 1rem" }}>
-        {tags.length > 0 && (
+        {(tags.length > 0 || links?.length > 0) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
             {tags.map((tag) => (
                 <TagPill key={`${event.id}-${tag}`}>{tag}</TagPill>
+            ))}
+            {(links ?? []).map((link) => (
+                <LinkPill key={`${event.id}-link-${link.kind}-${link.label}`} link={link} onFocus={lookups?.focusLink} />
             ))}
             </div>
         )}
@@ -1729,6 +1768,9 @@ const DateWidget = ({
     // the notice falls back to its own wording — and set per segment when a long
     // skip is generated in pieces (AI/jumpSegments.js).
     const [jumpProgress, setJumpProgress] = useState("");
+    // A phase of the skip as it starts: "Writing 1 month of events… (part 2 of 3)".
+    const showSkipPhase = ({ label, detail } = {}) =>
+        setJumpProgress(label ? `${label}…${detail ? ` (${detail})` : ""}` : "");
     const [error, setError] = useState("");
     const [fallbackWarning, setFallbackWarning] = useState("");
     // A turn that is generated and valid but NOT written, because the Projects &
@@ -1770,28 +1812,35 @@ const DateWidget = ({
     useEffect(() => {
         let cancelled = false;
 
+        // Each on its own. The stock outlines come from tile archives that a
+        // drawn map does not use and an install may not have at all; they used
+        // to share one Promise.all with the names, so a missing archive (a 404)
+        // took the country and region names down with it — and with them the
+        // event camera, the cards' links and the names in "N map changes".
         const loadLookups = async () => {
-            try {
-                const [countries, regions, nextCountryBounds, nextRegionBounds] = await Promise.all([
-                    loadCountryNames(),
-                                                                                                    loadRegionCatalog(),
-                                                                                                    loadCountryBounds(),
-                                                                                                    loadRegionBounds(),
-                ]);
-
-                if (cancelled) {
-                    return;
+            const settle = async (label, load, fallback) => {
+                try {
+                    return (await load()) ?? fallback;
+                } catch (lookupError) {
+                    if (!cancelled) console.warn(`Timeline lookups: the ${label} could not be loaded; going on without them.`, lookupError);
+                    return fallback;
                 }
+            };
+            const [countries, regions, nextCountryBounds, nextRegionBounds] = await Promise.all([
+                settle("country names", loadCountryNames, []),
+                settle("region catalog", loadRegionCatalog, []),
+                settle("stock country outlines", loadCountryBounds, new Map()),
+                settle("stock region outlines", loadRegionBounds, new Map()),
+            ]);
 
-                setCountryBounds(nextCountryBounds);
-                setCountryCatalog(countries ?? []);
-                setRegionBounds(nextRegionBounds);
-                setRegionCatalog(regions ?? []);
-            } catch (lookupError) {
-                if (!cancelled) {
-                    console.error("Failed to load timeline lookups:", lookupError);
-                }
+            if (cancelled) {
+                return;
             }
+
+            setCountryBounds(nextCountryBounds);
+            setCountryCatalog(countries);
+            setRegionBounds(nextRegionBounds);
+            setRegionCatalog(regions);
         };
 
         loadLookups();
@@ -1918,15 +1967,14 @@ const DateWidget = ({
         jumpAbortRef.current = controller;
         try {
             const result = mode === "auto"
-            ? await simulateAutoJump({ days, signal: controller.signal })
+            ? await simulateAutoJump({ days, signal: controller.signal, onProgress: showSkipPhase })
             : await simulateTimelineJump({
                 days,
                 signal: controller.signal,
-                // A long skip is generated in segments (AI/jumpSegments.js) and can
-                // run for many minutes. Without this the spinner says the same
-                // thing throughout and a working turn reads as a frozen one.
-                onProgress: ({ segment, segmentCount }) =>
-                    setJumpProgress(`Simulating… segment ${segment} of ${segmentCount}`),
+                // What the skip is doing right now, in its own words
+                // (AI/skipPhases.js). Without this the spinner said the same
+                // thing throughout and a working turn read as a frozen one.
+                onProgress: showSkipPhase,
             });
             setGameData(result.game);
             setEvents(result.events);
@@ -2073,8 +2121,7 @@ const DateWidget = ({
         try {
             const result = await retryPendingJumpSegment({
                 signal: controller.signal,
-                onProgress: ({ segment, segmentCount }) =>
-                    setJumpProgress(`Simulating… segment ${segment} of ${segmentCount}`),
+                onProgress: showSkipPhase,
             });
             setGameData(result.game);
             setEvents(result.events);
@@ -2399,6 +2446,46 @@ const DateWidget = ({
         focusWorldRef.current = worldState;
     }, [worldState]);
 
+    // The cached context, rebuilt only when the catalog or the world moved on.
+    // Shared by the camera below and the event cards' links.
+    // The map's own region records come in when its worker has read the
+    // geometry — after this panel mounted — and on a drawn map they are the only
+    // frames there are, so their arrival re-derives the cards' links.
+    const [primedRegionsVersion, setPrimedRegionsVersion] = useState(0);
+    useEffect(() => {
+        const bump = () => setPrimedRegionsVersion((version) => version + 1);
+        window.addEventListener("oh:region-catalog-primed", bump);
+        return () => window.removeEventListener("oh:region-catalog-primed", bump);
+    }, []);
+
+    const currentFocusContext = useCallback(() => {
+        const world = focusWorldRef.current;
+        const drawn = getPrimedScenarioRegionCatalog();
+        const cached = focusContextRef.current;
+        if (cached.catalog !== focusCatalog || cached.world !== world || cached.drawn !== drawn || !cached.context) {
+            focusContextRef.current = {
+                catalog: focusCatalog,
+                context: buildFocusContext({ catalog: focusCatalog, world, drawnRegions: drawn }),
+                drawn,
+                world,
+            };
+        }
+        return focusContextRef.current.context;
+        // primedRegionsVersion is not read: it is what makes the cards ask again.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusCatalog, primedRegionsVersion]);
+
+    // What each event is about, as chips on its card that fly the map there
+    // (eventFocus.js deriveEventLinks). Re-derived once the map data has loaded,
+    // since currentFocusContext changes with the catalog.
+    const cardLookups = useMemo(() => ({
+        ...lookups,
+        eventLinks: (event) => deriveEventLinks(event, currentFocusContext(), {
+            unitName: (id) => getUnitById(id)?.name || "",
+        }),
+        focusLink: (bounds) => focusMapOnBounds(mapRef, bounds),
+    }), [lookups, currentFocusContext, mapRef]);
+
     // The camera follows EVERY revealed event — impacts pin the exact spot,
     // otherwise the polities the event involves do, and its own words are the
     // last resort. Opt out via the "Disable camera movement during events" map
@@ -2408,18 +2495,8 @@ const DateWidget = ({
             return;
         }
 
-        const world = focusWorldRef.current;
-        const cached = focusContextRef.current;
-        if (cached.catalog !== focusCatalog || cached.world !== world || !cached.context) {
-            focusContextRef.current = {
-                catalog: focusCatalog,
-                context: buildFocusContext({ catalog: focusCatalog, world }),
-                world,
-            };
-        }
-
-        focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, focusContextRef.current.context));
-    }, [activeVisibleEvent, disableEventCamera, focusCatalog, mapRef]);
+        focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, currentFocusContext()));
+    }, [activeVisibleEvent, disableEventCamera, currentFocusContext, mapRef]);
 
     const revealNextEvent = () => {
         setVisibleEventCount((current) => {
@@ -2564,7 +2641,7 @@ const DateWidget = ({
         isOpen={openPanel === "history"}
         onRevealNextEvent={revealNextEvent}
         onRevealAll={revealAllEvents}
-        lookups={lookups}
+        lookups={cardLookups}
         onClose={() => setPanel(null)}
         buildDebugIncident={buildFallbackIncident}
         // A fallback turn is usually a turn the player wants gone; the undo it

@@ -78,6 +78,8 @@ import {
 import { collapseRepeatedWorldContext } from "./promptDedupe.js";
 import { filterChatsVisibleTo, isChatVisibleTo } from "./chatVisibility.js";
 import { foreignAgentBrief } from "../../runtime/spycraft.js";
+import { renderReminders } from "../../runtime/gmChanges.js";
+import { withCatchUp } from "./conversationCatchUp.js";
 
 // main.jsx - AI chat module
 // Supports Gemini, OpenAI, Anthropic, and OpenAI-compatible endpoints
@@ -2715,6 +2717,16 @@ Example:
 [Current Projects & Operations]
 ${projectsSummary}`;
 
+// The conversation rides as the message turns, and only there. It used to be
+// rendered into the system prompt as well (ALL_ADVISOR_MESSAGES for the advisor,
+// THIS_CHAT_HISTORY for a leader): the same transcript twice in every request,
+// ~20 K characters of an advisor message on a real save. Worse, it sat near the
+// END of the system prompt, so everything after it changed with every message
+// and no provider's prefix cache could reuse the ~40 K of directives behind it.
+// Both builders below serve only callers that send the conversation as turns;
+// the template keeps its sentence, and this is what now stands in it.
+export const CONVERSATION_IN_TURNS = "(given below as the message turns, oldest first; the newest message is the last one)";
+
 async function buildAdvisorSystemPrompt() {
     await ensurePromptsLoaded();
     const [gameData, actionData, chatData, worldData, eventData, advisorData] = await Promise.all([
@@ -2726,14 +2738,17 @@ async function buildAdvisorSystemPrompt() {
         readJson(JSON_URLS.advisor, { defaultValue: [] }),
     ]);
 
-    const variables = await buildPromptVariables({
-        actionData,
-        advisorData,
-        chatData,
-        eventData,
-        gameData,
-        worldData,
-    });
+    const variables = {
+        ...(await buildPromptVariables({
+            actionData,
+            advisorData,
+            chatData,
+            eventData,
+            gameData,
+            worldData,
+        })),
+        advisorMessages: CONVERSATION_IN_TURNS,
+    };
     const helperValues = resolveHelperValues(promptPack.helpers, variables);
 
     // The briefing and the rules also ride inside the world summary; keep one
@@ -2748,8 +2763,11 @@ async function buildAdvisorSystemPrompt() {
         ADVISOR_DEPLOY_DIRECTIVE,
         buildAdvisorProjectsDirective(variables.projectsSummary),
         buildAdvisorForcesDirective(variables.forcePosture),
+        // The Game Master's standing reminders (runtime/gmChanges.js): what is
+        // true now, whatever the record says. Empty — and so absent — without any.
+        renderReminders(worldData?.simulationReminders, { formatDate: formatDateReadable }),
         ADVISOR_FORMATTING_DIRECTIVE,
-    ];
+    ].filter(Boolean);
     return `${rendered}\n\n${directives.join("\n\n")}`;
 }
 
@@ -2759,7 +2777,11 @@ async function buildAdvisorSystemPrompt() {
 // old "first non-player participant" guess would have shown one member's private
 // correspondence to another. Callers that genuinely have no speaker yet may omit
 // it and keep the old derivation.
-export async function buildDiplomaticSystemPrompt(countries, playerCountry, speakingAs = "") {
+//
+// `chatId` names the thread being answered. That thread rides as the turns, so
+// it is left out of the digest of the speaker's other chats as well — it used
+// to appear there too, a second copy that changed with every message.
+export async function buildDiplomaticSystemPrompt(countries, playerCountry, speakingAs = "", { chatId = "" } = {}) {
     await ensurePromptsLoaded();
     const participantList = countries.map((country) => `- ${country}`).join("\n");
     const [gameData, actionData, chatData, worldData, eventData, advisorData] = await Promise.all([
@@ -2784,17 +2806,23 @@ export async function buildDiplomaticSystemPrompt(countries, playerCountry, spea
     const speaker = speakingAs || countries.find((country) => country !== playerCountry) || "";
     const chats = Array.isArray(chatData) ? chatData : [];
     const ownChats = speaker ? filterChatsVisibleTo(chats, speaker) : [];
+    const threadId = String(chatId || "");
+    const otherOwnChats = threadId ? ownChats.filter((chat) => String(chat?.id || "") !== threadId) : ownChats;
     const variables = {
         ...(await buildPromptVariables({
             actionData,
             advisorData,
-            chatData: ownChats,
+            chatData: otherOwnChats,
             eventData,
             gameData,
             speakingAs: speaker,
             worldData,
         })),
         chatParticipants: participantList || "",
+        // The thread itself rides as the turns (see CONVERSATION_IN_TURNS). It
+        // also stops this prompt naming the WRONG thread: the variable took the
+        // speaker's most recently active chat, which need not be this one.
+        chatHistory: CONVERSATION_IN_TURNS,
     };
     const helperValues = resolveHelperValues(promptPack.helpers, variables);
 
@@ -2821,8 +2849,12 @@ export async function buildDiplomaticSystemPrompt(countries, playerCountry, spea
         variables,
     );
 
+    // The Game Master's standing reminders bind a leader too: a leader told the
+    // bridge is down does not offer to meet on it.
+    const reminders = renderReminders(worldData?.simulationReminders, { formatDate: formatDateReadable });
+
     // Leaders negotiate as softly or ruthlessly as the chosen difficulty.
-    return `${rendered}${espionage}\n\n${difficultyDirective(gameData?.difficulty)}`;
+    return `${rendered}${espionage}${reminders ? `\n\n${reminders}` : ""}\n\n${difficultyDirective(gameData?.difficulty)}`;
 }
 
 let advisorHistory = [];
@@ -2852,9 +2884,13 @@ function compactConversationHistory(history) {
     ];
 }
 
-export async function sendMessage(userMessage, opts) {
+// `catchUp` is the note the advisor panel wrote for this message when the world
+// moved on since the last exchange (conversationCatchUp.js). The model reads it
+// ahead of what the player typed; it goes no further than this history.
+export async function sendMessage(userMessage, options) {
+    const { catchUp = "", ...opts } = options || {};
     const systemPrompt = await buildAdvisorSystemPrompt();
-    advisorHistory.push({ role: "user", parts: [{ text: userMessage }] });
+    advisorHistory.push({ role: "user", parts: [{ text: withCatchUp(userMessage, catchUp) }] });
     advisorHistory = compactConversationHistory(advisorHistory);
 
     // Both halves of the exchange, in full, in detailed mode. The question is
@@ -2891,7 +2927,9 @@ export function loadHistory(savedMessages) {
     .filter((msg) => msg.role === "user" || msg.role === "advisor")
     .map((msg) => ({
         role: msg.role === "user" ? "user" : "model",
-        parts: [{ text: msg.text }],
+        // A player's message is sent with the catch-up note it was first sent
+        // with, so a reloaded conversation reads exactly as the live one did.
+        parts: [{ text: msg.role === "user" ? withCatchUp(msg.text, msg.catchUp) : msg.text }],
     }));
     advisorHistory = compactConversationHistory(advisorHistory);
     // Error bubbles are filtered out above, so the count the model resumes with
@@ -2947,12 +2985,14 @@ const participantLabel = (countries) => (Array.isArray(countries) ? countries : 
     .filter(Boolean)
     .join(", ") || "(no participants)";
 
-export async function sendDiplomaticMessage(playerMessage, speakingAs, countries, opts) {
+export async function sendDiplomaticMessage(playerMessage, speakingAs, countries, options) {
     // speakingAs is passed through now (it used to be dropped, leaving the prompt
     // to guess "first participant" — which with a null playerCountry could pick
     // the PLAYER). It selects this turn's voice and gates which chats that polity
-    // may have read.
-    const freshPrompt = await buildDiplomaticSystemPrompt(countries, null, speakingAs);
+    // may have read. `chatId` is the thread's own, and goes no further than the
+    // prompt builder.
+    const { chatId = "", ...opts } = options || {};
+    const freshPrompt = await buildDiplomaticSystemPrompt(countries, null, speakingAs, { chatId });
 
     diplomaticHistory.push({ role: "user", parts: [{ text: playerMessage }] });
     diplomaticHistory = compactConversationHistory(diplomaticHistory);
@@ -3011,8 +3051,8 @@ export async function sendDiplomaticMessage(playerMessage, speakingAs, countries
 // chat a ConversationView currently has open in the Diplomacy panel — reusing
 // it here would splice this unrelated exchange into whatever chat the player
 // happens to be mid-reading.
-export async function sendDiplomaticMessageOnceOff({ playerMessage, speakingAs, participantNames, playerCountry, priorMessages = [], opts }) {
-    const freshPrompt = await buildDiplomaticSystemPrompt(participantNames, playerCountry, speakingAs);
+export async function sendDiplomaticMessageOnceOff({ playerMessage, speakingAs, participantNames, playerCountry, priorMessages = [], chatId = "", opts }) {
+    const freshPrompt = await buildDiplomaticSystemPrompt(participantNames, playerCountry, speakingAs, { chatId });
 
     const priorMemory = latestSavedDiplomaticMemory(priorMessages);
     let history = priorMessages

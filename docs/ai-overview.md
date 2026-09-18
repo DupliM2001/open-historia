@@ -35,6 +35,10 @@ This page documents the plumbing. For the prompt templates and how they are asse
 | `src/runtime/chatThreads.js` | **A thread as an event log.** chat_created / member_joined / member_left / title_changed / message / reaction / poll_created / poll_option_added / poll_vote_cast, the projection back to the shape every reader already expects, migration of an older thread, and membership windows. See [group diplomacy](#group-diplomacy-one-request-for-the-whole-table). |
 | `src/Game/AI/chatActions.js` | **One request acts for every AI participant.** The action vocabulary, refs for a poll created and voted in one answer, per-action validation, and the feedback the next turn is told. |
 | `src/Game/AI/crossChatKnowledge.js` | **What a leader has heard elsewhere.** Membership-scoped, cursored so nothing is sent twice, and fenced with the delimiters escaped out of the content. |
+| `src/runtime/gmChanges.js` | **The Game Master's hand.** One line per change made outside the simulation (`world.gmChanges`, by round, grouped when made in steps), the block the next skip opens with, and the GM's standing reminders (`world.simulationReminders`) every AI is shown. See [the Game Master's hand](#the-game-masters-hand-changes-made-outside-the-simulation-and-standing-reminders). |
+| `src/Game/AI/conversationCatchUp.js` | **What a conversation missed.** The note the advisor's next question carries when the world moved on: what became of its last reply, the time and the newest events since, the GM's changes. See [conversations](#conversations-one-copy-a-stable-prefix-and-a-catch-up-note). |
+| `src/Game/AI/skipPhases.js` | **What a skip is doing, and where its time went.** The phases a skip enters by name, told to the panel as each starts and summed into one log line when it lands. See [the phases of a skip](#the-phases-of-a-skip). |
+| `src/Game/AI/catalystRewind.js` | **Taking back a beat of a catalyst scene.** Each beat keeps what the player was shown when they chose it, so the scene can return to any beat. See [catalyst scenes](#catalyst-scenes-taking-back-a-beat). |
 | `src/runtime/reports.js` | **Documents, and the governments that hold them.** The stored shape, the `create`/`share` ops an event carries, the audience-scoped read, the list a prompt is shown, and the Report Voice directive. See [reports](#reports-what-only-some-governments-know). |
 | `src/Game/AI/intervene.js` | **Stopping a round where the player wants to act.** The journal of what a turn applied, kept on its rollback snapshot; the cut of that journal to the revealed prefix (ledger records bound only to discarded events go with them; the closing date is the last kept event's); and the receipt note that tells the simulator what never happened. See [Intervene](#intervene-stopping-a-round-where-the-player-wants-to-act). |
 | `src/Game/AI/placement.js` | **Where a thing goes, said in words.** The grammar of `at` ("near Kharkiv", "eastern Ukraine", "off Sevastopol", "Donetsk Oblast facing Russia") and its resolution against a gazetteer of the map into one deterministic point. See [placing things by name](#placing-things-by-name-and-keeping-them-apart). |
@@ -374,6 +378,53 @@ A four-way chat cost **four requests for one player message**: one for the `next
 **What only the live model could teach it.** Gemini refuses a function declaration whose `anyOf` has more than six branches — 400 "Request contains an invalid argument", bisected against the live API, six passing and seven not — so `chatActionSchema` is ONE object with a `type` enum and all-optional fields, exactly as `projectOpSchema` is. It also refuses array-length bounds on an array of *objects* inside an `anyOf` branch, which `geminiSchema.js` now strips for every schema (an array of strings keeps them, which is why the jump's `catalyst.choices` always worked). And the model writes poll options loosely — bare strings, or a label with no ref, then votes for them by label — so a label is accepted as a ref rather than costing the poll and every vote that named it.
 
 Proven offline (`.lab/probes/chat-batch-probe.mjs`, ten checks) and **live** (`live-chat-batch-probe.mjs`): one request, three leaders in their own voices, a binding ceasefire poll opened and answered by every AI participant, seven actions applied and nothing said for the player.
+
+One request writes every participant, so the whole thread is in front of the model — including what was said before a newcomer came in. A line some present participant did not hear is marked `(not heard by …)` from the log's own `heardBy`, and the transcript says what that means; what a newcomer does bring is its own other threads, capped at four threads of eight lines each — the budgeted prior knowledge of a polity just brought in.
+
+## Conversations: one copy, a stable prefix, and a catch-up note
+
+The advisor and a leader are real conversations — a system prompt rebuilt from the present on every message, then the exchange so far as the turns. They were sent **twice**: the templates also rendered the transcript into the system prompt (`ALL_ADVISOR_MESSAGES`, `THIS_CHAT_HISTORY`, and a leader's own thread a third time in the digest of its chats). Worse than the size, the copy sat near the end of the system prompt, so everything after it — the advisor's ~40 K of directives — changed with every message and no provider's prefix cache could reuse any of it. Now the turns are the only copy (`CONVERSATION_IN_TURNS`, [prompts §3b](ai-prompts.md#3b-advisor--leader-path-mainjsx)). On the Fault Lines save with a 12-exchange transcript (`.lab/probes/conversation-anatomy.mjs`):
+
+| | before | after | system prompt identical to the previous message's |
+|---|---|---|---|
+| advisor message | 124.4 K | 103.7 K | 59% → **100%** |
+| leader message | 70.2 K | 67.3 K | 88% → **100%** |
+
+No other passage of 200+ characters is sent twice in these requests or in a jump request (`jump-repeats.mjs`) — which is why the reference's per-fact fingerprints are not built: they earn their keep where knowledge is delivered into a transcript once and must be re-sent when edited, and here the state is re-rendered on every call (an edit is simply what the next call says), while the one incremental channel, cross-chat knowledge, is append-only and already cursored.
+
+What the rebuilt system prompt cannot say is **what is new since the conversation last spoke**. The advisor's earlier replies sit in the turns undated, written before a month of events it cannot tell apart from the ones it discussed. So the advisor panel writes a **catch-up note** onto the player's next question when the world moved on (`conversationCatchUp.js`): what became of the advisor's own last reply (a chart the panel could not draw, an actions block whose removal matched nothing, a projects block cut short — the receipt it was never given), the span and the newest few events since (titles only; the record is already in the prompt), and the Game Master's changes by hand. It is stored on the message and sent with it again after a reload; an unchanged world adds nothing. Live, the advisor opened its next answer with the change it was told of.
+
+## The Game Master's hand: changes made outside the simulation, and standing reminders
+
+The cheats panel changes the world between turns — a country annexed, a border redrawn region by region, a polity's figures set by hand, a city placed, an event written into the record, the history document rewritten, a turn rolled back — and the GM console makes AI-assisted transactions. The console's were logged in `world.gmAudit`; the rest nowhere. The next skip saw the new state with no word of how it came about, and a model shown an unexplained change tends to explain it, or undo it.
+
+Every such change is now one line in `world.gmChanges` (`src/runtime/gmChanges.js`, 10 tests), tagged with the round it was made in — each cheats tool records its own sentence after its save succeeds (a failed note never costs the edit), and a change made in steps is one growing line ("Moved Crimea, Sevastopol and 4 more to …"). The skip that starts from that round opens with `[CHANGES MADE OUTSIDE THE SIMULATION SINCE YOUR LAST TURN]`, beside the receipt: canon, acts of authority not events, not to be undone or written up again. Told once, because the round moves on when the skip lands; told again after a rollback, because the skip that heard them no longer happened. The advisor's catch-up note carries them too.
+
+**Reminders** are the GM's standing facts ("the Kerch bridge is down") — dated, a short list, edited or withdrawn in the cheats panel's *Simulation Reminders* tool. Every prompt that writes the world or speaks for a polity ends with the whole list (after the author's priority rules: a fact declared mid-game is newer than any rule written before it), the turn review once for all its jobs, the advisor and every leader too. Because every call carries the list, an edit is simply what the next call says. Withdrawing one is itself a change, so the next skip is told the fact no longer holds. Every AI sees every reminder — a secret belongs in a report, which has an audience.
+
+Proven offline (`.lab/probes/gm-changes-probe.mjs`, eleven checks) and live: a region annexed by hand before a skip stayed annexed, and nothing in the skip contradicted the reminder. None of it costs a request.
+
+## The phases of a skip
+
+A skip is several pieces of work — reading the world, writing the events, the one review request, placing the armies and fronts, the board, the history, writing the record — and the panel said "Simulating…" for all of it. `src/Game/AI/skipPhases.js` (7 tests): the skip enters each phase by name as it starts; the time panel shows the phase's own words ("Writing 1 month of events… (part 2 of 3)", "Moving the armies, redrawing the fronts and hearing from 2 agents…" — the review described by the jobs it carries), auto-jump included; and when the skip lands the log gets one line of where the time and the requests went, counted from the skip's own budget — of this form:
+
+```
+Time skip phases: 25.8 s — reading the world 1.1 s · writing 1 month of events 16.9 s (1 request) · moving the armies and checking the record 6.2 s (1 request) · writing it into the record 1.6 s.
+```
+
+The summary also rides on the result (`result.phases`). A retry of a held segment is timed on its own and tells the panel that asked for it.
+
+## Catalyst scenes: taking back a beat
+
+Until a catalyst scene resolves into its one event, nothing but the scene has changed, so any beat can be taken back at no cost beyond the beat itself. The record made it impossible: a beat kept its choice and summary only, and the scene's `opening` was overwritten by every summary. `src/Game/AI/catalystRewind.js` (4 tests): each beat now keeps the text above the choices (`before`) and the choices offered (`offered`), the scene its `firstOpening`; `rewindActiveCatalyst({ beatIndex, choice })` (gameplay.js) returns the scene to exactly how it stood at that beat — no request — or chooses again at once, the one request any beat costs. A beat played before this has no screen kept and says so.
+
+**No panel drives catalyst scenes.** `createCatalyst`, `advanceActiveCatalyst` and now `rewindActiveCatalyst` are exported (gameplayLazy.js) but nothing in the interface shows `world.activeCatalyst` or lets the player choose, and the lineage never had such a panel — while the jump's output schema offers a `catalyst` on every skip. Whether scenes get a panel, or the jump stops offering them, is an open decision.
+
+## The event cards' links
+
+`deriveEventLinks` (`src/Game/GameUI/eventFocus.js`, `eventLinks.test.js`): the powers, regions, formations and structures an event is about — from its operations first, then from the places and powers its words name, through the same word-boundary name index the event camera uses — each with the frame to fly to. The card shows them as chips; a click flies the map there. A place the map cannot frame is left out; a power is shown by the name it has now; eight at most. Derived on render, never stored.
+
+On a drawn map the stock outline tables (keyed by GADM id) know none of the regions, so the map's worker now records each region's bounding box (wrapped across the antimeridian) and the focus context frames drawn regions — and the polities holding them — by those boxes. The same fix gives the event camera a frame on drawn maps, where it had none.
 
 ## Reports: what only some governments know
 

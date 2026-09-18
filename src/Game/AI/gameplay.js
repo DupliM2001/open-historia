@@ -232,6 +232,9 @@ import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
+import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
+import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
+import { canRewindCatalystTo, openCatalyst, recordCatalystBeat, rewindCatalyst } from "./catalystRewind.js";
 import { buildCrossChatKnowledge } from "./crossChatKnowledge.js";
 import {
   eventsFromLegacyChat,
@@ -1841,7 +1844,10 @@ const resolvePlacements = async (containers, world, { receipt = null } = {}) => 
 // frozen copies of the templates). Its own function so that the turn review
 // (runTurnReview below) can put several tasks into ONE request and still show
 // each of them exactly the prompt it would have been sent alone.
-const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null } = {}) => {
+//
+// `reminders: false` leaves out the Game Master's reminders; the turn review
+// adds them once to the whole request instead of once per job.
+const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null, reminders = true } = {}) => {
   const prompts = await loadPromptCatalog();
   // The GM operational contract is native behaviour: a campaign's frozen
   // gameMaster prompt would silently roll the transaction semantics back.
@@ -2403,7 +2409,45 @@ This live instruction supersedes older frozen country-stat prompts and all earli
     if (directionDirective) systemPrompt = `${systemPrompt}\n\n${directionDirective}`;
   }
 
+  // The Game Master's standing reminders (runtime/gmChanges.js), for every task
+  // that writes the world or speaks for a polity. After the author's priority
+  // rules: a fact the GM declared mid-game is newer than any rule written before
+  // the game began. Nothing at all while there are none.
+  if (reminders && GM_REMINDER_TASKS.has(taskKey)) {
+    const block = await gmRemindersBlock();
+    if (block) systemPrompt = `${systemPrompt}\n\n${block}`;
+  }
+
   return { prompts, promptTemplate, staticPromptPrefix, systemPrompt };
+};
+
+// Who is shown the reminders. Left out: the tasks that only reshape text
+// (translation, consolidation, place names, the pre-game bootstrap) or only
+// describe a polity's figures.
+const GM_REMINDER_TASKS = new Set([
+  "jumpForward",
+  "autoJumpForward",
+  "worldMotionRepair",
+  "worldBreadthRepair",
+  "timelineCurator",
+  "unitDirector",
+  "territoryDirector",
+  "projects",
+  "gameMaster",
+  "actions",
+  "idleDiplomacy",
+  "catalystCreation",
+  "catalystExecutor",
+  "spyIntercept",
+  "chatActions",
+]);
+
+// Read from the stored world as it is, without normalizing the rest of it: a
+// reminder is edited in the cheats panel, which writes the world, and the next
+// prompt sees the new list.
+const gmRemindersBlock = async () => {
+  const raw = await readJson(JSON_URLS.world, { defaultValue: {}, clone: false }).catch(() => null);
+  return renderReminders(normalizeReminders(raw?.simulationReminders), { formatDate: formatDateReadable });
 };
 
 const runJsonTask = async (taskKey, {
@@ -5898,6 +5942,7 @@ export const sendAdvisorDraftedMessage = async ({ countryName, text }) => {
       participantNames: [playerName, recipient.name],
       playerCountry: playerName,
       priorMessages,
+      chatId: existing?.id ?? "",
     });
 
     const userMessage = {
@@ -5971,6 +6016,9 @@ const applySimulationResult = async ({
   baseGame,
   campaignId = "",
   projects = null,
+  // The skip's phase tracker (skipPhases.js), when a time skip is applying: the
+  // board and the history each announce themselves. Null everywhere else.
+  phases = null,
   baseWorld,
   result,
 }) => {
@@ -6486,6 +6534,7 @@ const applySimulationResult = async ({
   // stall the operation it belonged to, and BEFORE anything is written so its ops
   // ride in on the events that caused them.
   if (projects) {
+    phases?.enter("board");
     // Every Canonical event the timeline left out, minus anything the log or this
     // turn's own timeline already holds (the de-dup that visible events had).
     const boardHiddenEvents = dedupeGeneratedEvents(
@@ -6611,6 +6660,7 @@ const applySimulationResult = async ({
       logDebugEvent("turn", "Turn HELD: the board did not update, so nothing was written.", error);
       throw projectsHeldError(error);
     }
+    phases?.enter("applying");
   }
 
   let nextWorld = worldWithImpacts;
@@ -6637,6 +6687,7 @@ const applySimulationResult = async ({
 
   if (result.mode === "jump" || result.mode === "auto") {
     try {
+      phases?.enter("history");
       nextWorld = await compactHistoryIfNeeded({
         actions: nextActions,
         chats: nextChats,
@@ -6647,6 +6698,8 @@ const applySimulationResult = async ({
     } catch (error) {
       console.warn("[ai] campaign history consolidation failed; the completed turn will still be saved.", error);
     }
+    // Everything after this is the writing of the turn itself.
+    phases?.enter("applying");
   }
 
   // Bounded automatic Stats tracking: only when the player's configured calendar
@@ -10289,9 +10342,26 @@ export const runChatActionBatch = async ({
     )).join("\n")}`
     : "";
 
-  const transcript = projected.messages.slice(-24)
-    .map((message) => `[${message.id}] ${message.speaker || (message.role === "user" ? player : "someone")}: ${message.text}`)
-    .join("\n");
+  // One request writes every participant, so the whole thread is in front of the
+  // model — including what was said before a newcomer came into the room. The
+  // log knows who heard each line (chatThreads.js heardBy); a line some present
+  // participant did NOT hear says so, and the header says what that means.
+  const absentFrom = (message) => {
+    const heard = normalizeArray(message.heardBy).map(regionKey);
+    return heard.length ? aiParticipants.filter((name) => !heard.includes(regionKey(name))) : [];
+  };
+  const recent = projected.messages.slice(-24);
+  const lines = recent.map((message) => {
+    const absent = absentFrom(message);
+    return `[${message.id}] ${message.speaker || (message.role === "user" ? player : "someone")}: ${message.text}`
+      + (absent.length ? ` (not heard by ${absent.join(", ")})` : "");
+  });
+  const transcript = [
+    ...(recent.some((message) => absentFrom(message).length)
+      ? ["(A line marked \"not heard by\" was said while that polity was not in this conversation. It does not know what was said there unless its own cables below tell it; write it that way.)"]
+      : []),
+    ...lines,
+  ].join("\n");
   const rosterText = [
     ...aiParticipants.map((name) => `- ${name} — AI-controlled: you act for it`),
     `- ${player} — HUMAN-controlled (the player): never speak or act for it`,
@@ -10437,17 +10507,41 @@ export const createCatalyst = async ({ force = true } = {}) => {
     variables,
   });
 
-  const catalyst = {
-    choices: normalizeArray(payload?.choices).map((entry) => normalizeString(entry)).filter(Boolean).slice(0, 5),
+  // Opened with its first opening kept, so a beat can be taken back to the very
+  // start (catalystRewind.js).
+  const catalyst = openCatalyst({
+    choices: normalizeArray(payload?.choices).map((entry) => normalizeString(entry)).filter(Boolean),
     opening: normalizeString(payload?.opening),
     premise: normalizeString(payload?.premise),
     title: normalizeString(payload?.title),
-  };
+  });
 
   const world = normalizeWorldState(await readWorldState({ force: true }));
   world.activeCatalyst = catalyst;
   await writeWorldState(world);
   return catalyst;
+};
+
+// Take back beat `beatIndex` of the scene in progress (D6, catalystRewind.js):
+// the scene returns to exactly how it stood when that beat was about to be
+// chosen. Nothing outside the scene has changed before it resolves, so the
+// rewind itself asks nothing of a model; with `choice` the beat is chosen again
+// at once, which is the one request any beat costs.
+export const rewindActiveCatalyst = async ({ beatIndex, choice = "" } = {}) => {
+  if (isSimulationBusy()) throw new Error("A turn is being generated; wait for it to finish before changing the scene.");
+  const world = normalizeWorldState(await readWorldState({ force: true }));
+  const catalyst = world.activeCatalyst;
+  if (!catalyst) throw new Error("No catalyst scene is in progress.");
+  const rewound = rewindCatalyst(catalyst, Number(beatIndex));
+  if (!rewound) {
+    throw new Error(canRewindCatalystTo(catalyst, Number(beatIndex))
+      ? "That beat cannot be returned to."
+      : "That beat was played before the scene kept what was on screen at each beat, so it cannot be returned to; a later one can.");
+  }
+  await writeWorldState({ ...world, activeCatalyst: rewound });
+  logDebugEvent("turn", `Catalyst scene "${rewound.title || "untitled"}": beat ${Number(beatIndex) + 1} taken back${normalizeString(choice) ? " and chosen again" : ""}.`);
+  if (normalizeString(choice)) return advanceActiveCatalyst(normalizeString(choice));
+  return { catalyst: rewound };
 };
 
 export const advanceActiveCatalyst = async (choiceText) => {
@@ -10503,12 +10597,13 @@ export const advanceActiveCatalyst = async (choiceText) => {
     summary: normalizeString(payload?.summary),
   };
 
-  const nextCatalyst = {
-    ...catalyst,
-    choices: normalizeArray(payload?.nextChoices).map((entry) => normalizeString(entry)).filter(Boolean).slice(0, 5),
-    history: [...normalizeArray(catalyst.history), historyEntry],
-    opening: normalizeString(payload?.summary) || catalyst.opening,
-  };
+  // The beat keeps what the player was shown when they chose it, so it can be
+  // taken back and chosen differently (catalystRewind.js).
+  const nextCatalyst = recordCatalystBeat(catalyst, {
+    choice: choiceText,
+    summary: historyEntry.summary,
+    nextChoices: normalizeArray(payload?.nextChoices).map((entry) => normalizeString(entry)).filter(Boolean),
+  });
 
   if (!payload?.resolved) {
     const nextWorld = {
@@ -10606,16 +10701,16 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
   const segmentCount = segmentDays.length;
 
   // A segmented jump takes as long as the segments put together, so the spinner
-  // has to say which one is running or a correct turn looks like a hung one.
-  // Wrapped because a throwing UI callback must never cost the player a turn -
-  // the same rule the streaming onChunk callbacks follow.
+  // has to say which one is running or a correct turn looks like a hung one. The
+  // skip's phases (skipPhases.js) carry it to the panel; a retry of a held
+  // segment brings its own, since the panel that started the skip may be gone.
+  if (!state.phases) state.phases = createSkipPhases({ requestsUsed: () => state.requests?.used ?? 0, onChange: onProgress });
+  const writingLabel = `Writing ${formatDurationLabel(safeDays)} of events`;
   const reportProgress = (segmentIndex) => {
-    if (segmentCount <= 1 || typeof onProgress !== "function") return;
-    try {
-      onProgress({ segment: segmentIndex + 1, segmentCount });
-    } catch (error) {
-      console.warn("[ai] a jump progress callback threw; continuing.", error);
-    }
+    state.phases.enter("writing", {
+      label: writingLabel,
+      detail: segmentCount > 1 ? `part ${segmentIndex + 1} of ${segmentCount}` : "",
+    });
   };
 
   // What the engine did with the PREVIOUS turn's answer, as the first thing this
@@ -10625,6 +10720,11 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
   // Empty on a campaign's first jump and after a turn that predates receipts, and
   // then the message is byte-for-byte what it always was.
   const lastTurnReceipt = renderLastTurnReceipt(normalizeWorldState(bundle.world).simulationHistory);
+  // And what the Game Master changed by hand since then (runtime/gmChanges.js):
+  // the changes made in the round this skip starts from. Once, because the round
+  // moves on when the skip lands — and again after a rollback, because the skip
+  // that heard them no longer happened. Empty when nobody touched the world.
+  const gmChangeNarration = renderGmChangeNarration(gmChangesForRound(bundle.world, bundle.game?.round));
 
   // Starts at 0 on a fresh jump, and at the failed segment on a retry.
   let segmentIndex = state.nextSegment;
@@ -10720,7 +10820,7 @@ const runJumpSegments = async ({ context, onProgress, signal, state }) => {
         // silence, not elapsed time, so a long segment is never mistaken for a
         // stalled one (and a segmented jump gets that window per segment, since it
         // is per request). Cancel works either way.
-        userMessage: [lastTurnReceipt, buildSegmentInstruction({
+        userMessage: [lastTurnReceipt, gmChangeNarration, buildSegmentInstruction({
           mode,
           segmentIndex,
           segmentCount,
@@ -11130,7 +11230,7 @@ const runTurnReview = async ({ context, merged, signal, state }) => {
   const jobs = [];
   const sharedBlocks = [];
   const addJob = async (job, variables) => {
-    const { systemPrompt } = await buildTaskSystemPrompt(job.taskKey, { variables, lookups: null });
+    const { systemPrompt } = await buildTaskSystemPrompt(job.taskKey, { variables, lookups: null, reminders: false });
     jobs.push({ ...job, prompt: systemPrompt, schema: getGameplayTool(job.taskKey)?.schema });
     for (const value of Object.values(variables ?? {})) if (typeof value === "string") sharedBlocks.push(value);
   };
@@ -11260,9 +11360,12 @@ const runTurnReview = async ({ context, merged, signal, state }) => {
   }
 
   const { jobs: shared, savedChars } = shareRepeatedBlocks(usable, sharedBlocks);
-  const systemPrompt = buildTurnReviewPrompt(shared);
+  // The Game Master's reminders once for the whole request, not once per job.
+  const systemPrompt = [buildTurnReviewPrompt(shared), await gmRemindersBlock()].filter(Boolean).join("\n\n");
   const tool = buildTurnReviewTool(shared);
   review.asked = true;
+  // The panel says what this one request is doing, by the jobs it carries.
+  state.phases?.enter("checking", { label: describeReviewJobs(shared.map((job) => job.key)) });
   logDebugEvent("turn", `Turn review: ${shared.map((job) => job.key).join(", ")} in one request.`, {
     reasons,
     promptChars: systemPrompt.length,
@@ -11381,6 +11484,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
   // only the plausible ones, and they ride the same application path as the
   // simulator's own unitOps (a long move becomes a standing order). A failed or
   // unavailable director never costs the turn — the events pass through as written.
+  state.phases?.enter("placing");
   let directedEvents = merged.events;
   try {
     directedEvents = await directGeneratedUnitOps({
@@ -11483,10 +11587,18 @@ const finishTimelineJump = async ({ context, signal, state }) => {
   // `review` carries the turn review's answers (null when requests are not being
   // saved) and `requests` the skip's budget, for everything the apply still asks.
   applyArgs.projects = { bundle, signal, review, requests: state.requests };
+  applyArgs.phases = state.phases;
+  state.phases?.enter("applying");
   try {
     const applied = await applySimulationResult(applyArgs);
     reportJumpRequests(state.requests);
-    return applied;
+    // Where the skip's time and requests went, in one line (skipPhases.js),
+    // and on the result for the panel's own log entry.
+    const phaseSummary = state.phases?.finish();
+    if (phaseSummary?.phases?.length) {
+      logDebugEvent("turn", `Time skip phases: ${formatSkipPhases(phaseSummary)}.`, phaseSummary);
+    }
+    return phaseSummary ? { ...applied, phases: phaseSummary } : applied;
   } catch (error) {
     if (error?.projectsHeld) setPendingProjectsJump({ applyArgs });
     throw error;
@@ -11500,6 +11612,12 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
   discardPendingProjectsJump();
   discardPendingJumpSegment();
   beginSimulation();
+  // The skip's phases (skipPhases.js): said to the panel as each starts, timed
+  // and counted into one log line when the skip lands. The request count comes
+  // from the skip's budget once there is one.
+  let budgetForPhases = null;
+  const phases = createSkipPhases({ requestsUsed: () => budgetForPhases?.used ?? 0, onChange: onProgress });
+  phases.enter("reading");
   try {
   const bundle = withDiplomaticLedgerMigration(await readGameStateBundle({ force: true }));
   const baseColors = await readJson(JSON_URLS.colors, { defaultValue: {}, force: true });
@@ -11597,7 +11715,9 @@ export const simulateTimelineJump = async ({ days, mode = "jump", onProgress, si
     // request where it can be, never more than the cap, while requests are
     // being saved.
     requests: createJumpRequests({ segments: segmentCount }),
+    phases,
   };
+  budgetForPhases = jumpState.requests;
 
   await runJumpSegments({ context: jumpContext, onProgress, signal, state: jumpState });
   return await finishTimelineJump({ context: jumpContext, signal, state: jumpState });
@@ -11626,6 +11746,8 @@ export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
       used: spentSoFar.used,
       refused: spentSoFar.refused,
     };
+    // A retry is timed on its own, and tells the panel that asked for it.
+    state.phases = createSkipPhases({ requestsUsed: () => state.requests?.used ?? 0, onChange: onProgress });
     // Re-holds itself on another failure, so the player can retry again or
     // discard — exactly as they could the first time.
     await runJumpSegments({ context, onProgress, signal, state });
@@ -11635,8 +11757,8 @@ export const retryPendingJumpSegment = async ({ onProgress, signal } = {}) => {
   }
 };
 
-export const simulateAutoJump = async ({ days = 365, signal } = {}) =>
-  simulateTimelineJump({ days, mode: "auto", signal });
+export const simulateAutoJump = async ({ days = 365, signal, onProgress } = {}) =>
+  simulateTimelineJump({ days, mode: "auto", signal, onProgress });
 
 // ---- GM Console: previewable, revalidated, audited transactions ------------
 // The AI plans a structured transaction; native code validates it against the
@@ -12414,6 +12536,31 @@ const gameMasterTransactionCandidate = (transaction) => ({
   diplomaticOutreach: cloneValue(normalizeArray(transaction?.diplomaticOutreach)),
 });
 
+// The GM console's transaction in one line of words, for the next skip
+// (runtime/gmChanges.js). The audit keeps the whole of it; the skip needs to know
+// what was done, and that it was done by decree.
+const gameMasterChangeSummary = ({ transaction, summary = "", request = "" }) => {
+  const count = (list, one, many) => {
+    const total = normalizeArray(list).length;
+    return total ? `${total} ${total === 1 ? one : many}` : "";
+  };
+  const events = normalizeArray(transaction?.events);
+  const titles = events.slice(0, 3).map((event) => `"${normalizeString(event?.title) || "untitled"}"`).join(", ");
+  const statCountries = [...new Set(normalizeArray(transaction?.countryStatPatches)
+    .map((entry) => normalizeString(entry?.country)).filter(Boolean))];
+  const parts = [
+    events.length ? `wrote ${events.length === 1 ? "the event" : `${events.length} events`} ${titles}${events.length > 3 ? " and more" : ""} into the record` : "",
+    statCountries.length ? `set the figures of ${statCountries.join(", ")}` : "",
+    count(transaction?.warUpdates, "war record", "war records"),
+    count(transaction?.relationUpdates, "relation", "relations"),
+    count(transaction?.agreementUpdates, "agreement", "agreements"),
+    count(transaction?.storylineUpdates, "storyline", "storylines"),
+    count(transaction?.diplomaticOutreach, "diplomatic note", "diplomatic notes"),
+  ].filter(Boolean);
+  const what = normalizeString(summary) || normalizeString(request);
+  return `${what ? `${what} — ` : ""}the GM console ${parts.length ? parts.join("; ") : "changed nothing that can be listed"}.`;
+};
+
 const gameMasterAcceptedOperationLabels = (transaction) => {
   const labels = [];
   for (const [eventIndex, event] of normalizeArray(transaction?.events).entries()) {
@@ -12841,6 +12988,13 @@ export const applyGameMasterPreview = async (preview) => {
       statCountries: [...new Set(statCountries.filter(Boolean))],
     };
     nextWorld.gmAudit = [auditRecord, ...normalizeArray(nextWorld.gmAudit)].slice(0, 64);
+    nextWorld = recordGmChange(nextWorld, {
+      kind: "gm-console",
+      summary: gameMasterChangeSummary({ transaction, summary, request }),
+      round: bundle.game.round || 0,
+      date: bundle.game.gameDate || bundle.game.startDate || "",
+      at: auditRecord.appliedAt,
+    });
 
     // Canonical persistence only. Deliberately omit actions/game writes, rollback
     // snapshots and oh:turn-complete: a GM edit is administrative authority, not a turn.

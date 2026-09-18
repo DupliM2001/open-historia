@@ -152,6 +152,49 @@ const geometryBoundsCenter = (geometry) => {
     : null;
 };
 
+// The region's bounding box, [[west, south], [east, north]] — what the event
+// camera and an event card's links fly to on a drawn map, where the stock
+// outline tables (keyed by GADM id) know nothing of the region. A box wider
+// than half the world has crossed the antimeridian and is measured again with
+// the western longitudes wrapped east, so `east` may exceed 180 (MapLibre's
+// fitBounds expects exactly that).
+const geometryBox = (geometry) => {
+  const longitudes = [];
+  let south = Infinity;
+  let north = -Infinity;
+  for (const polygon of geometryPolygons(geometry)) {
+    for (const ring of polygon ?? []) {
+      for (const point of ring ?? []) {
+        const lng = Number(point?.[0]);
+        const lat = Number(point?.[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        longitudes.push(lng);
+        south = Math.min(south, lat);
+        north = Math.max(north, lat);
+      }
+    }
+  }
+  if (!longitudes.length) return null;
+  // Loops, not Math.min(...): a detailed coastline is more points than a call
+  // can take as arguments.
+  let west = Infinity;
+  let east = -Infinity;
+  for (const lng of longitudes) {
+    if (lng < west) west = lng;
+    if (lng > east) east = lng;
+  }
+  if (east - west > 180) {
+    west = Infinity;
+    east = -Infinity;
+    for (const lng of longitudes) {
+      const wrapped = lng < 0 ? lng + 360 : lng;
+      if (wrapped < west) west = wrapped;
+      if (wrapped > east) east = wrapped;
+    }
+  }
+  return [[west, south], [east, north]];
+};
+
 const wrappedLongitudeDelta = (fromLng, toLng) => {
   let delta = Number(toLng) - Number(fromLng);
   if (!Number.isFinite(delta)) return 0;
@@ -200,6 +243,7 @@ const buildMetadata = (regions) => {
       name: String(props.name ?? props.NAME_1 ?? props.name_1 ?? id),
       lng: Number.isFinite(lng) ? lng : null,
       lat: Number.isFinite(lat) ? lat : null,
+      bounds: geometryBox(feature?.geometry),
       territoryWeight: territoryWeight > 1e-12 ? territoryWeight : 1,
       tags: toStringArray(props.tags),
       type: props.type ? String(props.type) : "",
