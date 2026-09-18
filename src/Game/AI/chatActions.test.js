@@ -140,3 +140,35 @@ test("a batch is bounded, and the feedback names every refusal", () => {
     assert.match(feedback, /send_message by Bavaria was refused: played by a human\./);
     assert.equal(describeChatActionFeedback({}), "", "nothing to say when everything landed");
 });
+
+// What a live run actually wrote (2026-09-17): the poll's options came back as
+// bare strings and the votes named them by label, so the whole poll and both
+// votes were refused over bookkeeping. A label IS a usable ref.
+test("a poll written loosely still lands: bare options, votes by label", () => {
+    const { events, applied, rejected, unansweredPolls } = applyChatActionBatch([
+        { type: "create_poll", actorName: "France", pollRef: "ceasefire_vote", question: "Accept an immediate ceasefire?", options: ["Accept", "Refuse"] },
+        { type: "poll_vote", actorName: "France", pollRef: "ceasefire_vote", optionRef: "Accept" },
+        { type: "poll_vote", actorName: "Prussia", pollRef: "ceasefire_vote", optionRef: "refuse" },
+    ], roster(), { time: "1871-01-26" });
+
+    assert.deepEqual(rejected, [], "nothing was refused over a missing ref");
+    assert.equal(applied.length, 3);
+    assert.deepEqual(unansweredPolls, []);
+    const [poll] = projectChatThread([
+        { id: "c", kind: "chat_created", title: "Armistice" },
+        { id: "j1", kind: "member_joined", member: "France" },
+        { id: "j2", kind: "member_joined", member: "Prussia" },
+        ...events,
+    ]).polls;
+    assert.deepEqual(poll.options.map((option) => option.label), ["Accept", "Refuse"]);
+    assert.deepEqual(poll.tally.map((option) => `${option.label}:${option.votes}`), ["Accept:1", "Refuse:1"]);
+});
+
+test("an option given as {label} alone, and a vote by its own ref, both work", () => {
+    const { rejected } = applyChatActionBatch([
+        { type: "create_poll", actorName: "France", pollRef: "p", question: "Adjourn?", options: [{ label: "Adjourn for a week" }, { optionRef: "sit", label: "Sit on" }] },
+        { type: "poll_vote", actorName: "France", pollRef: "p", optionRef: "adjourn-for-a-week" },
+        { type: "poll_vote", actorName: "Prussia", pollRef: "p", optionRef: "sit" },
+    ], roster(), {});
+    assert.deepEqual(rejected, []);
+});

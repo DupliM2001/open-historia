@@ -49,6 +49,8 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 const asText = (value) => String(value ?? "").trim();
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const fold = (value) => asText(value).toLowerCase();
+// An option's label, usable as its ref when the model gave none.
+const refFromLabel = (label) => fold(label).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 
 // ---------------------------------------------------------------------------
 // Reading one action
@@ -82,11 +84,17 @@ export const normalizeChatAction = (entry) => {
     if (type === "create_poll") {
         const pollRef = asText(entry.pollRef ?? entry.ref);
         const question = clip(asText(entry.question), 500);
+        // A live run wrote its options as bare strings ("Accept", "Refuse") and
+        // lost the whole poll — and the votes that referenced it — to a missing
+        // optionRef. A label IS a usable ref, so one is derived from it: the
+        // model meant the option it wrote, and refusing it over bookkeeping is
+        // the kind of loss the flat markerOps build exists to prevent.
         const options = asArray(entry.options)
-            .map((option) => ({
-                optionRef: asText(option?.optionRef ?? option?.ref),
-                label: clip(asText(option?.label ?? option), 120),
-            }))
+            .map((option) => {
+                const label = clip(asText(typeof option === "string" ? option : option?.label ?? option?.text), 120);
+                const explicit = asText(typeof option === "object" ? option?.optionRef ?? option?.ref ?? option?.id : "");
+                return { optionRef: explicit || refFromLabel(label), label };
+            })
             .filter((option) => option.optionRef && option.label);
         if (!pollRef || !question || options.length < 2) return null;
         return { ...base, pollRef, question, options, allowCustom: entry.allowCustom === true };
@@ -203,7 +211,12 @@ export const applyChatActionBatch = (actions, roster = {}, { time = "" } = {}) =
             const pollId = nextId("poll");
             const options = action.options.map((option, index) => {
                 const optionId = `${pollId}-o${index + 1}`;
+                // Addressable by the ref it was given AND by what it says on the
+                // ballot: a model that writes `optionRef: "Accept"` on the vote
+                // means the option labelled Accept, and always did.
                 optionIdByRef.set(`${action.pollRef}/${option.optionRef}`, optionId);
+                optionIdByRef.set(`${action.pollRef}/${fold(option.label)}`, optionId);
+                optionIdByRef.set(`${action.pollRef}/${refFromLabel(option.label)}`, optionId);
                 return { id: optionId, label: option.label };
             });
             pollIdByRef.set(action.pollRef, pollId);
@@ -232,6 +245,8 @@ export const applyChatActionBatch = (actions, roster = {}, { time = "" } = {}) =
 
         // poll_vote
         const optionId = optionIdByRef.get(`${action.pollRef}/${action.optionRef}`)
+            ?? optionIdByRef.get(`${action.pollRef}/${fold(action.optionRef)}`)
+            ?? optionIdByRef.get(`${action.pollRef}/${refFromLabel(action.optionRef)}`)
             ?? asArray(openPoll?.options).find((option) => fold(option?.id) === fold(action.optionRef) || fold(option?.label) === fold(action.optionRef))?.id;
         if (!optionId) { refuse(action, `poll "${action.pollRef}" has no option "${action.optionRef}"`); continue; }
         const batchPoll = pollsThisBatch.get(pollId);

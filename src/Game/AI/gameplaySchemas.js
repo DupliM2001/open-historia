@@ -1394,101 +1394,52 @@ export const NEXT_SPEAKER_SCHEMA = {
 // and copied, and the model already has the names in front of it. `pollRef` and
 // `optionRef` are the batch's OWN labels for a poll it invents, so it can be
 // created and voted in the same answer; the engine mints the real ids.
+// ONE object with a `type` enum and all-optional fields, exactly as
+// projectOpSchema is, and for a harder reason: Gemini refuses a function
+// declaration whose anyOf has more than six branches outright (400 "Request
+// contains an invalid argument", bisected against the live API — six branches
+// passed, seven did not), and this vocabulary has eight. Nothing is lost:
+// what each type actually needs is enforced by normalizeChatAction
+// (AI/chatActions.js) before a single action is applied, and a malformed one
+// costs only itself.
 const chatActionSchema = {
-  description: "One action by one AI participant. Fill the fields that type needs.",
-  anyOf: [
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["send_message"] },
-        actorName: nonEmptyTextSchema("The AI participant speaking, by exact display name. NEVER a human-controlled one."),
-        content: nonEmptyTextSchema("What it says, in its leader's voice. Match the length and tone of what it answers."),
-      },
-      required: ["type", "actorName", "content"],
-      additionalProperties: false,
+  type: "object",
+  description: "One action by one AI participant. Fill the fields that type needs and leave the rest out.",
+  properties: {
+    type: {
+      type: "string",
+      description:
+        "send_message = speak. add_reaction = react to a message instead of speaking. rename_chat = the conversation has become about something else. "
+        + "add_member / remove_member = bring a polity in, or put one out. create_poll = call a binding vote. add_poll_option = add a choice to one. poll_vote = cast a vote.",
+      enum: ["send_message", "add_reaction", "rename_chat", "add_member", "remove_member", "create_poll", "add_poll_option", "poll_vote"],
     },
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["add_reaction"] },
-        actorName: nonEmptyTextSchema("The AI participant reacting."),
-        targetEntryId: nonEmptyTextSchema("The id of the message reacted to, copied from the transcript."),
-        emoji: nonEmptyTextSchema("One emoji."),
-      },
-      required: ["type", "actorName", "targetEntryId", "emoji"],
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["rename_chat"] },
-        actorName: nonEmptyTextSchema("The AI participant renaming it."),
-        title: nonEmptyTextSchema("The new title: what this conversation has become about."),
-      },
-      required: ["type", "actorName", "title"],
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["add_member", "remove_member"] },
-        actorName: nonEmptyTextSchema("The AI participant doing it."),
-        targetName: nonEmptyTextSchema("The polity brought in or put out, by exact FULL name. Never a human-controlled participant."),
-      },
-      required: ["type", "actorName", "targetName"],
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["create_poll"] },
-        actorName: nonEmptyTextSchema("The AI participant opening it."),
-        pollRef: nonEmptyTextSchema("Your own short label for this poll, to vote on it in this same answer."),
-        question: nonEmptyTextSchema("The binding question: a treaty, an armistice, war credits, a conference resolution. Never a mood check."),
-        options: {
-          type: "array",
-          description: "Two or more options to vote on.",
-          minItems: 2,
-          maxItems: 10,
-          items: {
-            type: "object",
-            properties: {
-              optionRef: nonEmptyTextSchema("Your own short label for this option."),
-              label: nonEmptyTextSchema("What it says on the ballot."),
-            },
-            required: ["optionRef", "label"],
-            additionalProperties: false,
-          },
+    actorName: nonEmptyTextSchema("The AI participant acting, by exact display name. NEVER a human-controlled one."),
+    content: textSchema("send_message: what it says, in its leader's voice. Match the length and tone of what it answers."),
+    targetEntryId: textSchema("add_reaction: the id of the message reacted to, copied from the transcript."),
+    emoji: textSchema("add_reaction: one emoji."),
+    title: textSchema("rename_chat: the new title."),
+    targetName: textSchema("add_member / remove_member: the polity, by exact FULL name. Never a human-controlled participant."),
+    pollRef: textSchema("create_poll: your own short label for the poll, so you can vote on it in this same answer. add_poll_option / poll_vote: that label, or the id of a poll already open."),
+    question: textSchema("create_poll: the binding question — a treaty, an armistice, war credits, a conference resolution. Never a mood check."),
+    options: {
+      type: "array",
+      description: "create_poll: two or more choices to vote on.",
+      items: {
+        type: "object",
+        properties: {
+          optionRef: nonEmptyTextSchema("Your own short label for this option."),
+          label: nonEmptyTextSchema("What it says on the ballot."),
         },
-        allowCustom: { type: "boolean", description: "Whether a participant may add an option of its own." },
+        required: ["optionRef", "label"],
+        additionalProperties: false,
       },
-      required: ["type", "actorName", "pollRef", "question", "options"],
-      additionalProperties: false,
     },
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["add_poll_option"] },
-        actorName: nonEmptyTextSchema("The AI participant adding it."),
-        pollRef: nonEmptyTextSchema("The poll's ref from this answer, or the id of one already open."),
-        optionRef: nonEmptyTextSchema("Your own short label for the new option."),
-        label: nonEmptyTextSchema("What it says on the ballot."),
-      },
-      required: ["type", "actorName", "pollRef", "optionRef", "label"],
-      additionalProperties: false,
-    },
-    {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["poll_vote"] },
-        actorName: nonEmptyTextSchema("The AI participant voting. Every one that would vote must vote in THIS answer."),
-        pollRef: nonEmptyTextSchema("The poll's ref from this answer, or the id of one already open."),
-        optionRef: nonEmptyTextSchema("The option's ref, or the exact label of an option already open."),
-      },
-      required: ["type", "actorName", "pollRef", "optionRef"],
-      additionalProperties: false,
-    },
-  ],
+    optionRef: textSchema("add_poll_option: your own label for the new choice. poll_vote: the option's ref, or the exact label of an option already open."),
+    label: textSchema("add_poll_option: what the new choice says on the ballot."),
+    allowCustom: { type: "boolean", description: "create_poll: whether a participant may add a choice of its own." },
+  },
+  required: ["type", "actorName"],
+  additionalProperties: false,
 };
 
 export const CHAT_ACTIONS_SCHEMA = {
