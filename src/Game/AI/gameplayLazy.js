@@ -42,13 +42,15 @@ export const rollBackToSnapshot = async (...args) => (await gameplay()).rollBack
 export const canInterveneInLastTurn = async (...args) => (await gameplay()).canInterveneInLastTurn(...args);
 export const interveneAfterEvent = async (...args) => (await gameplay()).interveneAfterEvent(...args);
 
-// --- Catalyst scenes ----------------------------------------------------------
-// The engine's scene mode, and taking back a beat of one (catalystRewind.js).
-// No panel calls these yet: a scene opened by a skip is held in
-// world.activeCatalyst until one does.
+// --- Catalyst mode ------------------------------------------------------------
+// A moment played out as a scene (GameUI/catalyst.jsx): started by the player,
+// beat by beat, taken back (catalystRewind.js), ended into the record or set
+// aside. Nothing of it exists until the player enters the mode.
 export const createCatalyst = async (...args) => (await gameplay()).createCatalyst(...args);
 export const advanceActiveCatalyst = async (...args) => (await gameplay()).advanceActiveCatalyst(...args);
 export const rewindActiveCatalyst = async (...args) => (await gameplay()).rewindActiveCatalyst(...args);
+export const endActiveCatalyst = async (...args) => (await gameplay()).endActiveCatalyst(...args);
+export const setAsideActiveCatalyst = async (...args) => (await gameplay()).setAsideActiveCatalyst(...args);
 
 // --- Chat and diplomacy -----------------------------------------------------
 export const chooseNextDiplomaticSpeaker = async (...args) => (await gameplay()).chooseNextDiplomaticSpeaker(...args);

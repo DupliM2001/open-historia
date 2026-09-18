@@ -79,6 +79,7 @@ import { collapseRepeatedWorldContext } from "./promptDedupe.js";
 import { filterChatsVisibleTo, isChatVisibleTo } from "./chatVisibility.js";
 import { foreignAgentBrief } from "../../runtime/spycraft.js";
 import { renderReminders } from "../../runtime/gmChanges.js";
+import { describeGoalForAdvisor, playerGoalOf } from "../../runtime/playerGoal.js";
 import { describeReportsForPrompt, normalizeReports } from "../../runtime/reports.js";
 import { describeDocumentsForAdvisor } from "../../runtime/reportDelivery.js";
 import { viewAsSeen } from "../../runtime/gameState.js";
@@ -2776,6 +2777,10 @@ async function buildAdvisorSystemPrompt() {
         // through its diplomats, its agents and the news. The file the player
         // no longer browses; the advisor, as the government's staff, reads it.
         describeDocumentsForAdvisor(worldData?.reports, gameData?.country),
+        // The player's standing goal (runtime/playerGoal.js): the direction the
+        // advice serves. The advisor's alone of the conversations — a leader is
+        // never told a government's aims.
+        describeGoalForAdvisor(playerGoalOf(worldData, gameData?.country)),
         // The Game Master's standing reminders (runtime/gmChanges.js): what is
         // true now, whatever the record says. Empty — and so absent — without any.
         renderReminders(worldData?.simulationReminders, { formatDate: formatDateReadable }),
@@ -2977,6 +2982,11 @@ export function startChat() {
 }
 
 let diplomaticHistory = [];
+// A stored thread message as the leader is sent it: a player's line with the
+// catch-up it carried ahead of it (conversationCatchUp.js), anything else as is.
+const withCatchUpOn = (msg) => (msg?.role === "user" && msg.catchUp
+    ? { ...msg, text: withCatchUp(msg.text, msg.catchUp) }
+    : msg);
 // The open thread's durable memory (the newest DIPLOMATIC_MEMORY a reply
 // carried) and the game date it runs through.
 let diplomaticMemorySummary = "";
@@ -3000,7 +3010,9 @@ export function loadDiplomaticHistory(savedMessages) {
     diplomaticHistory = saved
     .map((msg) => ({
         role: msg.role === "user" ? "user" : "model",
-        parts: [{ text: formatDiplomaticTranscriptEntry(msg, formatDateReadable) }],
+        // A player's line is sent with the catch-up it was first sent with, so a
+        // reopened thread reads exactly as the live one did.
+        parts: [{ text: formatDiplomaticTranscriptEntry(withCatchUpOn(msg), formatDateReadable) }],
     }));
     diplomaticHistory = compactConversationHistory(diplomaticHistory);
     logDebugEvent("diplomacy",
@@ -3022,10 +3034,13 @@ export async function sendDiplomaticMessage(playerMessage, speakingAs, countries
     // the PLAYER). It selects this turn's voice and gates which chats that polity
     // may have read. `chatId` is the thread's own, and goes no further than the
     // prompt builder.
-    const { chatId = "", ...opts } = options || {};
+    // `catchUp` is what the world did since this thread last spoke, written by
+    // the panel and kept on the player's message (conversationCatchUp.js
+    // buildThreadCatchUp); the leader reads it ahead of what the player typed.
+    const { chatId = "", catchUp = "", ...opts } = options || {};
     const freshPrompt = await buildDiplomaticSystemPrompt(countries, null, speakingAs, { chatId });
 
-    diplomaticHistory.push({ role: "user", parts: [{ text: playerMessage }] });
+    diplomaticHistory.push({ role: "user", parts: [{ text: withCatchUp(playerMessage, catchUp) }] });
     diplomaticHistory = compactConversationHistory(diplomaticHistory);
 
     const turnInstruction = buildDiplomaticTurnInstruction({ speakingAs, priorMemory: diplomaticMemorySummary });
@@ -3090,7 +3105,7 @@ export async function sendDiplomaticMessageOnceOff({ playerMessage, speakingAs, 
         .filter((msg) => ["user", "leader"].includes(msg.role))
         .map((msg) => ({
             role: msg.role === "user" ? "user" : "model",
-            parts: [{ text: formatDiplomaticTranscriptEntry(msg, formatDateReadable) }],
+            parts: [{ text: formatDiplomaticTranscriptEntry(withCatchUpOn(msg), formatDateReadable) }],
         }));
     history = compactConversationHistory(history);
     history.push({ role: "user", parts: [{ text: playerMessage }] });

@@ -23,6 +23,7 @@ import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
 import { documentsForEvent } from "../../runtime/reportDelivery.js";
 import { unseenEvents } from "../../runtime/unseenEvents.js";
+import { isSceneInProgress } from "../AI/catalystRewind.js";
 import { isMainMenuOpen, useMainMenuOpen } from "./libraryBar";
 import {
     applyEventImpactsToWorld,
@@ -989,6 +990,7 @@ const TimelineSkipPanel = ({
     progressLabel,
     projectsHeld,
     projectsRetries,
+    sceneInProgress = false,
     segmentHeld,
     segmentRetries,
     topOffset,
@@ -996,10 +998,13 @@ const TimelineSkipPanel = ({
 }) => {
     const [customValue, setCustomValue] = useState("");
     const [customUnit, setCustomUnit] = useState("days");
+    // Time stands still while a scene is being played (Catalyst mode): the
+    // skips wait for it to end or be set aside, as the engine does.
+    const blocked = isLoading || sceneInProgress;
     const unitToDays = { hours: 1 / 24, days: 1, weeks: 7, months: 30, years: 365 };
     const runCustomJump = () => {
         const amount = Number(customValue);
-        if (!Number.isFinite(amount) || amount <= 0 || isLoading) return;
+        if (!Number.isFinite(amount) || amount <= 0 || blocked) return;
         onJump(amount * (unitToDays[customUnit] ?? 1));
     };
     // Where a custom jump would land, shown under the row the way every preset
@@ -1037,6 +1042,18 @@ const TimelineSkipPanel = ({
             gap: 0,
         }}
         >
+        {sceneInProgress && (
+            <div style={{ background: "rgba(250,204,21,0.1)", border: "1px solid rgba(250,204,21,0.5)", borderRadius: "10px", color: "#fef08a", fontSize: "0.72rem", lineHeight: 1.45, marginBottom: "0.6rem", padding: "0.5rem 0.6rem", textAlign: "center", width: "12.5rem" }}>
+                ⚡ A scene is in progress. Time stands still until it ends or is set aside.
+                <button
+                type="button"
+                onClick={() => window.dispatchEvent(new Event("oh:open-catalyst-mode"))}
+                style={{ background: "#facc15", border: "none", borderRadius: "8px", color: "#1c1917", cursor: "pointer", display: "block", fontSize: "0.72rem", fontWeight: 800, margin: "0.4rem auto 0", padding: "0.3rem 0.7rem" }}
+                >
+                Return to the scene
+                </button>
+            </div>
+        )}
         {canUndo && (
             <>
             <button
@@ -1083,7 +1100,7 @@ const TimelineSkipPanel = ({
         {jumpOptions.map((opt) => (
             <React.Fragment key={opt.label}>
             <div style={{ background: "rgba(139,92,246,0.4)", height: "1.25rem", width: "2px" }} />
-            <JumpNode isLoading={isLoading} opt={opt} onJump={onJump} />
+            <JumpNode isLoading={blocked} opt={opt} onJump={onJump} />
             </React.Fragment>
         ))}
 
@@ -1091,7 +1108,7 @@ const TimelineSkipPanel = ({
         <button
         type="button"
         onClick={() => {
-            if (isLoading) {
+            if (blocked) {
                 return;
             }
 
@@ -1102,8 +1119,8 @@ const TimelineSkipPanel = ({
             border: "1px solid rgba(96,165,250,0.45)",
             borderRadius: "12px",
             color: "white",
-            cursor: "pointer",
-            opacity: isLoading ? 0.72 : 1,
+            cursor: blocked ? "default" : "pointer",
+            opacity: blocked ? 0.72 : 1,
             padding: "0.55rem 0.7rem",
             textAlign: "center",
             width: "12.5rem",
@@ -1133,7 +1150,7 @@ const TimelineSkipPanel = ({
         onChange={(event) => setCustomValue(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter") runCustomJump(); }}
         placeholder="Custom"
-        disabled={isLoading}
+        disabled={blocked}
         style={{
             background: "rgba(0,0,0,0.25)",
             border: "1px solid rgba(255,255,255,0.16)",
@@ -1150,7 +1167,7 @@ const TimelineSkipPanel = ({
         data-no-translate
         value={customUnit}
         onChange={(event) => setCustomUnit(event.target.value)}
-        disabled={isLoading}
+        disabled={blocked}
         style={{
             background: "rgba(0,0,0,0.25)",
             border: "1px solid rgba(255,255,255,0.16)",
@@ -1173,16 +1190,16 @@ const TimelineSkipPanel = ({
         <button
         type="button"
         onClick={runCustomJump}
-        disabled={isLoading || !customValue}
+        disabled={blocked || !customValue}
         style={{
             background: "rgba(109,40,217,0.4)",
             border: "1px solid rgba(139,92,246,0.6)",
             borderRadius: "8px",
             color: "#fff",
-            cursor: isLoading || !customValue ? "default" : "pointer",
+            cursor: blocked || !customValue ? "default" : "pointer",
             fontSize: "0.8rem",
             fontWeight: 700,
-            opacity: isLoading || !customValue ? 0.5 : 1,
+            opacity: blocked || !customValue ? 0.5 : 1,
             padding: "0.3rem 0.6rem",
         }}
         >
@@ -2690,6 +2707,7 @@ const DateWidget = ({
         progressLabel={jumpProgress}
         projectsHeld={projectsHeld}
         projectsRetries={projectsRetries}
+        sceneInProgress={isSceneInProgress(worldState?.activeCatalyst)}
         segmentHeld={segmentHeld}
         segmentRetries={segmentRetries}
         topOffset={topOffset}

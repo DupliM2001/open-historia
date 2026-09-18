@@ -17,6 +17,8 @@ import StatsPane from "./stats.jsx";
 import { buildCatchUpNote } from "../AI/conversationCatchUp.js";
 import { gmChangesSince } from "../../runtime/gmChanges.js";
 import { compareGameDates, formatGameDateReadable } from "../../runtime/gameDates.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
+import { useUnseenEventIds } from "./useUnseenEvents.js";
 
 Chart.register(...registerables);
 
@@ -866,6 +868,62 @@ const AdvisorMessageRow = React.memo(({ msg, msgIndex, chatDiffers, chatDir, onO
     );
 });
 
+// The advisor flagging a paper a turn put in the government's hands
+// (runtime/reportDelivery.js documentNotices): one line, the document a click
+// away. Shown once the reveal reaches the event it came with; gone if the paper
+// is (an undone turn).
+const selectReports = (world) => (Array.isArray(world?.reports) ? world.reports : []);
+const noticeHow = (notice) => (notice.channel === "intelligence"
+    ? `a copy our agents took${notice.from ? ` in ${notice.from}` : ""}; they do not know we have it`
+    : notice.channel === "diplomacy"
+    ? `from ${notice.from || "abroad"}, filed in our correspondence with them`
+    : "for our government's eyes alone");
+
+const AdvisorDocumentNotice = ({ notice }) => {
+    const reports = useRuntimeState("world", selectReports);
+    const unseen = useUnseenEventIds();
+    const [open, setOpen] = useState(false);
+    if (unseen.has(String(notice?.eventId ?? ""))) return null;
+    const report = reports.find((entry) => String(entry?.id) === String(notice?.reportId));
+    if (!report) return null;
+    return (
+        <div style={{ alignItems: "flex-start", display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>🧭 Advisor</span>
+            <div style={{ background: "rgba(250,204,21,0.06)", border: "1px solid rgba(250,204,21,0.22)", borderRadius: "12px 12px 12px 2px", boxSizing: "border-box", fontSize: "0.82rem", lineHeight: 1.5, maxWidth: "90%", padding: "0.55rem 0.8rem" }}>
+                <div>
+                    📄 A new paper on your desk: <span data-no-translate style={{ fontWeight: 800 }}>{report.title}</span>, {noticeHow(notice)}.
+                </div>
+                <button type="button" onClick={() => setOpen((value) => !value)} style={{ background: "none", border: "none", color: "#fde68a", cursor: "pointer", fontFamily: "inherit", fontSize: "0.74rem", fontWeight: 700, marginTop: "0.3rem", padding: 0 }}>
+                    {open ? "Put it away" : "Read it"}
+                </button>
+                {open && (
+                    <div data-no-translate style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: "0.4rem", paddingTop: "0.45rem", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {report.dateline ? `${report.dateline}\n\n` : ""}{report.body}
+                    </div>
+                )}
+            </div>
+            {notice.time && (
+                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.65rem", marginTop: "0.25rem" }}>{formatAdvisorDate(notice.time)}</span>
+            )}
+        </div>
+    );
+};
+
+// Notices a turn posted while the panel held its conversation (gameplay.js
+// postDocumentNotices), and those an undo took back, merged in from the file —
+// never the other way — so the panel's next save keeps them.
+const mergeNotices = (current, stored) => {
+    const storedNotices = (Array.isArray(stored) ? stored : []).filter((message) => message?.role === "notice");
+    const storedIds = new Set(storedNotices.map((message) => message.id));
+    const kept = current.filter((message) => message?.role !== "notice" || storedIds.has(message.id));
+    const present = new Set(kept.filter((message) => message?.role === "notice").map((message) => message.id));
+    const added = storedNotices.filter((message) => !present.has(message.id));
+    if (!added.length && kept.length === current.length) return current;
+    // A reply still streaming stays last: the panel finds it there.
+    const last = kept.at(-1);
+    return last?.streaming ? [...kept.slice(0, -1), ...added, last] : [...kept, ...added];
+};
+
 // The whole scrollable history, also memoized as a unit — so a keystroke in
 // the composer (state that lives in AdvisorPanel, outside this component)
 // never even reaches AdvisorMessageRow's own per-row check above.
@@ -880,10 +938,12 @@ const AdvisorMessageList = React.memo(({ messages, isLoading, chatDiffers, chatD
     {/* The retry is offered on the LAST message only, and only when it is the
         error: retrying anything older would re-ask a question the conversation
         has already moved past. */}
-    {messages.map((msg, i) => (
+    {messages.map((msg, i) => (msg.role === "notice"
+        ? <AdvisorDocumentNotice key={msg.id || i} notice={msg} />
+        : (
         <AdvisorMessageRow key={i} msg={msg} msgIndex={i} chatDiffers={chatDiffers} chatDir={chatDir} onOpenActions={onOpenActions} onOpenProjects={onOpenProjects} onRetryProjects={onRetryProjects} onDraftMessage={onDraftMessage} onPlaceDeployment={onPlaceDeployment}
         onRetry={i === messages.length - 1 && msg.role === "error" ? onRetry : undefined} retrying={retrying} />
-    ))}
+    )))}
 
     {isLoading && !(messages[messages.length - 1]?.role === "advisor" && messages[messages.length - 1]?.streaming) && (
         <div style={{ display: "flex", alignItems: "flex-start", flexDirection: "column", gap: "0.25rem" }}>
@@ -975,6 +1035,20 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
         });
         return () => { cancelled = true; };
     }, [hasBootstrapped, isAdvisorOpen]);
+
+    // A turn flags new papers in the file while the panel holds the conversation
+    // (and an undo takes them back): merge them in (mergeNotices), so they show
+    // and the panel's next save keeps them. Before the panel has loaded, the load
+    // itself brings them.
+    useEffect(() => {
+        if (!hasBootstrapped) return undefined;
+        const onRuntimeUpdate = (event) => {
+            if (event?.detail?.url !== JSON_URLS.advisor) return;
+            setMessages((prev) => mergeNotices(prev, event.detail.value));
+        };
+        window.addEventListener("oh:runtime-json-updated", onRuntimeUpdate);
+        return () => window.removeEventListener("oh:runtime-json-updated", onRuntimeUpdate);
+    }, [hasBootstrapped]);
 
     useEffect(() => {
         if (!shouldAutoScrollRef.current) return;

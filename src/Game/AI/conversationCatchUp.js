@@ -95,6 +95,103 @@ export const buildCatchUpNote = ({
   return { text, label };
 };
 
+// ---- A leader's catch-up (GameUI/chat.jsx) -----------------------------------
+//
+// A leader's thread has the advisor's blind spot: the world moves between two
+// messages and the turns above say nothing of it, so a leader answers as though
+// the border it complained of last month had not since moved. The note tells it
+// what changed in public since the thread last spoke — the time, the newest
+// events, the borders that moved, the polities renamed, founded or gone — and
+// the votes cast in this conversation since its last turn. All of it is the
+// public record or the thread itself: nothing a leader could not know.
+
+export const CATCH_UP_BORDERS_NAMED = 6;
+
+const regionLabel = (op) => clean(op?.regionName) || clean(op?.regionId);
+
+// The borders those events moved, oldest first, in words.
+export const bordersMovedIn = (events) => {
+  const lines = [];
+  for (const event of array(events)) {
+    const impacts = event?.impacts ?? {};
+    for (const transfer of array(impacts.regionTransfers)) {
+      const to = clean(transfer?.toCode);
+      const from = clean(transfer?.fromCode);
+      if (to && regionLabel(transfer)) lines.push(`${regionLabel(transfer)} passed ${from ? `from ${from} ` : ""}to ${to}`);
+    }
+    for (const control of array(impacts.regionControlOps)) {
+      const to = clean(control?.toCode);
+      if (control?.op === "control" && to && regionLabel(control)) {
+        lines.push(`${regionLabel(control)} came under ${to}'s control${clean(control?.fromCode) ? `, taken from ${clean(control.fromCode)}` : ""}`);
+      }
+    }
+  }
+  return lines;
+};
+
+// The polities those events renamed, founded or dissolved, in words.
+export const politiesChangedIn = (events) => {
+  const lines = [];
+  for (const event of array(events)) {
+    for (const change of array(event?.impacts?.polityChanges)) {
+      const code = clean(change?.code);
+      const name = clean(change?.name);
+      if (change?.operation === "rename" && name && name !== code) lines.push(`${code} is now called ${name}`);
+      else if (change?.operation === "create" && (name || code)) lines.push(`${name || code} came into being`);
+      else if (change?.operation === "dissolve" && code) lines.push(`${code} ceased to exist`);
+    }
+  }
+  return lines;
+};
+
+// { text, label }, like buildCatchUpNote. `votesSince` are sentences ("France
+// voted "Accept" on "A ceasefire?"") the panel reads off the thread's log.
+export const buildThreadCatchUp = ({
+  previousDate = "",
+  currentDate = "",
+  events = [],
+  votesSince = [],
+  compareDates = defaultCompare,
+  formatDate = (value) => value,
+} = {}) => {
+  const from = clean(previousDate);
+  const to = clean(currentDate);
+  const moved = Boolean(from && to && compareDates(to, from) > 0);
+  const since = moved ? eventsBetween(events, from, to, { compareDates }) : [];
+  const borders = bordersMovedIn(since);
+  const polities = politiesChangedIn(since);
+  const votes = array(votesSince).map(clean).filter(Boolean);
+  if (!moved && !votes.length) return { text: "", label: "" };
+
+  const lines = [moved
+    ? `[Since this conversation last spoke: ${clean(formatDate(from))} → ${clean(formatDate(to))}]`
+    : "[Since this conversation last spoke]"];
+  if (moved) {
+    const named = since.slice(-CATCH_UP_EVENTS_NAMED)
+      .map((event) => `"${clean(event.title)}" (${clean(formatDate(clean(event.date)))})`);
+    lines.push(since.length
+      ? `Time has passed. ${since.length} event${since.length === 1 ? " is" : "s are"} on the public record since then${since.length > named.length ? ", the newest" : ""}: ${named.join("; ")}.`
+      : "Time has passed, though nothing on the public record happened in between.");
+  }
+  if (borders.length) {
+    const shown = borders.slice(-CATCH_UP_BORDERS_NAMED);
+    lines.push(`Borders moved: ${shown.join("; ")}${borders.length > shown.length ? ` (and ${borders.length - shown.length} more)` : ""}.`);
+  }
+  if (polities.length) lines.push(`Among the polities: ${polities.join("; ")}.`);
+  if (votes.length) lines.push(`Votes cast in this conversation since your last turn: ${votes.join("; ")}.`);
+  lines.push("What was said above was said before this; speak from the world as it stands now.");
+
+  let text = lines.join("\n");
+  if (text.length > CATCH_UP_MAX_CHARS) text = `${text.slice(0, CATCH_UP_MAX_CHARS - 1).trimEnd()}…`;
+  const label = [
+    moved ? `Since ${clean(formatDate(from))}` : "",
+    moved ? `${since.length} event${since.length === 1 ? "" : "s"}` : "",
+    borders.length ? `${borders.length} border change${borders.length === 1 ? "" : "s"}` : "",
+    votes.length ? `${votes.length} vote${votes.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" · ");
+  return { text, label };
+};
+
 // What the model is sent for one of the player's messages: the note, if the
 // message carries one, ahead of what the player typed.
 export const withCatchUp = (message, catchUp) => {

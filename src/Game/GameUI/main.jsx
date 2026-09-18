@@ -89,6 +89,10 @@ const LazyCheatsPanel = lazy(() =>
 const LazyDebugConsole = lazy(() =>
   import("./debugConsole.jsx").then((module) => ({ default: module.DebugConsole })),
 );
+// Catalyst mode (catalyst.jsx): nothing of it loads until the player enters it.
+const LazyCatalystPanel = lazy(() =>
+  import("./catalyst.jsx").then((module) => ({ default: module.CatalystPanel })),
+);
 
 const checkWebGL = () => {
   try {
@@ -201,6 +205,7 @@ const Main = ({
   const [shouldLoadCheats, setShouldLoadCheats] = useState(false);
   const [isDebugConsoleOpen, setIsDebugConsoleOpen] = useState(false);
   const [shouldLoadDebugConsole, setShouldLoadDebugConsole] = useState(false);
+  const [isCatalystOpen, setIsCatalystOpen] = useState(false);
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
   const [advisorWidth, setAdvisorWidth] = useState(readAdvisorWidth);
   // A starter message queued for the advisor's input box — set when something
@@ -411,6 +416,14 @@ const Main = ({
     ));
   }, []);
 
+  // Catalyst mode opens from the Tools menu, and from the time panel's note
+  // while a scene holds time still (time.jsx dispatches this).
+  useEffect(() => {
+    const openCatalyst = () => setIsCatalystOpen(true);
+    window.addEventListener("oh:open-catalyst-mode", openCatalyst);
+    return () => window.removeEventListener("oh:open-catalyst-mode", openCatalyst);
+  }, []);
+
   return (
     <>
       {showWebGLWarning && <WebGLWarningPopup />}
@@ -468,6 +481,15 @@ const Main = ({
           <LazyDebugConsole open={isDebugConsoleOpen} onClose={() => setIsDebugConsoleOpen(false)} />
         </Presence>
       </Suspense>
+      <Suspense fallback={null}>
+        <Presence open={isCatalystOpen}>
+          <LazyCatalystPanel
+            open={isCatalystOpen}
+            onClose={() => setIsCatalystOpen(false)}
+            onOpenTimeline={() => { setIsCatalystOpen(false); setActiveBottomPanel("history"); }}
+          />
+        </Presence>
+      </Suspense>
       <GenerationRatingToast />
       <Presence open={showGameLoading} leaveMs={450}>
         <GameLoadingScreen
@@ -516,6 +538,10 @@ const Main = ({
           }}
           onOpenGameManagement={() => openLibraryTab("games")}
           onOpenEvents={() => setActiveBottomPanel("history")}
+          onOpenCatalyst={() => {
+            setIsCatalystOpen(true);
+            setIsSettingsOpen(false);
+          }}
           onOpenCheats={() => {
             setShouldLoadCheats(true);
             setIsCheatsOpen(true);

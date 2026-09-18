@@ -51,6 +51,7 @@ const world = () => ({
   countryTags: { Borduria: ["monarchy"] },
   internationalReputation: { Borduria: 40, Syldavia: 60 },
   intelligence: { Borduria: 55 },
+  playerGoals: { Borduria: { text: "Take the Syldavian coast", round: 2 } },
 });
 
 test("a rename re-keys every store that carried the old name and keeps it as a former name", () => {
@@ -80,6 +81,7 @@ test("a rename re-keys every store that carried the old name and keeps it as a f
   assert.deepEqual(next.countryTags, { "Bordurian Republic": ["monarchy"] });
   assert.deepEqual(next.internationalReputation, { "Bordurian Republic": 40, Syldavia: 60 });
   assert.deepEqual(next.intelligence, { "Bordurian Republic": 55 });
+  assert.deepEqual(next.playerGoals, { "Bordurian Republic": { text: "Take the Syldavian coast", round: 2 } }, "the standing goal follows its country");
   assert.deepEqual(world().units[0].ownerCode, "Borduria", "the input world is not mutated");
 });
 

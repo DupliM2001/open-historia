@@ -108,6 +108,9 @@ export const normalizeChatEvent = (entry, index = 0) => {
             // A turn's own message: shown when this event is revealed
             // (runtime/unseenEvents.js).
             ...(asText(entry.eventId) ? { eventId: asText(entry.eventId) } : {}),
+            // The catch-up the player's message was sent with
+            // (AI/conversationCatchUp.js buildThreadCatchUp).
+            ...(asText(entry.catchUp) ? { catchUp: asText(entry.catchUp), ...(asText(entry.catchUpLabel) ? { catchUpLabel: asText(entry.catchUpLabel) } : {}) } : {}),
         };
     }
     if (kind === "reaction") {
@@ -199,6 +202,8 @@ export const eventsFromLegacyChat = (chat) => {
             text,
             memorySummary: asText(message?.memorySummary ?? message?.diplomaticMemorySummary),
             eventId: asText(message?.eventId),
+            catchUp: asText(message?.catchUp),
+            catchUpLabel: asText(message?.catchUpLabel),
         });
         // Reactions were a map on the message; each becomes its own event.
         const reactions = message?.reactions && typeof message.reactions === "object" ? message.reactions : {};
@@ -267,6 +272,7 @@ export const projectChatThread = (events) => {
                 // later did not hear it, and must not be written as though it did.
                 heardBy: members.map((member) => member.name),
                 ...(event.eventId ? { eventId: event.eventId } : {}),
+                ...(event.catchUp ? { catchUp: event.catchUp, ...(event.catchUpLabel ? { catchUpLabel: event.catchUpLabel } : {}) } : {}),
             };
             messages.push(message);
             messageById.set(event.id, message);
@@ -407,6 +413,8 @@ export const withUnloggedMessages = (events, messages, { threadId = "" } = {}) =
             text,
             memorySummary: asText(message?.memorySummary ?? message?.diplomaticMemorySummary),
             eventId: asText(message?.eventId),
+            catchUp: asText(message?.catchUp),
+            catchUpLabel: asText(message?.catchUpLabel),
         });
     }
     return additions.length ? normalizeChatEvents([...log, ...additions]) : log;

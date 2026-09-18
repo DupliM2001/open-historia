@@ -9,8 +9,12 @@ import { revertUnitOrder } from "../Map/unitsController.js";
 import {
     buildActionDisplayText,
     normalizeActionEntry,
+    readWorldState,
     writeActionsState,
+    writeWorldState,
 } from "../../runtime/gameState.js";
+import { PLAYER_GOAL_MAX_CHARS, playerGoalOf, withPlayerGoal } from "../../runtime/playerGoal.js";
+import { isSimulationBusy } from "../AI/simulationStatus.js";
 import { formatGameDateReadable } from "../../runtime/gameDates.js";
 import { refreshRuntimeState, subscribeRuntime } from "../../runtime/runtimeStore.js";
 import { useRuntimeState } from "../../runtime/useRuntimeState.js";
@@ -235,6 +239,209 @@ const SuggestionCard = ({ topic, onQueue, queuedIds }) => (
     </div>
     </div>
 );
+
+// Whether a turn is running, for the controls a turn's own world write would
+// overwrite. The flag is a synchronous counter (simulationStatus.js), so it is
+// polled while the panel is open, as the HUD polls it.
+const TURN_POLL_MS = 800;
+
+const useTurnRunning = (active) => {
+    const [running, setRunning] = React.useState(() => isSimulationBusy());
+    React.useEffect(() => {
+        if (!active) return undefined;
+        setRunning(isSimulationBusy());
+        const timer = window.setInterval(() => setRunning(isSimulationBusy()), TURN_POLL_MS);
+        return () => window.clearInterval(timer);
+    }, [active]);
+    return running;
+};
+
+const goalButtonStyle = (enabled, tone = "neutral") => ({
+    background: tone === "primary" ? (enabled ? "rgba(109,40,217,0.55)" : "rgba(109,40,217,0.2)") : "none",
+    border: tone === "primary" ? "1px solid rgba(139,92,246,0.55)" : "1px solid rgba(255,255,255,0.14)",
+    borderRadius: "8px",
+    color: enabled ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.4)",
+    cursor: enabled ? "pointer" : "not-allowed",
+    fontFamily: "sans-serif",
+    fontSize: "0.74rem",
+    fontWeight: 600,
+    padding: "0.3rem 0.7rem",
+});
+
+// The player's standing goal (runtime/playerGoal.js): the direction behind the
+// orders. The advisor, the time skip and the suggestions are told it; a foreign
+// leader never is. Locked while a turn runs, because the turn writes the world
+// it lives in.
+const StandingGoal = ({ country, round, gameDate, isOpen }) => {
+    const goal = useRuntimeState("world", (world) => playerGoalOf(world, country), country);
+    const turnRunning = useTurnRunning(isOpen);
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState("");
+    const [saving, setSaving] = React.useState(false);
+    const [error, setError] = React.useState("");
+    const draftRef = React.useRef(null);
+
+    React.useEffect(() => {
+        if (!isOpen) {
+            setEditing(false);
+            setError("");
+        }
+    }, [isOpen]);
+
+    React.useEffect(() => {
+        if (editing) draftRef.current?.focus();
+    }, [editing]);
+
+    if (!country) return null;
+
+    const lockedNote = "A turn is running. The goal can be changed once it ends.";
+
+    const startEditing = () => {
+        if (turnRunning) return;
+        setDraft(goal);
+        setError("");
+        setEditing(true);
+    };
+
+    const save = async (text) => {
+        if (saving) return;
+        if (isSimulationBusy()) {
+            setError(lockedNote);
+            return;
+        }
+        setSaving(true);
+        setError("");
+        try {
+            const current = await readWorldState({ force: true });
+            await writeWorldState(withPlayerGoal(current, country, text, { round, date: gameDate }));
+            const wording = String(text || "").trim();
+            logDebugEvent("action", wording ? `Standing goal set: ${wording}` : "Standing goal cleared");
+            setEditing(false);
+        } catch (saveError) {
+            console.error("Failed to save the standing goal:", saveError);
+            setError("The goal could not be saved. Try again.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const canSave = !saving && !turnRunning && draft.trim() !== goal;
+
+    const handleKeyDown = (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (canSave) void save(draft);
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            setEditing(false);
+            setError("");
+        }
+    };
+
+    const label = (
+        <span style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        Standing goal
+        </span>
+    );
+
+    if (editing) {
+        return (
+            <div style={{ background: "rgba(109,40,217,0.08)", border: "1px solid rgba(139,92,246,0.35)", borderRadius: "10px", display: "flex", flexDirection: "column", gap: "0.45rem", padding: "0.6rem 0.75rem" }}>
+            {label}
+            <textarea
+            ref={draftRef}
+            className="actions-composer"
+            aria-label="Standing goal"
+            maxLength={PLAYER_GOAL_MAX_CHARS}
+            placeholder="What is your government steering toward? e.g. Keep out of the war and grow the economy"
+            rows={2}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleKeyDown}
+            style={{
+                background: "rgba(0,0,0,0.25)",
+                border: "1px solid rgba(255,255,255,0.15)",
+                borderRadius: "8px",
+                boxSizing: "border-box",
+                color: "white",
+                fontFamily: "sans-serif",
+                fontSize: "0.8rem",
+                lineHeight: "1.45",
+                outline: "none",
+                padding: "0.5rem 0.65rem",
+                resize: "vertical",
+                width: "100%",
+            }}
+            />
+            <div style={{ alignItems: "center", display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
+            {goal && (
+                <button type="button" disabled={saving || turnRunning} onClick={() => void save("")} style={{ ...goalButtonStyle(!saving && !turnRunning), marginRight: "auto" }}>
+                Clear goal
+                </button>
+            )}
+            <button type="button" onClick={() => { setEditing(false); setError(""); }} style={goalButtonStyle(true)}>
+            Cancel
+            </button>
+            <button type="button" disabled={!canSave} onClick={() => void save(draft)} style={goalButtonStyle(canSave, "primary")}>
+            {saving ? "Saving…" : "Save"}
+            </button>
+            </div>
+            {(error || turnRunning) && (
+                <span style={{ color: "rgba(253,186,116,0.9)", fontSize: "0.72rem" }}>{error || lockedNote}</span>
+            )}
+            </div>
+        );
+    }
+
+    if (!goal) {
+        return (
+            <button
+            type="button"
+            disabled={turnRunning}
+            onClick={startEditing}
+            title={turnRunning ? lockedNote : "Your advisor, the time skip and the AI suggestions steer by it. Foreign leaders never see it."}
+            style={{
+                background: "none",
+                border: "1px dashed rgba(139,92,246,0.4)",
+                borderRadius: "10px",
+                color: turnRunning ? "rgba(196,165,255,0.4)" : "rgba(196,165,255,0.85)",
+                cursor: turnRunning ? "not-allowed" : "pointer",
+                fontFamily: "sans-serif",
+                fontSize: "0.78rem",
+                padding: "0.5rem 0.9rem",
+                textAlign: "left",
+                width: "100%",
+            }}
+            >
+            {"\u{1F3AF} Set a standing goal"}
+            <span style={{ color: "rgba(255,255,255,0.45)", display: "block", fontSize: "0.72rem", marginTop: "0.15rem" }}>
+            What your government is steering toward. Your advisor and the simulation keep it in mind; foreign leaders never see it.
+            </span>
+            </button>
+        );
+    }
+
+    return (
+        <div style={{ background: "rgba(109,40,217,0.08)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: "10px", display: "flex", flexDirection: "column", gap: "0.3rem", padding: "0.55rem 0.75rem" }}>
+        <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between" }}>
+        {label}
+        <button
+        type="button"
+        disabled={turnRunning}
+        onClick={startEditing}
+        title={turnRunning ? lockedNote : "Change or clear the goal"}
+        style={{ background: "none", border: "none", color: turnRunning ? "rgba(196,165,255,0.35)" : "rgba(196,165,255,0.85)", cursor: turnRunning ? "not-allowed" : "pointer", fontFamily: "sans-serif", fontSize: "0.74rem", padding: 0 }}
+        >
+        Edit
+        </button>
+        </div>
+        <span title={goal} style={{ color: "rgba(255,255,255,0.82)", display: "-webkit-box", fontSize: "0.8rem", lineHeight: "1.45", overflow: "hidden", WebkitBoxOrient: "vertical", WebkitLineClamp: 3 }}>
+        {"\u{1F3AF} "}{goal}
+        </span>
+        </div>
+    );
+};
 
 const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
     const [actions, setActions] = React.useState([]);
@@ -514,6 +721,8 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         >
         Submit actions for {countryDisplayName} for {gameDate}. Your actions will affect how the game world responds.
         </p>
+
+        <StandingGoal country={game.country} round={game.round} gameDate={game.gameDate} isOpen={isOpen} />
 
         <button
         type="button"

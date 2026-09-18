@@ -222,10 +222,11 @@ Also used for `autoJumpForward`. This is the largest task.
 | `stopDate` | string | Date the simulation stops | **yes** |
 | `summary` | string | Concise period summary | **yes** |
 | `clearActions` | boolean | Were queued player actions resolved | **yes** |
-| `catalyst` | `catalystSchema \| null` | Optional interactive scene | no |
 | `diplomaticOutreach` | `createdChatSchema[]` | Polities reaching out on their own initiative, not tied to any event | no |
 
 `eventSchema` (`:322`): `id`, `date`* , `title`* , `description`* , `importance`, `kind`, `notable` (bool), `playerRelated` (bool), `impacts` (`impactsSchema`).
+
+There is **no `catalyst`**: a scene begins only when the player starts one in Catalyst mode (`catalystCreation`). The schema used to offer one on every skip, into a save no panel showed it from; an answer that still carries one has it dropped by `normalizeGameplayPayload` before validation, never refused.
 
 #### Ledger transports (`warUpdates`, `relationUpdates`, `agreementUpdates`)
 
@@ -310,7 +311,7 @@ After the schema walk passes, `validateGameplayPayload` runs task-specific check
 
 | Task | Extra rule | Line |
 |---|---|---|
-| `jumpForward` / `autoJumpForward` | `stopDate` non-blank; every event's `date`/`title`/`description` non-blank after trim; **at least one of** events, non-empty summary, or a *meaningful* catalyst; if a catalyst is present its `choices` must be distinct | `:866` |
+| `jumpForward` / `autoJumpForward` | `stopDate` non-blank; every event's `date`/`title`/`description` non-blank after trim; **at least one of** events or a non-empty summary | `:866` |
 | `pregameHistory` | every event's `date`/`title`/`description` non-blank; `summary` non-blank | `:892` |
 | `descriptionToAction`, `nextSpeaker`, `eventConsolidator`, `catalystCreation`, `catalystExecutor`, `catalystSummary`, `gameMaster` | a per-task list of top-level fields must be non-blank after trim (`requiredTextByTask`, `:906`) | `:915` |
 | `catalystCreation` | `choices` distinct (`validateDistinctChoices`) | `:921` |
@@ -320,7 +321,6 @@ After the schema walk passes, `validateGameplayPayload` runs task-specific check
 
 Helpers backing these:
 
-- **`hasMeaningfulCatalyst`** (`:819`) — a catalyst counts only if `title`/`premise`/`opening` has real text **or** `choices` is non-empty. Prevents an empty `{}` catalyst from satisfying the "at least one of" jump rule.
 - **`validateDistinctChoices`** (`:828`) — trims + lowercases each choice, flags the first blank, then rejects if the `Set` size differs from the array length (duplicate detection).
 - **`findBlankString`** (`:836`) — recurses the entire value (objects and arrays) and returns the JSONPath of the first whitespace-only string. Used by `countryStatSheet` so no field in the sheet ships blank. Note this is stricter than the schema's `nonEmptyTextSchema` (which only checks `minLength`, so `"   "` would pass the walker but fail here).
 
