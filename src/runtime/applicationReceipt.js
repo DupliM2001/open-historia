@@ -46,6 +46,7 @@ const APPLIED_KEYS = Object.freeze([
   "markerOps",
   "projectOps",
   "createdChats",
+  "reports",
 ]);
 
 const APPLIED_LABELS = Object.freeze({
@@ -58,6 +59,7 @@ const APPLIED_LABELS = Object.freeze({
   markerOps: ["structure operation", "structure operations"],
   projectOps: ["project operation", "project operations"],
   createdChats: ["new chat", "new chats"],
+  reports: ["report", "reports"],
 });
 
 const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();

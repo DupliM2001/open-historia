@@ -271,6 +271,10 @@ Shows player country + formatted date (`«` opens Events history, `»` opens the
 
 On success it swaps to the **history panel** with `visibleEventCount = 1`. Fallback generations surface a warning banner.
 
+### 6.2-bis Dossier (`dossier.jsx`)
+
+The fourth launcher in the bottom-left dock. Lists the documents this player's government holds — secret protocols, private letters, intelligence assessments, treaty articles (`world.reports`, see [reports](ai-overview.md#reports-what-only-some-governments-know)) — newest first, each card expanding to the document rendered as Markdown, with a search box over title and body. Read-only: only the simulation writes reports. Scoped by exactly the rule every other reader uses, `audienceSeesScoped(viewerAudience([player]), report.visibleTo)`, so a document addressed only to other powers is not in the list at all; the subtitle says `Published`, `Held by us alone` or `Shared with …`.
+
 ### 6.3 Event history panel (`«`) + staged reveal
 
 Renders the latest turn's events (`buildTurnRecord`) one at a time; **Next event** / **Skip to end** reveal more. The camera follows every revealed event (`deriveEventFocusBounds` → `focusMapOnBounds`), unless the **Disable camera movement during events** map setting is on. A **staged reveal** (`time.jsx:1558`) replays the pre-jump world from the rollback snapshot and applies only revealed events' impacts through a purely visual override (`setWorldStateOverride`/`setUnitsOverride`) so ownership/units/markers animate in; finishing/closing clears the override.

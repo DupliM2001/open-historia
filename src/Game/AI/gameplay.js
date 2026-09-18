@@ -231,6 +231,7 @@ import { assertCampaignUnchanged } from "../../runtime/campaignGuard.js";
 import { getLibraryState } from "../../runtime/library.js";
 import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureEnabled } from "../../runtime/gameFeatures.js";
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
+import { REPORT_VOICE_DIRECTIVE, describeReportsForPrompt, normalizeReportOp } from "../../runtime/reports.js";
 import {
   applyTerritoryTempo,
   buildScriptedEventsInstruction,
@@ -1879,6 +1880,17 @@ const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null } = {}
     // Where a unit or a structure goes, in words (placement.js). Appended at call
     // time for the same reason as the rest; the field itself ships in the live schema.
     systemPrompt = `${systemPrompt}\n\n${PLACEMENT_DIRECTIVE}`;
+    // Documents, and what is on file already (runtime/reports.js). The narrator
+    // is shown every report — it wrote them — so the list is unscoped here; the
+    // audience rule applies where a VIEWER reads them. Read the same way the
+    // espionage brief below is, so a frozen-prompt campaign gets it too.
+    systemPrompt = `${systemPrompt}\n\n${REPORT_VOICE_DIRECTIVE}`;
+    try {
+      const reportsOnFile = describeReportsForPrompt(normalizeWorldState(await readWorldState({ force: false })).reports);
+      if (reportsOnFile) systemPrompt = `${systemPrompt}\n\n${reportsOnFile}`;
+    } catch {
+      /* no documents this turn */
+    }
     // Place renaming: appended at call time so existing frozen-prompt campaigns get it
     // too; the markerOps rename op ships via the LIVE tool schema either way.
     systemPrompt = `${systemPrompt}\n\n[Place Renaming]\nYou may rename places when the story warrants it (a city renamed after a leader or ideology, a capital re-designated, a colonial name replaced, a conquered city given the conqueror's name). Emit an impacts.markerOps entry {"op":"rename","name":"<current name>","newName":"<new name>","note":"<why>"}. This works on structures you built AND on existing map cities. Do it sparingly and only when a real event motivates it.`;
@@ -5462,6 +5474,37 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
       keptMarkerOps.push(operation);
     }
     if (impacts && Array.isArray(impacts.markerOps)) impacts.markerOps = keptMarkerOps;
+
+    // Documents (runtime/reports.js). A holder the world does not know is the
+    // same failure as an unknown chat participant — the document would be
+    // written to nobody, or to fewer governments than the story says — and it is
+    // checked HERE, where the whole country catalog is in hand.
+    const keptReports = [];
+    for (let index = 0; index < normalizeArray(impacts?.reports).length; index += 1) {
+      const operation = normalizeReportOp(impacts.reports[index]);
+      const operationPath = `${path}.reports[${index}]`;
+      if (!operation) {
+        if (strict) return `${operationPath} must be a report operation: create with a title, a body and visibleTo, or share with a reportId and visibleTo.`;
+        drop(path, "a report was dropped — it carried no document to write and no report to widen.");
+        continue;
+      }
+      if (operation.visibleTo.length) {
+        const holders = await resolveInvitees(operation.visibleTo, world, generatedPolities);
+        const unknown = operation.visibleTo.filter((name) => !holders.some((holder) => regionKey(holder.name) === regionKey(name) || regionKey(holder.code) === regionKey(name)));
+        if (!holders.length) {
+          if (strict) return `${operationPath}.visibleTo must name polities on this map; "${operation.visibleTo.join('", "')}" ${operation.visibleTo.length === 1 ? "is not one" : "are not"}.`;
+          drop(path, `the report "${operation.title || operation.reportId}" was dropped — none of the governments it names (${operation.visibleTo.join(", ")}) is a polity on this map.`);
+          continue;
+        }
+        if (unknown.length && !strict) {
+          noteReceipt(receipt, "adjusted", `The report "${operation.title || operation.reportId}" is held by ${holders.map((holder) => holder.name).join(", ")}: ${unknown.join(", ")} ${unknown.length === 1 ? "is not a polity" : "are not polities"} on this map.`);
+        }
+        if (unknown.length && strict) return `${operationPath}.visibleTo names "${unknown.join('", "')}", which ${unknown.length === 1 ? "is not a polity" : "are not polities"} on this map. Use the full names exactly as the map spells them.`;
+        operation.visibleTo = holders.map((holder) => holder.name);
+      }
+      keptReports.push(operation);
+    }
+    if (impacts && Array.isArray(impacts.reports)) impacts.reports = keptReports;
 
     // Project ops aimed at nothing. applyProjectOps drops these silently (which
     // is the right runtime behaviour - a phantom project conjured from a typo is

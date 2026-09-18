@@ -10,6 +10,7 @@ import { buildOwnerAliasMap, createOwnerResolver, isRealCountryName, toCountryNa
 import { foundPolityIfUnknown } from "./polityFounding.js";
 import { normalizeTerritoryBasis, screenTerritoryBasis } from "./territoryBasis.js";
 import { normalizeApplicationReceipt } from "./applicationReceipt.js";
+import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.js";
 import { mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
 import { resolvePolityIdentity } from "./polityIdentity.js";
 import {
@@ -93,6 +94,11 @@ export const WORLD_DEFAULTS = {
   // and rendered as map markers beside the stock cities. Stored here so they
   // share every existing read/write/poll/normalize path, exactly like units.
   markers: [],
+  // Documents held by the governments they were addressed to (runtime/reports.js):
+  // a secret pact, a letter, an intelligence assessment. Written by events
+  // (impacts.reports); read by an audience through visibleTo. Listed in the
+  // normalizeWorldState return too, for the reason given elsewhere here.
+  reports: [],
   // Real-time grace-period queue for optional Event Editor -> NPC diplomatic
   // reactions. Pending evaluations only, never chats: the conversation itself
   // is created later through the normal chat merge seam.
@@ -2733,6 +2739,7 @@ const normalizeEventImpacts = (value) => {
       regionClaims: [],
       regionControlOps: [],
       regionTransfers: [],
+      reports: [],
       unitOps: [],
     };
   }
@@ -2746,6 +2753,8 @@ const normalizeEventImpacts = (value) => {
     regionClaims: normalizeArray(value.regionClaims).map(normalizeRegionClaim).filter(Boolean),
     regionControlOps: normalizeArray(value.regionControlOps).map(normalizeRegionControlOp).filter(Boolean),
     regionTransfers: normalizeArray(value.regionTransfers).map(normalizeRegionTransfer).filter(Boolean),
+    // Documents the event writes or widens (runtime/reports.js).
+    reports: normalizeArray(value.reports).map(normalizeReportOp).filter(Boolean),
     // Say WHY a unit op was thrown away. A dropped op is the difference between an
     // event that narrates a deployment and troops that actually appear on the map,
     // and it used to vanish into .filter(Boolean) without a word — leaving no way
@@ -3398,6 +3407,7 @@ export const normalizeWorldState = (world) => {
       })
       .filter(Boolean),
     markers: normalizeMarkers(nextWorld.markers),
+    reports: normalizeReports(nextWorld.reports),
     pendingEventOutreach: normalizePendingEventOutreach(nextWorld.pendingEventOutreach),
     // Explicit (not via the ...WORLD_DEFAULTS spread) so these new fields survive every
     // write path — the documented new-world-field trap.
@@ -4269,6 +4279,22 @@ export const applyEventImpactsToWorld = ({
           };
         }
       }
+    }
+
+    // The documents this event writes or widens (runtime/reports.js). Holders
+    // go through the same resolver as every owner above (a code becomes its
+    // name, an alias its polity); whether a holder exists at all was settled at
+    // validation, where the whole country catalog is in hand (gameplay.js
+    // validateReportOps).
+    if (event.impacts.reports?.length) {
+      const outcome = applyReportOps(nextWorld.reports, event.impacts.reports, {
+        eventId: boardOnly.has(event.id) ? "" : event.id,
+        date: event.date || "",
+        round,
+        resolvePolity: resolveOwner,
+      });
+      nextWorld.reports = outcome.reports;
+      for (const entry of outcome.rejected) console.warn(`[reports] an operation on event "${event.title}" was refused — ${entry.reason}.`);
     }
 
     // Projects & Operations last, so the ops see the world this event has already

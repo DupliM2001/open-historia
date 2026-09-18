@@ -1426,16 +1426,26 @@ export const loadCountryNames = async ({ force = false } = {}) => {
   countryNamesPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.countries;
-      if (!layer) return [];
+      // The STOCK world's countries, from the tile archive — one of two sources,
+      // and the optional one. This used to return an empty catalog the moment the
+      // archive could not be read, before the world's own polities below had been
+      // looked at: a hand-drawn map, whose every country lives in polityOverrides,
+      // lost all of them to a missing tile file, and with them the country pickers,
+      // the map labels and every name a chat participant or a report holder is
+      // resolved against. (The same gap loadRegionCatalog had.) The archive is
+      // tried; the world's declared polities are always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.countries ?? null;
+      } catch (error) {
+        console.warn("The stock country tiles could not be read; the catalog carries this world's own polities only.", error);
+      }
 
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const code = props?.GID_0 || props?.gid_0 || props?.ISO_A3 || props?.iso_a3 || "";
         const name = resolveCountryDisplayName(
