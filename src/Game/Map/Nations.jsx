@@ -1194,7 +1194,12 @@ const WorldMap = ({ isGlobe = false }) => {
     }
 
     const { props, regionId, gid0, owner } = hit;
-    const rawClaimants = regionClaimants?.[regionId] ?? (Array.isArray(props.claimants) ? props.claimants : []);
+    // The world's list wherever it has one, an ended dispute's empty one
+    // included (useWorldState.js withSettledClaims); the feature's own claimants
+    // only for a region the world never recorded.
+    const rawClaimants = regionClaimants && Object.prototype.hasOwnProperty.call(regionClaimants, regionId)
+      ? regionClaimants[regionId]
+      : (Array.isArray(props.claimants) ? props.claimants : []);
     const claimants = Array.isArray(rawClaimants) ? rawClaimants : [];
     onRegionSelected({
       GID_0: owner || (owner === "" ? "" : toCountryName(gid0)),
@@ -2166,7 +2171,7 @@ const WorldMap = ({ isGlobe = false }) => {
     for (const record of customRegionMeta.records ?? []) {
       const id = String(record?.id ?? "");
       if (!id || record?.authored === true) continue;
-      const claimants = regionClaimants[id]?.length ? regionClaimants[id] : record?.claimants;
+      const claimants = Object.prototype.hasOwnProperty.call(regionClaimants, id) ? regionClaimants[id] : record?.claimants;
       if (!Array.isArray(claimants) || !claimants.length) continue;
       const liveOwner = regionOwnershipOverrides[id] ?? record?.owner ?? "";
       const seen = new Set();
