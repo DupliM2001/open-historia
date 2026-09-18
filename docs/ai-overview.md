@@ -323,8 +323,8 @@ Most players bring a free Gemini key. On that tier tokens are close to free and 
 |---|---|---|---|
 | Save AI requests | `ai_save_requests` | **on** | Everything below the table. Off restores the pipeline exactly as it was: lookups, strict-then-retry, one request per check, one per agent. |
 | Requests a day your key allows | `ai_daily_request_limit` | 500 | The denominator of the count, and the reserve background AI keeps clear of. The game never stops a call at the limit; the provider does. |
-| Background AI | `ai_background_activity` | **off** | Whether anything may call the model with nobody pressing a button. |
-| Background requests a day, at most | `ai_background_daily_cap` | 30 | The cap once it is on. It also stops while less than a tenth of the day is left (`BACKGROUND_RESERVE_SHARE`). |
+| Background AI | `ai_background_activity` | **on** | Whether anything may call the model with nobody pressing a button. Absent means on; only an explicit `"0"` turns it off. |
+| Background requests a day, at most | `ai_background_daily_cap` | 30 | The most it may spend in a day. It also stops while less than a tenth of the day is left (`BACKGROUND_RESERVE_SHARE`). |
 | Checks after a time skip ×5 | `ai_review_units` / `_territory` / `_timeline` / `_board` / `_spies` | on | Which jobs the turn review may carry. |
 
 **What saving changes.** A time skip is one request where it can be and never more than `JUMP_REQUEST_CAP` (3; a skip the player chose to generate in segments pays one per segment, and the cap moves with it — `jumpRequestCap`).

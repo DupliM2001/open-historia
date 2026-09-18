@@ -9527,9 +9527,9 @@ let spyReportInFlight = false;
 export const maybeGatherIntelligence = async ({ chance = SPY_REPORT_CHANCE } = {}) => {
   if (spyReportInFlight || isSimulationBusy()) return null;
   if (!isActiveFeatureEnabled("espionage")) return null;
-  // Nobody pressed anything: this is background AI (requestBudget.js), off until
-  // the player turns it on and capped for the day when they do. The agents still
-  // report after every time skip either way.
+  // Nobody pressed anything: this is background AI (requestBudget.js), capped
+  // for the day, and nothing at all once the player turns it off. The agents
+  // still report after every time skip either way.
   if (!backgroundAiAllowance().allowed) return null;
   if (Math.random() >= chance) return null;
   spyReportInFlight = true;
@@ -14042,7 +14042,7 @@ const appendSightingEvent = async (bundle, sighting, unitOps) => {
 export const maybeSendIdleDiplomacy = async ({ chance } = {}) => {
   if (idleDiplomacyInFlight || isSimulationBusy()) return null;
   // Nobody pressed anything, so this is background AI (requestBudget.js): it
-  // spends nothing until the player turns it on, and stops at its daily cap.
+  // stops at its daily cap, and spends nothing once the player turns it off.
   if (!backgroundAiAllowance().allowed) return null;
   // One cadence, the feature's own (see the comment above idleDiplomacyInFlight);
   // zero when idle diplomacy is off for this game, and then nothing runs. An

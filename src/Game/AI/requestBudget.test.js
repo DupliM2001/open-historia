@@ -43,10 +43,10 @@ const setup = ({ stored = {}, at = NOON_PACIFIC } = {}) => {
     return { storage, clock, settings, ledger };
 };
 
-test("a fresh install saves requests, keeps background AI off, and assumes a free key", () => {
+test("a fresh install saves requests, runs background AI within its cap, and assumes a free key", () => {
     const { settings } = setup();
     assert.equal(settings.saveRequests(), true);
-    assert.equal(settings.backgroundAi(), false);
+    assert.equal(settings.backgroundAi(), true);
     assert.equal(settings.dailyLimit(), DEFAULT_DAILY_REQUEST_LIMIT);
     assert.equal(settings.dailyLimit(), 500);
     assert.equal(settings.backgroundDailyCap(), DEFAULT_BACKGROUND_DAILY_CAP);
@@ -57,10 +57,11 @@ test("a fresh install saves requests, keeps background AI off, and assumes a fre
 test("only an explicit choice changes a default", () => {
     const { settings, storage } = setup();
     settings.setSaveRequests(false);
-    settings.setBackgroundAi(true);
+    settings.setBackgroundAi(false);
     settings.setReviewSection("timeline", false);
     assert.equal(settings.saveRequests(), false);
-    assert.equal(settings.backgroundAi(), true);
+    assert.equal(settings.backgroundAi(), false);
+    assert.equal(storage.getItem(REQUEST_BUDGET_KEYS.backgroundAi), "0");
     assert.equal(settings.reviewSection("timeline"), false);
     assert.equal(settings.reviewSection("board"), true);
     assert.equal(storage.getItem(reviewSectionKey("timeline")), "0");
@@ -91,7 +92,7 @@ test("a storage that throws reads as the defaults", () => {
     };
     const settings = createRequestSettings({ storage: broken });
     assert.equal(settings.saveRequests(), true);
-    assert.equal(settings.backgroundAi(), false);
+    assert.equal(settings.backgroundAi(), true);
     assert.equal(settings.setSaveRequests(false), false);
     const ledger = createRequestLedger({ storage: broken, now: () => NOON_PACIFIC });
     assert.equal(ledger.note({ status: 200 }).used, 1, "the count is still returned, it just is not kept");
@@ -171,8 +172,10 @@ test("what the last skip cost is kept for the time panel", () => {
     assert.deepEqual(ledger.today().lastJump, { used: 2, refused: 1, at: NOON_PACIFIC });
 });
 
-test("background AI spends nothing until the player turns it on", () => {
+test("background AI runs from the start within its cap, and spends nothing once turned off", () => {
     const { settings, ledger } = setup();
+    assert.deepEqual(backgroundAllowance({ settings, ledger }), { allowed: true, reason: "", remaining: DEFAULT_BACKGROUND_DAILY_CAP });
+    settings.setBackgroundAi(false);
     assert.deepEqual(backgroundAllowance({ settings, ledger }), { allowed: false, reason: "off", remaining: 0 });
 });
 

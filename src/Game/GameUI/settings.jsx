@@ -1109,7 +1109,9 @@ const RequestBudgetSection = () => {
             }}
             />
             <div style={settingsHelper}>
-                Off (default): the game only calls the model when you do something. On: while you are not skipping time, countries may write to you unprompted, forces may reposition, agents may file extra reports, and a country you look at gets its first intelligence reading — each of those is a request nobody pressed a button for.
+                {background
+                    ? <>On (default): while you are not skipping time, countries may write to you unprompted, forces may reposition, agents may file extra reports, and a country you look at gets its first intelligence reading — each of those is a request nobody pressed a button for, and together they stop at the daily cap below.</>
+                    : <>Off: the game only calls the model when you do something.</>}
             </div>
             {background && (
                 <div style={fieldGroupStyle}>
