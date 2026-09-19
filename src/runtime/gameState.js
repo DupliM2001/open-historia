@@ -159,6 +159,13 @@ export const WORLD_DEFAULTS = {
   // scenario whose geometry ships as an immutable seed (the modern world), and
   // overridable per-world without touching geometry. Wins over feature props.
   regionClaimants: {},
+  // Region ids whose dispute the world has ended — renounced, cleared, handed
+  // over cleanly. The claimant list stays sparse (no row once a region is
+  // undisputed), so without this the map could not tell a dispute that ended
+  // from one never recorded, and drew the claimants the region's geojson feature
+  // bakes in again. A region disputed anew leaves the list. See
+  // settleRegionClaims.
+  settledRegionClaims: [],
   regionOwnershipOverrides: {},
   // Legal sovereignty where it differs from the polity administering a region
   // (an occupation). Sparse: normal territory has no row. Written by legal
@@ -3323,6 +3330,12 @@ export const normalizeWorldState = (world) => {
       .filter(([regionId, claimants]) => regionId && claimants.length),
   );
 
+  // Settled disputes: unique region ids, none of them disputed again — a live
+  // claimant list is the region's state and wins.
+  const settledRegionClaims = [...new Set(
+    normalizeArray(nextWorld.settledRegionClaims).map((regionId) => normalizeOptionalString(regionId)),
+  )].filter((regionId) => regionId && !Object.prototype.hasOwnProperty.call(regionClaimants, regionId));
+
   // Legal sovereignty is SPARSE: only regions whose lawful sovereign differs
   // from the polity administering them. A row that agrees with the controller
   // is dropped (a save from before the ledger simply has none), and owners
@@ -3434,6 +3447,7 @@ export const normalizeWorldState = (world) => {
     notes: normalizeOptionalString(nextWorld.notes),
     polityOverrides,
     regionClaimants,
+    settledRegionClaims,
     regionOwnershipOverrides,
     regionSovereigntyOverrides,
     simulationHistory: normalizeArray(nextWorld.simulationHistory)
@@ -3944,7 +3958,8 @@ const samePolity = (a, b) =>
   normalizeOptionalString(a).toLowerCase() === normalizeOptionalString(b).toLowerCase();
 
 // The claimant list of a region: one entry per polity (case-insensitively), at
-// most four, and the key deleted at zero. An empty array left behind is a
+// most four, and the key deleted at zero — the region then recorded as settled
+// (settleRegionClaims). An empty array left behind is a
 // permanent phantom difference to useWorldState's JSON comparison and a stripe
 // nobody can see (Nations.jsx tests `regionClaimants[id]?.length`).
 const writeRegionClaimants = (world, regionId, values) => {
@@ -3954,8 +3969,26 @@ const writeRegionClaimants = (world, regionId, values) => {
     if (!name || kept.some((entry) => samePolity(entry, name))) continue;
     kept.push(name);
   }
-  if (kept.length > 0) world.regionClaimants[regionId] = kept.slice(0, 4);
-  else delete world.regionClaimants[regionId];
+  if (kept.length > 0) {
+    world.regionClaimants[regionId] = kept.slice(0, 4);
+    if (Array.isArray(world.settledRegionClaims) && world.settledRegionClaims.includes(regionId)) {
+      world.settledRegionClaims = world.settledRegionClaims.filter((id) => id !== regionId);
+    }
+  } else {
+    settleRegionClaims(world, regionId);
+  }
+};
+
+// The dispute over a region is over. The row goes, as it always has, and the
+// region is recorded as settled: a region's geojson feature may bake claimants
+// in (the built-in map does, for 109 regions), and the map draws those wherever
+// the world has no row, so without the record an ended dispute came back —
+// even one ended by a clean hand-over, which clears whatever the scenario
+// declared.
+const settleRegionClaims = (world, regionId) => {
+  delete world.regionClaimants[regionId];
+  if (!Array.isArray(world.settledRegionClaims)) world.settledRegionClaims = [];
+  if (!world.settledRegionClaims.includes(regionId)) world.settledRegionClaims.push(regionId);
 };
 
 // Legal sovereignty is stored SPARSELY: an entry exists only while the lawful
@@ -4066,8 +4099,9 @@ const applyPolityAndTerritoryImpacts = ({
       // A clean hand-over resolves whatever dispute the scenario seed or an
       // earlier turn declared for this region: regionClaimants is written by
       // nothing else, so a negotiated cession kept rendering permanently striped
-      // with its old claimant, out of step with the ownership map.
-      delete world.regionClaimants[regionId];
+      // with its old claimant, out of step with the ownership map. Settled, so
+      // the claimants the map's own file bakes in do not stand in for it either.
+      settleRegionClaims(world, regionId);
     } else {
       const remaining = normalizeArray(world.regionClaimants[regionId])
         .filter((name) => !samePolity(name, toCode) && !samePolity(name, previousSovereign));
