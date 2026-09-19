@@ -11148,7 +11148,11 @@ export const runChatActionBatch = async ({
     knownPolities: known,
     messageIds: shownMessages.map((message) => message.id),
     polls: projected.polls,
-  }, { time: normalizeString(time) || normalizeString((bundle.savedGame ?? bundle.game)?.gameDate) });
+  }, {
+    time: normalizeString(time) || normalizeString((bundle.savedGame ?? bundle.game)?.gameDate),
+    // So a second turn on the same game day cannot mint the first one's ids.
+    takenIds: events.map((event) => event?.id),
+  });
 
   const memorySummary = normalizeString(payload?.memorySummary);
   if (memorySummary) {
