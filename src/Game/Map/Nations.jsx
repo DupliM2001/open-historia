@@ -26,6 +26,7 @@ import {
 } from "../../runtime/assets.js";
 import { resolveRegionName } from "../../runtime/regionNameFixes.js";
 import { useWorkerFetchableUrl } from "./useWorkerFetchableUrl.js";
+import { publishPolityIndex } from "../../runtime/placeSearch.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
 import {
   loadCountryLabelCollections,
@@ -850,6 +851,12 @@ const WorldMap = ({ isGlobe = false }) => {
       mapInstance.off("idle", confirmRenderedCurves);
     };
   }, [customFlag, map, mapDisplaySettings.disableCurvedCountryLabels, ptr1PolityTextAuthoritative, useLivePolityLabels]);
+
+  // Where each polity sits, for the place search: a custom scenario's countries are nowhere else.
+  useEffect(() => {
+    const ptrFeatures = polityLabelCollections.ptrLabelData?.features;
+    publishPolityIndex(ptrFeatures?.length ? ptrFeatures : polityLabelCollections.labelData?.features);
+  }, [polityLabelCollections]);
 
   // Development-time proof instead of screenshot guesswork. One authoritative
   // record per polity is exposed for inspection and the known regression set is

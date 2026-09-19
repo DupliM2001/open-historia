@@ -326,6 +326,23 @@ function getGeminiStreamUrl(model, apiKey) {
     return getGeminiUrl(model, apiKey).replace(":generateContent?", ":streamGenerateContent?alt=sse&");
 }
 
+// Why a Gemini skip's events arrive together while every other provider's arrive
+// one by one (streamedEvents.js).
+//
+// Streaming a tool call's arguments needs partialArgs, and
+// toolConfig.functionCallingConfig.streamFunctionCallArguments is Vertex-only:
+// this API's v1beta discovery doc (revision 20260918) gives FunctionCallingConfig
+// only `mode` and `allowedFunctionNames`. Sending it buys a 400 and costs the
+// player a request, so it is not sent.
+//
+// The alternative, JSON mode, does stream but Gemini refuses it alongside tools
+// ("Function calling with a response mime type: 'application/json' is
+// unsupported"), so a skip would lose its lookup functions. Declined: the
+// simulator keeps the ability to ask the engine questions.
+//
+// streamAssembly.js still assembles partialArgs if they ever arrive, so the day
+// the field reaches this API, asking for it is the only change.
+
 // AI calls go straight from the browser to the provider so the player's API key
 // only ever reaches the provider — never a server or a community node. Direct is
 // always tried first. Only when the page is served from a machine the player
@@ -872,6 +889,7 @@ async function callGemini(systemPrompt, history, {
     onActivity,
     onChunk,
     onRequest,
+    onToolStream,
     onUsage,
     rateLimitPolicy = "wait",
     retries = 3,
@@ -1059,7 +1077,7 @@ async function callGemini(systemPrompt, history, {
         // or proxy that ignored alt=sse still answers plain JSON, and that must
         // keep working exactly as it did.
         const data = String(response.headers.get("content-type") || "").includes("text/event-stream")
-            ? await readGeminiStreamedResponse(response, onActivity)
+            ? await readGeminiStreamedResponse(response, onActivity, onToolStream)
             : await readJsonAnswer(response, "Gemini");
         onUsage?.(data);
         if (tool) {
@@ -1086,6 +1104,14 @@ async function callGemini(systemPrompt, history, {
                 console.warn(`[ai] Gemini reported "${errorPayloadText(streamedError)}" mid-stream; retrying once in ${OVERLOADED_RETRY_DELAY / 1000}s`);
                 await sleep(OVERLOADED_RETRY_DELAY, signal);
                 continue;
+            }
+            // Fragments that stopped partway assemble into a valid object missing
+            // half the turn, so streamAssembly.js drops the call and leaves this
+            // for the log alone.
+            if (data?.partialToolJson) {
+                logDebugEvent("warn", `[ai] Gemini tool call was cut off mid-argument.`, {
+                    partialChars: data.partialToolJson.length,
+                }, { verbose: true });
             }
             // Still refusing: say so, rather than hand back an empty "answer".
             if (!streamedText && streamedError) throw toolStreamRefusalError("Gemini", streamedError, retriedAfterOverload);
@@ -1127,6 +1153,7 @@ async function callOpenAIStyleChatCompletions({
     onActivity,
     onChunk,
     onRequest,
+    onToolStream,
     onUsage,
     allowJsonSchemaFallback = false,
     configuredStructuredMode = "auto",
@@ -1411,7 +1438,7 @@ async function callOpenAIStyleChatCompletions({
         // stream is safe: a gateway that quietly ignores it still lands here.
         const responseType = String(response.headers.get("content-type") || "");
         const data = responseType.includes("text/event-stream")
-            ? await readOpenAIStreamedResponse(response, onActivity)
+            ? await readOpenAIStreamedResponse(response, onActivity, onToolStream)
             : await readJsonAnswer(response, providerLabel);
         onUsage?.(data);
         const text = extractOpenAIMessageText(data);
@@ -1654,6 +1681,7 @@ async function callAnthropic(systemPrompt, history, {
     onActivity,
     onChunk,
     onRequest,
+    onToolStream,
     onUsage,
     rateLimitPolicy = "wait",
     retries = 3,
@@ -1815,7 +1843,7 @@ async function callAnthropic(systemPrompt, history, {
         // nothing downstream can tell the difference. Branch on what actually
         // arrived, so an endpoint that ignored stream:true still works.
         const data = String(response.headers.get("content-type") || "").includes("text/event-stream")
-            ? await readAnthropicStreamedResponse(response, onActivity)
+            ? await readAnthropicStreamedResponse(response, onActivity, onToolStream)
             : await readJsonAnswer(response, "Anthropic");
         onUsage?.(data);
         if (tool) {
@@ -1868,6 +1896,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
     onActivity,
     onChunk,
     onRequest,
+    onToolStream,
     onUsage,
     rateLimitPolicy = "wait",
     retries = 3,
@@ -2046,7 +2075,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
         // nothing downstream can tell the difference. Branch on what actually
         // arrived, so an endpoint that ignored stream:true still works.
         const data = String(response.headers.get("content-type") || "").includes("text/event-stream")
-            ? await readAnthropicStreamedResponse(response, onActivity)
+            ? await readAnthropicStreamedResponse(response, onActivity, onToolStream)
             : await readJsonAnswer(response, "Anthropic Compatible");
         onUsage?.(data);
         if (tool) {

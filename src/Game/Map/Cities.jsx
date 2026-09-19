@@ -8,6 +8,7 @@ import {
     readJson,
 } from "../../runtime/assets.js";
 import { useWorldState } from "./useWorldState.js";
+import { publishCustomCityIndex } from "../../runtime/placeSearch.js";
 import {
     EMPTY_CITY_FEATURE_COLLECTION,
     customCityFeatureCount,
@@ -260,6 +261,7 @@ const Cities = () => {
         if (!customFlag) {
             setCustomData(null);
             setCustomLoadFailed(false);
+            publishCustomCityIndex(null);
             return undefined;
         }
 
@@ -271,6 +273,8 @@ const Cities = () => {
                 const normalized = normalizeCustomCityFeatureCollection(data);
                 const count = customCityFeatureCount(normalized);
                 setCustomData(normalized);
+                // Names for the place search; stock cities are OSM's already.
+                publishCustomCityIndex(count > 0 ? normalized : null);
                 setCustomLoadFailed(count === 0);
 
                 if (import.meta.env?.DEV) {
@@ -287,6 +291,7 @@ const Cities = () => {
                 if (cancelled) return;
                 console.warn("[cities] failed to load scenario cities.geojson; using stock fallback.", error);
                 setCustomData(EMPTY_CITY_FEATURE_COLLECTION);
+                publishCustomCityIndex(null);
                 setCustomLoadFailed(true);
             });
 

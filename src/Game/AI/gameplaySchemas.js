@@ -2859,6 +2859,48 @@ export const getGameplayToolForCustomStatSheet = (taskKey, rows, { custom = fals
     };
   }
 
+  // The GM uses a deliberately shallow provider transport: countryStatPatchesJson
+  // and eventsJson are JSON ARRAY TEXT rather than nested tool objects. The generic
+  // schema rewrite below therefore cannot reach patch.customStats or
+  // impacts.polityChanges[].stats. Put the live scenario contract on those string
+  // fields themselves so providers see the exact custom machine keys before they
+  // author the JSON text. Native validation still owns the decoded transaction.
+  if (taskKey === "gameMaster") {
+    const keyList = keys.join(", ");
+    const sampleKey = keys[0];
+    const patchDescription =
+      `JSON array text for authoritative country Stats patches in this custom-sheet scenario. `
+      + `Numeric Stats MUST be written only as patch.customStats using these exact machine keys: ${keyList}. `
+      + `Do not use population, economy, indices, stability, or gdpBreakdown. `
+      + `Example: [{"country":"Full Polity Name","patch":{"customStats":{"${sampleKey}":1}},"eventIndexes":[],"reason":""}]. `
+      + "Use only the requested customStats keys; values are absolute, not deltas.";
+    const eventDescription =
+      `JSON array text for canonical event objects. This scenario uses a custom National Stats sheet. `
+      + `If an event changes Stats through impacts.polityChanges[].stats, numeric Stats MUST be under customStats `
+      + `using only these exact machine keys: ${keyList}. Do not use population, economy, indices, stability, or gdpBreakdown. `
+      + "Use [] when there are no events.";
+
+    return {
+      ...tool,
+      description:
+        `${tool.description} This scenario has a custom National Stats sheet; any Stats mutation must use the exact live customStats machine keys.`,
+      schema: {
+        ...tool.schema,
+        properties: {
+          ...tool.schema.properties,
+          eventsJson: {
+            ...tool.schema.properties?.eventsJson,
+            description: eventDescription,
+          },
+          countryStatPatchesJson: {
+            ...tool.schema.properties?.countryStatPatchesJson,
+            description: patchDescription,
+          },
+        },
+      },
+    };
+  }
+
   const rewrite = (value, parentKey = "") => {
     if (Array.isArray(value)) return value.map((entry) => rewrite(entry));
     if (!value || typeof value !== "object") return value;
