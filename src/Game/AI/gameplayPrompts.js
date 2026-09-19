@@ -111,7 +111,7 @@ Current runtime map features:
 \${CURRENT_MAP_STRUCTURES}
 
 Recent campaign history / continuity:
-\${ALL_EVENTS_WITH_CONSOLIDATION_CATALYSTS}
+\${ALL_EVENTS_WITH_CONSOLIDATION}
 
 Recent diplomacy:
 \${CHATS_NON_CONSOLIDATED_ROUNDS}
@@ -229,7 +229,7 @@ export const PROMPT_SECTION_DEFINITIONS = [
       "HISTORICAL_PRESET_SIMULATION_RULES",
       "TARGET_ROUND_DATE",
       "CURRENT_UNITS",
-      "ALL_EVENTS_WITH_CONSOLIDATION_CATALYSTS",
+      "ALL_EVENTS_WITH_CONSOLIDATION",
       "CONSOLIDATED_HISTORY",
       "PLAYER_ACTIONS_THIS_ROUND",
       "CHATS_NON_CONSOLIDATED_ROUNDS",
@@ -246,7 +246,7 @@ export const PROMPT_SECTION_DEFINITIONS = [
       "PLAYER_POLITY_REPUTATION_CONTEXT",
       "TARGET_ROUND_DATE",
       "CURRENT_UNITS",
-      "ALL_EVENTS_WITH_CONSOLIDATION_CATALYSTS",
+      "ALL_EVENTS_WITH_CONSOLIDATION",
       "CONSOLIDATED_HISTORY",
       "PLAYER_ACTIONS_THIS_ROUND",
       "CHATS_NON_CONSOLIDATED_ROUNDS",
@@ -309,44 +309,44 @@ export const PROMPT_SECTION_DEFINITIONS = [
     type: "task",
   },
   {
-    description: "Create branching catalyst scenes.",
+    description: "Open the scene of an interactive event the player took up.",
     helpers: [
       "PLAYER_POLITY",
       "PLAYER_POLITY_REPUTATION_CONTEXT",
-      "RUNNING_CATALYST_DATE",
+      "RUNNING_INTERACTIVE_DATE",
       "WORLD_BEFORE_ROUND_ONE_TEXT",
       "HISTORICAL_PRESET_SIMULATION_RULES",
-      "ALL_EVENTS_WITH_CONSOLIDATION_CATALYSTS",
+      "ALL_EVENTS_WITH_CONSOLIDATION",
       "PLAYER_ACTIONS_THIS_ROUND",
     ],
-    key: "catalystCreation",
-    label: "Catalyst Creation",
+    key: "interactiveCreation",
+    label: "Interactive Event Creation",
     type: "task",
   },
   {
-    description: "Advance an active catalyst scene.",
+    description: "Play one move of an interactive event.",
     helpers: [
       "PLAYER_POLITY",
       "PLAYER_POLITY_REPUTATION_CONTEXT",
-      "RUNNING_CATALYST_DATE",
-      "CATALYST_PREMISE_DESCRIPTION",
-      "CATALYST_SIMULATION_HISTORY",
-      "RUNNING_CATALYST_PERCENT",
+      "RUNNING_INTERACTIVE_DATE",
+      "INTERACTIVE_PREMISE_DESCRIPTION",
+      "INTERACTIVE_SIMULATION_HISTORY",
+      "RUNNING_INTERACTIVE_PERCENT",
     ],
-    key: "catalystExecutor",
-    label: "Catalyst Execution",
+    key: "interactiveExecutor",
+    label: "Interactive Event Execution",
     type: "task",
   },
   {
-    description: "Turn a resolved catalyst into a campaign event.",
+    description: "Turn a finished interactive event into a campaign event.",
     helpers: [
       "PLAYER_POLITY",
-      "RUNNING_CATALYST_DATE",
-      "CATALYST_PREMISE_DESCRIPTION",
-      "CATALYST_SIMULATION_HISTORY",
+      "RUNNING_INTERACTIVE_DATE",
+      "INTERACTIVE_PREMISE_DESCRIPTION",
+      "INTERACTIVE_SIMULATION_HISTORY",
     ],
-    key: "catalystSummary",
-    label: "Catalyst Summary",
+    key: "interactiveSummary",
+    label: "Interactive Event Summary",
     type: "task",
   },
   {
@@ -360,7 +360,7 @@ export const PROMPT_SECTION_DEFINITIONS = [
       "GRAND_MAP_DESCRIPTION_NO_CITY",
       "CURRENT_UNITS",
       "CURRENT_MAP_STRUCTURES",
-      "ALL_EVENTS_WITH_CONSOLIDATION_CATALYSTS",
+      "ALL_EVENTS_WITH_CONSOLIDATION",
       "CHATS_NON_CONSOLIDATED_ROUNDS",
     ],
     key: "gameMaster",
