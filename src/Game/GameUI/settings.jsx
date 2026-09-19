@@ -6,6 +6,7 @@ import {
     CONNECTION_TEMPLATES,
     DEFAULT_PROVIDER,
     GEMINI_DEFAULT_CHAIN,
+    OPENAI_DEFAULT_MODEL,
     PROVIDER_OPTIONS,
     addConnection,
     addEntry,
@@ -24,7 +25,6 @@ import {
     getTaskPick,
     moveEntry,
     providerSetupRequirement,
-    providerSupportsModelDiscovery,
     removeConnection,
     removeEntry,
     resetEntryState,
@@ -613,9 +613,12 @@ const STATUS_COLORS = {
 const describeRowStatus = (status, at) => {
     if (status.status === "spent") return `Spent until ${formatResetTime(status.until)}`;
     if (status.status === "unusable") return `Unusable: ${status.reason}`;
+    // Not a skip: the next call still starts here (fallbackRunner.js). It says
+    // how long the provider asked for, which is how long it is likely to keep
+    // handing the call to the backup.
     if (status.status === "busy") {
         const seconds = Math.max(1, Math.ceil((status.until - at) / 1000));
-        return `${status.reason === "rate limited" ? "Rate limited" : "Busy"}, back in ${seconds < 90 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`}`;
+        return `${status.reason === "rate limited" ? "Rate limited" : "Busy"}, for about ${seconds < 90 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`}`;
     }
     return "Ready";
 };
@@ -716,8 +719,8 @@ const EntryEditor = ({ entry, connections, entries }) => {
         value={entry.model}
         onChange={set("model")}
         suggestions={suggestions}
-        placeholder={provider === "gemini" ? GEMINI_DEFAULT_CHAIN[0] : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
-        helperText={providerSupportsModelDiscovery(provider)
+        placeholder={provider === "gemini" ? GEMINI_DEFAULT_CHAIN[0] : provider === "openai" ? OPENAI_DEFAULT_MODEL : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
+        helperText={provider === "openai-compatible"
             ? "Leave blank to auto-pick a chat-capable model from the server's /models."
             : "Leave blank to use the built-in default."}
         />
@@ -805,7 +808,7 @@ const FallbackListSection = () => {
     return (
         <SettingsSection
         title="Models"
-        description="Backup models: when one runs out, the next one takes over. Every AI call starts at the top of the list and moves down only when a model can't answer."
+        description="Backup models: when one runs out, the next one takes over. Every AI call starts at the top of the list and moves down only when a model can't answer — including the call right after one failed, so a model is back in use the moment it can answer again."
         >
         {entries.length === 0 && (
             <div style={{ ...helperStyle, marginTop: 0, marginBottom: "0.7rem" }}>No models yet. Add one to let the game write turns and replies.</div>
@@ -838,7 +841,7 @@ const FallbackListSection = () => {
             <button type="button" onClick={() => moveEntry(entry.id, index - 1)} disabled={index === 0} aria-label="Move up" title="Move up" style={{ ...rowButtonStyle, opacity: index === 0 ? 0.4 : 1 }}>↑</button>
             <button type="button" onClick={() => moveEntry(entry.id, index + 1)} disabled={index === entries.length - 1} aria-label="Move down" title="Move down" style={{ ...rowButtonStyle, opacity: index === entries.length - 1 ? 0.4 : 1 }}>↓</button>
             <button type="button" onClick={() => setEditingId(editingId === entry.id ? null : entry.id)} style={rowButtonStyle}>{editingId === entry.id ? "Done" : "Edit"}</button>
-            {entry.status.status !== "ready" && <button type="button" onClick={() => resetEntryState(entry.id)} title="Try it again on the next call" style={rowButtonStyle}>Reset</button>}
+            {entry.status.status !== "ready" && <button type="button" onClick={() => resetEntryState(entry.id)} title="Clear this status. Every call tries this model again either way." style={rowButtonStyle}>Reset</button>}
             <button type="button" onClick={() => remove(entry)} aria-label="Remove" title="Remove from the list" style={rowButtonStyle}>✕</button>
             </div>
             {editingId === entry.id && (
@@ -857,12 +860,13 @@ const FallbackListSection = () => {
         <div style={{ ...fieldGroupStyle, marginTop: "0.9rem" }}>
         <label style={labelStyle}>When a model is rate limited</label>
         <select data-no-translate value={view.rateLimitPolicy} onChange={(event) => setRateLimitPolicy(event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
-        <option value="wait" style={{ color: "black" }}>Wait, then try it again (default)</option>
-        <option value="next" style={{ color: "black" }}>Try the next one straight away</option>
+        <option value="next" style={{ color: "black" }}>Use the next one straight away (default)</option>
+        <option value="wait" style={{ color: "black" }}>Wait, then try it again</option>
         </select>
         <div style={helperStyle}>
-        A rate limit is a short pause, not a used-up allowance. Waiting keeps your
-        backups' daily allowance for when the top model has truly run out.
+        A rate limit is a short pause, not a used-up allowance, and it is usually
+        over by the next call — which starts at the top of the list again. Waiting
+        instead keeps your backups' daily allowance, at the cost of a slower turn.
         </div>
         </div>
         <div style={{ ...helperStyle, marginBottom: 0 }}>

@@ -75,7 +75,7 @@ _Avoid_: Prompt dump
 ### AI access
 
 **Fallback list**:
-The player's ordered list of models to answer AI calls, which may mix providers. Every call starts at the top and uses the first entry that is not Spent. It moves down only when an entry cannot answer, and never spreads calls across entries to get more usage.
+The player's ordered list of models to answer AI calls, which may mix providers. Every call starts at the top — every call, whatever failed a moment ago — and uses the first entry that answers. It moves down only when an entry cannot answer, and never spreads calls across entries to get more usage.
 _Avoid_: Rotator, rotation, key rotation, model chain
 
 **Connection**:
@@ -87,7 +87,7 @@ One Connection and one model, at one place in the Fallback list. A task that has
 _Avoid_: Slot, route, step
 
 **Spent**:
-A Fallback list entry that has used up its allowance. It is skipped until its allowance resets or the player resets it.
+A Fallback list entry that has used up its allowance. Its row says so until its allowance resets, it answers again, or the player resets it. Calls still start there: the mark is what the player is shown, not where a call begins.
 _Avoid_: Exhausted, maxed out, dead
 
 **Rate limited**:
