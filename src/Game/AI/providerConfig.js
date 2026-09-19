@@ -5,6 +5,27 @@ import { FORMER_TASK_KEYS, readUnderTaskKey } from "./formerTaskKeys.js";
 
 export const DEFAULT_PROVIDER = "gemini";
 
+// Gemini's default Fallback list: the newest Flash first, and each older model
+// behind it as its backup, down to the Flash-Lites. Every call starts at the
+// top, and an entry that cannot answer — its allowance spent, the model
+// unknown to the key or overloaded — hands the call to the next one
+// (fallbackRunner.js). A first launch sets it up (migrateFromProviderSettings),
+// and so does the one-step key prompt for a new Gemini connection; a model the
+// player names is theirs instead. `GEMINI_DEFAULT_CHAIN[0]` is also the model
+// an entry with a blank model uses (main.jsx).
+export const GEMINI_DEFAULT_CHAIN = Object.freeze([
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+]);
+
+// The single model a first launch set up before the chain existed (a blank
+// model meant it too).
+const FORMER_GEMINI_DEFAULT = "gemini-3.5-flash-lite";
+
 export const PROVIDER_OPTIONS = [
     {
         value: "gemini",
@@ -46,7 +67,7 @@ export const PROVIDER_OPTIONS = [
 const PROVIDER_SETTINGS = {
     gemini: {
         apiKey: { storageKey: "gemini_api_key", defaultValue: "" },
-        model: { storageKey: "gemini_model", defaultValue: "gemini-3.5-flash-lite" },
+        model: { storageKey: "gemini_model", defaultValue: GEMINI_DEFAULT_CHAIN[0] },
         customParams: { storageKey: "gemini_custom_params", defaultValue: "" },
         structuredMode: { storageKey: "gemini_structured_mode", defaultValue: "auto" },
     },
@@ -384,13 +405,15 @@ function migrateFromProviderSettings() {
         }));
     }
 
+    // A model the player chose is theirs alone. With none, Gemini starts on its
+    // default chain, and any other provider on its own default model.
     const oldActive = PROVIDER_SETTINGS[active];
-    const activeModel = (storedOldValue(oldActive.model) ?? oldActive.model.defaultValue ?? "").trim();
-    const list = [normalizeEntry({
-        connectionId: connectionFor[active],
-        model: activeModel,
-        structuredMode: storedOldValue(oldActive.structuredMode) ?? "auto",
-    })];
+    const chosenModel = (storedOldValue(oldActive.model) ?? "").trim();
+    const models = chosenModel
+        ? [chosenModel]
+        : active === "gemini" ? [...GEMINI_DEFAULT_CHAIN] : [String(oldActive.model.defaultValue ?? "").trim()];
+    const structuredMode = storedOldValue(oldActive.structuredMode) ?? "auto";
+    const list = models.map((model) => normalizeEntry({ connectionId: connectionFor[active], model, structuredMode }));
 
     // The active provider's per-task models were the ones in effect. Each
     // distinct one becomes an entry at the bottom that its tasks point at; one
@@ -413,9 +436,36 @@ function migrateFromProviderSettings() {
     writeJsonSetting(FALLBACK_LIST_KEY, list);
 }
 
+// A list still exactly as a first launch set it up before the default chain
+// existed — one Gemini entry on the old default model, or on a blank one, which
+// meant the same — takes the chain, once. The entry keeps its place in the
+// chain and its id, so a task pick or a mark stays with it; its model is
+// written out, since a blank one now means the chain's first. A list the player
+// has shaped is left alone, and so is this one after its first read, whatever
+// is done to it later.
+const DEFAULT_CHAIN_KEY = "ai_gemini_default_chain";
+
+function upgradeFormerGeminiDefault() {
+    if (localStorage.getItem(DEFAULT_CHAIN_KEY) !== null) return;
+    localStorage.setItem(DEFAULT_CHAIN_KEY, "1");
+    const stored = readJsonSetting(FALLBACK_LIST_KEY, []);
+    if (!Array.isArray(stored) || stored.length !== 1) return;
+    const only = normalizeEntry(stored[0]);
+    const model = only.model.trim();
+    if (model && model !== FORMER_GEMINI_DEFAULT) return;
+    const connections = readJsonSetting(CONNECTIONS_KEY, []);
+    const connection = (Array.isArray(connections) ? connections : []).map(normalizeConnection).find((candidate) => candidate.id === only.connectionId);
+    if (connection?.provider !== "gemini") return;
+    writeJsonSetting(FALLBACK_LIST_KEY, GEMINI_DEFAULT_CHAIN.map((name) => (name === FORMER_GEMINI_DEFAULT
+        ? { ...only, model: name }
+        : normalizeEntry({ connectionId: only.connectionId, model: name, structuredMode: only.structuredMode }))));
+    logDebugEvent("setting", `Fallback list: the untouched Gemini default became the default list — ${GEMINI_DEFAULT_CHAIN.join(" → ")}.`);
+}
+
 const ensureMigrated = () => {
     if (typeof localStorage === "undefined") return;
     if (localStorage.getItem(FALLBACK_LIST_KEY) === null) migrateFromProviderSettings();
+    upgradeFormerGeminiDefault();
 };
 
 export function getConnections() {
@@ -576,7 +626,20 @@ export function applyQuickAiSetup({ provider, apiKey = "", endpoint = "", model 
     let entryId;
     if (existing) {
         entryId = existing.id;
-        if (modelName && existing.model.trim() !== modelName) updateEntry(existing.id, { model: modelName });
+        if (modelName && existing.model.trim() !== modelName) {
+            updateEntry(existing.id, { model: modelName });
+            // The same model further down the same Connection would only be
+            // asked a second time after it had failed once.
+            const repeats = getFallbackList().filter((entry) => entry.id !== existing.id && entry.connectionId === connectionId && entry.model.trim() === modelName);
+            for (const repeat of repeats) removeEntry(repeat.id);
+        }
+    } else if (!modelName && normalized === "gemini") {
+        // A new Gemini connection with no model named: the default chain, at the
+        // top of the list in its own order.
+        const chain = GEMINI_DEFAULT_CHAIN.map((name) => normalizeEntry({ connectionId, model: name }));
+        saveFallbackList([...chain, ...getFallbackList()]);
+        logDebugEvent("setting", `Fallback list: the Gemini default list added at the top — ${GEMINI_DEFAULT_CHAIN.join(" → ")}.`);
+        entryId = chain[0].id;
     } else {
         entryId = addEntry({ connectionId, model: modelName });
     }
