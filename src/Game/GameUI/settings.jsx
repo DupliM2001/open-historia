@@ -5,6 +5,7 @@ import {
     AI_TASK_ROUTING,
     CONNECTION_TEMPLATES,
     DEFAULT_PROVIDER,
+    GEMINI_DEFAULT_CHAIN,
     PROVIDER_OPTIONS,
     addConnection,
     addEntry,
@@ -715,7 +716,7 @@ const EntryEditor = ({ entry, connections, entries }) => {
         value={entry.model}
         onChange={set("model")}
         suggestions={suggestions}
-        placeholder={provider === "gemini" ? "gemini-3.5-flash-lite" : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
+        placeholder={provider === "gemini" ? GEMINI_DEFAULT_CHAIN[0] : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
         helperText={providerSupportsModelDiscovery(provider)
             ? "Leave blank to auto-pick a chat-capable model from the server's /models."
             : "Leave blank to use the built-in default."}
@@ -762,7 +763,7 @@ const FillPanel = ({ connections, onDone }) => {
             {connectionDisplayName(connection)} <span style={{ color: "rgba(255,255,255,0.45)" }}>({getProviderMeta(connection.provider).label})</span>
             </label>
         ))}
-        <SettingsInput label="Models, strongest first (one per line)" multiline value={models} onChange={setModels} placeholder={"gemini-3.7-flash\ngemini-3.6-flash\ngemini-3.5-flash\ngemini-3.5-flash-lite"} />
+        <SettingsInput label="Models, strongest first (one per line)" multiline value={models} onChange={setModels} placeholder={GEMINI_DEFAULT_CHAIN.join("\n")} />
         <div style={{ alignItems: "center", display: "flex", gap: "0.5rem" }}>
         <button type="button" onClick={fill} disabled={!ticked.length || !models.trim()} style={{ ...primaryButtonStyle, opacity: ticked.length && models.trim() ? 1 : 0.5 }}>Fill</button>
         <button type="button" onClick={onDone} style={smallButtonStyle}>Close</button>

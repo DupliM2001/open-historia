@@ -1,6 +1,7 @@
 import React, { useId, useMemo, useState } from "react";
 import {
   DEFAULT_PROVIDER,
+  GEMINI_DEFAULT_CHAIN,
   PROVIDER_OPTIONS,
   applyQuickAiSetup,
   getProviderMeta,
@@ -29,7 +30,8 @@ const TUTORIAL_EMBED_URL = `https://www.youtube-nocookie.com/embed/${TUTORIAL_VI
 const AI_STUDIO_KEY_URL = "https://aistudio.google.com/app/apikey";
 
 const MODEL_PLACEHOLDERS = {
-  gemini: "gemini-3.5-flash-lite",
+  // Blank keeps the default list: the newest Flash first, the older ones behind it.
+  gemini: `Blank: ${GEMINI_DEFAULT_CHAIN[0]}, older Flash models as backups`,
   anthropic: "claude-haiku-4-5",
   "anthropic-compatible": "claude-haiku-4-5",
   openai: "Blank picks a chat model from the server",

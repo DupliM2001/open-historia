@@ -1,5 +1,6 @@
 /*! Open Historia — portions (server relay for OpenAI-style APIs + reasoning toggle) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import {
+    GEMINI_DEFAULT_CHAIN,
     fallbackStateStore,
     getEntryStatus,
     getRateLimitPolicy,
@@ -89,7 +90,8 @@ import { withCatchUp } from "./conversationCatchUp.js";
 // Supports Gemini, OpenAI, Anthropic, and OpenAI-compatible endpoints
 // Usage: import { sendMessage, sendDiplomaticMessage, startChat, startDiplomaticChat, loadHistory, loadDiplomaticHistory, buildDiplomaticSystemPrompt } from './main.jsx'
 
-const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
+// An entry with a blank model: the top of Gemini's default list (providerConfig.js).
+const GEMINI_DEFAULT_MODEL = GEMINI_DEFAULT_CHAIN[0];
 const ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5";
 
 // What each model has said about its context window (contextWindow.js), kept
