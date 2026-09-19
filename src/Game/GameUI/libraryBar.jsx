@@ -3258,6 +3258,8 @@ const LibraryTopBar = () => {
                   : {},
                 background,
                 basemap: world.basemap || null,
+                // Carried like the flags above: a round-trip must not reset it.
+                customCities: Boolean(world.customCities),
                 // The scenario's starting units, so the Units panel edits what the game starts with.
                 units: Array.isArray(world.units) ? world.units : [],
               });
