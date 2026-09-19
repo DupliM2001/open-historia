@@ -26,6 +26,12 @@ export const GEMINI_DEFAULT_CHAIN = Object.freeze([
 // model meant it too).
 const FORMER_GEMINI_DEFAULT = "gemini-3.5-flash-lite";
 
+// What an OpenAI entry with a blank model runs with. OpenAI serves dozens of
+// models, most of them no use for a turn, and asking /models for a list took a
+// request and still guessed; naming the one the game is built around is both
+// quicker and better. A model the player types is theirs instead.
+export const OPENAI_DEFAULT_MODEL = "gpt-5.6-luna";
+
 export const PROVIDER_OPTIONS = [
     {
         value: "gemini",
@@ -73,7 +79,7 @@ const PROVIDER_SETTINGS = {
     },
     openai: {
         apiKey: { storageKey: "openai_api_key", defaultValue: "" },
-        model: { storageKey: "openai_model", defaultValue: "" },
+        model: { storageKey: "openai_model", defaultValue: OPENAI_DEFAULT_MODEL },
         customParams: { storageKey: "openai_custom_params", defaultValue: "" },
         structuredMode: { storageKey: "openai_structured_mode", defaultValue: "auto" },
     },
@@ -855,15 +861,16 @@ export function setTaskPick(taskKey, entryId) {
 
 // --- When an entry is Rate limited ---
 
-// One setting for the whole list. "wait" (the default) retries the same entry
-// as the game always did, protecting the backups' daily allowance; "next"
-// moves straight on.
+// One setting for the whole list. "next" (the default) hands the call to the
+// backup at once — a per-minute limit is usually over by the next call, which
+// starts at the top again (fallbackRunner.js). "wait" retries the same entry as
+// the game always did, protecting the backups' daily allowance.
 export function getRateLimitPolicy() {
-    return typeof localStorage !== "undefined" && localStorage.getItem(RATE_LIMIT_POLICY_KEY) === "next" ? "next" : "wait";
+    return typeof localStorage !== "undefined" && localStorage.getItem(RATE_LIMIT_POLICY_KEY) === "wait" ? "wait" : "next";
 }
 
 export function setRateLimitPolicy(policy) {
-    const next = policy === "next" ? "next" : "wait";
+    const next = policy === "wait" ? "wait" : "next";
     localStorage.setItem(RATE_LIMIT_POLICY_KEY, next);
     logDebugEvent("setting", `When a model is rate limited: ${next === "next" ? "try the next one" : "wait"}.`);
     notifyFallbackChange();

@@ -130,6 +130,16 @@ test("a fresh install starts with an empty Gemini Connection and the default Gem
   assert.equal(config.isFallbackListConfigured(), false, "so the start-of-game prompt still asks for a key");
 });
 
+// OpenAI serves dozens of models and used to be asked which one to use. The
+// game names one instead: it is what a blank OpenAI model means, and what a
+// player who was on OpenAI carries over.
+test("OpenAI has a default model of its own", () => {
+  assert.equal(config.OPENAI_DEFAULT_MODEL, "gpt-5.6-luna");
+  store.set("api_provider", "openai");
+  store.set("openai_api_key", "sk-oldsettings");
+  assert.deepEqual(resolved().map(({ provider, model }) => [provider, model]), [["openai", "gpt-5.6-luna"]]);
+});
+
 // A list as a first launch set it up before the default list existed: one
 // Gemini entry on the old default model, or on a blank one, which meant it.
 const storeFormerDefault = (model) => {
@@ -321,12 +331,12 @@ test("Clear list removes every entry and keeps every Connection", () => {
   assert.equal(config.getFallbackList().length, 0, "an empty list stays empty rather than migrating again");
 });
 
-test("the rate-limit setting is one choice for the whole list, defaulting to wait", () => {
-  assert.equal(config.getRateLimitPolicy(), "wait");
-  config.setRateLimitPolicy("next");
+test("the rate-limit setting is one choice for the whole list, defaulting to the next model", () => {
   assert.equal(config.getRateLimitPolicy(), "next");
-  config.setRateLimitPolicy("anything else");
+  config.setRateLimitPolicy("wait");
   assert.equal(config.getRateLimitPolicy(), "wait");
+  config.setRateLimitPolicy("anything else");
+  assert.equal(config.getRateLimitPolicy(), "next");
 });
 
 // Settings changes reach the Diagnostics log once each typed value settles,

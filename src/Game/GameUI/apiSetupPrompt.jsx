@@ -2,6 +2,7 @@ import React, { useId, useMemo, useState } from "react";
 import {
   DEFAULT_PROVIDER,
   GEMINI_DEFAULT_CHAIN,
+  OPENAI_DEFAULT_MODEL,
   PROVIDER_OPTIONS,
   applyQuickAiSetup,
   getProviderMeta,
@@ -34,7 +35,7 @@ const MODEL_PLACEHOLDERS = {
   gemini: `Blank: ${GEMINI_DEFAULT_CHAIN[0]}, older Flash models as backups`,
   anthropic: "claude-haiku-4-5",
   "anthropic-compatible": "claude-haiku-4-5",
-  openai: "Blank picks a chat model from the server",
+  openai: `Blank: ${OPENAI_DEFAULT_MODEL}`,
   "openai-compatible": "Blank picks a chat model from the server",
 };
 
