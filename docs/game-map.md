@@ -23,12 +23,12 @@ Everything below is in `src/Game/Map/` unless noted.
 
 | Hook | File | What it provides |
 |---|---|---|
-| `useWorldState()` | `useWorldState.js` | Singleton 5s poll of `world.json`; one poll shared by all consumers |
+| `useWorldState()` | `useWorldState.js` | Singleton store of `world.json`, shared by all consumers, fed by canonical write events |
 | `useCustomBackground()` | `useCustomBackground.js` | Resolves a scenario's uploaded image/vector basemap from `world.background` |
 | `useMapSetting(key)` | `../../runtime/mapSettings.js` | Reactive localStorage map toggles (`hideCountryLabels`, `disableIdleRotation`) |
-| `unitsController` | `unitsController.js` | Separate 5s poll of `world.units` + player order mutations |
+| `unitsController` | `unitsController.js` | Separate store of `world.units` + player order mutations |
 
-`useWorldState` is a module-level singleton: `startPolling()` fires one `setInterval(poll, 5000)` reading `JSON_URLS.world`, and all mounted consumers subscribe. It returns a **stable object identity** across polls when nothing it exposes changed (deep/shallow compares each field — arrays like `markers`/`regionClaimants` are `JSON.stringify`-compared) so React children don't re-render on every 5s tick. See [World state](world-state.md) for the `world.json` schema.
+`useWorldState` is a module-level singleton: it bootstraps `JSON_URLS.world` once and thereafter updates from the `oh:world-updated` event that every canonical write dispatches, so there is no poll. It returns a **stable object identity** when nothing it exposes changed (each field is compared by content, not reference) so React children don't re-render on an unrelated world write. See [World state §9](world-state.md#9-state-distribution-three-stores-no-panel-polls).
 
 Fields `useWorldState` derives from `world.json`:
 
@@ -212,7 +212,7 @@ A region whose `claimants` list names contesting countries renders **diagonally 
 
 Because the image id **encodes its own colours**, the `styleimagemissing` handler can rebuild *any* combination — including after a globe↔mercator remount wipes all GL images. This is why stripes are reactive rather than pre-registered.
 
-Claimants come from `world.regionClaimants[id]` first (how the modern-world scenario declares disputes, since its geometry is an immutable seed), else the region feature's own `claimants` prop (editor maps). `enrichedCustomRegionData` bakes a `_stripes` property (the image id) onto disputed features; layers select on `["has","_stripes"]` and paint with `fill-pattern` instead of the solid fill:
+Claimants come from `world.regionClaimants[id]` first (how the modern-world scenario declares disputes, since its geometry is an immutable seed), else the region feature's own `claimants` prop (editor maps). A region the world has a say on uses the world's list even when it is empty: `useWorldState.js` `withSettledClaims` puts every `world.settledRegionClaims` region into the map's view with no claimants, and the worker's `deriveDisputedData`, the stock-tile stripes and the region click test the key's presence, so a dispute the world ended does not come back from the feature. `enrichedCustomRegionData` bakes a `_stripes` property (the image id) onto disputed features; layers select on `["has","_stripes"]` and paint with `fill-pattern` instead of the solid fill:
 
 - `custom-regions-disputed-vnext` — the worker's `disputedData` (every claimant-carrying region with its live owner and claimants), striped at `0.90` whenever `customActive && worldKnown`.
 - `regions-disputed` — the tile twin for GADM disputed regions (uses `disputedTileStops`, opacity `TILE_FILL_FADE`), excluding `editedStockIds`.
@@ -365,7 +365,7 @@ world.json ──(useWorldState, 5s)──► customRegions, regionOwnershipOver
    │
    ├─► useCustomBackground ──► buildWorldStyle (image/vector/placeholder/ESRI)
    ├─► MarkersLayer ──► markers-source
-   └─► unitsController (own 5s poll of world.units) ──► Units.jsx / popups
+   └─► unitsController (own store of world.units) ──► Units.jsx / popups
 
 colors.json ──(getNationColors, oh:colors-updated event)──► colorMap
    └─► resolveOwnerRgb ──► every fill / stripe / label / marker / unit colour
@@ -375,7 +375,7 @@ countries.pmtiles / regions.pmtiles / cities.pmtiles ──► stock tile geomet
    └─► countryLabels.js (z0 countries tile) ──► point + curved stock labels
 ```
 
-Every owner recolour, label rebuild, and unit/marker update is a consequence of a `world.json` (or `colors.json`) change surfacing through the 5s polls — there is no push channel; the map is a pure function of that polled state plus the static per-scenario geometry.
+Every owner recolour, label rebuild, and unit/marker update is a consequence of a `world.json` (or `colors.json`) change surfacing through the store's write events. The map is a pure function of that state plus the static per-scenario geometry.
 
 ### Cross-references
 

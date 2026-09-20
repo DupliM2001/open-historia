@@ -2,7 +2,7 @@
 
 The web build is the browser-only edition of Open Historia served from the trusted central origin (openhistoria.com / the `/play/` site). It runs the **entire game client unchanged** with **zero server**: a `window.fetch` interceptor answers every same-origin `/api/*` call out of IndexedDB, heavy map tiles stream from a Cloudflare Worker proxy (or a hash-verified community node swarm), and optional magic-link/Google accounts sync your games as client-side-encrypted blobs. Everything in this page lives under `src/runtime/web/` and ships **only** in the web build — it is dynamically imported behind `import.meta.env.VITE_OH_WEB` so it is dead-code-eliminated from the local desktop/APK download, which keeps its real same-origin Express server.
 
-See also: [Server build](server-build.md) (the Express store this mirrors), [World state](world-state.md), [Assets & PMTiles](assets.md), [Scenario & game library](library.md), [Community hub](community-hub.md).
+See also: [Server build](server.md) (the Express store this mirrors), [World state](world-state.md), [Assets & PMTiles](assets-and-data.md), [Scenario & game library](runtime-services.md), [Community hub](runtime-services.md).
 
 ---
 
@@ -157,7 +157,7 @@ Rewrites a record whose owners are GADM codes into one keyed by country **names*
 
 ### Export / import bundles
 
-- `exportScenarioBundle(id, mode)` (`:858`) — `mode:"light"` drops pmtiles overrides; `"full"` embeds them base64. Schema `pax-historia-scenario-bundle/2`.
+- `exportScenarioBundle(id, mode)` (`:858`) — `mode:"light"` drops pmtiles overrides; `"full"` embeds them base64. Geometry is embedded as JSON, not base64, matching the desktop store (see `docs/server.md`). Schema `pax-historia-scenario-bundle/2`.
 - `importScenarioBundle` / `updateScenarioFromBundle` accept any schema in `ACCEPTED_BUNDLE_SCHEMAS` (v1 + v2). Note the **JSON-descriptor gotcha** (`:915`): `colors`/`flags`/`tags` descriptors carry the **object itself** in `descriptor.data`, not base64 — passing them through `base64ToBytes` (as geojson/pmtiles do) made `atob` throw and broke import of every flag/tag-carrying preset (e.g. WWII).
 - Hub provenance (`hubOrigin = { postId, bundleUrl, syncedAt }`) is stamped **last** and survives only when a write explicitly carries it — any other meta write forks the copy and stops offering hub updates.
 

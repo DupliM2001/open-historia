@@ -16,6 +16,7 @@ import {
   guidanceSegmentsFor,
   hasGuidance,
   locateSegment,
+  materializePackGuidance,
   normalizePackGuidance,
   normalizeSectionGuidance,
 } from "./promptGuidance.js";
@@ -168,4 +169,49 @@ test("when the defaults change, an edited passage stays and everything else foll
   assert.ok(out.includes("Be blunt."), "the edited passage keeps the author's text");
   assert.ok(!out.includes(locateSegment(original, guidelines).text), "the edited passage's old default is gone");
   assert.equal(composePrompt(key, updated, {}), updated, "nothing edited: the whole new prompt");
+});
+
+test("Export all prompts materializes every editable default passage", () => {
+  const guidance = materializePackGuidance({}, GUIDANCE_DEFAULTS);
+  assert.deepEqual(guidance.advisor, GUIDANCE_DEFAULTS.advisor);
+  assert.deepEqual(guidance.leader, GUIDANCE_DEFAULTS.leader);
+  assert.deepEqual(guidance.tasks, GUIDANCE_DEFAULTS.tasks);
+
+  for (const key of SECTION_KEYS) {
+    const bucket = ROOT_KEYS.includes(key) ? guidance[key] : guidance.tasks[key];
+    assert.deepEqual(Object.keys(bucket), guidanceSegmentsFor(key).map((segment) => segment.id), `${key}: every editable passage exported`);
+    assert.ok(Object.values(bucket).every((text) => typeof text === "string" && text.trim()), `${key}: no empty exported passage`);
+  }
+});
+
+test("a materialized transfer folds current defaults back to sparse overrides on import", () => {
+  const guidance = materializePackGuidance(
+    {
+      promptModel: PROMPT_MODEL_VERSION,
+      guidance: { advisor: { guidelines: "Be concise and specific." } },
+    },
+    GUIDANCE_DEFAULTS,
+  );
+
+  assert.equal(guidance.advisor.guidelines, "Be concise and specific.");
+  assert.equal(guidance.advisor.role, GUIDANCE_DEFAULTS.advisor.role);
+
+  const imported = normalizePackGuidance(
+    { promptModel: PROMPT_MODEL_VERSION, guidance },
+    GUIDANCE_DEFAULTS,
+  );
+  assert.deepEqual(imported, {
+    advisor: { guidelines: "Be concise and specific." },
+    leader: {},
+    tasks: {},
+  });
+});
+
+test("edits stored under a renamed task's old key are the new task's", () => {
+  const [first] = guidanceSegmentsFor("interactiveCreation");
+  const packWith = (tasks) => ({ promptModel: PROMPT_MODEL_VERSION, guidance: { tasks } });
+  const before = normalizePackGuidance(packWith({ catalystCreation: { [first.id]: "An edit made before the rename." } }), GUIDANCE_DEFAULTS);
+  assert.deepEqual(before.tasks, { interactiveCreation: { [first.id]: "An edit made before the rename." } }, "kept under the new key only");
+  const both = normalizePackGuidance(packWith({ catalystCreation: { [first.id]: "Old." }, interactiveCreation: { [first.id]: "New." } }), GUIDANCE_DEFAULTS);
+  assert.deepEqual(both.tasks.interactiveCreation, { [first.id]: "New." }, "the new key wins");
 });

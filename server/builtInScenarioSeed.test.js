@@ -13,7 +13,11 @@
 //   - an untouched older install with no campaigns is simply reset;
 //   - a scenario created from scratch starts on the built-in map;
 //   - a scenario without a map of its own renders on the stock world, never on
-//     the built-in's map.
+//     the built-in's map;
+//   - newer content on the same map (world.json `builtInRevision`: the countries
+//     renamed) refreshes the built-in in place, its campaigns staying on it with
+//     copies of whatever they still read from it, and a copy the player edited is
+//     kept with its campaigns first.
 // Each case runs in its own child process because OH_DATA_DIR is read once, at
 // import time, so one process can only ever see one data directory.
 import assert from "node:assert/strict";
@@ -127,6 +131,7 @@ test("the seed is a complete scenario whose world matches its map", () => {
   const meta = readJson(path.join(SEED_DIR, "scenario.json"));
   assert.equal(meta.createdAt, meta.updatedAt, "the seed is an untouched scenario");
   assert.ok(existsSync(path.join(SEED_DIR, "colors.json")));
+  assert.ok(Number.isInteger(seedWorld.builtInRevision) && seedWorld.builtInRevision >= 2, "the seed carries the revision its renamed countries shipped in");
 });
 
 test("a fresh data directory gets the whole seed", () => {
@@ -293,4 +298,86 @@ test("a running server whose built-in loses its record completes it on the next 
   assert.equal(result.world.builtInMap, STAMP);
   assert.equal(result.world.customRegions, true);
   assert.ok(existsSync(path.join(root, "scenarios", "default", "colors.json")));
+});
+
+// The built-in as an install had it before the countries were renamed: the same
+// map (stamp) with the first revision of its content, and two campaigns started
+// on it — one with its own colours, one old enough to still read the scenario's.
+const revisionOneRoot = ({ touched = false } = {}) => {
+  const root = freshRoot();
+  const dir = path.join(root, "scenarios", "default");
+  const createdAt = "2026-09-07T12:00:00.000Z";
+  writeJson(path.join(dir, "scenario.json"), { id: "default", name: "Modern Day", createdAt, updatedAt: touched ? "2026-09-10T08:00:00.000Z" : createdAt });
+  writeJson(path.join(dir, "world.json"), {
+    ownerSchema: OWNER_SCHEMA,
+    builtInMap: STAMP,
+    customRegions: true,
+    polityOverrides: { "Kingdom of Spain": { code: "Kingdom of Spain", name: "Kingdom of Spain", aliases: [], color: "", note: "" } },
+    regionOwnershipOverrides: { 0: "Kingdom of Spain" },
+  });
+  writeJson(path.join(dir, "game.json"), { country: "Kingdom of Spain", startDate: "2016-01-01", gameDate: "2016-01-01" });
+  writeJson(path.join(dir, "colors.json"), { "Kingdom of Spain": [1, 2, 3] });
+  writeJson(path.join(dir, "flags.json"), { "Kingdom of Spain": "data:flag" });
+  writeFileSync(path.join(dir, "regions.geojson"), readFileSync(path.join(SEED_DIR, "regions.geojson")));
+  writeJson(path.join(root, "scenario-manifest.json"), { order: ["default"], selectedScenarioId: "default", version: 2 });
+  for (const [game, colors] of [["own-copies", { "Kingdom of Spain": [7, 7, 7] }], ["reads-scenario", null]]) {
+    const gameDir = path.join(root, "games", game);
+    writeJson(path.join(gameDir, "game-instance.json"), { id: game, name: game, scenarioId: "default", createdAt, updatedAt: createdAt });
+    writeJson(path.join(gameDir, "world.json"), { ownerSchema: OWNER_SCHEMA, builtInMap: STAMP, regionOwnershipOverrides: { 0: "Kingdom of Spain" } });
+    writeJson(path.join(gameDir, "game.json"), { country: "Kingdom of Spain", gameDate: "2016-05-01" });
+    if (colors) writeJson(path.join(gameDir, "colors.json"), colors);
+  }
+  writeJson(path.join(root, "game-manifest.json"), { activeGameId: "own-copies", order: ["own-copies", "reads-scenario"], version: 2 });
+  return root;
+};
+const catalogOf = (root) => runStore(root, `store.ensureScenarioStore(); ${report("store.getScenarioCatalog().scenarios.map((s) => s.id)")}`);
+
+test("newer content on the same map refreshes the built-in in place, and its campaigns stay on it", () => {
+  const root = revisionOneRoot();
+  assert.deepEqual(catalogOf(root), ["default"], "nothing forked: the map is the same");
+  const dir = path.join(root, "scenarios", "default");
+  const world = readJson(path.join(dir, "world.json"));
+  assert.equal(world.builtInMap, STAMP);
+  assert.equal(world.builtInRevision, seedWorld.builtInRevision);
+  assert.ok(world.polityOverrides.Spain, "the built-in has the seed's names");
+  assert.equal(world.polityOverrides["Kingdom of Spain"], undefined);
+  assert.deepEqual(readJson(path.join(dir, "colors.json")), readJson(path.join(SEED_DIR, "colors.json")));
+  assert.ok(!existsSync(path.join(dir, "flags.json")), "the seed has no flags file");
+  assert.equal(statSync(path.join(dir, "regions.geojson")).size, seedRegionsBytes);
+  for (const game of ["own-copies", "reads-scenario"]) {
+    assert.equal(readJson(path.join(root, "games", game, "game-instance.json")).scenarioId, "default", `${game} stays on the built-in`);
+    assert.deepEqual(readJson(path.join(root, "games", game, "world.json")).regionOwnershipOverrides, { 0: "Kingdom of Spain" }, `${game}'s own world is untouched`);
+  }
+  assert.deepEqual(readJson(path.join(root, "games", "own-copies", "colors.json")), { "Kingdom of Spain": [7, 7, 7] }, "its own colours are its own");
+  assert.deepEqual(readJson(path.join(root, "games", "own-copies", "flags.json")), { "Kingdom of Spain": "data:flag" }, "the flags it still read from the scenario are its own now");
+  assert.deepEqual(readJson(path.join(root, "games", "reads-scenario", "colors.json")), { "Kingdom of Spain": [1, 2, 3] }, "the colours it was reading are now its own copy");
+  assert.deepEqual(readJson(path.join(root, "games", "reads-scenario", "flags.json")), { "Kingdom of Spain": "data:flag" }, "and the flags");
+});
+
+test("a copy the player edited is kept with its campaigns before the content is refreshed", () => {
+  const root = revisionOneRoot({ touched: true });
+  assert.deepEqual([...catalogOf(root)].sort(), ["default", "modern-day-edited"]);
+  const edited = path.join(root, "scenarios", "modern-day-edited");
+  assert.ok(readJson(path.join(edited, "world.json")).polityOverrides["Kingdom of Spain"], "the edited copy keeps its content");
+  assert.deepEqual(readJson(path.join(edited, "colors.json")), { "Kingdom of Spain": [1, 2, 3] });
+  assert.equal(statSync(path.join(edited, "regions.geojson")).size, seedRegionsBytes, "and its map");
+  assert.equal(readJson(path.join(edited, "scenario.json")).name, "Modern Day (your edited copy)");
+  for (const game of ["own-copies", "reads-scenario"]) {
+    assert.equal(readJson(path.join(root, "games", game, "game-instance.json")).scenarioId, "modern-day-edited", `${game} goes with the copy it was started on`);
+  }
+  const world = readJson(path.join(root, "scenarios", "default", "world.json"));
+  assert.equal(world.builtInRevision, seedWorld.builtInRevision);
+  assert.ok(world.polityOverrides.Spain);
+  assert.deepEqual(readJson(path.join(root, "scenario-manifest.json")).order, ["default", "modern-day-edited"]);
+});
+
+test("a second start after the refresh does nothing more", () => {
+  const root = revisionOneRoot({ touched: true });
+  catalogOf(root);
+  const manifest = readJson(path.join(root, "scenario-manifest.json"));
+  const world = readFileSync(path.join(root, "scenarios", "default", "world.json"), "utf-8");
+  assert.deepEqual([...catalogOf(root)].sort(), ["default", "modern-day-edited"]);
+  assert.deepEqual(readJson(path.join(root, "scenario-manifest.json")), manifest);
+  assert.equal(readFileSync(path.join(root, "scenarios", "default", "world.json"), "utf-8"), world);
+  assert.ok(!existsSync(path.join(root, "scenarios", "modern-day-edited-2")), "no second copy");
 });

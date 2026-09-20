@@ -247,6 +247,25 @@ export const useMapDocument = (initial) => {
     setSaveStatus("dirty");
   }, []);
 
+  const removePolities = useCallback((keys) => {
+    const stableKeys = [...new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean))];
+    if (!stableKeys.length) return;
+    setDoc((d) => {
+      const polities = { ...(d.polities || {}) };
+      const colorOverrides = { ...(d.colorOverrides || {}) };
+      const flags = { ...(d.flags || {}) };
+      const tags = { ...(d.tags || {}) };
+      for (const stableKey of stableKeys) {
+        delete polities[stableKey];
+        delete colorOverrides[stableKey];
+        delete flags[stableKey];
+        delete tags[stableKey];
+      }
+      return { ...d, polities, colorOverrides, flags, tags };
+    });
+    setSaveStatus("dirty");
+  }, []);
+
   // Scenario Workshop bulk polity import. A 1911 roster can contain dozens of
   // landless polity identities before any of the newly imported regions have
   // been painted. Do the whole merge in ONE document update instead of calling
@@ -422,6 +441,7 @@ export const useMapDocument = (initial) => {
     upsertPolity,
     renamePolity,
     removePolity,
+    removePolities,
     importPolityRoster,
     importCityMarkers,
     mergeColors,

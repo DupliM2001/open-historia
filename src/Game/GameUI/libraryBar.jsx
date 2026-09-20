@@ -4,6 +4,7 @@ import { Presence } from "./presence.jsx";
 import {
   PROMPT_EDITOR_SECTIONS,
   PROMPT_GUIDANCE_DEFAULTS,
+  materializePromptPack,
   normalizePromptPack,
   serializePromptPack,
 } from "../AI/gameplayPrompts.js";
@@ -37,7 +38,9 @@ import { loadCountryNames, readJson, writeJson, JSON_URLS } from "../../runtime/
 import { LABEL_FONT_SUGGESTIONS } from "../../runtime/mapSettings.js";
 import FactionCreator from "./FactionCreator.jsx";
 import FeaturesSectionEditor from "./FeaturesSectionEditor.jsx";
+import StatsSheetEditor, { normalizeStatsEditorValue } from "./StatsSheetEditor.jsx";
 import { normalizeFeatureOverrides, normalizeFeatureSettings } from "../../runtime/gameFeatures.js";
+import { flattenStatSheetRows, normalizeStatSheetDefinition, serializeStatSheet } from "../../runtime/statIndexDefinitions.js";
 import { UNIT_TYPES } from "../../runtime/gameState.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { DIFFICULTY_LEVELS } from "../../runtime/difficulty.js";
@@ -49,6 +52,7 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
+import { restoreBundleFiles, splitBundleFiles } from "../../runtime/bundleFiles.js";
 import { buildGameZipBlob, formatZipSize, readGameZip, saveGameZipToDisk } from "../../runtime/gameZip.js";
 import { isNativeApp } from "../../runtime/web/nativeBoot.js";
 
@@ -67,6 +71,10 @@ const MapEditor = lazy(() => import("../../Editor/MapEditor.jsx"));
 const CommunityPanel = lazy(() => import("./communityHub.jsx"));
 // Lazy so OpenLayers only loads when the country picker map is opened.
 const CountryPickerMap = lazy(() => import("./CountryPickerMap.jsx"));
+
+// The accent a scenario or game falls back to when it carries none: the same
+// default the stores hand out (server/libraryStore.js, web/storeConstants.js).
+const DEFAULT_ACCENT_COLOR = "#2bc1f3";
 
 const BAR_HEIGHT = 64;
 
@@ -212,6 +220,7 @@ const editorSectionLabels = {
   features: "Features",
   overview: "Overview",
   prompts: "Prompts",
+  stats: "Stats",
   world: "World",
 };
 
@@ -224,7 +233,7 @@ const buildScenarioEditorState = (details) => {
   const world = details?.data?.world ?? {};
 
   return {
-    accentColor: scenario.accentColor ?? "#7c3aed",
+    accentColor: scenario.accentColor ?? DEFAULT_ACCENT_COLOR,
     allowedUnitTypes: Array.isArray(world.allowedUnitTypes) ? world.allowedUnitTypes : [...UNIT_TYPES],
     country: game.country ?? "",
     description: scenario.description ?? "",
@@ -252,7 +261,7 @@ const buildGameEditorState = (details) => {
   const world = details?.data?.world ?? {};
 
   return {
-    accentColor: gameMeta.accentColor ?? "#7c3aed",
+    accentColor: gameMeta.accentColor ?? DEFAULT_ACCENT_COLOR,
     country: game.country ?? "",
     description: gameMeta.description ?? "",
     eyebrow: gameMeta.eyebrow ?? "",
@@ -293,6 +302,30 @@ const saveJsonBundleToDisk = (bundle, fileName) => {
   saveBlobToDisk(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }), fileName);
 };
 
+// Prompt-pack files intentionally contain only scenario-author editable guidance.
+// The technical/tooling portions of prompts are app-owned and are recomposed from
+// the current defaults when the pack loads, so importing an older pack cannot
+// freeze stale schemas or runtime contracts into a scenario. Accept a raw prompt
+// pack, a small { prompts } wrapper, or a full scenario bundle's data.prompts.
+const promptPackFromImport = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Prompt import must be a JSON object.");
+  }
+
+  const candidate =
+    value.data?.prompts && typeof value.data.prompts === "object" && !Array.isArray(value.data.prompts)
+      ? value.data.prompts
+      : value.prompts && typeof value.prompts === "object" && !Array.isArray(value.prompts)
+        ? value.prompts
+        : value;
+
+  if (!("promptModel" in candidate) && !("guidance" in candidate)) {
+    throw new Error("That file does not contain an Open Historia prompt pack.");
+  }
+
+  return candidate;
+};
+
 const AssetBadgeRow = ({ badges }) =>
   badges.length > 0 ? (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.85rem" }}>
@@ -320,10 +353,14 @@ const AssetBadgeRow = ({ badges }) =>
 // cannot be broken here and it stays current as the game changes.
 const PromptSectionEditor = ({
   onChangePrompt,
+  onExportPromptPack,
+  onImportPromptPack,
   promptPack,
   promptSectionKey,
   setPromptSectionKey,
 }) => {
+  const promptFileInputRef = useRef(null);
+  const [promptTransferStatus, setPromptTransferStatus] = useState(null);
   const currentSection =
     PROMPT_EDITOR_SECTIONS.find((section) => section.key === promptSectionKey) ??
     PROMPT_EDITOR_SECTIONS[0];
@@ -341,6 +378,32 @@ const PromptSectionEditor = ({
   const editedCount = segments.filter(isEdited).length;
   const smallButtonStyle = { ...actionButtonStyle, fontSize: "0.72rem", minHeight: "1.7rem", padding: "0 0.6rem" };
 
+  const handlePromptImportFile = async (event) => {
+    const [file] = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!file || !onImportPromptPack) return;
+
+    try {
+      const parsed = JSON.parse(await file.text());
+      onImportPromptPack(promptPackFromImport(parsed));
+      setPromptTransferStatus({
+        error: false,
+        text: `Imported ${file.name}. Save the scenario to persist these prompt edits.`,
+      });
+    } catch (error) {
+      setPromptTransferStatus({ error: true, text: `Import failed: ${error.message}` });
+    }
+  };
+
+  const handlePromptExport = () => {
+    if (!onExportPromptPack) return;
+    onExportPromptPack();
+    setPromptTransferStatus({
+      error: false,
+      text: "Exported every editable prompt passage. Technical/tooling prompt text stays app-owned and is intentionally excluded.",
+    });
+  };
+
   return (
     <div
       style={{
@@ -350,6 +413,91 @@ const PromptSectionEditor = ({
         padding: "0.9rem",
       }}
     >
+      {(onExportPromptPack || onImportPromptPack) ? (
+        <div
+          style={{
+            alignItems: "center",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.45rem",
+            justifyContent: "space-between",
+            marginBottom: "0.85rem",
+          }}
+        >
+          <div style={{ flex: "1 1 15rem" }}>
+            <div style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.82rem", fontWeight: 700 }}>
+              Prompt pack
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.72rem", lineHeight: 1.4, marginTop: "0.15rem" }}>
+              Move every scenario-authored prompt passage at once. Tooling and output contracts stay with the app.
+            </div>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
+            {onExportPromptPack ? (
+              <button
+                onClick={handlePromptExport}
+                style={{ ...actionButtonStyle, minHeight: "2rem", padding: "0 0.8rem" }}
+                type="button"
+              >
+                Export all prompts
+              </button>
+            ) : null}
+            {onImportPromptPack ? (
+              <>
+                <button
+                  onClick={() => promptFileInputRef.current?.click()}
+                  style={{ ...actionButtonStyle, minHeight: "2rem", padding: "0 0.8rem" }}
+                  type="button"
+                >
+                  Import all prompts
+                </button>
+                <input
+                  accept=".json,application/json"
+                  onChange={handlePromptImportFile}
+                  ref={promptFileInputRef}
+                  style={{ display: "none" }}
+                  type="file"
+                />
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {promptTransferStatus ? (
+        <div
+          style={{
+            background: promptTransferStatus.error ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.08)",
+            border: `1px solid ${promptTransferStatus.error ? "rgba(239,68,68,0.28)" : "rgba(34,197,94,0.2)"}`,
+            borderRadius: "10px",
+            color: promptTransferStatus.error ? "#fca5a5" : "rgba(220,252,231,0.86)",
+            fontSize: "0.72rem",
+            lineHeight: 1.4,
+            marginBottom: "0.8rem",
+            padding: "0.5rem 0.65rem",
+          }}
+        >
+          {promptTransferStatus.text}
+        </div>
+      ) : null}
+
+      {(onExportPromptPack || onImportPromptPack) ? (
+        <div style={{ margin: "0.1rem 0 0.75rem" }}>
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginBottom: "0.6rem" }} />
+          <div
+            style={{
+              color: "rgba(255,255,255,0.42)",
+              fontSize: "0.68rem",
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+            }}
+          >
+            Prompt passages
+          </div>
+        </div>
+      ) : null}
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", marginBottom: "0.85rem" }}>
         {PROMPT_EDITOR_SECTIONS.map((section) => (
           <button
@@ -358,9 +506,9 @@ const PromptSectionEditor = ({
             style={{
               ...actionButtonStyle,
               background:
-                section.key === currentSection.key ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
+                section.key === currentSection.key ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
               borderColor:
-                section.key === currentSection.key ? "rgba(124,58,237,0.42)" : "rgba(255,255,255,0.08)",
+                section.key === currentSection.key ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
               minHeight: "2rem",
               padding: "0 0.8rem",
             }}
@@ -376,8 +524,8 @@ const PromptSectionEditor = ({
       </div>
       <div
         style={{
-          background: "rgba(124,58,237,0.08)",
-          border: "1px solid rgba(124,58,237,0.22)",
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.11)",
           borderRadius: "12px",
           color: "rgba(255,255,255,0.62)",
           fontSize: "0.76rem",
@@ -401,7 +549,7 @@ const PromptSectionEditor = ({
               <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
                 <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>
                   {segment.label}
-                  {edited ? <span style={{ color: "#c4b5fd", marginLeft: "0.4rem" }}>· edited</span> : null}
+                  {edited ? <span style={{ color: "#e4e4e7", marginLeft: "0.4rem" }}>· edited</span> : null}
                 </label>
                 {edited ? (
                   <button
@@ -552,11 +700,16 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
             <div
               style={{
                 color: "rgba(244,244,246,0.7)",
+                display: "-webkit-box",
                 fontSize: "0.92rem",
                 lineHeight: 1.45,
                 marginTop: "0.65rem",
                 maxWidth: "16rem",
+                overflow: "hidden",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 6,
               }}
+              title={scenario.heroSubtitle || scenario.description || scenario.subtitle || undefined}
             >
               {scenario.heroSubtitle || scenario.description || scenario.subtitle}
             </div>
@@ -564,7 +717,18 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
         </div>
 
         <div>
-          <div style={{ color: "rgba(255,255,255,0.68)", fontSize: "0.8rem", marginBottom: "0.7rem" }}>
+          <div
+            style={{
+              color: "rgba(255,255,255,0.68)",
+              display: "-webkit-box",
+              fontSize: "0.8rem",
+              marginBottom: "0.7rem",
+              overflow: "hidden",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 2,
+            }}
+            title={scenario.subtitle || undefined}
+          >
             {scenario.subtitle}
           </div>
           <AssetBadgeRow badges={assetBadges} />
@@ -831,7 +995,19 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
             <div style={{ color: "rgba(244,244,246,0.72)", fontSize: "0.92rem", marginTop: "0.45rem" }}>
               {game.country || "No player country"} / {game.currentDate || "No date"} / Round {game.round || 1}
             </div>
-            <div style={{ color: "rgba(244,244,246,0.58)", fontSize: "0.84rem", marginTop: "0.5rem", lineHeight: 1.45 }}>
+            <div
+              style={{
+                color: "rgba(244,244,246,0.58)",
+                display: "-webkit-box",
+                fontSize: "0.84rem",
+                lineHeight: 1.45,
+                marginTop: "0.5rem",
+                overflow: "hidden",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 6,
+              }}
+              title={game.description || undefined}
+            >
               {game.description || "Playable campaign session."}
             </div>
           </div>
@@ -846,7 +1022,7 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
               onClick={() => onActivate(game.id)}
               style={{
                 ...actionButtonStyle,
-                background: active ? "rgba(255,255,255,0.16)" : `${game.accentColor}cc`,
+                background: active ? "rgba(0,0,0,0.42)" : `${game.accentColor}cc`,
                 borderColor: active ? "rgba(255,255,255,0.22)" : `${game.accentColor}dd`,
                 color: "#fff",
                 flexBasis: "100%",
@@ -928,9 +1104,9 @@ const SectionTabs = ({ currentSection, sections, setSection }) => (
         style={{
           ...actionButtonStyle,
           background:
-            currentSection === sectionKey ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
+            currentSection === sectionKey ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
           borderColor:
-            currentSection === sectionKey ? "rgba(124,58,237,0.42)" : "rgba(255,255,255,0.08)",
+            currentSection === sectionKey ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
           minHeight: "2rem",
           padding: "0 0.8rem",
         }}
@@ -956,13 +1132,17 @@ const EditorDrawer = ({
   onClose,
   onDelete,
   onExportBundle,
+  onExportPrompts,
   onFileSelect,
+  onImportPrompts,
   onOpenFileDialog,
   onOpenMapEditor,
   onSave,
   promptSectionKey,
   setEditorSection,
   setPromptSectionKey,
+  statsValue,
+  onStatsChange,
 }) => {
   if (!details || !formState) {
     return null;
@@ -971,7 +1151,7 @@ const EditorDrawer = ({
   const record = kind === "scenario" ? details.scenario : details.game;
   const visibleSections =
     kind === "scenario"
-      ? ["overview", "world", "features", "prompts", "assets", "bundles"]
+      ? ["overview", "world", "stats", "features", "prompts", "assets", "bundles"]
       : ["overview", "world", "features", "prompts", "assets"];
 
   return (
@@ -1087,8 +1267,8 @@ const EditorDrawer = ({
                         }}
                         style={{
                           ...actionButtonStyle,
-                          background: checked ? "rgba(124,58,237,0.3)" : "rgba(255,255,255,0.04)",
-                          borderColor: checked ? "rgba(124,58,237,0.5)" : "rgba(255,255,255,0.1)",
+                          background: checked ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
+                          borderColor: checked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
                           minHeight: "2rem",
                           padding: "0 0.7rem",
                         }}
@@ -1153,6 +1333,16 @@ const EditorDrawer = ({
         </div>
       )}
 
+      {editorSection === "stats" && kind === "scenario" && (
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "18px", marginBottom: "0.95rem", padding: "0.9rem" }}>
+          <div style={{ color: "rgba(255,255,255,0.92)", fontSize: "0.92rem", fontWeight: 800, marginBottom: "0.2rem" }}>National Stats</div>
+          <div style={{ color: "rgba(255,255,255,0.46)", fontSize: "0.7rem", lineHeight: 1.45, marginBottom: "0.8rem" }}>
+            Define the entire National Stats sheet for this scenario. Sections, values, units, order, icons, colours and AI guidance are scenario data and travel with exports.
+          </div>
+          <StatsSheetEditor value={statsValue} onChange={onStatsChange} />
+        </div>
+      )}
+
       {editorSection === "features" && (
         <FeaturesSectionEditor
           kind={kind}
@@ -1166,6 +1356,8 @@ const EditorDrawer = ({
       {editorSection === "prompts" && (
         <PromptSectionEditor
           onChangePrompt={onChangePrompt}
+          onExportPromptPack={kind === "scenario" ? onExportPrompts : null}
+          onImportPromptPack={kind === "scenario" ? onImportPrompts : null}
           promptPack={formState.prompts}
           promptSectionKey={promptSectionKey}
           setPromptSectionKey={setPromptSectionKey}
@@ -1287,7 +1479,7 @@ const EditorDrawer = ({
         {kind === "scenario" && onOpenMapEditor && (
           <button
             onClick={onOpenMapEditor}
-            style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.24)", borderColor: "rgba(124,58,237,0.38)", color: "#fff", minWidth: "9rem" }}
+            style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.19)", color: "#fff", minWidth: "9rem" }}
             type="button"
           >
             🗺️ Open Map Editor
@@ -1338,6 +1530,7 @@ const LibraryTopBar = () => {
   const [editorKind, setEditorKind] = useState(null);
   const [editorDetails, setEditorDetails] = useState(null);
   const [editorState, setEditorState] = useState(null);
+  const [editorStats, setEditorStats] = useState(() => normalizeStatsEditorValue(null));
   const [editorError, setEditorError] = useState(null);
   const [editorSection, setEditorSection] = useState("overview");
   const [promptSectionKey, setPromptSectionKey] = useState("leader");
@@ -1358,6 +1551,7 @@ const LibraryTopBar = () => {
     setEditorKind(null);
     setEditorDetails(null);
     setEditorState(null);
+    setEditorStats(normalizeStatsEditorValue(null));
     setEditorError(null);
     setEditorSection("overview");
     setPromptSectionKey("leader");
@@ -1368,10 +1562,14 @@ const LibraryTopBar = () => {
     setIsBusy(true);
 
     try {
-      const details = await loadScenarioDetails(scenarioId);
+      const [details, statsAsset] = await Promise.all([
+        loadScenarioDetails(scenarioId),
+        downloadScenarioJsonAsset(scenarioId, "stats"),
+      ]);
       setEditorKind("scenario");
       setEditorDetails(details);
       setEditorState(buildScenarioEditorState(details));
+      setEditorStats(normalizeStatsEditorValue(statsAsset));
       setEditorSection("overview");
       setPromptSectionKey("leader");
     } catch (nextError) {
@@ -1455,7 +1653,7 @@ const LibraryTopBar = () => {
       const gameDetails = await loadGameDetails(gameId).catch(() => null);
       const world = { ...(gameDetails?.data?.world ?? {}) };
       const name = faction.name;
-      const hexColor = /^#[0-9a-fA-F]{6}$/.test(faction.color) ? faction.color : "#7c3aed";
+      const hexColor = /^#[0-9a-fA-F]{6}$/.test(faction.color) ? faction.color : "#a1a1aa";
 
       world.polityOverrides = {
         ...(world.polityOverrides ?? {}),
@@ -1860,6 +2058,30 @@ const LibraryTopBar = () => {
     });
   };
 
+  const handleExportPrompts = () => {
+    if (editorKind !== "scenario" || !editorState || !editorDetails?.scenario) return;
+    const scenario = editorDetails.scenario;
+    const bundle = {
+      schema: "open-historia-prompt-pack",
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      scenario: { id: scenario.id, name: scenario.name },
+      prompts: materializePromptPack(editorState.prompts),
+    };
+    saveGameZipToDisk(
+      new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }),
+      `${scenario.id}-prompts.json`,
+    );
+  };
+
+  const handleImportPrompts = (rawPromptPack) => {
+    if (editorKind !== "scenario") return;
+    setEditorState((current) => ({
+      ...current,
+      prompts: normalizePromptPack(rawPromptPack),
+    }));
+  };
+
   const handleSave = async () => {
     if (!editorKind || !editorDetails || !editorState) {
       return;
@@ -1873,7 +2095,7 @@ const LibraryTopBar = () => {
       if (editorKind === "scenario") {
         const currentGame = editorDetails.data?.game ?? {};
         const currentWorld = editorDetails.data?.world ?? {};
-        const details = await saveScenario(editorDetails.scenario.id, {
+        let details = await saveScenario(editorDetails.scenario.id, {
           accentColor: editorState.accentColor,
           description: editorState.description,
           eyebrow: editorState.eyebrow,
@@ -1903,6 +2125,23 @@ const LibraryTopBar = () => {
             startingTimelineText: editorState.startingTimelineText,
           },
         });
+        if (editorStats.custom) {
+          if ((editorStats.sections || []).some((section) => !Array.isArray(section?.stats) || section.stats.length === 0)) {
+            throw new Error("Each custom Stats section needs at least one statistic before saving.");
+          }
+          const definition = normalizeStatSheetDefinition(editorStats, { fallbackStandard: false });
+          if (!definition.custom || !flattenStatSheetRows(definition).length) {
+            throw new Error("A custom Stats sheet needs at least one valid statistic.");
+          }
+          const blob = new Blob([JSON.stringify(serializeStatSheet(definition), null, 2)], { type: "application/json" });
+          details = await uploadScenarioAsset(editorDetails.scenario.id, "stats", blob);
+          setEditorStats({ custom: true, version: definition.version, sections: definition.sections });
+        } else {
+          if (editorDetails.assetStatus?.stats || details.assetStatus?.stats) {
+            details = await clearScenarioAsset(editorDetails.scenario.id, "stats");
+          }
+          setEditorStats(normalizeStatsEditorValue(null));
+        }
         setEditorDetails(details);
         setEditorState(buildScenarioEditorState(details));
       } else {
@@ -2048,13 +2287,18 @@ const LibraryTopBar = () => {
         // hub shares. With no custom basemap there's nothing to split out, so the zip
         // just holds scenario.json (still a valid, self-contained bundle).
         const split = await splitScenarioBundleImage(bundle).catch(() => null);
-        const files = { "scenario.json": JSON.stringify(bundle) };
+        const files = {};
         if (split) {
           delete bundle.assets.backgroundData; // the basemap now travels as a real file
-          files["scenario.json"] = JSON.stringify(bundle);
           files[split.imageName] = split.imageBytes;
           if (split.previewBytes) files[split.previewName] = split.previewBytes;
         }
+        // The heavy assets — the region geometry, a custom tile archive — ride as
+        // real entries too, so the zip actually compresses them instead of carrying
+        // them as one long JSON string (src/runtime/bundleFiles.js).
+        const lifted = splitBundleFiles(bundle);
+        Object.assign(files, lifted.files);
+        files["scenario.json"] = JSON.stringify(lifted.bundle);
         saveBlobToDisk(await zipBundle(files), `${id}-scenario.zip`);
       } else {
         saveJsonBundleToDisk(bundle, `${id}-scenario.json`);
@@ -2088,7 +2332,7 @@ const LibraryTopBar = () => {
         const zip = await unzipBundle(buffer);
         const scenarioText = await zip.text("scenario.json");
         if (!scenarioText) throw new Error("That .zip is missing scenario.json.");
-        bundle = JSON.parse(scenarioText);
+        bundle = await restoreBundleFiles(JSON.parse(scenarioText), zip);
         const imageName = zip.names().find((n) => /(^|\/)basemap\.(png|jpe?g|webp|gif|svg)$/i.test(n));
         if (imageName) {
           embedScenarioBundleImage(bundle, await zip.bytes(imageName), imageName);
@@ -2600,8 +2844,8 @@ const LibraryTopBar = () => {
                         ...actionButtonStyle,
                         flex: 1,
                         fontWeight: 700,
-                        background: pickerTab === "country" ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "country" ? "rgba(124,58,237,0.7)" : undefined,
+                        background: pickerTab === "country" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
+                        borderColor: pickerTab === "country" ? "rgba(255,255,255,0.28)" : undefined,
                       }}
                     >
                       Pick a country
@@ -2613,8 +2857,8 @@ const LibraryTopBar = () => {
                         ...actionButtonStyle,
                         flex: 1,
                         fontWeight: 700,
-                        background: pickerTab === "faction" ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "faction" ? "rgba(124,58,237,0.7)" : undefined,
+                        background: pickerTab === "faction" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
+                        borderColor: pickerTab === "faction" ? "rgba(255,255,255,0.28)" : undefined,
                       }}
                     >
                       Create a faction
@@ -2633,7 +2877,7 @@ const LibraryTopBar = () => {
                     <button
                       type="button"
                       onClick={() => pickCountry("")}
-                      style={{ ...actionButtonStyle, justifyContent: "flex-start", background: "rgba(124,58,237,0.18)", marginBottom: "0.4rem" }}
+                      style={{ ...actionButtonStyle, justifyContent: "flex-start", background: "rgba(255,255,255,0.06)", marginBottom: "0.4rem" }}
                     >
                       {playGameId ? "Keep scenario default" : "Scenario default"}
                     </button>
@@ -2692,7 +2936,7 @@ const LibraryTopBar = () => {
                   <button
                     disabled={isBusy}
                     onClick={() => handleMissingScenarioImport(pending)}
-                    style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.3)", borderColor: "rgba(139,92,246,0.55)", minHeight: "2.6rem" }}
+                    style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.6rem" }}
                     type="button"
                   >
                     {isBusy ? "Getting the scenario…" : "Import & play"}
@@ -2805,8 +3049,8 @@ const LibraryTopBar = () => {
                   onClick={() => setActiveTab(tab)}
                   style={{
                     ...actionButtonStyle,
-                    background: activeTab === tab ? "rgba(124,58,237,0.24)" : "rgba(255,255,255,0.05)",
-                    borderColor: activeTab === tab ? "rgba(124,58,237,0.38)" : "rgba(255,255,255,0.08)",
+                    background: activeTab === tab ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
+                    borderColor: activeTab === tab ? "rgba(255,255,255,0.19)" : "rgba(255,255,255,0.08)",
                     minWidth: isMobile ? "0" : "6.6rem",
                     padding: isMobile ? "0.55rem 0.6rem" : undefined,
                   }}
@@ -2873,7 +3117,7 @@ const LibraryTopBar = () => {
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", justifyContent: "center" }}>
                     <button
                       type="button"
-                      style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.3)", borderColor: "rgba(139,92,246,0.55)", minHeight: "2.8rem", padding: "0 1.4rem" }}
+                      style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.8rem", padding: "0 1.4rem" }}
                       onClick={() => setActiveTab("scenarios")}
                     >
                       Start from a scenario
@@ -3006,6 +3250,8 @@ const LibraryTopBar = () => {
         onClose={resetEditor}
         onDelete={handleDelete}
         onExportBundle={handleExportBundle}
+        onExportPrompts={handleExportPrompts}
+        onImportPrompts={handleImportPrompts}
         onOpenMapEditor={() => {
           const scenario = editorDetails?.scenario || null;
           setMapEditorScenario(scenario);
@@ -3050,6 +3296,8 @@ const LibraryTopBar = () => {
                   : {},
                 background,
                 basemap: world.basemap || null,
+                // Carried like the flags above: a round-trip must not reset it.
+                customCities: Boolean(world.customCities),
                 // The scenario's starting units, so the Units panel edits what the game starts with.
                 units: Array.isArray(world.units) ? world.units : [],
               });
@@ -3062,6 +3310,8 @@ const LibraryTopBar = () => {
         promptSectionKey={promptSectionKey}
         setEditorSection={setEditorSection}
         setPromptSectionKey={setPromptSectionKey}
+        statsValue={editorStats}
+        onStatsChange={setEditorStats}
       />
 
       {!loaded && (

@@ -9,7 +9,7 @@ import { requestDiplomaticChat } from "../GameUI/chat.jsx";
 import GameFlagPicker from "../GameUI/GameFlagPicker.jsx";
 import { resolvePolityFlag } from "../../runtime/polityFlags.js";
 import { resolvePolityIdentity } from "../../runtime/polityIdentity.js";
-import { generateCountryStats } from "../AI/gameplay.js";
+import { generateCountryStats } from "../AI/gameplayLazy.js";
 
 // Bridge: the region popup's info button opens this panel from outside React.
 let _openPanel = null;
@@ -66,7 +66,9 @@ const eventInvolvesCountry = (event, code, name) => {
     if ((impacts.regionTransfers ?? []).some((transfer) => transfer?.toCode === code || transfer?.fromCode === code)) return true;
     if ((impacts.regionControlOps ?? []).some((op) =>
         [op?.fromCode, op?.toCode, op?.actorCode, op?.claimantCode].some((value) => value === code || value === name))) return true;
-    if ((impacts.createdChats ?? []).some((chat) => (chat?.countries ?? []).some((country) => country?.code === code || country?.name === name))) return true;
+    if ((impacts.createdChats ?? []).some((chat) => (chat?.countries ?? []).some((country) => (typeof country === "string"
+        ? country === code || country === name
+        : country?.code === code || country?.name === name)))) return true;
     const haystack = `${event?.title ?? ""} ${event?.description ?? ""}`.toLowerCase();
     return Boolean(name) && haystack.includes(String(name).toLowerCase());
 };
@@ -321,7 +323,7 @@ const CountryInfoPanel = () => {
             {tags.map((tag) => (
                 <span
                     key={tag}
-                    style={{ ...pillStyle, background: "rgba(124,58,237,0.22)", borderColor: "rgba(124,58,237,0.5)" }}
+                    style={{ ...pillStyle, background: "rgba(255,255,255,0.11)", borderColor: "rgba(255,255,255,0.25)" }}
                     title="What this country is — the map-maker set this, and the AI reads it as context"
                 >
                     {tag}
@@ -411,7 +413,7 @@ const CountryInfoPanel = () => {
         <button type="button" onClick={runAdvisorReport} style={footerButtonStyle}>
         Advisor Report
         </button>
-        <button type="button" onClick={openDiplomacy} style={{ ...footerButtonStyle, background: "rgba(124,58,237,0.3)", border: "1px solid rgba(168,85,247,0.65)" }}>
+        <button type="button" onClick={openDiplomacy} style={{ ...footerButtonStyle, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.28)" }}>
         Open Diplomacy
         </button>
         </div>

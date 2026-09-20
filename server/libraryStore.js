@@ -75,10 +75,14 @@ const BUILT_IN_SEED_FILES = [
 const BUILT_IN_RESET_STALE_FILES = [
   "flags.json",
   "tags.json",
+  "stats.json",
   "background.json",
   "regions.coarse.geojson",
   "regions.coarse.geojson.stamp",
 ];
+// Where a built-in the player edited is kept when the seed's content changes
+// on the same map (see refreshBuiltInContent).
+const EDITED_BUILT_IN_SCENARIO_ID = "modern-day-edited";
 // Where the campaigns started on an older built-in map are moved to.
 const CLASSIC_SCENARIO_ID = "modern-day-classic";
 
@@ -328,8 +332,18 @@ const SCENARIO_BUNDLE_SCHEMA = "pax-historia-scenario-bundle/2";
 const ACCEPTED_BUNDLE_SCHEMAS = new Set([SCENARIO_BUNDLE_SCHEMA, "pax-historia-scenario-bundle"]);
 const SCENARIO_BUNDLE_VERSION = 2;
 
+// The accent a scenario or game wears in the library. The app's old default was
+// a purple; it is retired, and anything still carrying it reads as the new one
+// (accentOrDefault below), so an install made before the change does not keep a
+// colour the app no longer uses anywhere.
+export const RETIRED_ACCENT_COLOR = "#7c3aed";
+const accentOrDefault = (raw, fallback) => {
+  const value = String(raw ?? "").trim();
+  return !value || value.toLowerCase() === RETIRED_ACCENT_COLOR ? fallback : value;
+};
+
 const DEFAULT_SCENARIO_META = {
-  accentColor: "#7c3aed",
+  accentColor: "#2bc1f3",
   description: "Server-backed base scenario",
   eyebrow: "Scenario",
   heroSubtitle: "Editable server-backed scenario template.",
@@ -339,7 +353,7 @@ const DEFAULT_SCENARIO_META = {
 };
 
 const DEFAULT_GAME_META = {
-  accentColor: "#7c3aed",
+  accentColor: "#2bc1f3",
   description: "Active playable game",
   eyebrow: "Game",
   heroSubtitle: "Playable campaign session",
@@ -379,6 +393,8 @@ const OPTIONAL_JSON_ASSET_FILES = {
   // 5s poll has no business carrying. These are the starting tags — the AI's own
   // changes accumulate in world.countryTags and are merged over these on read.
   tags: "tags.json",
+  // Scenario-defined National Stats sheet used by the persistent Stats system.
+  stats: "stats.json",
 };
 
 // Roll-back restore points, captured client-side each turn (see the "Roll back
@@ -388,6 +404,9 @@ const OPTIONAL_JSON_ASSET_FILES = {
 // be large. Read/written only through the /api/runtime/json/snapshots endpoint.
 const RUNTIME_ONLY_JSON_ASSET_FILES = {
   snapshots: "storage/snapshots.json",
+  // Derived, read-only projection of snapshots.json: id/round/dates, no state.
+  // The undo counter polled the real thing per turn, parsing 8+ MB for a length.
+  snapshotsIndex: "storage/snapshots-index.json",
   // What the player's spies have intercepted, keyed by target polity. Its own
   // file on purpose: it is refreshed AFTER a jump's world write lands, and a
   // second writer on world.json would race it.
@@ -447,30 +466,38 @@ const JSON_ASSET_DEFAULTS = {
   events: [],
   game: {},
   prompts: {},
+  stats: {},
   world: {},
   snapshots: [],
+  snapshotsIndex: { entries: [] },
   intercepts: {},
 };
 
+// The world keys a fresh game inherits from its scenario. MIRRORED in
+// src/runtime/web/storeConstants.js — the two stores cannot share code (Node with a
+// filesystem vs a browser with an object store), so gameBundleParity.test.js holds
+// them to the same list. A key on one side only is silent: the game simply stops
+// carrying that piece of its scenario on one platform.
 const TEMPLATE_WORLD_OVERRIDE_KEYS = [
   "allowedUnitTypes",
-"author",
-"background",
-"basemap",
-"customCities",
-"customRegions",
-"difficulty",
-"language",
-"mapCredit",
-"notes",
-"ownerCodes",
-"polityOverrides",
-"units",
-"regionClaimants",
-"regionOwnershipOverrides",
-"regionSovereigntyOverrides",
-"simulationRules",
-"startingTimelineText",
+  "author",
+  "background",
+  "basemap",
+  "customCities",
+  "customGeometry",
+  "customRegions",
+  "difficulty",
+  "language",
+  "mapCredit",
+  "notes",
+  "ownerCodes",
+  "polityOverrides",
+  "units",
+  "regionClaimants",
+  "regionOwnershipOverrides",
+  "regionSovereigntyOverrides",
+  "simulationRules",
+  "startingTimelineText",
 ];
 
 const COLORS_ASSET_CANDIDATES = [
@@ -720,7 +747,7 @@ const readScenarioMeta = (scenarioId) => {
   const description = String(raw?.description ?? "").trim() || subtitle || DEFAULT_SCENARIO_META.description;
 
   return {
-    accentColor: String(raw?.accentColor ?? "").trim() || DEFAULT_SCENARIO_META.accentColor,
+    accentColor: accentOrDefault(raw?.accentColor, DEFAULT_SCENARIO_META.accentColor),
     coverImageContentType: readStoredImageContentType(raw?.coverImageContentType),
     countryNameOverrides:
     raw?.countryNameOverrides && typeof raw.countryNameOverrides === "object"
@@ -779,7 +806,7 @@ const readGameMeta = (gameId) => {
   const description = String(raw?.description ?? "").trim() || subtitle || DEFAULT_GAME_META.description;
 
   return {
-    accentColor: String(raw?.accentColor ?? "").trim() || DEFAULT_GAME_META.accentColor,
+    accentColor: accentOrDefault(raw?.accentColor, DEFAULT_GAME_META.accentColor),
     // Hidden from the library but fully intact on disk — the "I want it out of
     // the way, not gone" case that delete cannot serve.
     archived: raw?.archived === true,
@@ -868,11 +895,21 @@ const copyGameOptionalAssets = (targetGameId, sourceGameId) => {
 // the scenario with a one-entry partial file.
 const copyScenarioOptionalJsonAssetsToGame = (gameId, scenarioId) => {
   for (const [assetKey] of Object.entries(OPTIONAL_JSON_ASSET_FILES)) {
-    copyJsonFile(
-      getScenarioJsonPath(scenarioId, assetKey),
-      getGameJsonPath(gameId, assetKey),
-      {},
-    );
+    const sourcePath = getScenarioJsonPath(scenarioId, assetKey);
+    const targetPath = getGameJsonPath(gameId, assetKey);
+
+    // stats.json is a scenario-authored DEFINITION, not an ordinary mutable
+    // campaign map like colors/flags/tags. Do not manufacture an empty {} copy
+    // when a scenario does not define one: that empty game file would shadow a
+    // sheet added to the scenario later and make /api/runtime/json/stats look as
+    // though the campaign explicitly chose the standard sheet.
+    if (assetKey === "stats") {
+      if (fs.existsSync(sourcePath)) copyFileIfPresent(sourcePath, targetPath);
+      else removeFileIfPresent(targetPath);
+      continue;
+    }
+
+    copyJsonFile(sourcePath, targetPath, {});
   }
 };
 
@@ -1183,6 +1220,17 @@ const readInstalledBuiltInStamp = () => {
   return String(world?.builtInMap ?? "").trim() || null;
 };
 
+// Which edition of the built-in's content — its countries' names, colours,
+// claims — a world carries on its map (builtInMap). A new map is a new stamp; the
+// same map with new content is a new revision. 1 when unstamped: the content the
+// map first shipped with.
+const builtInRevisionOf = (world) => {
+  const value = Number(world?.builtInRevision);
+  return Number.isInteger(value) && value > 0 ? value : 1;
+};
+const readBuiltInSeedRevision = () => builtInRevisionOf(readJsonFile(path.join(BUILT_IN_SEED_DIR, "world.json"), null));
+const readInstalledBuiltInRevision = () => builtInRevisionOf(readJsonFile(getScenarioJsonPath(DEFAULT_SCENARIO_ID, "world"), null));
+
 // The manifest's byte size for the stock world: how an older install's built-in
 // regions.geojson is recognised as that world (the fetcher wrote it there before
 // the stock map had a home of its own).
@@ -1254,10 +1302,11 @@ const retireLegacyBuiltInRegions = () => {
 };
 
 // Fork the install's current built-in scenario so the campaigns started on it
-// keep their map, then point those campaigns at the fork.
-const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath) => {
+// keep their map, then point those campaigns at the fork. `edited`: the map is
+// the same and the fork keeps the player's own edits to it (refreshBuiltInContent).
+const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath, { edited = false } = {}) => {
   const sourceDir = getScenarioDirectory(DEFAULT_SCENARIO_ID);
-  const forkId = ensureUniqueId(CLASSIC_SCENARIO_ID, "scenario");
+  const forkId = ensureUniqueId(edited ? EDITED_BUILT_IN_SCENARIO_ID : CLASSIC_SCENARIO_ID, "scenario");
   const forkDir = getScenarioDirectory(forkId);
   ensureDirectory(forkDir);
   const skip = new Set(["regions.geojson", "regions.coarse.geojson", "regions.coarse.geojson.stamp"]);
@@ -1266,13 +1315,16 @@ const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath) => {
 
   const meta = readScenarioMeta(DEFAULT_SCENARIO_ID);
   const now = new Date().toISOString();
-  const blurb = `The world map ${meta.name} used before it was redrawn. Kept for the campaigns that were started on it.`;
+  const suffix = edited ? "(your edited copy)" : "(classic map)";
+  const blurb = edited
+    ? `Your edited copy of ${meta.name}, kept with the campaigns started on it when the built-in scenario was updated.`
+    : `The world map ${meta.name} used before it was redrawn. Kept for the campaigns that were started on it.`;
   writeJsonFile(getScenarioMetaPath(forkId), {
     ...meta,
     id: forkId,
-    name: `${meta.name} (classic map)`,
-    heroTitle: `${meta.heroTitle || meta.name} (classic map)`,
-    subtitle: "The map before the built-in scenario was redrawn",
+    name: `${meta.name} ${suffix}`,
+    heroTitle: `${meta.heroTitle || meta.name} ${suffix}`,
+    subtitle: edited ? "Your edits to the built-in scenario" : "The map before the built-in scenario was redrawn",
     description: blurb,
     heroSubtitle: blurb,
     hubOrigin: null,
@@ -1289,6 +1341,38 @@ const forkBuiltInScenarioForExistingGames = (gameIds, ownRegionsPath) => {
   manifest.order.splice(at >= 0 ? at + 1 : manifest.order.length, 0, forkId);
   saveScenarioManifest(manifest);
   return forkId;
+};
+
+// A campaign reads its scenario's colours, flags, tags and stats sheet only when
+// it has no copy of its own (readRuntimeJsonAsset) — a game made before every new
+// game was given copies. Before the scenario's content changes under it, such a
+// campaign is given copies of what it has been reading.
+const keepScenarioJsonForGame = (gameId, scenarioId) => {
+  for (const assetKey of Object.keys(OPTIONAL_JSON_ASSET_FILES)) {
+    const own = getGameJsonPath(gameId, assetKey);
+    if (!fs.existsSync(own)) copyFileIfPresent(getScenarioJsonPath(scenarioId, assetKey), own);
+  }
+};
+
+// The seed carries newer content on the same map — its countries renamed, say.
+// Every campaign keeps its own world, colours, flags and tags and reads only the
+// geometry from here, which a revision never changes, so the built-in is simply
+// brought up to date and its campaigns stay on it. A copy the player edited is
+// kept, with the campaigns started on it, before the built-in is reseeded.
+const refreshBuiltInContent = (stamp) => {
+  const gamesOnBuiltIn = listGameIdsOnDisk().filter(
+    (gameId) => readGameMeta(gameId).scenarioId === DEFAULT_SCENARIO_ID,
+  );
+  const meta = readScenarioMeta(DEFAULT_SCENARIO_ID);
+  if (meta.updatedAt !== meta.createdAt) {
+    const regionsPath = getScenarioUploadPath(DEFAULT_SCENARIO_ID, "regionsGeojson");
+    const forkId = forkBuiltInScenarioForExistingGames(gamesOnBuiltIn, fs.existsSync(regionsPath) ? regionsPath : null, { edited: true });
+    console.warn(`[built-in scenario] kept the player's edited Modern Day as "${forkId}" for ${gamesOnBuiltIn.length} campaign(s)`);
+  } else {
+    for (const gameId of gamesOnBuiltIn) keepScenarioJsonForGame(gameId, DEFAULT_SCENARIO_ID);
+  }
+  seedBuiltInScenarioFiles(stamp);
+  console.warn(`[built-in scenario] Modern Day content updated to revision ${readInstalledBuiltInRevision()} (${stamp})`);
 };
 
 const seedRegionsBytes = () => {
@@ -1315,6 +1399,7 @@ const syncBuiltInScenarioFromSeed = () => {
   }
   const scenarioDir = getScenarioDirectory(DEFAULT_SCENARIO_ID);
   if (readInstalledBuiltInStamp() === stamp) {
+    if (readInstalledBuiltInRevision() < readBuiltInSeedRevision()) refreshBuiltInContent(stamp);
     builtInScenarioSynced = true;
     return;
   }
@@ -1933,7 +2018,7 @@ const createScenario = ({
 
   const createdAt = new Date().toISOString();
   writeJsonFile(getScenarioMetaPath(scenarioId), {
-    accentColor: String(accentColor ?? "").trim() || DEFAULT_SCENARIO_META.accentColor,
+    accentColor: accentOrDefault(accentColor, DEFAULT_SCENARIO_META.accentColor),
                 coverImageContentType: sourceScenario?.coverImageContentType ?? null,
                 features: normalizeFeatureSettings(features ?? sourceScenario?.features),
                 countryNameOverrides:
@@ -2768,65 +2853,145 @@ const ensureGameOwnerSchema = (gameId) => {
   }
 };
 
-const readRuntimeJsonAsset = (assetKey) => {
+// Resolves the source file WITHOUT reading it, so the GET route can stream it.
+// Null for every other key, which is what keeps `world` on normalizeRuntimeWorld.
+const resolveRuntimeGeojsonAsset = (assetKey) => {
+  // Custom region/city geometry is scenario-scoped (static map data). Resolve it
+  // from the active game's scenario, mirroring how pmtiles overrides resolve.
+  if (!Object.hasOwn(SCENARIO_GEOJSON_ASSET_FILES, assetKey)) return null;
+
   ensureGameStore();
-  // Above the geojson branch deliberately: that branch returns before anything
-  // else runs, and it is the branch that serves the file `owner` lives in.
+  // Before the scenario resolution: this branch serves the file `owner` lives in.
   const activeGame = getActiveGameSummary();
   if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
 
-  // Custom region/city geometry is scenario-scoped (static map data). Resolve it
-  // from the active game's scenario, mirroring how pmtiles overrides resolve.
-  if (Object.hasOwn(SCENARIO_GEOJSON_ASSET_FILES, assetKey)) {
-    const scenario = getActiveRuntimeScenarioSummary();
-    ensureScenarioOwnerSchema(scenario.id);
-    let sourcePath = getScenarioUploadPath(scenario.id, assetKey);
-    if (!fs.existsSync(sourcePath)) {
-      sourcePath = null;
-      // Scenarios without a map of their own render on the STOCK world (the
-      // hub's re-ownership presets key their ownership by its GADM ids), so
-      // EVERY scenario renders with the custom map style (the scenario's
-      // ownership overrides still recolor it). Not the built-in scenario's own
-      // map: since Modern Day was redrawn that is a different world, and a
-      // scenario CREATED from it carries its own copy (createScenario). Cities
-      // stay absent unless the scenario ships its own set.
-      if (assetKey === "regionsGeojson" && scenario.id !== DEFAULT_SCENARIO_ID) {
-        const stockPath = resolveStockRegionsPath();
-        if (stockPath) {
-          // An install that still keeps the stock world as the built-in's file
-          // migrates it as DEFAULT'S record, not this scenario's: the file's
-          // owners live in default's owner-space, so resolving them against this
-          // scenario's polities would name Russia after whatever this world
-          // calls that token. The stock map's own home needs no migration.
-          if (stockPath !== STOCK_REGIONS_PATH) ensureScenarioOwnerSchema(DEFAULT_SCENARIO_ID);
-          sourcePath = stockPath;
-        }
+  const scenario = getActiveRuntimeScenarioSummary();
+  ensureScenarioOwnerSchema(scenario.id);
+  let sourcePath = getScenarioUploadPath(scenario.id, assetKey);
+  if (!fs.existsSync(sourcePath)) {
+    sourcePath = null;
+    // Scenarios without a map of their own render on the STOCK world (the
+    // hub's re-ownership presets key their ownership by its GADM ids), so
+    // EVERY scenario renders with the custom map style (the scenario's
+    // ownership overrides still recolor it). Not the built-in scenario's own
+    // map: since Modern Day was redrawn that is a different world, and a
+    // scenario CREATED from it carries its own copy (createScenario). Cities
+    // stay absent unless the scenario ships its own set.
+    if (assetKey === "regionsGeojson" && scenario.id !== DEFAULT_SCENARIO_ID) {
+      const stockPath = resolveStockRegionsPath();
+      if (stockPath) {
+        // An install that still keeps the stock world as the built-in's file
+        // migrates it as DEFAULT'S record, not this scenario's: the file's
+        // owners live in default's owner-space, so resolving them against this
+        // scenario's polities would name Russia after whatever this world
+        // calls that token. The stock map's own home needs no migration.
+        if (stockPath !== STOCK_REGIONS_PATH) ensureScenarioOwnerSchema(DEFAULT_SCENARIO_ID);
+        sourcePath = stockPath;
       }
     }
+  }
+  return { contentType: "application/json; charset=utf-8", sourcePath };
+};
+
+// What the rollback list shows, minus `state` (~700 KB per entry, up to 12).
+const snapshotIndexEntry = (snap) => ({
+  id: snap?.id ?? "",
+  round: snap?.round ?? null,
+  fromDate: snap?.fromDate ?? "",
+  toDate: snap?.toDate ?? "",
+  capturedAt: snap?.capturedAt ?? "",
+});
+
+const writeSnapshotIndex = (gameId, snapshots, stamp = "") => {
+  const list = Array.isArray(snapshots) ? snapshots : [];
+  const target = getGameJsonPath(gameId, "snapshotsIndex");
+  ensureDirectory(path.dirname(target));
+  writeJsonFile(target, { stamp, entries: list.map(snapshotIndexEntry) });
+};
+
+// The write path refreshes the index for free; this covers a cold index, a zip
+// import, or a file edited outside the app.
+const ensureSnapshotIndexFresh = (gameId) => {
+  const source = getGameJsonPath(gameId, "snapshots");
+  const indexPath = getGameJsonPath(gameId, "snapshotsIndex");
+  if (!fs.existsSync(source)) {
+    // The owner-rename migration deletes snapshots outright. A surviving index
+    // would advertise turns that cannot be restored, so it goes with them.
+    if (fs.existsSync(indexPath)) {
+      try { fs.rmSync(indexPath); } catch { /* best effort */ }
+    }
+    return;
+  }
+  let stamp = "";
+  try {
+    const stat = fs.statSync(source);
+    stamp = `${stat.size}:${Math.round(stat.mtimeMs)}`;
+  } catch {
+    return;
+  }
+  const cached = readJsonFile(indexPath, null);
+  if (cached?.stamp === stamp && Array.isArray(cached.entries)) return;
+  writeSnapshotIndex(gameId, readJsonFile(source, []), stamp);
+};
+
+const readRuntimeJsonAsset = (assetKey) => {
+  const geojson = resolveRuntimeGeojsonAsset(assetKey);
+  if (geojson) {
     return {
-      contentType: "application/json; charset=utf-8",
-      data: sourcePath ? readJsonFile(sourcePath, EMPTY_FEATURE_COLLECTION) : cloneJson(EMPTY_FEATURE_COLLECTION),
-      sourcePath,
+      ...geojson,
+      data: geojson.sourcePath
+        ? readJsonFile(geojson.sourcePath, EMPTY_FEATURE_COLLECTION)
+        : cloneJson(EMPTY_FEATURE_COLLECTION),
     };
   }
 
-  // No games yet — runtime data resolves from the scenario below. (activeGame is
-  // resolved at the top of this function, above the geojson branch, so the
-  // migration hook can see it.)
+  ensureGameStore();
+  const activeGame = getActiveGameSummary();
+  if (activeGame?.id) ensureGameOwnerSchema(activeGame.id);
+
+  if (assetKey === "snapshotsIndex" && activeGame?.id) ensureSnapshotIndexFresh(activeGame.id);
+
+  const scenario = getActiveRuntimeScenarioSummary();
+
+  // The Stats SHEET is authored by the scenario. A game's countryStats/customStats
+  // values are campaign state, but the definition that says which rows exist is
+  // not. Early builds copied stats.json into every game and the generic runtime
+  // resolver then preferred that copy over the scenario. The first campaign
+  // snapshot therefore shadowed later scenario edits forever - exactly the
+  // opposite of the Scenario Editor's ownership model.
+  //
+  // While the linked scenario still exists, it is the canonical definition. A
+  // game-level stats.json remains only as a portability/orphan fallback for an
+  // imported campaign whose source scenario is genuinely missing. Missing stats
+  // on an existing scenario intentionally means "use the standard sheet" and
+  // must NOT resurrect a stale game copy.
+  if (assetKey === "stats" && scenario && !scenario.missing) {
+    const canonicalStatsPath = getScenarioJsonPath(scenario.id, "stats");
+    const hasCanonicalStats = fs.existsSync(canonicalStatsPath);
+    return {
+      contentType: "application/json; charset=utf-8",
+      data: hasCanonicalStats ? readJsonFile(canonicalStatsPath, {}) : {},
+      sourcePath: hasCanonicalStats ? canonicalStatsPath : null,
+    };
+  }
+
+  // No games yet, runtime data resolves from the scenario below. activeGame is
+  // resolved above so the migration hook can see it.
+
   const gamePath =
   activeGame && (Object.hasOwn(JSON_ASSET_FILES, assetKey) || Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey) || Object.hasOwn(RUNTIME_ONLY_JSON_ASSET_FILES, assetKey))
   ? getGameJsonPath(activeGame.id, assetKey)
   : null;
 
   if (gamePath && fs.existsSync(gamePath)) {
+    const gameValue = readJsonFile(gamePath, JSON_ASSET_DEFAULTS[assetKey] ?? {});
     return {
       contentType: "application/json; charset=utf-8",
-      data: normalizeRuntimeWorld(assetKey, readJsonFile(gamePath, JSON_ASSET_DEFAULTS[assetKey] ?? {})),
+      data: normalizeRuntimeWorld(assetKey, gameValue),
       sourcePath: gamePath,
     };
   }
 
-  const scenario = getActiveRuntimeScenarioSummary();
   const scenarioPath =
   Object.hasOwn(JSON_ASSET_FILES, assetKey) || Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey)
   ? getScenarioJsonPath(scenario.id, assetKey)
@@ -2927,6 +3092,10 @@ const writeRuntimeJsonAsset = (assetKey, value) => {
     throw new Error(`Unsupported JSON asset key: ${assetKey}`);
   }
 
+  if (assetKey === "snapshotsIndex") {
+    throw new Error("snapshotsIndex is derived from snapshots and cannot be written directly.");
+  }
+
   // Shape guard. The storage assets are arrays and everything else is an object.
   // The SEED path already enforces this (normalizeBaseSaveSeedAsset), but this
   // runtime path did not — so a PUT whose body never parsed, which express.json()
@@ -3001,6 +3170,15 @@ const writeRuntimeJsonAsset = (assetKey, value) => {
 
   const targetPath = getGameJsonPath(activeGameId, assetKey);
   writeJsonFile(targetPath, canonical);
+  // From the array already in hand, so a turn never reparses to stay in step.
+  if (assetKey === "snapshots") {
+    try {
+      const stat = fs.statSync(targetPath);
+      writeSnapshotIndex(activeGameId, canonical, `${stat.size}:${Math.round(stat.mtimeMs)}`);
+    } catch {
+      // A missing index just means the next read rebuilds it.
+    }
+  }
   writeGameMeta(activeGameId, {});
   return readRuntimeJsonAsset(assetKey);
 };
@@ -3034,6 +3212,20 @@ const resolveRuntimeBinaryAsset = (assetKey) => {
 };
 
 const encodeBinaryFile = (sourcePath) => fs.readFileSync(sourcePath).toString("base64");
+
+// A JSON asset travels as JSON. Base64 made every shared map a third bigger for
+// nothing: in a real hub bundle the region geometry was 17.1 MB of the 18.1 MB
+// file. Anything that does not parse as JSON still travels byte-exact as base64,
+// so a hand-edited or half-written file is never silently lost.
+const encodeJsonFile = (sourcePath) => {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
+    if (parsed && typeof parsed === "object") return { data: parsed };
+  } catch {
+    // Not JSON we can re-serialise; fall through to the bytes.
+  }
+  return { data: encodeBinaryFile(sourcePath), encoding: "base64" };
+};
 
 const buildScenarioBundleAsset = (scenarioId, assetKey) => {
   if (assetKey === COVER_IMAGE_ASSET_KEY) {
@@ -3080,8 +3272,7 @@ const buildScenarioBundleAsset = (scenarioId, assetKey) => {
 
     return {
       contentType: "application/json",
-      data: encodeBinaryFile(geojsonPath),
-      encoding: "base64",
+      ...encodeJsonFile(geojsonPath),
       fileName: SCENARIO_GEOJSON_ASSET_FILES[assetKey],
       mode: "embedded",
     };
@@ -3124,6 +3315,7 @@ const exportScenarioBundle = (scenarioId) => {
       // characterisation of every country and the model reads them as context, so a
       // shared map that loses them plays differently than its author intended.
       tags: buildScenarioBundleAsset(scenarioId, "tags"),
+      stats: buildScenarioBundleAsset(scenarioId, "stats"),
       countries: buildScenarioBundleAsset(scenarioId, "countries"),
       regions: buildScenarioBundleAsset(scenarioId, "regions"),
       regionsGeojson: buildScenarioBundleAsset(scenarioId, "regionsGeojson"),
@@ -3248,9 +3440,13 @@ const applyScenarioBundleAsset = (scenarioId, assetKey, assetValue) => {
   if (assetValue?.mode === "embedded") {
     if (Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey)) {
       writeJsonFile(getScenarioJsonPath(scenarioId, assetKey), assetValue.data ?? {});
-    } else {
+    } else if (assetValue.encoding === "base64" || typeof assetValue.data === "string") {
+      // Binary, or a bundle written before JSON assets stopped being base64'd.
       const decoded = Buffer.from(String(assetValue.data ?? ""), "base64");
       fs.writeFileSync(getScenarioUploadPath(scenarioId, assetKey), decoded);
+    } else {
+      // A JSON asset that travelled as JSON (geometry, a vector basemap).
+      fs.writeFileSync(getScenarioUploadPath(scenarioId, assetKey), JSON.stringify(assetValue.data ?? {}), "utf-8");
     }
     return;
   }
@@ -3350,13 +3546,14 @@ const GAME_BUNDLE_DATA_KEYS = [
   "colors",
   "flags",
   "tags",
+  "stats",
   "intercepts",
 ];
 
 // Keys whose file is legitimately absent on a game that never had one. Writing
 // an empty one on import is harmless but noisy, and `flags: {}` is not the same
 // statement as "this game has no flags file".
-const OPTIONAL_GAME_BUNDLE_KEYS = new Set(["colors", "flags", "tags", "intercepts"]);
+const OPTIONAL_GAME_BUNDLE_KEYS = new Set(["colors", "flags", "tags", "stats", "intercepts"]);
 
 // Scenarios every install already has, so a game played on one never needs to
 // carry a map. CLASSIC_SCENARIO_ID is where campaigns started on the older
@@ -3399,6 +3596,16 @@ const exportGameBundle = (gameId) => {
       getGameJsonPath(gameId, assetKey),
       cloneJson(JSON_ASSET_DEFAULTS[assetKey] ?? {}),
     );
+  }
+
+  // Stats definitions are scenario-authored while the source scenario exists.
+  // Export the canonical current definition, not the game's stale portability
+  // snapshot. If the scenario intentionally uses the standard sheet, omit the
+  // optional asset so an imported orphan also uses the standard sheet.
+  if (!scenario?.missing) {
+    const statsPath = getScenarioJsonPath(game.scenarioId, "stats");
+    if (fs.existsSync(statsPath)) data.stats = readJsonFile(statsPath, {});
+    else delete data.stats;
   }
 
   return {
@@ -3579,6 +3786,7 @@ export {
   updateScenarioFromBundle,
   readGameSnapshots,
   readRuntimeJsonAsset,
+  resolveRuntimeGeojsonAsset,
   removeGameAsset,
   removeScenarioAsset,
   resolveGameUploadAsset,

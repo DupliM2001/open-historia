@@ -10,7 +10,8 @@ import { intelligenceOf } from "../../runtime/spycraft.js";
 import { flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import COUNTRY_NAMES from "../../runtime/generated/countryNames.js";
 import { setRegionClickObserver } from "../Selection/Regions.jsx";
-import { ensureIntelligenceRated, generateCountryStatSheet, isSimulationBusy } from "../AI/gameplay.js";
+import { ensureIntelligenceRated, generateCountryStatSheet } from "../AI/gameplayLazy.js";
+import { isSimulationBusy } from "../AI/simulationStatus.js";
 import { validateGameplayPayload } from "../AI/gameplaySchemas.js";
 import {
     appendCountryStatHistorySample,
@@ -21,6 +22,7 @@ import {
     countryStatsTrackingIntervalLabel,
     finalizeCountryStatSheet,
     isCompleteCountryStatSheet,
+    isCompleteCustomCountryStatSheet,
     mergeCountryStatPatch,
     mergeCountryStatsHistory,
     normalizeCountryStatHistorySample,
@@ -28,6 +30,12 @@ import {
     normalizeCountryStatsTracking,
 } from "../../runtime/countryStats.js";
 import { compareGameDates, formatGameDateReadable, gameDateDayNumber, parseGameDate } from "../../runtime/gameDates.js";
+import {
+    DEFAULT_STAT_INDEX_ROWS,
+    flattenStatSheetRows,
+    loadStatSheetDefinition,
+    statSheetKeys,
+} from "../../runtime/statsSheet.js";
 
 // Sheets are regenerated when the game date moves; within a date they persist
 // across reloads so flipping between countries stays instant.
@@ -61,8 +69,11 @@ const storeTrackingSettingsFallback = (gameKey, value, playerCountry = "") => {
     }
 };
 
-const isValidStatSheet = (value) => {
+const isValidStatSheet = (value, definition) => {
     const sheet = finalizeCountryStatSheet(value);
+    if (definition?.custom) {
+        return isCompleteCustomCountryStatSheet(sheet, statSheetKeys(definition));
+    }
     return isCompleteCountryStatSheet(sheet) && validateGameplayPayload("countryStatSheet", sheet).valid;
 };
 
@@ -126,14 +137,7 @@ const storeSheet = (key, entry) => {
 
 const clamp01 = (value) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 
-const INDEX_ROWS = [
-    { key: "sovereignty", label: "Sovereignty", icon: "⚑", color: "#8b5cf6" },
-    { key: "foodAutonomy", label: "Food autonomy", icon: "🌾", color: "#22c55e" },
-    { key: "energyAutonomy", label: "Energy autonomy", icon: "⚡", color: "#eab308" },
-    { key: "economicIndependence", label: "Economic independence", icon: "🏦", color: "#06b6d4" },
-    { key: "internalSecurity", label: "Internal security", icon: "🛡", color: "#f43f5e" },
-    { key: "internationalReputation", label: "International reputation", icon: "🤝", color: "#3b82f6" },
-];
+const INDEX_ROWS = DEFAULT_STAT_INDEX_ROWS;
 
 const sectionTitleStyle = {
     color: "rgba(255,255,255,0.45)",
@@ -145,7 +149,7 @@ const sectionTitleStyle = {
 };
 
 const cardStyle = {
-    backgroundColor: "rgba(255,255,255,0.045)",
+    backgroundColor: "rgba(255,255,255,0.05)",
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: "10px",
     padding: "0.6rem 0.7rem",
@@ -204,6 +208,39 @@ const formatPercent = (value, { signed = false } = {}) => {
     return `${prefix}${rounded}%`;
 };
 
+const formatCustomStatValue = (stat, value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    const decimals = Math.max(0, Math.min(4, Math.trunc(Number(stat?.decimals) || 0)));
+    let body;
+    if (stat?.compact) {
+        body = formatCompactNumber(number, { digits: Math.min(2, decimals || 1) });
+    } else {
+        body = number.toLocaleString(undefined, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals,
+        });
+    }
+    const prefix = String(stat?.prefix || "");
+    const suffix = String(stat?.suffix || "");
+    const suffixText = suffix ? (/^[%°]/.test(suffix) ? suffix : ` ${suffix}`) : "";
+    return `${prefix}${body}${suffixText}`;
+};
+
+const customMetricUnit = (stat) => [
+    "custom",
+    stat?.kind || "number",
+    String(stat?.prefix || ""),
+    String(stat?.suffix || ""),
+].join(":");
+
+const customMetricUnitLabel = (stat) => {
+    if (stat?.kind === "index") return "Index · 0–100";
+    if (stat?.kind === "percentage") return stat?.suffix || "Percent";
+    const display = [stat?.prefix, stat?.suffix].filter(Boolean).join(" … ");
+    return display || "Value";
+};
+
 const EconomyCard = ({ label, value, sub, tone }) => (
     <div style={cardStyle}>
     <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.06em", marginBottom: "0.3rem", textTransform: "uppercase" }}>
@@ -213,6 +250,55 @@ const EconomyCard = ({ label, value, sub, tone }) => (
     {sub && <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem", marginTop: "0.15rem" }}>{sub}</div>}
     </div>
 );
+
+const CustomStatCard = ({ stat, value }) => {
+    const numeric = Number(value);
+    const formatted = formatCustomStatValue(stat, numeric);
+    if (stat.kind === "index") {
+        const bounded = clamp01(numeric);
+        return (
+            <div style={{ ...cardStyle, gridColumn: "1 / -1" }}>
+                <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", marginBottom: "0.4rem", gap: "0.5rem" }}>
+                    <span style={{ color: "rgba(255,255,255,0.8)", fontSize: "0.76rem", minWidth: 0 }}>
+                        {stat.icon} {stat.label}
+                    </span>
+                    <span data-no-translate style={{ flexShrink: 0, fontSize: "0.78rem", fontWeight: 800 }}>{Number.isFinite(numeric) ? `${bounded}/100` : "—"}</span>
+                </div>
+                <Bar value={bounded} color={stat.color || "#a1a1aa"} />
+            </div>
+        );
+    }
+    return (
+        <div style={cardStyle}>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.05em", marginBottom: "0.3rem", textTransform: "uppercase" }}>
+                {stat.icon} {stat.label}
+            </div>
+            <div data-no-translate style={{ color: stat.color || "#e7e7e9", fontSize: "1.05rem", fontWeight: 800, overflowWrap: "anywhere" }}>
+                {formatted}
+            </div>
+        </div>
+    );
+};
+
+const CustomStatsSheet = ({ definition, sheet }) => {
+    const values = sheet?.customStats || {};
+    return (
+        <>
+            {definition.sections.map((section, sectionIndex) => (
+                <React.Fragment key={section.key}>
+                    <div style={{ ...sectionTitleStyle, marginTop: sectionIndex === 0 ? "1rem" : sectionTitleStyle.marginTop }}>
+                        {section.icon || "◆"} {section.label}
+                    </div>
+                    <div style={{ display: "grid", gap: "0.55rem", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+                        {section.stats.map((stat) => (
+                            <CustomStatCard key={stat.key} stat={stat} value={values[stat.key]} />
+                        ))}
+                    </div>
+                </React.Fragment>
+            ))}
+        </>
+    );
+};
 
 const stabilityColor = (value) => (value < 40 ? "#ef4444" : value < 70 ? "#f59e0b" : "#22c55e");
 
@@ -497,10 +583,10 @@ const DiplomacySection = ({ world, targetCountry }) => {
 
 const statsSubtabStyle = (selected) => ({
     alignItems: "center",
-    backgroundColor: selected ? "rgba(59,130,246,0.13)" : "rgba(255,255,255,0.025)",
-    border: `1px solid ${selected ? "rgba(96,165,250,0.5)" : "rgba(255,255,255,0.09)"}`,
+    backgroundColor: selected ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.03)",
+    border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.09)"}`,
     borderRadius: "8px",
-    color: selected ? "#bfdbfe" : "rgba(255,255,255,0.58)",
+    color: selected ? "#f4f4f5" : "rgba(255,255,255,0.58)",
     cursor: "pointer",
     display: "flex",
     flex: 1,
@@ -515,59 +601,76 @@ const statsSubtabStyle = (selected) => ({
 // ---------------------------------------------------------------------------
 // 8B.3 — Advanced Statistics
 // ---------------------------------------------------------------------------
-const ADVANCED_METRIC_GROUPS = [
-    {
-        key: "headline",
-        label: "Headline economy",
-        icon: "◈",
-        metrics: [
-            { key: "gdp", label: "GDP", unit: "gdp", color: "#34d399", format: formatEuroTotal },
-            { key: "gdpPerCapita", label: "GDP per capita", unit: "gdpPerCapita", color: "#e7e7e9", format: formatEuroPerCapita },
-            { key: "population", label: "Population", unit: "population", color: "#a78bfa", format: formatPopulation },
-        ],
-    },
-    {
-        key: "economy",
-        label: "Economic conditions",
-        icon: "↗",
-        metrics: [
-            { key: "gdpGrowth", label: "GDP growth", unit: "economicPercent", color: "#34d399", format: (value) => formatPercent(value, { signed: true }) },
-            { key: "inflation", label: "Inflation", unit: "economicPercent", color: "#f59e0b", format: formatPercent },
-            { key: "unemployment", label: "Unemployment", unit: "economicPercent", color: "#60a5fa", format: formatPercent },
-            { key: "publicDebt", label: "Public debt", unit: "economicPercent", color: "#c084fc", format: formatPercent },
-            { key: "budgetBalance", label: "Budget balance", unit: "economicPercent", color: "#f87171", format: (value) => formatPercent(value, { signed: true }) },
-        ],
-    },
-    {
-        key: "strategic",
-        label: "Strategic indices",
-        icon: "⚑",
-        metrics: [
-            { key: "stability", label: "National stability", unit: "index", color: "#22c55e", format: (value) => `${Math.round(Number(value) || 0)}` },
-            ...INDEX_ROWS.map((row) => ({
-                key: row.key,
-                label: row.label,
-                unit: "index",
-                color: row.color,
-                format: (value) => `${Math.round(Number(value) || 0)}%`,
+const advancedMetricGroupsFor = (indexRows = INDEX_ROWS, definition = null) => {
+    if (definition?.custom) {
+        return definition.sections.map((section) => ({
+            key: section.key,
+            label: section.label,
+            icon: section.icon || "◆",
+            metrics: section.stats.map((stat) => ({
+                key: stat.key,
+                label: stat.label,
+                unit: customMetricUnit(stat),
+                unitLabel: customMetricUnitLabel(stat),
+                color: stat.color || "#a1a1aa",
+                format: (value) => formatCustomStatValue(stat, value),
+                bounded01: stat.kind === "index" || (Number(stat.minimum) === 0 && Number(stat.maximum) === 100),
+                nonNegative: Number.isFinite(Number(stat.minimum)) && Number(stat.minimum) >= 0,
             })),
-        ],
-    },
-    {
-        key: "sectors",
-        label: "GDP sectors",
-        icon: "▦",
-        metrics: [
-            { key: "agriculture", label: "Agriculture", unit: "sector", color: "#22c55e", format: formatPercent },
-            { key: "industry", label: "Industry", unit: "sector", color: "#3b82f6", format: formatPercent },
-            { key: "services", label: "Services", unit: "sector", color: "#8b5cf6", format: formatPercent },
-        ],
-    },
-];
+        }));
+    }
+    return [
+        {
+            key: "headline",
+            label: "Headline economy",
+            icon: "◈",
+            metrics: [
+                { key: "gdp", label: "GDP", unit: "gdp", color: "#34d399", format: formatEuroTotal },
+                { key: "gdpPerCapita", label: "GDP per capita", unit: "gdpPerCapita", color: "#e7e7e9", format: formatEuroPerCapita },
+                { key: "population", label: "Population", unit: "population", color: "#94a3b8", format: formatPopulation },
+            ],
+        },
+        {
+            key: "economy",
+            label: "Economic conditions",
+            icon: "↗",
+            metrics: [
+                { key: "gdpGrowth", label: "GDP growth", unit: "economicPercent", color: "#34d399", format: (value) => formatPercent(value, { signed: true }) },
+                { key: "inflation", label: "Inflation", unit: "economicPercent", color: "#f59e0b", format: formatPercent },
+                { key: "unemployment", label: "Unemployment", unit: "economicPercent", color: "#60a5fa", format: formatPercent },
+                { key: "publicDebt", label: "Public debt", unit: "economicPercent", color: "#94a3b8", format: formatPercent },
+                { key: "budgetBalance", label: "Budget balance", unit: "economicPercent", color: "#f87171", format: (value) => formatPercent(value, { signed: true }) },
+            ],
+        },
+        {
+            key: "strategic",
+            label: "Strategic indices",
+            icon: "⚑",
+            metrics: [
+                { key: "stability", label: "National stability", unit: "index", color: "#22c55e", format: (value) => `${Math.round(Number(value) || 0)}` },
+                ...indexRows.map((row) => ({
+                    key: row.key,
+                    label: row.label,
+                    unit: "index",
+                    color: row.color,
+                    format: (value) => `${Math.round(Number(value) || 0)}%`,
+                })),
+            ],
+        },
+        {
+            key: "sectors",
+            label: "GDP sectors",
+            icon: "▦",
+            metrics: [
+                { key: "agriculture", label: "Agriculture", unit: "sector", color: "#22c55e", format: formatPercent },
+                { key: "industry", label: "Industry", unit: "sector", color: "#3b82f6", format: formatPercent },
+                { key: "services", label: "Services", unit: "sector", color: "#f59e0b", format: formatPercent },
+            ],
+        },
+    ];
+};
 
-const ADVANCED_METRICS = Object.fromEntries(
-    ADVANCED_METRIC_GROUPS.flatMap((group) => group.metrics.map((metric) => [metric.key, metric])),
-);
+const historyMetricValue = (sample, key) => sample?.[key] ?? sample?.indices?.[key] ?? sample?.customStats?.[key];
 
 const ADVANCED_UNIT_LABELS = {
     gdp: "GDP · 2026-EUR equivalent",
@@ -596,20 +699,20 @@ const historyDateMs = (value) => {
 };
 
 const advancedRangeStyle = (active) => ({
-    backgroundColor: active ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.035)",
-    border: `1px solid ${active ? "rgba(96,165,250,0.55)" : "rgba(255,255,255,0.08)"}`,
+    backgroundColor: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
+    border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)"}`,
     borderRadius: "7px",
-    color: active ? "#dbeafe" : "rgba(255,255,255,0.5)",
+    color: active ? "#f4f4f5" : "rgba(255,255,255,0.5)",
     cursor: "pointer",
     fontSize: "0.68rem",
     fontWeight: 800,
     padding: "0.42rem 0.62rem",
 });
 
-const AdvancedLineChart = ({ samples, metricKeys }) => {
+const AdvancedLineChart = ({ samples, metricKeys, metricsByKey }) => {
     const [hoverIndex, setHoverIndex] = useState(null);
-    const metrics = metricKeys.map((key) => ADVANCED_METRICS[key]).filter(Boolean);
-    const validSamples = samples.filter((sample) => metrics.some((metric) => Number.isFinite(Number(sample?.[metric.key]))));
+    const metrics = metricKeys.map((key) => metricsByKey[key]).filter(Boolean);
+    const validSamples = samples.filter((sample) => metrics.some((metric) => Number.isFinite(Number(historyMetricValue(sample, metric.key)))));
 
     if (!validSamples.length || !metrics.length) {
         return (
@@ -628,11 +731,11 @@ const AdvancedLineChart = ({ samples, metricKeys }) => {
     const minTime = Math.min(...times);
     const maxTime = Math.max(...times);
     const timeSpan = Math.max(1, maxTime - minTime);
-    const values = validSamples.flatMap((sample) => metrics.map((metric) => Number(sample?.[metric.key])).filter(Number.isFinite));
+    const values = validSamples.flatMap((sample) => metrics.map((metric) => Number(historyMetricValue(sample, metric.key))).filter(Number.isFinite));
     let minValue = Math.min(...values);
     let maxValue = Math.max(...values);
     const unit = metrics[0]?.unit;
-    if (unit === "index" || unit === "sector") {
+    if (unit === "index" || unit === "sector" || metrics[0]?.bounded01) {
         minValue = 0;
         maxValue = 100;
     } else {
@@ -640,7 +743,7 @@ const AdvancedLineChart = ({ samples, metricKeys }) => {
         const padding = span * 0.12;
         minValue -= padding;
         maxValue += padding;
-        if (unit === "population" || unit === "gdp" || unit === "gdpPerCapita") minValue = Math.max(0, minValue);
+        if (unit === "population" || unit === "gdp" || unit === "gdpPerCapita" || metrics[0]?.nonNegative) minValue = Math.max(0, minValue);
         if (minValue === maxValue) {
             minValue -= Math.abs(minValue || 1) * 0.08;
             maxValue += Math.abs(maxValue || 1) * 0.08;
@@ -660,7 +763,7 @@ const AdvancedLineChart = ({ samples, metricKeys }) => {
         let path = "";
         let started = false;
         validSamples.forEach((sample) => {
-            const value = Number(sample?.[metric.key]);
+            const value = Number(historyMetricValue(sample, metric.key));
             if (!Number.isFinite(value)) {
                 started = false;
                 return;
@@ -706,7 +809,7 @@ const AdvancedLineChart = ({ samples, metricKeys }) => {
                     <path key={metric.key} d={pathFor(metric)} fill="none" stroke={metric.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 5px ${metric.color}44)` }} />
                 ))}
                 {validSamples.length <= 24 && metrics.map((metric) => validSamples.map((sample) => {
-                    const value = Number(sample?.[metric.key]);
+                    const value = Number(historyMetricValue(sample, metric.key));
                     if (!Number.isFinite(value)) return null;
                     return <circle key={`${metric.key}-${sample.date}`} cx={xFor(sample)} cy={yFor(value)} r="3.7" fill={metric.color} stroke="#141417" strokeWidth="2" />;
                 }))}
@@ -714,7 +817,7 @@ const AdvancedLineChart = ({ samples, metricKeys }) => {
                     <>
                         <line x1={hoverX} x2={hoverX} y1={pad.top} y2={pad.top + plotHeight} stroke="rgba(255,255,255,0.34)" strokeWidth="1" />
                         {metrics.map((metric) => {
-                            const value = Number(hovered?.[metric.key]);
+                            const value = Number(historyMetricValue(hovered, metric.key));
                             if (!Number.isFinite(value)) return null;
                             return <circle key={`hover-${metric.key}`} cx={hoverX} cy={yFor(value)} r="6" fill={metric.color} stroke="#141417" strokeWidth="3" />;
                         })}
@@ -728,13 +831,13 @@ const AdvancedLineChart = ({ samples, metricKeys }) => {
                     const right = index === validSamples.length - 1 ? width - pad.right : (x + next) / 2;
                     return <rect key={`hit-${sample.date}`} x={left} y={pad.top} width={Math.max(2, right - left)} height={plotHeight} fill="transparent" onMouseEnter={() => setHoverIndex(index)} onMouseMove={() => setHoverIndex(index)} onMouseLeave={() => setHoverIndex(null)} />;
                 })}
-                <text x={pad.left} y="18" fill="rgba(255,255,255,0.38)" fontSize="11" fontWeight="700" letterSpacing="1">{ADVANCED_UNIT_LABELS[unit] || "Value"}</text>
+                <text x={pad.left} y="18" fill="rgba(255,255,255,0.38)" fontSize="11" fontWeight="700" letterSpacing="1">{metrics[0]?.unitLabel || ADVANCED_UNIT_LABELS[unit] || "Value"}</text>
             </svg>
             {hovered && (
                 <div style={{ backgroundColor: "rgba(16,16,18,0.96)", border: "1px solid rgba(148,163,184,0.22)", borderRadius: "10px", boxShadow: "0 12px 35px rgba(0,0,0,0.35)", left: `min(calc(${((hoverX / width) * 100).toFixed(2)}% + 10px), calc(100% - 190px))`, padding: "0.55rem 0.65rem", pointerEvents: "none", position: "absolute", top: "1.1rem", width: "180px", zIndex: 2 }}>
                     <div data-no-translate style={{ color: "rgba(255,255,255,0.62)", fontSize: "0.64rem", fontWeight: 800, letterSpacing: "0.04em", marginBottom: "0.45rem", textTransform: "uppercase" }}>{formatHistoryDate(hovered.date)}</div>
                     {metrics.map((metric) => {
-                        const value = Number(hovered?.[metric.key]);
+                        const value = Number(historyMetricValue(hovered, metric.key));
                         if (!Number.isFinite(value)) return null;
                         return (
                             <div key={metric.key} style={{ alignItems: "center", display: "flex", gap: "0.45rem", justifyContent: "space-between", marginTop: "0.28rem" }}>
@@ -760,9 +863,25 @@ const AdvancedStatsModal = ({
     error,
     recoveredCount,
     persistentCount,
+    indexRows,
+    statSheetDefinition,
 }) => {
     const [metricKeys, setMetricKeys] = useState(["gdp"]);
     const [range, setRange] = useState("all");
+    const metricGroups = useMemo(
+        () => advancedMetricGroupsFor(indexRows, statSheetDefinition),
+        [indexRows, statSheetDefinition],
+    );
+    const metricsByKey = useMemo(() => Object.fromEntries(
+        metricGroups.flatMap((group) => group.metrics.map((metric) => [metric.key, metric])),
+    ), [metricGroups]);
+
+    useEffect(() => {
+        if (!open) return;
+        const firstKey = metricGroups.flatMap((group) => group.metrics)[0]?.key;
+        if (!firstKey) return;
+        setMetricKeys((current) => current.some((key) => metricsByKey[key]) ? current.filter((key) => metricsByKey[key]) : [firstKey]);
+    }, [open, metricGroups, metricsByKey]);
 
     useEffect(() => {
         if (!open) return undefined;
@@ -785,7 +904,7 @@ const AdvancedStatsModal = ({
 
     if (!open || typeof document === "undefined") return null;
 
-    const selectedMetrics = metricKeys.map((key) => ADVANCED_METRICS[key]).filter(Boolean);
+    const selectedMetrics = metricKeys.map((key) => metricsByKey[key]).filter(Boolean);
     const selectedUnit = selectedMetrics[0]?.unit || "gdp";
     const latestMs = samples.reduce((max, sample) => Math.max(max, historyDateMs(sample.date) || 0), 0);
     const years = range === "1y" ? 1 : range === "5y" ? 5 : range === "10y" ? 10 : null;
@@ -800,7 +919,7 @@ const AdvancedStatsModal = ({
                 if (current.length === 1) return current;
                 return current.filter((key) => key !== metric.key);
             }
-            const currentUnit = ADVANCED_METRICS[current[0]]?.unit;
+            const currentUnit = metricsByKey[current[0]]?.unit;
             if (currentUnit !== metric.unit) return [metric.key];
             if (current.length >= 4) return [...current.slice(1), metric.key];
             return [...current, metric.key];
@@ -827,7 +946,7 @@ const AdvancedStatsModal = ({
                         </div>
                         <div data-no-translate style={{ color: "rgba(255,255,255,0.32)", fontSize: "0.64rem", marginTop: "0.15rem" }}>{sampleSpan} · {visibleSamples.length} snapshot{visibleSamples.length === 1 ? "" : "s"}</div>
                     </div>
-                    <button type="button" onClick={onClose} aria-label="Close advanced statistics" style={{ alignItems: "center", background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.62)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>×</button>
+                    <button type="button" onClick={onClose} aria-label="Close advanced statistics" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.62)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>×</button>
                 </div>
 
                 <div style={{ display: "grid", flex: 1, gridTemplateColumns: "minmax(0, 1fr) minmax(285px, 330px)", minHeight: 0 }}>
@@ -835,40 +954,42 @@ const AdvancedStatsModal = ({
                         <div style={{ alignItems: "flex-start", display: "flex", flexWrap: "wrap", gap: "0.55rem", justifyContent: "space-between", marginBottom: "0.35rem" }}>
                             <div>
                                 <div style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.82rem", fontWeight: 850 }}>{selectedMetrics.map((metric) => metric.label).join(" · ")}</div>
-                                <div style={{ color: "rgba(255,255,255,0.34)", fontSize: "0.64rem", marginTop: "0.15rem" }}>{ADVANCED_UNIT_LABELS[selectedUnit]}</div>
+                                <div style={{ color: "rgba(255,255,255,0.34)", fontSize: "0.64rem", marginTop: "0.15rem" }}>{selectedMetrics[0]?.unitLabel || ADVANCED_UNIT_LABELS[selectedUnit] || "Value"}</div>
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
                                 {selectedMetrics.map((metric) => <span key={metric.key} style={{ alignItems: "center", color: "rgba(255,255,255,0.58)", display: "inline-flex", fontSize: "0.63rem", gap: "0.3rem" }}><span style={{ backgroundColor: metric.color, borderRadius: "999px", height: "7px", width: "7px" }} />{metric.label}</span>)}
                             </div>
                         </div>
 
-                        <div style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0.012))", border: "1px solid rgba(255,255,255,0.065)", borderRadius: "12px", display: "flex", flex: 1, minHeight: "390px", overflow: "hidden", padding: "0.35rem" }}>
+                        <div style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "12px", display: "flex", flex: 1, minHeight: "390px", overflow: "hidden", padding: "0.35rem" }}>
                             {status === "loading" ? (
                                 <div style={{ alignItems: "center", color: "rgba(255,255,255,0.42)", display: "flex", flex: 1, fontSize: "0.82rem", justifyContent: "center" }}>Loading campaign history…</div>
                             ) : status === "error" ? (
                                 <div style={{ alignItems: "center", color: "#fca5a5", display: "flex", flex: 1, fontSize: "0.8rem", justifyContent: "center", padding: "2rem", textAlign: "center" }}>{error || "Historical Stats could not be loaded."}</div>
                             ) : (
-                                <AdvancedLineChart samples={visibleSamples} metricKeys={metricKeys} />
+                                <AdvancedLineChart samples={visibleSamples} metricKeys={metricKeys} metricsByKey={metricsByKey} />
                             )}
                         </div>
 
                         {first && last && (
                             <div style={{ display: "grid", gap: "0.55rem", gridTemplateColumns: `repeat(${Math.min(4, selectedMetrics.length)}, minmax(0, 1fr))`, marginTop: "0.7rem" }}>
                                 {selectedMetrics.map((metric) => {
-                                    const start = Number(first?.[metric.key]);
-                                    const end = Number(last?.[metric.key]);
+                                    const start = Number(historyMetricValue(first, metric.key));
+                                    const end = Number(historyMetricValue(last, metric.key));
                                     const delta = Number.isFinite(start) && Number.isFinite(end) ? end - start : null;
                                     const deltaText = delta == null
                                         ? "—"
-                                        : metric.unit === "gdp"
-                                            ? formatEuroTotal(delta)
-                                            : metric.unit === "gdpPerCapita"
-                                                ? formatEuroPerCapita(delta)
-                                                : metric.unit === "population"
-                                                    ? formatCompactNumber(delta)
-                                                    : `${delta > 0 ? "+" : ""}${Math.round(delta * 10) / 10}${metric.unit === "index" ? "" : " pp"}`;
+                                        : String(metric.unit || "").startsWith("custom:")
+                                            ? `${delta > 0 ? "+" : ""}${metric.format(delta)}`
+                                            : metric.unit === "gdp"
+                                                ? formatEuroTotal(delta)
+                                                : metric.unit === "gdpPerCapita"
+                                                    ? formatEuroPerCapita(delta)
+                                                    : metric.unit === "population"
+                                                        ? formatCompactNumber(delta)
+                                                        : `${delta > 0 ? "+" : ""}${Math.round(delta * 10) / 10}${metric.unit === "index" ? "" : " pp"}`;
                                     return (
-                                        <div key={metric.key} style={{ backgroundColor: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.065)", borderRadius: "9px", minWidth: 0, padding: "0.55rem 0.65rem" }}>
+                                        <div key={metric.key} style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "9px", minWidth: 0, padding: "0.55rem 0.65rem" }}>
                                             <div style={{ color: "rgba(255,255,255,0.36)", fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.05em", overflow: "hidden", textOverflow: "ellipsis", textTransform: "uppercase", whiteSpace: "nowrap" }}>{metric.label}</div>
                                             <div data-no-translate style={{ color: metric.color, fontSize: "0.92rem", fontWeight: 900, marginTop: "0.16rem" }}>{metric.format(end)}</div>
                                             <div data-no-translate style={{ color: delta == null ? "rgba(255,255,255,0.3)" : delta > 0 ? "#86efac" : delta < 0 ? "#fca5a5" : "rgba(255,255,255,0.42)", fontSize: "0.58rem", marginTop: "0.08rem" }}>{deltaText} over range</div>
@@ -891,8 +1012,8 @@ const AdvancedStatsModal = ({
                         </div>
                         <div style={{ color: "rgba(255,255,255,0.28)", fontSize: "0.58rem", lineHeight: 1.4, marginTop: "0.3rem" }}>Compatible metrics can share a chart. Choosing a different scale switches the graph automatically.</div>
 
-                        {ADVANCED_METRIC_GROUPS.map((group) => (
-                            <div key={group.key} style={{ borderTop: "1px solid rgba(255,255,255,0.065)", marginTop: "0.75rem", paddingTop: "0.65rem" }}>
+                        {metricGroups.map((group) => (
+                            <div key={group.key} style={{ borderTop: "1px solid rgba(255,255,255,0.07)", marginTop: "0.75rem", paddingTop: "0.65rem" }}>
                                 <div style={{ color: "rgba(255,255,255,0.62)", fontSize: "0.68rem", fontWeight: 850, marginBottom: "0.35rem" }}>{group.icon} {group.label}</div>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                                     {group.metrics.map((metric) => {
@@ -1021,10 +1142,10 @@ const HistoricalTrackingModal = ({
                                             type="button"
                                             onClick={() => setIntervalMonths(months)}
                                             style={{
-                                                backgroundColor: active ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.04)",
-                                                border: `1px solid ${active ? "rgba(96,165,250,0.5)" : "rgba(255,255,255,0.08)"}`,
+                                                backgroundColor: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
+                                                border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)"}`,
                                                 borderRadius: "999px",
-                                                color: active ? "#dbeafe" : "rgba(255,255,255,0.68)",
+                                                color: active ? "#f4f4f5" : "rgba(255,255,255,0.68)",
                                                 cursor: "pointer",
                                                 fontSize: "0.72rem",
                                                 fontWeight: active ? 800 : 700,
@@ -1166,7 +1287,7 @@ const HistoricalTrackingModal = ({
 };
 
 const StatsPaneBody = ({ active }) => {
-    const { activeGameId } = useLibraryState();
+    const { activeGameId, runtimeScenario, token: libraryToken } = useLibraryState();
     const [player, setPlayer] = useState({ code: "", date: "", startDate: "", round: 0, gameKey: "game" });
     const [targetCountry, setTargetCountry] = useState("");
     const [polity, setPolity] = useState(null); // world.polityOverrides[target]
@@ -1187,6 +1308,33 @@ const StatsPaneBody = ({ active }) => {
     // Author-set flags from the scenario (flags.json). Memoized in assets.js, so
     // this is one fetch per scenario; {} for every scenario that sets none.
     const [customFlags, setCustomFlags] = useState({});
+    const [statSheetDefinition, setStatSheetDefinition] = useState({ custom: false, sections: [] });
+    const [statSheetDefinitionReady, setStatSheetDefinitionReady] = useState(false);
+    const [statSheetDefinitionError, setStatSheetDefinitionError] = useState("");
+    const [indexRows, setIndexRows] = useState(() => DEFAULT_STAT_INDEX_ROWS.map((row) => ({ ...row })));
+
+    useEffect(() => {
+        if (!active) return undefined;
+        let cancelled = false;
+        setStatSheetDefinitionReady(false);
+        setStatSheetDefinitionError("");
+        loadStatSheetDefinition().then((definition) => {
+            if (cancelled) return;
+            setStatSheetDefinition(definition);
+            setIndexRows(definition?.custom
+                ? flattenStatSheetRows(definition).filter((row) => row.kind === "index")
+                : DEFAULT_STAT_INDEX_ROWS.map((row) => ({ ...row })));
+            setStatSheetDefinitionReady(true);
+        }).catch((error) => {
+            if (cancelled) return;
+            // Never turn a failed canonical definition read into the modern
+            // sheet. That makes a transport/ownership bug look like the author
+            // deliberately chose GDP, which is much worse than an honest error.
+            setStatSheetDefinitionError(error?.message || "Could not load this scenario's Stats definition.");
+            setStatSheetDefinitionReady(false);
+        });
+        return () => { cancelled = true; };
+    }, [active, player.gameKey, runtimeScenario?.id, libraryToken]);
 
     useEffect(() => {
         worldSnapshotRef.current = worldSnapshot;
@@ -1347,9 +1495,9 @@ const StatsPaneBody = ({ active }) => {
             try {
                 const world = worldSnapshotRef.current || await readWorldStateView({ force: false });
                 const persisted = world?.countryStats?.[code];
-                const persistedIsValid = persisted && isValidStatSheet(persisted);
-                const persistedNeedsCapAudit = persistedIsValid && needsLegacyComponentCapAudit(persisted);
-                const persistedNeedsPopulationAudit = persistedIsValid && needsStartPopulationCalibrationAudit(persisted, player);
+                const persistedIsValid = persisted && isValidStatSheet(persisted, statSheetDefinition);
+                const persistedNeedsCapAudit = !statSheetDefinition.custom && persistedIsValid && needsLegacyComponentCapAudit(persisted);
+                const persistedNeedsPopulationAudit = !statSheetDefinition.custom && persistedIsValid && needsStartPopulationCalibrationAudit(persisted, player);
                 const persistedNeedsNativeAudit = persistedNeedsCapAudit || persistedNeedsPopulationAudit;
                 if (persistedIsValid && !persistedNeedsNativeAudit) {
                     memoryCache.set(cacheKey, { date: player.date, sheet: persisted });
@@ -1366,9 +1514,9 @@ const StatsPaneBody = ({ active }) => {
             const cached = memoryCache.get(cacheKey) ?? readStoredSheets()[cacheKey];
             if (
                 cached &&
-                isValidStatSheet(cached.sheet) &&
-                !needsLegacyComponentCapAudit(cached.sheet) &&
-                !needsStartPopulationCalibrationAudit(cached.sheet, player)
+                isValidStatSheet(cached.sheet, statSheetDefinition) &&
+                (statSheetDefinition.custom || !needsLegacyComponentCapAudit(cached.sheet)) &&
+                (statSheetDefinition.custom || !needsStartPopulationCalibrationAudit(cached.sheet, player))
             ) {
                 const sheet = mergeStatSheet(cached.sheet, aiOverride);
                 memoryCache.set(cacheKey, { date: player.date, sheet });
@@ -1411,8 +1559,14 @@ const StatsPaneBody = ({ active }) => {
             } catch { /* display-name lookup is non-fatal */ }
 
             const generated = await generateCountryStatSheet({ code, name: generationName, forceReassess, signal: controller.signal });
-            const validation = validateGameplayPayload("countryStatSheet", generated);
-            if (!validation.valid) throw new Error(`The stat sheet failed validation: ${validation.error}`);
+            if (statSheetDefinition.custom) {
+                if (!isCompleteCustomCountryStatSheet(generated, statSheetKeys(statSheetDefinition))) {
+                    throw new Error("The scenario-defined stat sheet was incomplete.");
+                }
+            } else {
+                const validation = validateGameplayPayload("countryStatSheet", generated);
+                if (!validation.valid) throw new Error(`The stat sheet failed validation: ${validation.error}`);
+            }
             // generateCountryStatSheet already receives the previous persistent sheet as
             // continuity context and persists through the native mutation boundary. Do
             // not re-apply the legacy/partial pre-generation record here: doing so can
@@ -1435,7 +1589,7 @@ const StatsPaneBody = ({ active }) => {
                     : current);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [targetCountry, player.gameKey, player.date, player.startDate, player.round, displayName]);
+    }, [targetCountry, player.gameKey, player.date, player.startDate, player.round, displayName, statSheetDefinition]);
 
     useEffect(() => () => {
         statsLoadRef.current.controller?.abort?.(
@@ -1553,13 +1707,13 @@ const StatsPaneBody = ({ active }) => {
     // pays for the sheet too, in the background, rather than showing stats
     // that were never assessed.
     useEffect(() => {
-        if (!active || !targetCountry) return undefined;
+        if (!active || !targetCountry || !statSheetDefinitionReady) return undefined;
         let cancelled = false;
         loadSheet().finally(() => {
             if (!cancelled) void ensureIntelligenceRated(targetCountry, { reason: "stats pane" });
         });
         return () => { cancelled = true; };
-    }, [active, targetCountry, loadSheet]);
+    }, [active, targetCountry, loadSheet, statSheetDefinitionReady]);
 
     useEffect(() => {
         if (!active || typeof window === "undefined") return undefined;
@@ -1685,7 +1839,7 @@ const StatsPaneBody = ({ active }) => {
         const parts = [
             { key: "agriculture", label: "Agriculture", color: "#22c55e", value: clamp01(raw.agriculture) },
             { key: "industry", label: "Industry", color: "#3b82f6", value: clamp01(raw.industry) },
-            { key: "services", label: "Services", color: "#8b5cf6", value: clamp01(raw.services) },
+            { key: "services", label: "Services", color: "#f59e0b", value: clamp01(raw.services) },
         ];
         const total = parts.reduce((sum, part) => sum + part.value, 0) || 1;
         return parts.map((part) => ({ ...part, share: (part.value / total) * 100 }));
@@ -1792,10 +1946,16 @@ const StatsPaneBody = ({ active }) => {
             aria-pressed={statsView === "economy"}
             onClick={() => setStatsView("economy")}
             style={statsSubtabStyle(statsView === "economy")}
-            >📈 Economy</button>
+            >{statSheetDefinition.custom ? "📊 National" : "📈 Economy"}</button>
             </div>
 
-            {statsView === "economy" && state.status === "loading" && (
+            {statsView === "economy" && statSheetDefinitionError && (
+                <div style={{ backgroundColor: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", fontSize: "0.8rem", marginTop: "1rem", padding: "0.7rem 0.8rem" }}>
+                {statSheetDefinitionError}
+                </div>
+            )}
+
+            {statsView === "economy" && !statSheetDefinitionError && state.status === "loading" && (
                 <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.82rem", marginTop: "1rem" }}>
                 {state.waiting ? "Waiting for the world to finish updating, then compiling national statistics…" : "Compiling national statistics…"}
                 </p>
@@ -1821,8 +1981,12 @@ const StatsPaneBody = ({ active }) => {
                 </p>
             )}
 
-            {statsView === "economy" && sheet && state.status === "ready" && (
+            {statsView === "economy" && !statSheetDefinitionError && sheet && state.status === "ready" && (
                 <>
+                {statSheetDefinition.custom ? (
+                    <CustomStatsSheet definition={statSheetDefinition} sheet={sheet} />
+                ) : (
+                    <>
                 {/* National stability */}
                 <div style={{ ...cardStyle, marginTop: "1rem" }}>
                 <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", marginBottom: "0.45rem" }}>
@@ -1844,14 +2008,14 @@ const StatsPaneBody = ({ active }) => {
                 </span>
                 <span data-no-translate style={{ fontSize: "0.85rem", fontWeight: 800 }}>{intelligence}/100</span>
                 </div>
-                <Bar value={intelligence} color="#a78bfa" />
+                <Bar value={intelligence} color="#38bdf8" />
                 </div>
                 )}
 
                 {/* Strategic indices */}
                 <div style={sectionTitleStyle}>⚑ Strategic indices</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
-                {INDEX_ROWS.map((row) => {
+                {indexRows.map((row) => {
                     const value = clamp01(sheet.indices?.[row.key]);
                     return (
                         <div key={row.key} style={cardStyle}>
@@ -1933,11 +2097,13 @@ const StatsPaneBody = ({ active }) => {
                 ))}
                 </div>
                 </div>
+                    </>
+                )}
 
                 <button
                 type="button"
                 onClick={() => setAdvancedOpen(true)}
-                style={{ alignItems: "center", background: "linear-gradient(135deg, rgba(37,99,235,0.18), rgba(14,165,233,0.08))", border: "1px solid rgba(96,165,250,0.34)", borderRadius: "11px", color: "#dbeafe", cursor: "pointer", display: "flex", gap: "0.65rem", justifyContent: "space-between", marginTop: "0.9rem", padding: "0.72rem 0.8rem", textAlign: "left", width: "100%" }}
+                style={{ alignItems: "center", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "11px", color: "#e7e7ea", cursor: "pointer", display: "flex", gap: "0.65rem", justifyContent: "space-between", marginTop: "0.9rem", padding: "0.72rem 0.8rem", textAlign: "left", width: "100%" }}
                 >
                     <span style={{ alignItems: "center", display: "flex", gap: "0.6rem", minWidth: 0 }}>
                         <span style={{ alignItems: "center", backgroundColor: "rgba(59,130,246,0.18)", border: "1px solid rgba(147,197,253,0.2)", borderRadius: "8px", display: "inline-flex", flexShrink: 0, fontSize: "1rem", height: "2rem", justifyContent: "center", width: "2rem" }}>📊</span>
@@ -1952,7 +2118,7 @@ const StatsPaneBody = ({ active }) => {
                 <button
                 type="button"
                 onClick={() => setTrackingOpen(true)}
-                style={{ alignItems: "center", background: "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.035))", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "11px", color: "#e7e7e9", cursor: "pointer", display: "flex", gap: "0.7rem", justifyContent: "space-between", marginTop: "0.55rem", padding: "0.72rem 0.8rem", textAlign: "left", width: "100%" }}
+                style={{ alignItems: "center", background: "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.04))", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "11px", color: "#e7e7e9", cursor: "pointer", display: "flex", gap: "0.7rem", justifyContent: "space-between", marginTop: "0.55rem", padding: "0.72rem 0.8rem", textAlign: "left", width: "100%" }}
                 >
                     <span style={{ alignItems: "center", display: "flex", gap: "0.65rem", minWidth: 0 }}>
                         <span style={{ alignItems: "center", backgroundColor: "rgba(234,179,8,0.12)", border: "1px solid rgba(250,204,21,0.22)", borderRadius: "8px", color: "#fbbf24", display: "inline-flex", flexShrink: 0, fontSize: "0.98rem", height: "2rem", justifyContent: "center", width: "2rem" }}>⚙</span>
@@ -1989,6 +2155,8 @@ const StatsPaneBody = ({ active }) => {
             error={historyState.error}
             recoveredCount={historyState.recoveredCount}
             persistentCount={historyState.persistentCount}
+            indexRows={indexRows}
+            statSheetDefinition={statSheetDefinition}
             />
         )}
         {trackingOpen && (

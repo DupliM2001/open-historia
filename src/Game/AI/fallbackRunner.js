@@ -7,6 +7,13 @@
 // to get more usage — see docs/adr/0001-fallback-never-rotation.md before
 // changing anything about the order.
 //
+// And every call starts at the top again (2026-09-19): an entry that failed a
+// moment ago is still tried first next time, because a rate limit or a busy
+// spell is usually over by then, and a call that skipped it would run on a
+// weaker model for nothing. The marks a failure leaves are kept — the Settings
+// rows show them, and a call that finds every entry failing says when the
+// first comes back — but they never take an entry out of the order.
+//
 // DELIBERATELY IMPORT-FREE, like providerErrors.js: main.jsx makes the calls and
 // cannot be unit-tested, and these rules are exactly what needs to be. The
 // caller hands in the list, where entry states are kept, a clock, and one
@@ -83,19 +90,11 @@ const markFor = (entry, failure, at, rateLimitPolicy) => {
     }
 };
 
-// Entries that can answer, in list order — except that one sitting out a short
-// skip goes after every entry that is not. It is still tried when nothing else
-// can answer: a minute's pause must never be what fails a turn.
-//
-// A task's own pick goes first; the rest follow in list order.
-const orderToTry = (entries, preferredEntryId, store, at) => {
+// Every entry, in list order, whatever its mark: a task's own pick first, the
+// rest from the top.
+const orderToTry = (entries, preferredEntryId) => {
     const pick = entries.find((candidate) => candidate.id === preferredEntryId);
-    const ordered = pick ? [pick, ...entries.filter((candidate) => candidate !== pick)] : entries;
-    const available = ordered.filter((candidate) => isAvailable(store.get(candidate.id), at));
-    return [
-        ...available.filter((candidate) => !isSkipped(store.get(candidate.id), at)),
-        ...available.filter((candidate) => isSkipped(store.get(candidate.id), at)),
-    ];
+    return pick ? [pick, ...entries.filter((candidate) => candidate !== pick)] : [...entries];
 };
 
 // What a Settings row says about its entry: ready, Spent (until when),
@@ -157,36 +156,57 @@ const unavailableError = (entries, store, now, formatTime, cause) => {
 // entry tell the player once, not twice. It hears them whether the call then
 // got an answer (`to` is the entry that gave it) or not (`to` is null): either
 // way the calls after it start further down, and the player should know why.
+//
+// `canAttempt(entry)` is asked before each entry is tried: a reason (a string)
+// means THIS request must not go to that entry — it cannot fit the model's
+// context window (contextWindow.js) — and the runner moves on without sending
+// anything, exactly as it would after the provider had refused it. The entry is
+// not marked: it is the request that is too big, not the entry that is broken,
+// and the next request may fit. When every entry is refused this way the call
+// fails with `tooBigError(refused)` before a single request is spent.
 export async function runWithFallback({
     entries,
     preferredEntryId,
     store,
     now = Date.now,
-    rateLimitPolicy = "wait",
+    rateLimitPolicy = "next",
     onChunk,
     attempt,
+    canAttempt = null,
+    tooBigError = null,
     onMark,
     onSwitch,
     formatTime = formatResetTime,
 }) {
     let lastError = null;
     const skipped = [];
+    const refused = [];
     const fail = (error) => {
         if (skipped.length) onSwitch?.({ skipped, to: null });
         return error;
     };
-    const order = orderToTry(entries, preferredEntryId, store, now());
+    const order = orderToTry(entries, preferredEntryId);
     if (!order.length) throw unavailableError(entries, store, now, formatTime, null);
+    let tried = 0;
     for (const [index, candidate] of order.entries()) {
-        if (!isAvailable(store.get(candidate.id), now())) continue;
+        const refusal = typeof canAttempt === "function" ? canAttempt(candidate) : "";
+        if (refusal) {
+            const failure = { kind: "tooBig", reason: String(refusal) };
+            refused.push({ entry: candidate, reason: String(refusal) });
+            skipped.push({ entry: candidate, failure });
+            onMark?.({ entry: candidate, failure, state: null });
+            continue;
+        }
+        tried += 1;
         // Once any of a streamed reply has reached the player, a failure is
         // theirs to retry: a different model picking the reply up halfway
         // through would read as a glitch.
         let answerStarted = false;
         const context = {
-            // Whether anything is left after this entry. The provider keeps its
-            // full retries when it is the last hope (shouldRetryProviderFailure).
-            canFallBack: order.slice(index + 1).some((next) => isAvailable(store.get(next.id), now())),
+            // Whether anything is left after this entry. With a backup, a busy
+            // or rate-limited entry hands over at once; the last one keeps its
+            // full retries (shouldRetryProviderFailure).
+            canFallBack: index < order.length - 1,
             onChunk: typeof onChunk === "function"
                 ? (delta, full) => { answerStarted = true; onChunk(delta, full); }
                 : undefined,
@@ -199,6 +219,16 @@ export async function runWithFallback({
             return { result, entry: candidate };
         } catch (error) {
             const failure = error?.providerFailure;
+            // The model refused the request as too big for its window. Not a
+            // mark on the entry (the next request may fit), but a reason to try
+            // the next entry, whose window may be larger.
+            if (failure?.kind === "tooBig" && !answerStarted) {
+                refused.push({ entry: candidate, reason: failure.reason || "too big for its context window" });
+                skipped.push({ entry: candidate, failure });
+                onMark?.({ entry: candidate, failure, state: null });
+                lastError = error;
+                continue;
+            }
             const mark = markFor(candidate, failure, now(), rateLimitPolicy);
             if (mark) {
                 const before = store.get(candidate.id);
@@ -214,8 +244,12 @@ export async function runWithFallback({
             lastError = error;
         }
     }
+    // Nothing was even sent: every entry was refused for size before the call.
+    if (!tried && refused.length && typeof tooBigError === "function") throw fail(tooBigError(refused));
     // Everything is Spent or Unusable: say when the list comes back. When the
     // last hope was only busy, its own message says that better.
     if (!fallbackAvailability({ entries, store, now }).canAnswer) throw fail(unavailableError(entries, store, now, formatTime, lastError));
-    throw fail(lastError);
+    // The last thing that went wrong: for a request refused everywhere for its
+    // size, the provider's own context-window message.
+    throw fail(lastError ?? (typeof tooBigError === "function" && refused.length ? tooBigError(refused) : new Error("No model in your Fallback list answered.")));
 }

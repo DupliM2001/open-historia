@@ -42,6 +42,18 @@ const IDLE_ROTATE_FRAME_MS = 1000 / 15;
 // day/night line stays live without a per-frame cost.
 const LIVE_SUN_REFRESH_MS = 60 * 1000;
 
+// Terrain pushes each vertex out by elevation / earth radius.
+const EARTH_RADIUS_M = 6371008.8;
+const MAX_TERRAIN_ELEVATION_M = 8849;
+
+const terrainSurfaceRadii = (mapInstance) => {
+  const terrain = mapInstance.getTerrain?.();
+  if (!terrain) return 0;
+  const exaggeration = Number.isFinite(terrain.exaggeration) ? terrain.exaggeration : 1;
+  if (exaggeration <= 0) return 0;
+  return (exaggeration * MAX_TERRAIN_ELEVATION_M) / EARTH_RADIUS_M;
+};
+
 // The sun, stars, and surface lighting share one world frame: the REAL sun.
 // sunWorldPosition is the actual subsolar point for the current wall-clock
 // moment (seasonal declination + Earth's real rotation), so the day/night
@@ -171,6 +183,7 @@ const GlobeEffects = ({ active }) => {
             width,
             height,
             opacity: projectionTransition,
+            terrainRadii: terrainSurfaceRadii(mapInstance),
             immediate: autoRotationActive || mapInstance.isMoving(),
           });
         } else if (!lightingTimer) {

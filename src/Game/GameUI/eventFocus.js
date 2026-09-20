@@ -526,7 +526,7 @@ export const deriveEventFocusBounds = (event, context) => {
     ]),
     () => (impacts.createdChats ?? []).flatMap((chat) =>
       (chat?.countries ?? []).map((country) =>
-        resolvePolityBounds(country?.code || country?.name, context))),
+        resolvePolityBounds(typeof country === "string" ? country : country?.code || country?.name, context))),
   ];
 
   for (const tier of tiers) {
@@ -540,8 +540,128 @@ export const deriveEventFocusBounds = (event, context) => {
 };
 
 // ---------------------------------------------------------------------------
+// Event -> links
+// ---------------------------------------------------------------------------
+//
+// The powers, places, formations and structures an event is about, each with
+// the frame the map flies to when the player clicks it on the event's card. The
+// camera already flies to an event as it is revealed; these are for afterwards,
+// for an event with several places in it, and for a player who switched the
+// event camera off.
+//
+// Derived, never stored: from the event's own operations first (what it moved,
+// raised, built or changed — the most specific things it pins down), then from
+// the places and powers its words name. A link the map cannot place is left out:
+// a chip that goes nowhere is noise.
+
+export const EVENT_LINKS_MAX = 8;
+
+const polityLabel = (value, context) => {
+  const raw = String(value ?? "").trim();
+  return context?.polityNameByToken?.get(raw)
+    ?? context?.polityNameByToken?.get(lookupName(context?.polityIndex, raw))
+    ?? raw;
+};
+
+const regionLabel = (entry, context) => String(
+  entry?.regionName
+  || context?.regionNameById?.get(String(entry?.regionId ?? ""))
+  || entry?.regionId
+  || "",
+).trim();
+
+// [{ kind: "polity"|"region"|"unit"|"structure", label, bounds }], in the order
+// above. `unitName(id)` names a unit an operation refers to by id only.
+export const deriveEventLinks = (event, context, { max = EVENT_LINKS_MAX, unitName = () => "" } = {}) => {
+  const impacts = event?.impacts ?? {};
+  const links = [];
+  const seen = new Set();
+  const add = (kind, label, bounds) => {
+    const name = String(label ?? "").trim();
+    if (!name || !isBounds(bounds)) return;
+    const key = `${kind}:${focusNameKey(name)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push({ bounds, kind, label: name });
+  };
+  const addPolity = (value) => {
+    const raw = String(value ?? "").trim();
+    if (raw) add("polity", polityLabel(raw, context), resolvePolityBounds(raw, context));
+  };
+  const addRegion = (entry) => add("region", regionLabel(entry, context), transferBounds(entry, context));
+
+  for (const transfer of impacts.regionTransfers ?? []) {
+    addRegion(transfer);
+    addPolity(transfer?.toCode);
+    addPolity(transfer?.fromCode);
+  }
+  for (const op of impacts.regionControlOps ?? []) {
+    addRegion(op);
+    addPolity(op?.toCode || op?.actorCode);
+  }
+  for (const claim of impacts.regionClaims ?? []) {
+    addRegion(claim);
+    addPolity(claim?.claimantCode);
+  }
+  for (const change of impacts.polityChanges ?? []) addPolity(change?.name || change?.code);
+  for (const op of impacts.unitOps ?? []) {
+    if (op?.op === "spawn") add("unit", op?.unit?.name, pointBounds(Number(op?.unit?.lng), Number(op?.unit?.lat)));
+    else if (op?.op === "move") add("unit", op?.unit?.name || unitName(op?.unitId), pointBounds(Number(op?.toLng), Number(op?.toLat)));
+  }
+  for (const op of impacts.markerOps ?? []) {
+    if (op?.op === "build") add("structure", op?.marker?.name, pointBounds(Number(op?.marker?.lng), Number(op?.marker?.lat)));
+  }
+
+  const mentions = findNameMentions(`${event?.title ?? ""} ${event?.description ?? ""}`, [context?.polityIndex, context?.regionIndex]);
+  for (const match of mentions) {
+    if (match.kind === "region") {
+      add("region", context?.regionNameById?.get(match.token) || match.token, regionBoundsFor(match.token, context));
+    } else {
+      addPolity(match.token);
+    }
+  }
+
+  return links.slice(0, Math.max(0, max));
+};
+
+// ---------------------------------------------------------------------------
 // Context assembly (pure, so the lookups can be tested without PMTiles)
 // ---------------------------------------------------------------------------
+
+// The bounds table comes from the stock tile archive, keyed by GADM id. A drawn
+// map's regions are not in it — and the archive may not be installed at all —
+// so on such a map nothing could be framed: not the event camera, not an event
+// card's links. The map's own records know each drawn region's box (or at least
+// its centre, around which a small frame is enough to fly to), and a polity
+// framed by the regions it holds is framed well. Stock outlines win where they
+// exist; a centre that is missing is null, never 0,0.
+export const withDrawnRegionBounds = (regionBounds, regions) => {
+  let merged = null;
+  for (const region of regions ?? []) {
+    const id = String(region?.id ?? "");
+    if (!id || regionBounds?.has?.(id) || merged?.has(id)) continue;
+    const bounds = isBounds(region?.bounds)
+      ? region.bounds
+      : typeof region?.lng === "number" && typeof region?.lat === "number"
+        ? pointBounds(region.lng, region.lat)
+        : null;
+    if (!bounds) continue;
+    if (!merged) merged = new Map(regionBounds ?? []);
+    merged.set(id, bounds);
+  }
+  return merged ?? regionBounds ?? new Map();
+};
+
+// The merge above over the map's primed records, once per pair of tables: the
+// world a context is built against is replaced every few seconds, the tables
+// only when the map data is.
+let drawnBoundsCache = { stock: null, drawn: null, merged: null };
+const drawnRegionBoundsFor = (stock, drawn) => {
+  if (drawnBoundsCache.stock !== stock || drawnBoundsCache.drawn !== drawn) {
+    drawnBoundsCache = { stock, drawn, merged: withDrawnRegionBounds(stock, drawn) };
+  }
+  return drawnBoundsCache.merged;
+};
 
 // The half of the lookup tables that only changes when the map data does:
 // country names, region names, and each region's base owner. Kept separate
@@ -564,6 +684,7 @@ export const buildPlaceCatalog = ({
   }
 
   const regionIdsByName = new Map();
+  const regionNameById = new Map();
   const regionEntries = [];
   const regionOwners = [];
 
@@ -573,6 +694,7 @@ export const buildPlaceCatalog = ({
       continue;
     }
 
+    if (region?.name) regionNameById.set(id, String(region.name));
     const nameKey = focusNameKey(region?.name);
     if (nameKey) {
       const bucket = regionIdsByName.get(nameKey);
@@ -592,9 +714,10 @@ export const buildPlaceCatalog = ({
   return {
     countryBounds,
     countryEntries,
-    regionBounds,
+    regionBounds: withDrawnRegionBounds(regionBounds, regions),
     regionIdsByName,
     regionIndex: buildNameIndex(uniqueRegionEntries),
+    regionNameById,
     regionOwners,
   };
 };
@@ -602,7 +725,10 @@ export const buildPlaceCatalog = ({
 // The catalog plus the live world: era/invented polity names, and who owns what
 // right now. `catalog` may be omitted, in which case the raw catalogs are read
 // straight from the same options.
-export const buildFocusContext = ({ catalog = null, world = null, ...catalogOptions } = {}) => {
+//
+// `drawnRegions` are the map's own region records (assets.js
+// getPrimedScenarioRegionCatalog), whose boxes frame a drawn map's regions.
+export const buildFocusContext = ({ catalog = null, world = null, drawnRegions = null, ...catalogOptions } = {}) => {
   const places = catalog ?? buildPlaceCatalog(catalogOptions);
   const polityEntries = [...places.countryEntries];
 
@@ -674,13 +800,26 @@ export const buildFocusContext = ({ catalog = null, world = null, ...catalogOpti
     }
   }
 
+  // What a polity token is CALLED now, for a link's label: an override's current
+  // name first (a renamed stock country is shown by its new name), then the
+  // stock name.
+  const polityNameByToken = new Map();
+  for (const entry of [...polityEntries.slice(places.countryEntries.length), ...places.countryEntries]) {
+    const name = entry.names.find(Boolean);
+    if (entry.token && name && !polityNameByToken.has(entry.token)) polityNameByToken.set(entry.token, String(name));
+  }
+
   return {
     countryBounds: places.countryBounds,
     polityIndex,
-    regionBounds: places.regionBounds,
+    polityNameByToken,
+    regionBounds: Array.isArray(drawnRegions) && drawnRegions.length
+      ? drawnRegionBoundsFor(places.regionBounds, drawnRegions)
+      : places.regionBounds,
     regionIdsByName: places.regionIdsByName,
     regionIdsByOwner,
     regionIndex: places.regionIndex,
+    regionNameById: places.regionNameById ?? new Map(),
     regionOwnerToken,
   };
 };

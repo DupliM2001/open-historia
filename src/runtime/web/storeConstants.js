@@ -27,7 +27,7 @@ export const COVER_IMAGE_ASSET_KEY = "cover";
 export const STORAGE_JSON_ASSET_KEYS = ["actions", "advisor", "chat", "events"];
 export const CORE_JSON_ASSET_KEYS = ["game", "prompts", "world"];
 export const JSON_ASSET_KEYS = [...STORAGE_JSON_ASSET_KEYS, ...CORE_JSON_ASSET_KEYS];
-export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags"];
+export const OPTIONAL_JSON_ASSET_KEYS = ["colors", "flags", "tags", "stats"];
 export const RUNTIME_ONLY_JSON_ASSET_KEYS = ["snapshots", "intercepts"];
 export const PMTILES_ASSET_KEYS = ["cities", "countries", "regions"];
 export const SCENARIO_GEOJSON_ASSET_KEYS = ["regionsGeojson", "citiesGeojson", "backgroundData"];
@@ -42,7 +42,7 @@ export const UPLOADABLE_GAME_ASSET_KEYS = [COVER_IMAGE_ASSET_KEY];
 
 export const JSON_ASSET_DEFAULTS = {
   actions: [], advisor: [], chat: [], colors: {}, events: [],
-  game: {}, prompts: {}, world: {}, snapshots: [], intercepts: {},
+  game: {}, prompts: {}, stats: {}, world: {}, snapshots: [], intercepts: {},
 };
 
 // This project's name, deliberately. The scenario schema below is a frozen wire
@@ -58,20 +58,46 @@ export const CLASSIC_SCENARIO_ID = "modern-day-classic";
 export const BUILT_IN_SCENARIO_IDS = new Set([DEFAULT_SCENARIO_ID, CLASSIC_SCENARIO_ID]);
 
 
+// Mirrors TEMPLATE_WORLD_OVERRIDE_KEYS in server/libraryStore.js; held to it by
+// src/runtime/gameBundleParity.test.js. (It had drifted: a duplicated five-key run,
+// and customGeometry on this side only.)
 export const TEMPLATE_WORLD_OVERRIDE_KEYS = [
-  "allowedUnitTypes", "author", "background", "basemap", "customCities", "customGeometry", "customRegions",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "polityOverrides",
-  "difficulty", "language", "mapCredit", "notes", "ownerCodes", "units",
-  "regionClaimants", "regionOwnershipOverrides", "regionSovereigntyOverrides",
-  "simulationRules", "startingTimelineText",
+  "allowedUnitTypes",
+  "author",
+  "background",
+  "basemap",
+  "customCities",
+  "customGeometry",
+  "customRegions",
+  "difficulty",
+  "language",
+  "mapCredit",
+  "notes",
+  "ownerCodes",
+  "polityOverrides",
+  "units",
+  "regionClaimants",
+  "regionOwnershipOverrides",
+  "regionSovereigntyOverrides",
+  "simulationRules",
+  "startingTimelineText",
 ];
 
 export const SUPPORTED_IMAGE_CONTENT_TYPES = new Set([
   "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
 ]);
 
+// The app's old default accent was a purple. It is retired: anything still
+// carrying it reads as the current default, so a library made before the change
+// does not keep a colour the app no longer uses. Mirrors server/libraryStore.js.
+export const RETIRED_ACCENT_COLOR = "#7c3aed";
+export const accentOrDefault = (raw, fallback) => {
+  const value = String(raw ?? "").trim();
+  return !value || value.toLowerCase() === RETIRED_ACCENT_COLOR ? fallback : value;
+};
+
 export const DEFAULT_SCENARIO_META = {
-  accentColor: "#7c3aed",
+  accentColor: "#2bc1f3",
   description: "Server-backed base scenario",
   eyebrow: "Scenario",
   heroSubtitle: "Editable server-backed scenario template.",
@@ -81,7 +107,7 @@ export const DEFAULT_SCENARIO_META = {
 };
 
 export const DEFAULT_GAME_META = {
-  accentColor: "#7c3aed",
+  accentColor: "#2bc1f3",
   description: "Active playable game",
   eyebrow: "Game",
   heroSubtitle: "Playable campaign session",

@@ -12,6 +12,7 @@ import fs from "fs";
 import path from "path";
 import url from "url";
 import { resolveChildPath } from "./security.js";
+import { applyRegionDelta, isRegionDelta } from "./regionDelta.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 import { DATA_DIR } from "./dataDir.js";
@@ -81,14 +82,52 @@ const summarize = (doc) => ({
   createdAt: doc.createdAt,
 });
 
+// The catalog used to JSON.parse every document to read eight fields off it.
+// One shipped map is 54 MB, so opening the documents menu blocked the server for
+// seconds. Keep a summary beside each document instead, stamped on the source's
+// size and mtime so an externally edited file regenerates it.
+const summaryPath = (id) => `${docPath(id)}.summary.json`;
+
+const docStamp = (target) => {
+  const stat = fs.statSync(target);
+  return `${stat.size}:${Math.round(stat.mtimeMs)}`;
+};
+
+const writeSummary = (id, doc) => {
+  try {
+    writeJson(summaryPath(id), { stamp: docStamp(docPath(id)), summary: summarize(doc) });
+  } catch {
+    // Best effort: a missing summary costs a reparse, never correctness.
+  }
+};
+
+const readSummary = (id) => {
+  const target = docPath(id);
+  if (!fs.existsSync(target)) return null;
+  let stamp = "";
+  try {
+    stamp = docStamp(target);
+  } catch {
+    return null;
+  }
+  const cached = readJson(summaryPath(id), null);
+  if (cached?.stamp === stamp && cached.summary) return cached.summary;
+
+  // Cold or stale: pay the parse once, then leave the summary behind.
+  const doc = readJson(target, null);
+  if (!doc) return null;
+  const summary = summarize(doc);
+  try {
+    writeJson(summaryPath(id), { stamp, summary });
+  } catch {
+    // As above.
+  }
+  return summary;
+};
+
 export const getMapEditorCatalog = () => {
   const manifest = getManifest();
-  return manifest.order
-    .map((id) => {
-      const doc = readJson(docPath(id), null);
-      return doc ? summarize(doc) : null;
-    })
-    .filter(Boolean);
+  return manifest.order.map((id) => readSummary(id)).filter(Boolean);
 };
 
 export const getMapEditorDocument = (id) => {
@@ -119,33 +158,51 @@ export const createMapEditorDocument = (body = {}) => {
     updatedAt: now,
   };
   writeJson(docPath(id), doc);
+  writeSummary(id, doc);
   const manifest = getManifest();
   manifest.order = [id, ...manifest.order.filter((x) => x !== id)];
   saveManifest(manifest);
-  return doc;
+  // The summary, not the document: echoing it back stringified the same 54 MB a
+  // third time for a caller that reads `id`.
+  return summarize(doc);
 };
 
 export const updateMapEditorDocument = (id, updates = {}) => {
   const existing = getMapEditorDocument(id);
+  // A save may carry only the regions that moved (server/regionDelta.js). It is
+  // applied against what is on disk and refused whole when the two do not agree
+  // about the map, in which case the stored geometry is left exactly as it was
+  // and the editor is told to send the lot.
+  const { regionsDelta, ...fields } = updates;
+  let mergedRegions = null;
+  let needsFullRegions = "";
+  if (isRegionDelta(regionsDelta)) {
+    const merged = applyRegionDelta(existing.regions, regionsDelta);
+    if (merged.applied) mergedRegions = merged.regions;
+    else needsFullRegions = merged.reason;
+  }
   const doc = {
     ...existing,
-    ...updates,
+    ...fields,
+    ...(mergedRegions ? { regions: mergedRegions } : {}),
     id,
-    name: String(updates.name || updates.metadata?.name || existing.name).trim() || existing.name,
-    metadata: { ...existing.metadata, ...(updates.metadata || {}) },
+    name: String(fields.name || fields.metadata?.name || existing.name).trim() || existing.name,
+    metadata: { ...existing.metadata, ...(fields.metadata || {}) },
     updatedAt: new Date().toISOString(),
   };
   writeJson(docPath(id), doc);
+  writeSummary(id, doc);
   const manifest = getManifest();
   if (!manifest.order.includes(id)) {
     manifest.order = [id, ...manifest.order];
     saveManifest(manifest);
   }
-  return doc;
+  return needsFullRegions ? { ...summarize(doc), needsFullRegions } : summarize(doc);
 };
 
 export const deleteMapEditorDocument = (id) => {
   if (fs.existsSync(docPath(id))) fs.rmSync(docPath(id));
+  if (fs.existsSync(summaryPath(id))) fs.rmSync(summaryPath(id));
   const manifest = getManifest();
   manifest.order = manifest.order.filter((x) => x !== id);
   saveManifest(manifest);

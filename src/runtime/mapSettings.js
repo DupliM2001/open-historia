@@ -65,6 +65,10 @@ export const MAP_SETTING_KEYS = {
     // provider handles tool calls badly, or who wants the single cheaper
     // request per task, turns them off from Settings → AI.
     lookupFunctions: "ai_lookup_functions",
+    // A skip's events on the Events panel as the model writes them
+    // (AI/streamedEvents.js). ON by default; off leaves the skip behind the
+    // Timeline panel's spinner.
+    liveSkipEvents: "ai_live_skip_events",
 };
 
 // Families the label-font pickers suggest — Settings → Map and the game and
@@ -91,8 +95,8 @@ export function getMapSetting(key) {
 // A default-on setting CANNOT use getMapSetting above — an absent key reads as
 // "1" !== null, i.e. off — so every consumer of such a key must come through here.
 //
-// lookupFunctions ships on; limitAiGeneration and chunkLongJumps, which used
-// to, went default-off in the beta.
+// lookupFunctions and liveSkipEvents ship on; limitAiGeneration and
+// chunkLongJumps, which used to, went default-off in the beta.
 export function getMapSettingDefaultOn(key) {
     if (typeof localStorage === "undefined") return true;
     return localStorage.getItem(key) !== "0";
@@ -109,6 +113,7 @@ const SETTING_LABELS = {
     [MAP_SETTING_KEYS.batchBackgroundTasks]: "Batch background AI tasks",
     [MAP_SETTING_KEYS.chunkLongJumps]: "Generate long time skips in segments",
     [MAP_SETTING_KEYS.lookupFunctions]: "AI lookup functions",
+    [MAP_SETTING_KEYS.liveSkipEvents]: "Show time skip events as they are written",
 };
 
 export function setMapSetting(key, value) {
