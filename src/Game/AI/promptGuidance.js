@@ -19,6 +19,8 @@
 // editor; the model-facing tasks (curator, directors, resolver, stat sheet,
 // spy desks, the board) are entirely technical by design.
 
+import { readUnderTaskKey } from "./formerTaskKeys.js";
+
 const segment = (id, label, start, end, hint = "") => Object.freeze({ id, label, start, end, hint });
 
 export const PROMPT_GUIDANCE = Object.freeze({
@@ -78,10 +80,18 @@ export const PROMPT_GUIDANCE = Object.freeze({
         "[Player Agency — critical]",
         "always refer to the player's polity as ${PLAYER_POLITY}.",
         "Never acting for the player."),
+      segment("orders", "What an order can do",
+        "[What an Order Can Do]",
+        "not with 1939's under new dates.",
+        "Feasibility, the chain of authority, failure, and the pace of a war."),
       segment("scope", "What to simulate and how much",
         "[What to Simulate]",
         "and whenever an event warrants a region change, get that change right.",
         "Breadth, event count per month, and consequences of the player's actions."),
+      segment("reactions", "The world answers back",
+        "[The World Answers Back]",
+        "Bring the pressure to the player's door and stop there.",
+        "Other powers reacting on their own initiative, and how much of a jump is theirs."),
       segment("flags", "Flags",
         "[Flags]\nSome polities have flags, and flags sometimes change.",
         "(such as Vichy France in a WWII game).",
@@ -90,6 +100,10 @@ export const PROMPT_GUIDANCE = Object.freeze({
         "[Event Quality]\nEvery event is a headline, a description, and potentially map changes.",
         "Only newsworthy events belong in the output.",
         "Headlines, description lengths, quotes, filler and dates."),
+      segment("voice", "Event voice",
+        "[Event Voice]",
+        "rather than gesturing at \"the proposal\" or \"the plan.\"",
+        "Reporting instead of commenting: adjectives, attributed opinions, endings, atmosphere, intent."),
     ]),
     autoJumpForward: Object.freeze([
       segment("role", "The simulator's role",
@@ -104,10 +118,18 @@ export const PROMPT_GUIDANCE = Object.freeze({
         "[Player Agency — critical]",
         "If the player chooses not to act, assume it was deliberate and simulate the world accordingly.",
         "Never acting for the player."),
+      segment("orders", "What an order can do",
+        "[What an Order Can Do]",
+        "not with 1939's under new dates.",
+        "Feasibility, the chain of authority, failure, and the pace of a war."),
       segment("scope", "What to simulate",
         "[What to Simulate]",
         "Never generate a duplicate or exact copy of an event that already exists.",
         "Breadth and the consequences of the player's actions."),
+      segment("reactions", "The world answers back",
+        "[The World Answers Back]",
+        "Bring the pressure to the player's door and stop there.",
+        "Other powers reacting on their own initiative, and how much of a jump is theirs."),
       segment("stopping", "Where the auto-jump stops",
         "[Immersive Events — also stop for the great moments]",
         "A good game surprises the player and demands their engagement.",
@@ -120,6 +142,10 @@ export const PROMPT_GUIDANCE = Object.freeze({
         "[Event Quality]\nEvery event is a headline, a description, and potentially map changes.",
         "even in fictional and a-historical gamestates.",
         "Headlines, descriptions and quotes."),
+      segment("voice", "Event voice",
+        "[Event Voice]",
+        "rather than gesturing at \"the proposal\" or \"the plan.\"",
+        "Reporting instead of commenting: adjectives, attributed opinions, endings, atmosphere, intent."),
       segment("flags", "Flags",
         "[Flags]\nSome polities have flags.",
         "and a polity's flag changes when its regime changes.",
@@ -129,9 +155,9 @@ export const PROMPT_GUIDANCE = Object.freeze({
         "Only newsworthy events belong in the output.",
         "Filler, meta events and mechanical spacing."),
     ]),
-    catalystCreation: Object.freeze([
-      segment("guidelines", "What makes a good catalyst",
-        "[Important Guidelines] Catalysts are NOT a clone of one of the listed events",
+    interactiveCreation: Object.freeze([
+      segment("guidelines", "What makes a good interactive event",
+        "[Important Guidelines] Interactive events are NOT a clone of one of the listed events",
         "Think of variety and fun, not just bland and generic political meetings.**",
         "The kinds of scenes worth simulating, with examples."),
       segment("reminders", "Writing reminders",
@@ -139,21 +165,21 @@ export const PROMPT_GUIDANCE = Object.freeze({
         "your output shouldn’t include “the player decided” or “this will make the player”.\nGiven this, begin outputting.",
         "Dialogue, tone, immersion and the choices offered."),
     ]),
-    catalystExecutor: Object.freeze([
-      segment("style", "How a catalyst reads",
-        "The Catalyst MUST be engaging and immersive but not overdramatic and meaningless.",
+    interactiveExecutor: Object.freeze([
+      segment("style", "How an interactive event reads",
+        "The Interactive event MUST be engaging and immersive but not overdramatic and meaningless.",
         "Do not just make it boring busywork.",
         "Engagement, length and personality."),
-      segment("duration", "How much time a catalyst covers",
-        "[Length/In-game Duration of the Catalyst]",
+      segment("duration", "How much time an interactive event covers",
+        "[Length/In-game Duration of the Interactive event]",
         "Overall, each action and passage you make should be logical and not reflect something bizarre happening for the sake of a variety of actions for the player. Always keep it fun but immersive.",
-        "Days, replies and pacing inside a catalyst."),
+        "Days, replies and pacing inside an interactive event."),
       segment("reminders", "Writing reminders",
         "Reminders:\nDialogue should always be surrounded by double quotes",
         "your output shouldn’t include “the player decided” or “this will make the player”.\nGiven this, begin outputting.",
         "Dialogue, tone, reaction to the player's choice, and the choices offered."),
     ]),
-    catalystSummary: Object.freeze([
+    interactiveSummary: Object.freeze([
       segment("style", "How the summary is written",
         "The simulation MUST be engaging and immersive but not overdramatic and meaningless.",
         "“Diplomat from Polity X spoke to the prime minister of Polity Y about trade”.",
@@ -268,20 +294,41 @@ export const buildGuidanceDefaults = (defaults) => ({
 // only, trimmed, with blanks and default-identical text dropped. A pack of any
 // other shape carries nothing — the old model stored whole prompts, technical
 // text included, and those froze at the time of the save; they are ignored so
-// every scenario and game runs the current defaults plus its guidance.
+// every scenario and game runs the current defaults plus its guidance. A
+// renamed task's edits are read from its old key when its new one has none
+// (formerTaskKeys.js), and kept under the new one.
 export const normalizePackGuidance = (rawPack, guidanceDefaults = null) => {
   const pack = isRecord(rawPack) ? rawPack : {};
   const source = Number(pack.promptModel) === PROMPT_MODEL_VERSION && isRecord(pack.guidance) ? pack.guidance : {};
   const tasks = isRecord(source.tasks) ? source.tasks : {};
   const taskGuidance = {};
   for (const key of Object.keys(PROMPT_GUIDANCE.tasks)) {
-    const bucket = normalizeSectionGuidance(key, tasks[key], guidanceDefaults?.tasks?.[key] ?? null);
+    const bucket = normalizeSectionGuidance(key, readUnderTaskKey(tasks, key), guidanceDefaults?.tasks?.[key] ?? null);
     if (Object.keys(bucket).length) taskGuidance[key] = bucket;
   }
   return {
     advisor: normalizeSectionGuidance("advisor", source.advisor, guidanceDefaults?.advisor ?? null),
     leader: normalizeSectionGuidance("leader", source.leader, guidanceDefaults?.leader ?? null),
     tasks: taskGuidance,
+  };
+};
+
+// Materialize every editable passage for an explicit transfer/export. Stored
+// scenario packs stay sparse via normalizePackGuidance; this helper is only for
+// moving the complete author-editable layer between scenarios/files.
+export const materializePackGuidance = (rawPack, guidanceDefaults = null) => {
+  const defaults = isRecord(guidanceDefaults) ? guidanceDefaults : {};
+  const overrides = normalizePackGuidance(rawPack, guidanceDefaults);
+  const defaultTasks = isRecord(defaults.tasks) ? defaults.tasks : {};
+  return {
+    advisor: { ...(isRecord(defaults.advisor) ? defaults.advisor : {}), ...overrides.advisor },
+    leader: { ...(isRecord(defaults.leader) ? defaults.leader : {}), ...overrides.leader },
+    tasks: Object.fromEntries(
+      Object.keys(PROMPT_GUIDANCE.tasks).map((key) => [
+        key,
+        { ...(isRecord(defaultTasks[key]) ? defaultTasks[key] : {}), ...(overrides.tasks?.[key] ?? {}) },
+      ]),
+    ),
   };
 };
 

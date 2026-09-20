@@ -24,8 +24,21 @@ import {
 
 const CACHE_PREFIX = "i18n_cache_";
 const CACHE_LIMIT = 8000;
-const BATCH_SIZE = 60;
-const MAX_CONCURRENT_BATCHES = 3;
+// How many strings ride in one request. This used to be 60 strings × 3 requests
+// at a time, which made a first pass over a new language dozens of requests
+// nobody pressed a button for — on a free key, where a few hundred a day is the
+// whole allowance (AI/requestBudget.js), and where three concurrent requests is
+// also the surest way to trip the per-MINUTE limit. One bigger request instead:
+// same strings, a quarter of the requests, and nothing in flight beside it.
+//
+// Bounded by characters as well as count, because 240 strings of prose is a very
+// different answer from 240 button labels, and the reply must not be truncated.
+export const BATCH_MAX_STRINGS = 240;
+export const BATCH_MAX_CHARS = 6000;
+// What it falls back to when a batch fails: the model could not hold that many
+// (a truncated answer, a token ceiling). Halved per failure, restored on the
+// next success, so a language that cannot take big batches still finishes.
+export const BATCH_MIN_STRINGS = 30;
 const SCAN_DEBOUNCE_MS = 350;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const TRANSLATED_ATTRIBUTES = ["placeholder", "title", "aria-label"];
@@ -115,7 +128,7 @@ const showProgress = () => {
   progressEl.setAttribute("data-no-translate", "");
   progressEl.style.cssText =
     "position:fixed;bottom:5.2rem;left:50%;transform:translateX(-50%);z-index:10075;" +
-    "background:rgba(24,24,27,0.96);border:1px solid rgba(139,92,246,0.5);border-radius:999px;" +
+    "background:rgba(24,24,27,0.96);border:1px solid rgba(255,255,255,0.25);border-radius:999px;" +
     "color:#fff;font-family:sans-serif;font-size:0.8rem;font-weight:600;padding:0.45rem 0.95rem;" +
     "box-shadow:0 6px 24px rgba(0,0,0,0.5);pointer-events:none;";
   document.body.appendChild(progressEl);
@@ -318,9 +331,12 @@ const translateBatch = async (strings) => {
     `- If a string is already in ${name} or is a proper name/code with no translation, return it unchanged.\n` +
     `- Never add commentary, keys, or markdown.`;
 
+  // Named, so the request count (AI/requestBudget.js) can say what these were:
+  // a first pass over a new language is dozens of requests nobody pressed a
+  // button for, and "Used today, by task" is where a player finds that out.
   const raw = await callAI(systemPrompt, [
     { role: "user", parts: [{ text: JSON.stringify(strings) }] },
-  ], { languageMode: "none" });
+  ], { languageMode: "none", logLabel: "interface translation", taskKey: "translation" });
   const translations = extractJsonArray(raw);
 
   if (!translations) {
@@ -330,6 +346,28 @@ const translateBatch = async (strings) => {
   return translations;
 };
 
+// The next request's worth of strings: as many as fit under both ceilings, and
+// always at least one however long that one string is. Pure, so the sizing can
+// be tested without a DOM or a provider.
+export const planTranslationBatch = (strings, { maxStrings = BATCH_MAX_STRINGS, maxChars = BATCH_MAX_CHARS } = {}) => {
+  const all = Array.isArray(strings) ? strings : [...(strings ?? [])];
+  const limit = Math.max(1, Math.trunc(Number(maxStrings) || 1));
+  const room = Math.max(1, Math.trunc(Number(maxChars) || 1));
+  const batch = [];
+  let chars = 0;
+  for (const source of all) {
+    const text = String(source ?? "");
+    if (batch.length >= limit) break;
+    if (batch.length && chars + text.length > room) break;
+    batch.push(source);
+    chars += text.length;
+  }
+  return batch;
+};
+
+// Shrinks on failure, recovers on success (see BATCH_MIN_STRINGS).
+let batchStrings = BATCH_MAX_STRINGS;
+
 const processQueue = async () => {
   if (inFlight || stopped || pending.size === 0 || Date.now() < cooldownUntil) {
     return;
@@ -338,19 +376,19 @@ const processQueue = async () => {
   inFlight = true;
   try {
     while (pending.size > 0 && !stopped && Date.now() >= cooldownUntil) {
-      const slice = Array.from(pending).slice(0, BATCH_SIZE * MAX_CONCURRENT_BATCHES);
-      const batches = [];
-      for (let index = 0; index < slice.length; index += BATCH_SIZE) {
-        batches.push(slice.slice(index, index + BATCH_SIZE));
+      // ONE request at a time: a big batch in flight on its own, rather than
+      // three racing each other into a per-minute rate limit.
+      const batch = planTranslationBatch(pending, { maxStrings: batchStrings });
+      const results = [
+        await translateBatch(batch)
+          .then((translations) => ({ batch, translations }))
+          .catch((error) => ({ batch, error })),
+      ];
+      if (results[0].error) {
+        batchStrings = Math.max(BATCH_MIN_STRINGS, Math.floor(batchStrings / 2));
+      } else if (batchStrings < BATCH_MAX_STRINGS) {
+        batchStrings = BATCH_MAX_STRINGS;
       }
-
-      const results = await Promise.all(
-        batches.map((batch) =>
-          translateBatch(batch)
-            .then((translations) => ({ batch, translations }))
-            .catch((error) => ({ batch, error })),
-        ),
-      );
 
       let failures = 0;
       for (const result of results) {

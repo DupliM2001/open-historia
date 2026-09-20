@@ -1,5 +1,5 @@
 /*! Open Historia — portions (defensive date rendering) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import dayjs from "dayjs";
 import advancedFormat from "dayjs/plugin/advancedFormat";
@@ -7,35 +7,44 @@ import {
     PMTILES_ARCHIVES,
     decodeVectorTile,
     getPmtilesArchive,
+    getPrimedScenarioRegionCatalog,
     loadCountryNames,
     loadRegionCatalog,
+    loadRollbackSnapshotCount,
 } from "../../runtime/assets.js";
-import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplay.js";
+import { canInterveneInLastTurn, declineInteractiveOffer, interveneAfterEvent, loadRollbackSnapshots, maybeGeneratePregameHistory, retryPendingJumpSegment, retryPendingProjectsJump, rollBackToSnapshot, simulateAutoJump, simulateTimelineJump } from "../AI/gameplayLazy.js";
+import { NO_RESPONSE_BODY_NOTE, discardPendingJumpSegment, discardPendingProjectsJump } from "../AI/simulationStatus.js";
 import { acceptStructuredModeSuggestion, declineStructuredModeSuggestion, getStructuredModeSuggestion } from "../AI/main.jsx";
 import { fallbackStateStore, getResolvedFallbackList } from "../AI/providerConfig.js";
 import { describeUnavailable, fallbackAvailability } from "../AI/fallbackRunner.js";
+import { describeJumpCost, requestDay, savingRequests } from "../AI/requestBudget.js";
 import { logDebugEvent, setDebugLogContext } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { EVENT_TAG_ENUM } from "../../runtime/eventTags.js";
-import { isMainMenuOpen } from "./libraryBar";
+import { documentsForEvent } from "../../runtime/reportDelivery.js";
+import { unseenEvents } from "../../runtime/unseenEvents.js";
+import { isSceneInProgress } from "../AI/interactiveRewind.js";
+import { offeredEvent } from "../../runtime/interactiveOffer.js";
+import { useUnseenEventIds } from "./useUnseenEvents.js";
+import { isMainMenuOpen, useMainMenuOpen } from "./libraryBar";
 import {
     applyEventImpactsToWorld,
     normalizeActions,
-    readEventsState,
-    readGameData,
-    readWorldState,
 } from "../../runtime/gameState.js";
 import {
     buildFocusContext,
     buildPlaceCatalog,
     deriveEventFocusBounds,
+    deriveEventLinks,
     mergeFeatureParts,
     tileGeometryParts,
 } from "./eventFocus.js";
 import { setWorldStateOverride } from "../Map/useWorldState.js";
 import { getUnitById, setUnitsOverride } from "../Map/unitsController.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
-import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
+import { primeRuntimeValue } from "../../runtime/runtimeStore.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
+import { MAP_SETTING_KEYS, getMapSettingDefaultOn, useMapSetting } from "../../runtime/mapSettings.js";
 import { formatGameDateReadable, isGameDate, normalizeGameDate } from "../../runtime/gameDates.js";
 import { jumpDayStep, jumpTargetDate } from "../../runtime/jumpDates.js";
 
@@ -329,8 +338,10 @@ const collectEventTags = (event, { polityLookup, regionLookup }) => {
 
     for (const chat of event?.impacts?.createdChats ?? []) {
         for (const country of chat?.countries ?? []) {
-            if (country?.name) {
-                labels.add(country.name);
+            // A participant is {code, name} once resolved, a bare name before.
+            const label = typeof country === "string" ? country : country?.name;
+            if (label) {
+                labels.add(label);
             }
         }
     }
@@ -536,6 +547,122 @@ const buildTurnRecord = ({ entry, index, history, eventLookup, game, lookups }) 
     };
 };
 
+// The turn as it is being written, in the shape buildTurnRecord makes, so the
+// Events panel gives a skip in progress the same cards, chips and reveal it
+// gives a finished one (AI/streamedEvents.js). The id is fixed for the length of
+// the skip: the panel keys its filter and its scroll on it.
+const LIVE_TURN_RECORD_ID = "live-turn";
+
+// A copy, because this is the running game's own world and
+// applyEventImpactsToWorld is handed a snapshot everywhere else.
+const cloneWorldForStaging = (world) => {
+    if (!world || typeof world !== "object") return null;
+    try {
+        return typeof structuredClone === "function" ? structuredClone(world) : JSON.parse(JSON.stringify(world));
+    } catch {
+        return null;
+    }
+};
+
+// A field on the shape that is rarely read, computed the first time it is.
+const onFirstRead = (target, key, compute) => {
+    let value;
+    let read = false;
+    Object.defineProperty(target, key, {
+        configurable: true,
+        enumerable: true,
+        get() {
+            if (!read) {
+                value = compute();
+                read = true;
+            }
+            return value;
+        },
+    });
+};
+
+// The card for one streamed event, made once and kept. Cached against the event
+// it came from: the list is rebuilt on every arrival but its entries are the
+// same objects, and a fresh copy each time threw away the memo in every visible
+// EventCard, sending deriveEventLinks back through the place catalog for the
+// whole skip.
+//
+// The id is always the counter's, never the model's. A model may write its own
+// id and may repeat it, and two cards keyed alike is exactly the reconciliation
+// bug this panel must not have. The real ids arrive with the written turn.
+const liveEventCards = new WeakMap();
+let liveEventSeq = 0;
+
+// The lists the cards, the camera and the map staging walk. A streamed event's
+// are whatever the model typed, and `?? []` does not save an iteration from a
+// non-array: that throws in a render and blanks the panel. Dropped here once.
+const LIVE_EVENT_LISTS = [
+    "regionTransfers", "regionControlOps", "regionClaims", "polityChanges",
+    "unitOps", "markerOps", "createdChats", "projectOps",
+];
+
+const liveEventCard = (event) => {
+    if (!event || typeof event !== "object") return event;
+    let card = liveEventCards.get(event);
+    if (!card) {
+        liveEventSeq += 1;
+        card = { ...event, id: `${LIVE_TURN_RECORD_ID}-${liveEventSeq}` };
+        for (const key of ["tags", "combatants"]) {
+            if (card[key] !== undefined && !Array.isArray(card[key])) card[key] = [];
+        }
+        const impacts = card.impacts && typeof card.impacts === "object" && !Array.isArray(card.impacts)
+            ? { ...card.impacts }
+            : {};
+        for (const key of LIVE_EVENT_LISTS) {
+            if (impacts[key] !== undefined && !Array.isArray(impacts[key])) impacts[key] = [];
+        }
+        card.impacts = impacts;
+        liveEventCards.set(event, card);
+    }
+    return card;
+};
+
+const buildLiveTurnRecord = ({ events, fromDate, toDate, round, lookups }) => {
+    // Filtered before anything reads a field off one: this record is built on
+    // every arriving event, and a throw here takes the whole panel down blank.
+    const numbered = events.filter((event) => event && typeof event === "object").map(liveEventCard);
+    const primaryEvent = numbered.find((event) => String(event.importance).toLowerCase() === "major") || numbered[0];
+
+    const record = {
+        date: toDate || fromDate,
+        eventCount: numbered.length,
+        events: numbered,
+        fallbackReason: "",
+        fromDate,
+        id: LIVE_TURN_RECORD_ID,
+        mode: "jump",
+        plannedActions: [],
+        rangeLabel: formatRange(fromDate, toDate),
+        rawResponse: "",
+        round,
+        source: "ai",
+        summary: "",
+        title: primaryEvent?.title || "",
+        toDate,
+    };
+
+    // Both cost a pass over every event and every impact on it, and this record
+    // is rebuilt on every arrival, so computing them eagerly was quadratic for
+    // two fields the Events panel never reads. They belong to the history list,
+    // which never sees a live record.
+    onFirstRead(record, "tags", () => {
+        const tags = new Set();
+        for (const event of numbered) {
+            for (const label of collectEventTags(event, lookups)) tags.add(label);
+        }
+        return Array.from(tags).slice(0, 10);
+    });
+    onFirstRead(record, "mapChangeCount", () => (
+        numbered.reduce((sum, event) => sum + getEventMapChangeCount(event), 0)
+    ));
+    return record;
+};
+
 const MetricPill = ({ children, icon = null, tone = "default", onClick = null, active = false }) => {
     const toneMap = {
         default: {
@@ -548,10 +675,10 @@ const MetricPill = ({ children, icon = null, tone = "default", onClick = null, a
             border: "1px solid rgba(96,165,250,0.22)",
             color: "#bfdbfe",
         },
-        violet: {
-            background: "rgba(168,85,247,0.12)",
-            border: "1px solid rgba(192,132,252,0.2)",
-            color: "#e9d5ff",
+        slate: {
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            color: "#f4f4f5",
         },
     };
 
@@ -565,7 +692,7 @@ const MetricPill = ({ children, icon = null, tone = "default", onClick = null, a
         onClick={onClick ?? undefined}
         style={{
             alignItems: "center",
-            background: active ? "rgba(96,165,250,0.24)" : resolved.background,
+            background: active ? "rgba(0,0,0,0.42)" : resolved.background,
             border: resolved.border,
             borderRadius: "999px",
             color: resolved.color,
@@ -604,7 +731,7 @@ const TagPill = ({ children }) => (
 
 const ghostButtonStyle = {
     alignItems: "center",
-    background: "rgba(255,255,255,0.035)",
+    background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: "10px",
     color: "rgba(255,255,255,0.84)",
@@ -618,17 +745,95 @@ const ghostButtonStyle = {
     transition: "all 0.15s ease",
 };
 
-const EventCard = ({ event, footer = null, lookups }) => {
-    // The model's category tags first, then the participants the card derives.
-    const tags = [...(Array.isArray(event.tags) ? event.tags : []), ...collectEventTags(event, lookups)];
+// What an event is about, as chips that fly the map there (eventFocus.js
+// deriveEventLinks). One glyph per kind, the same family as the map's own.
+const LINK_GLYPHS = { polity: "⚑", region: "⌖", unit: "⛊", structure: "▣" };
+
+const LinkPill = ({ link, onFocus }) => (
+    <button
+    type="button"
+    title={`Show ${link.label} on the map`}
+    onClick={() => onFocus?.(link.bounds)}
+    style={{
+        alignItems: "center",
+        background: "rgba(96,165,250,0.07)",
+        border: "1px solid rgba(96,165,250,0.2)",
+        borderRadius: "999px",
+        color: "rgba(219,234,254,0.86)",
+        cursor: "pointer",
+        display: "inline-flex",
+        font: "inherit",
+        fontSize: "0.68rem",
+        fontWeight: 600,
+        gap: "0.3rem",
+        padding: "0.24rem 0.55rem",
+    }}
+    >
+    <span aria-hidden="true" style={{ opacity: 0.7 }}>{LINK_GLYPHS[link.kind] || "⌖"}</span>
+    {link.label}
+    </button>
+);
+
+// A document that came with an event: its heading, and the text itself on a
+// click. Published ones say so; a paper only the player's government holds says
+// that instead.
+const EventDocument = ({ report }) => {
+    const [open, setOpen] = useState(false);
+    return (
+        <div style={{ background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.18)", borderRadius: "12px", overflow: "hidden" }}>
+        <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        style={{ alignItems: "center", background: "none", border: "none", color: "rgba(254,243,199,0.92)", cursor: "pointer", display: "flex", font: "inherit", fontSize: "0.74rem", fontWeight: 700, gap: "0.45rem", padding: "0.5rem 0.7rem", textAlign: "left", width: "100%" }}
+        >
+        <span aria-hidden="true">📄</span>
+        <span style={{ flex: 1, minWidth: 0 }}>{report.title}</span>
+        <span style={{ color: "rgba(254,243,199,0.5)", flexShrink: 0, fontSize: "0.62rem", fontWeight: 600 }}>
+        {report.visibleTo === null ? "Published" : "Our government's"}{report.dateline ? ` · ${report.dateline}` : ""} {open ? "▴" : "▾"}
+        </span>
+        </button>
+        {open && (
+            <div className="timeline-markdown" style={{ borderTop: "1px solid rgba(251,191,36,0.12)", color: "rgba(228,228,231,0.84)", fontSize: "0.74rem", lineHeight: 1.55, padding: "0.55rem 0.8rem 0.7rem" }}>
+            <ReactMarkdown>{report.body}</ReactMarkdown>
+            </div>
+        )}
+        </div>
+    );
+};
+
+// What a card is opened by, rather than which card it is. A streamed event's id
+// changes when the turn is written, so a card keyed by id would close at exactly
+// the moment the live panel must not. The headline survives that crossing.
+const eventDisclosureKey = (event) => {
+    const title = String(event?.title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    return title || String(event?.id ?? "");
+};
+
+// openMapChanges/onToggleMapChanges let the panel hold the disclosure instead of
+// the card. Left out, the card keeps its own.
+const EventCard = ({ event, footer = null, lookups, openMapChanges = null, onToggleMapChanges = null }) => {
+    // The model's category tags, then what the event is about: links the map
+    // can fly to when the card has them, the participants it names otherwise.
+    const links = useMemo(
+        () => (typeof lookups?.eventLinks === "function" ? lookups.eventLinks(event) : null),
+        [event, lookups],
+    );
+    const tags = [...(Array.isArray(event.tags) ? event.tags : []), ...(links ? [] : collectEventTags(event, lookups))];
+    const documents = useMemo(
+        () => (typeof lookups?.eventDocuments === "function" ? lookups.eventDocuments(event) : []),
+        [event, lookups],
+    );
     const mapChanges = describeEventMapChanges(event, lookups);
     const mapChangeCount = mapChanges.length;
-    const [showMapChanges, setShowMapChanges] = useState(false);
+    const [ownMapChanges, setOwnMapChanges] = useState(false);
+    const heldAbove = typeof onToggleMapChanges === "function";
+    const showMapChanges = heldAbove ? Boolean(openMapChanges) : ownMapChanges;
+    const toggleMapChanges = () => (heldAbove ? onToggleMapChanges() : setOwnMapChanges((open) => !open));
 
     return (
         <div
         style={{
-            background: "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.03))",
+            background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
             border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: "16px",
             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
@@ -651,7 +856,7 @@ const EventCard = ({ event, footer = null, lookups }) => {
         {formatDate(event.date)}
         </MetricPill>
         {mapChangeCount > 0 && (
-            <MetricPill icon={<MapIcon />} tone="accent" active={showMapChanges} onClick={() => setShowMapChanges((open) => !open)}>
+            <MetricPill icon={<MapIcon />} tone="accent" active={showMapChanges} onClick={toggleMapChanges}>
             {mapChangeCount} map change{mapChangeCount === 1 ? "" : "s"}{showMapChanges ? " ▴" : " ▾"}
             </MetricPill>
         )}
@@ -662,10 +867,13 @@ const EventCard = ({ event, footer = null, lookups }) => {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem", padding: "0.95rem 1rem 1rem" }}>
-        {tags.length > 0 && (
+        {(tags.length > 0 || links?.length > 0) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
             {tags.map((tag) => (
                 <TagPill key={`${event.id}-${tag}`}>{tag}</TagPill>
+            ))}
+            {(links ?? []).map((link) => (
+                <LinkPill key={`${event.id}-link-${link.kind}-${link.label}`} link={link} onFocus={lookups?.focusLink} />
             ))}
             </div>
         )}
@@ -691,8 +899,50 @@ const EventCard = ({ event, footer = null, lookups }) => {
             </div>
         )}
 
+        {documents.length > 0 && (
+            <div style={{ display: "grid", gap: "0.35rem" }}>
+            {documents.map((report) => <EventDocument key={report.id} report={report} />)}
+            </div>
+        )}
+
         {footer}
         </div>
+        </div>
+    );
+};
+
+// Opens the interactive event panel (main.jsx listens): on the offer, or on
+// the scene in progress.
+const openInteractiveEvent = () => window.dispatchEvent(new Event("oh:open-interactive-event"));
+
+// On the card of the event a time skip offered as an interactive event
+// (runtime/interactiveOffer.js): play the moment out, or let it pass. Neither
+// button spends a request; playing it out opens the panel that does.
+const InteractiveOfferStrip = () => {
+    const [passing, setPassing] = useState(false);
+    const letPass = async () => {
+        if (passing) return;
+        setPassing(true);
+        try {
+            await declineInteractiveOffer();
+        } catch (error) {
+            console.warn("[interactive] the offer could not be let pass.", error);
+        } finally {
+            setPassing(false);
+        }
+    };
+    return (
+        <div style={{ alignItems: "center", background: "rgba(250,204,21,0.08)", border: "1px solid rgba(250,204,21,0.45)", borderRadius: "12px", display: "flex", flexWrap: "wrap", gap: "0.5rem", padding: "0.55rem 0.7rem" }}>
+            <div style={{ flex: "1 1 12rem", minWidth: 0 }}>
+                <div style={{ color: "#fde047", fontSize: "0.74rem", fontWeight: 800 }}>⚡ Interactive event</div>
+                <div style={{ color: "rgba(254,249,195,0.72)", fontSize: "0.68rem", lineHeight: 1.4 }}>Play this moment out as a scene: you make the moves, and how it ends goes into the record.</div>
+            </div>
+            <button type="button" onClick={openInteractiveEvent} style={{ background: "#facc15", border: "none", borderRadius: "8px", color: "#1c1917", cursor: "pointer", fontSize: "0.72rem", fontWeight: 800, padding: "0.4rem 0.75rem" }}>
+                Play it out
+            </button>
+            <button type="button" onClick={letPass} disabled={passing} title="Let the moment pass as it happened — free" style={{ ...ghostButtonStyle, opacity: passing ? 0.6 : 1, padding: "0.4rem 0.75rem" }}>
+                {passing ? "Letting it pass…" : "Let it pass"}
+            </button>
         </div>
     );
 };
@@ -814,6 +1064,39 @@ const PanelChrome = ({
     );
 };
 
+// What today has cost and what the next skip will, under the skip buttons
+// (AI/requestBudget.js). A player on a free key has a few hundred requests a
+// day and, until this line, no way to see them going.
+const RequestsTodayCaption = () => {
+    const [day, setDay] = useState(() => requestDay());
+    useEffect(() => {
+        const refresh = () => setDay(requestDay());
+        window.addEventListener("ai:request-budget", refresh);
+        const timer = setInterval(refresh, 60000);
+        return () => {
+            window.removeEventListener("ai:request-budget", refresh);
+            clearInterval(timer);
+        };
+    }, []);
+    const cost = describeJumpCost({ saveRequests: savingRequests() });
+    // A long skip split into segments (Settings → AI) pays one request a segment.
+    const segmented = useMapSetting(MAP_SETTING_KEYS.chunkLongJumps);
+    const nearlyOut = day.left <= Math.max(3, Math.ceil(day.limit * 0.1));
+    return (
+        <div
+        title="Counted on this device since midnight Pacific time. Change what the game spends in Settings → AI → AI requests."
+        style={{ color: nearlyOut ? "#fbbf24" : "rgba(255,255,255,0.42)", fontSize: "0.68rem", lineHeight: 1.45, marginTop: "0.45rem", textAlign: "center", width: "12.5rem" }}
+        >
+            <span data-no-translate>{day.used}</span> of <span data-no-translate>{day.limit}</span> AI requests used today
+            <br />
+            {cost.capped
+                ? <>a skip uses <span data-no-translate>{cost.min}</span>, at most <span data-no-translate>{cost.max}</span>{segmented ? ", plus one per extra segment" : ""}</>
+                : <>a skip can use twenty or more</>}
+            {day.lastJump ? <> · the last used <span data-no-translate>{day.lastJump.used}</span></> : null}
+        </div>
+    );
+};
+
 const JumpNode = ({ isLoading, opt, onJump }) => {
     const [hovered, setHovered] = useState(false);
 
@@ -830,8 +1113,8 @@ const JumpNode = ({ isLoading, opt, onJump }) => {
             onJump(opt.days);
         }}
         style={{
-            background: hovered ? "rgba(109,40,217,0.35)" : "rgba(109,40,217,0.15)",
-            border: hovered ? "1px solid rgba(139,92,246,0.7)" : "1px solid rgba(139,92,246,0.35)",
+            background: hovered ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
+            border: hovered ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.18)",
             borderRadius: "10px",
             color: "white",
             cursor: "pointer",
@@ -844,12 +1127,53 @@ const JumpNode = ({ isLoading, opt, onJump }) => {
         }}
         >
         <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{opt.sublabel}</div>
-        <div style={{ color: "rgba(196,165,255,0.7)", fontSize: "0.7rem" }}>
+        <div style={{ color: "#e4e4e7", fontSize: "0.7rem" }}>
         {opt.label}
         </div>
         </button>
     );
 };
+
+// What the skip is doing, and the way out. The same row in both panels, so
+// switching between them does not look like two different states of the game.
+const SkipProgressRow = ({ label, onCancel }) => (
+    <div
+    style={{
+        alignItems: "center",
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: "12px",
+        color: "rgba(255,255,255,0.75)",
+        display: "flex",
+        fontSize: "0.76rem",
+        gap: "0.55rem",
+        justifyContent: "center",
+        padding: "0.68rem 0.8rem",
+    }}
+    >
+    <SpinnerRing size={15} />
+    <span>{label || "Simulating…"}</span>
+    {onCancel && (
+        <button
+        type="button"
+        onClick={onCancel}
+        style={{
+            background: "rgba(220,38,38,0.18)",
+            border: "1px solid rgba(248,113,113,0.5)",
+            borderRadius: "8px",
+            color: "#fecaca",
+            cursor: "pointer",
+            fontSize: "0.74rem",
+            fontWeight: 600,
+            marginLeft: "0.2rem",
+            padding: "0.28rem 0.7rem",
+        }}
+        >
+        Cancel
+        </button>
+    )}
+    </div>
+);
 
 const TimelineSkipPanel = ({
     canUndo,
@@ -860,6 +1184,7 @@ const TimelineSkipPanel = ({
     isRetryingProjects,
     isRetryingSegment,
     modeSuggestion,
+    offeredInteractive = null,
     onAcceptModeSuggestion,
     onAutoJump,
     onCancel,
@@ -874,6 +1199,7 @@ const TimelineSkipPanel = ({
     progressLabel,
     projectsHeld,
     projectsRetries,
+    sceneInProgress = false,
     segmentHeld,
     segmentRetries,
     topOffset,
@@ -881,10 +1207,13 @@ const TimelineSkipPanel = ({
 }) => {
     const [customValue, setCustomValue] = useState("");
     const [customUnit, setCustomUnit] = useState("days");
+    // Time stands still while an interactive event is being played: the skips
+    // wait for it to end or be set aside, as the engine does.
+    const blocked = isLoading || sceneInProgress;
     const unitToDays = { hours: 1 / 24, days: 1, weeks: 7, months: 30, years: 365 };
     const runCustomJump = () => {
         const amount = Number(customValue);
-        if (!Number.isFinite(amount) || amount <= 0 || isLoading) return;
+        if (!Number.isFinite(amount) || amount <= 0 || blocked) return;
         onJump(amount * (unitToDays[customUnit] ?? 1));
     };
     // Where a custom jump would land, shown under the row the way every preset
@@ -922,6 +1251,32 @@ const TimelineSkipPanel = ({
             gap: 0,
         }}
         >
+        {sceneInProgress && (
+            <div style={{ background: "rgba(250,204,21,0.1)", border: "1px solid rgba(250,204,21,0.5)", borderRadius: "10px", color: "#fef08a", fontSize: "0.72rem", lineHeight: 1.45, marginBottom: "0.6rem", padding: "0.5rem 0.6rem", textAlign: "center", width: "12.5rem" }}>
+                ⚡ A scene is in progress. Time stands still until it ends or is set aside.
+                <button
+                type="button"
+                onClick={openInteractiveEvent}
+                style={{ background: "#facc15", border: "none", borderRadius: "8px", color: "#1c1917", cursor: "pointer", display: "block", fontSize: "0.72rem", fontWeight: 800, margin: "0.4rem auto 0", padding: "0.3rem 0.7rem" }}
+                >
+                Return to the scene
+                </button>
+            </div>
+        )}
+        {/* The offer outlives the reveal until the next skip replaces it; this
+            says so where the skip is pressed. */}
+        {!sceneInProgress && offeredInteractive && (
+            <div style={{ background: "rgba(250,204,21,0.07)", border: "1px solid rgba(250,204,21,0.35)", borderRadius: "10px", color: "#fef08a", fontSize: "0.72rem", lineHeight: 1.45, marginBottom: "0.6rem", padding: "0.5rem 0.6rem", textAlign: "center", width: "12.5rem" }}>
+                ⚡ An interactive event is on offer: <span data-no-translate style={{ fontWeight: 800 }}>{offeredInteractive.title}</span>. The next time skip lets it pass.
+                <button
+                type="button"
+                onClick={openInteractiveEvent}
+                style={{ background: "#facc15", border: "none", borderRadius: "8px", color: "#1c1917", cursor: "pointer", display: "block", fontSize: "0.72rem", fontWeight: 800, margin: "0.4rem auto 0", padding: "0.3rem 0.7rem" }}
+                >
+                Play it out
+                </button>
+            </div>
+        )}
         {canUndo && (
             <>
             <button
@@ -945,15 +1300,15 @@ const TimelineSkipPanel = ({
             {undoCount} turn{undoCount === 1 ? "" : "s"} can be undone
             </div>
             </button>
-            <div style={{ background: "rgba(139,92,246,0.4)", height: "1.25rem", width: "2px" }} />
+            <div style={{ background: "rgba(255,255,255,0.1)", height: "1.25rem", width: "2px" }} />
             </>
         )}
         <div
         style={{
-            background: "rgba(109,40,217,0.2)",
-            border: "2px solid rgba(139,92,246,0.8)",
+            background: "rgba(255,255,255,0.07)",
+            border: "2px solid rgba(255,255,255,0.28)",
             borderRadius: "999px",
-            color: "rgba(196,165,255,0.95)",
+            color: "#e4e4e7",
             fontSize: "0.7rem",
             fontWeight: 700,
             letterSpacing: "0.04em",
@@ -967,16 +1322,16 @@ const TimelineSkipPanel = ({
 
         {jumpOptions.map((opt) => (
             <React.Fragment key={opt.label}>
-            <div style={{ background: "rgba(139,92,246,0.4)", height: "1.25rem", width: "2px" }} />
-            <JumpNode isLoading={isLoading} opt={opt} onJump={onJump} />
+            <div style={{ background: "rgba(255,255,255,0.1)", height: "1.25rem", width: "2px" }} />
+            <JumpNode isLoading={blocked} opt={opt} onJump={onJump} />
             </React.Fragment>
         ))}
 
-        <div style={{ background: "rgba(139,92,246,0.4)", height: "1.25rem", width: "2px" }} />
+        <div style={{ background: "rgba(255,255,255,0.1)", height: "1.25rem", width: "2px" }} />
         <button
         type="button"
         onClick={() => {
-            if (isLoading) {
+            if (blocked) {
                 return;
             }
 
@@ -987,8 +1342,8 @@ const TimelineSkipPanel = ({
             border: "1px solid rgba(96,165,250,0.45)",
             borderRadius: "12px",
             color: "white",
-            cursor: "pointer",
-            opacity: isLoading ? 0.72 : 1,
+            cursor: blocked ? "default" : "pointer",
+            opacity: blocked ? 0.72 : 1,
             padding: "0.55rem 0.7rem",
             textAlign: "center",
             width: "12.5rem",
@@ -997,7 +1352,7 @@ const TimelineSkipPanel = ({
         <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>Auto-jump</div>
         </button>
 
-        <div style={{ background: "rgba(139,92,246,0.4)", height: "1.25rem", width: "2px" }} />
+        <div style={{ background: "rgba(255,255,255,0.1)", height: "1.25rem", width: "2px" }} />
         <div
         style={{
             alignItems: "center",
@@ -1018,7 +1373,7 @@ const TimelineSkipPanel = ({
         onChange={(event) => setCustomValue(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter") runCustomJump(); }}
         placeholder="Custom"
-        disabled={isLoading}
+        disabled={blocked}
         style={{
             background: "rgba(0,0,0,0.25)",
             border: "1px solid rgba(255,255,255,0.16)",
@@ -1035,7 +1390,7 @@ const TimelineSkipPanel = ({
         data-no-translate
         value={customUnit}
         onChange={(event) => setCustomUnit(event.target.value)}
-        disabled={isLoading}
+        disabled={blocked}
         style={{
             background: "rgba(0,0,0,0.25)",
             border: "1px solid rgba(255,255,255,0.16)",
@@ -1058,16 +1413,16 @@ const TimelineSkipPanel = ({
         <button
         type="button"
         onClick={runCustomJump}
-        disabled={isLoading || !customValue}
+        disabled={blocked || !customValue}
         style={{
-            background: "rgba(109,40,217,0.4)",
-            border: "1px solid rgba(139,92,246,0.6)",
+            background: "rgba(255,255,255,0.1)",
+            border: "1px solid rgba(255,255,255,0.28)",
             borderRadius: "8px",
             color: "#fff",
-            cursor: isLoading || !customValue ? "default" : "pointer",
+            cursor: blocked || !customValue ? "default" : "pointer",
             fontSize: "0.8rem",
             fontWeight: 700,
-            opacity: isLoading || !customValue ? 0.5 : 1,
+            opacity: blocked || !customValue ? 0.5 : 1,
             padding: "0.3rem 0.6rem",
         }}
         >
@@ -1079,46 +1434,11 @@ const TimelineSkipPanel = ({
             Lands on {customLanding}
             </div>
         )}
+        <RequestsTodayCaption />
         </div>
 
-        {isLoading && (
-            <div
-            style={{
-                alignItems: "center",
-                background: "rgba(255,255,255,0.04)",
-                       border: "1px solid rgba(255,255,255,0.08)",
-                       borderRadius: "12px",
-                       color: "rgba(255,255,255,0.75)",
-                       display: "flex",
-                       fontSize: "0.76rem",
-                       gap: "0.55rem",
-                       justifyContent: "center",
-                       padding: "0.68rem 0.8rem",
-            }}
-            >
-            <SpinnerRing size={15} />
-            <span>{progressLabel || "Simulating…"}</span>
-            {onCancel && (
-                <button
-                type="button"
-                onClick={onCancel}
-                style={{
-                    background: "rgba(220,38,38,0.18)",
-                    border: "1px solid rgba(248,113,113,0.5)",
-                    borderRadius: "8px",
-                    color: "#fecaca",
-                    cursor: "pointer",
-                    fontSize: "0.74rem",
-                    fontWeight: 600,
-                    marginLeft: "0.2rem",
-                    padding: "0.28rem 0.7rem",
-                }}
-                >
-                Cancel
-                </button>
-            )}
-            </div>
-        )}
+        {/* The events are in the Events panel; this is for a player who came back to cancel. */}
+        {isLoading && <SkipProgressRow label={progressLabel} onCancel={onCancel} />}
 
         {error && (
             <div
@@ -1359,9 +1679,23 @@ const TimelineHistoryPanel = ({
     canRollbackTurn,
     buildDebugIncident,
     onRollbackTurn,
+    canIntervene = false,
+    onIntervene = null,
+    // The event of this turn offered as an interactive event, by id; "" for none.
+    offeredInteractiveId = "",
+    // The record is still being written: nothing is saved and the world has not
+    // moved. The cards and the reveal are a finished turn's, but everything that
+    // acts on a written turn waits for it to land.
+    live = false,
+    // { label, onCancel } while the skip runs.
+    progress = null,
     record,
     topOffset,
     visibleEventCount,
+    // Held here, not in each card, so a card survives being replaced by its
+    // validated self (eventDisclosureKey).
+    openMapChanges = null,
+    onToggleMapChanges = null,
     warning,
 }) => {
     // Category filter chips (ported from the abdulrahman-2005 fork): only the
@@ -1399,6 +1733,24 @@ const TimelineHistoryPanel = ({
     // idle | working — the undo runs without switching panels, so this button is
     // the only place the player can see that anything is happening.
     const [rollbackState, setRollbackState] = useState("idle");
+    // Intervene (AI/intervene.js): idle | asking | working. Asking is the one
+    // confirmation — the events not yet revealed are discarded for good — and
+    // it is keyed to the record so a new turn never opens on a stale question.
+    const [interveneState, setInterveneState] = useState({ recordId: null, state: "idle" });
+    const intervening = record && interveneState.recordId === record.id ? interveneState.state : "idle";
+    const handleInterveneClick = async () => {
+        if (!record || intervening === "working" || !canIntervene || typeof onIntervene !== "function") return;
+        if (intervening !== "asking") {
+            setInterveneState({ recordId: record.id, state: "asking" });
+            return;
+        }
+        setInterveneState({ recordId: record.id, state: "working" });
+        try {
+            await onIntervene();
+        } finally {
+            setInterveneState({ recordId: record.id, state: "idle" });
+        }
+    };
     const handleRollbackClick = async () => {
         if (rollbackState === "working" || !canRollbackTurn || typeof onRollbackTurn !== "function") return;
         setRollbackState("working");
@@ -1507,7 +1859,8 @@ const TimelineHistoryPanel = ({
         {!record ? (
             <EmptyPanelState text="No event chain is available yet." />
         ) : totalEvents === 0 ? (
-            <EmptyPanelState text="No world events were recorded for this time skip." />
+            // Mid-skip an empty list just means the first event has not arrived.
+            live ? null : <EmptyPanelState text="No world events were recorded for this time skip." />
         ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             {categoryChips.length > 0 && (
@@ -1522,8 +1875,8 @@ const TimelineHistoryPanel = ({
                         style={{
                             padding: "0.2rem 0.6rem",
                             borderRadius: "999px",
-                            border: active ? "1px solid rgba(96,165,250,0.8)" : "1px solid rgba(255,255,255,0.16)",
-                            background: active ? "rgba(59,130,246,0.35)" : "rgba(255,255,255,0.06)",
+                            border: active ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.16)",
+                            background: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.06)",
                             color: "white",
                             fontSize: "0.68rem",
                             fontWeight: 700,
@@ -1539,11 +1892,20 @@ const TimelineHistoryPanel = ({
             {visibleEvents.map((event, index) => {
                 const isLastVisible = index === visibleEvents.length - 1;
 
+                const openKey = eventDisclosureKey(event);
+
                 return (
                     <div key={event.id} ref={isLastVisible ? lastVisibleEventRef : null}>
                     {/* No "Show on map" footer: the camera already flies to
-                        every event as it is revealed. */}
-                    <EventCard event={event} lookups={lookups} />
+                        every event as it is revealed. The offered interactive
+                        event carries its offer instead. */}
+                    <EventCard
+                    event={event}
+                    lookups={lookups}
+                    openMapChanges={openMapChanges ? openMapChanges.has(openKey) : null}
+                    onToggleMapChanges={onToggleMapChanges ? () => onToggleMapChanges(openKey) : null}
+                    footer={offeredInteractiveId && event.id === offeredInteractiveId ? <InteractiveOfferStrip /> : null}
+                    />
                     </div>
                 );
             })}
@@ -1575,8 +1937,75 @@ const TimelineHistoryPanel = ({
                 >
                 <span>Skip to end ({totalEvents - visibleEvents.length} more)</span>
                 </button>
+                {/* Intervene: stop the round HERE. The revealed events are canon,
+                    the rest never happened, and the game's date is the last
+                    revealed event's — so the player's orders go out before what
+                    came next. Costs no request (AI/intervene.js). Only offered
+                    with no category filter on: the count is by reveal order. */}
+                {canIntervene && !categoryFilter && typeof onIntervene === "function" && (
+                    intervening === "asking" ? (
+                        <div
+                        style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.4rem",
+                            padding: "0.6rem 0.7rem",
+                            borderRadius: "0.6rem",
+                            border: "1px solid rgba(251,191,36,0.55)",
+                            background: "rgba(251,191,36,0.10)",
+                            fontSize: "0.78rem",
+                            lineHeight: 1.4,
+                        }}
+                        >
+                        <span>
+                            Stop the round after <strong>{visibleEvents[visibleEvents.length - 1]?.title}</strong>? The
+                            {" "}{totalEvents - visibleEvents.length} event{totalEvents - visibleEvents.length === 1 ? "" : "s"} not yet revealed
+                            will be discarded — they never happen — and the date becomes {visibleEvents[visibleEvents.length - 1]?.date}.
+                            You can still undo the round afterwards.
+                        </span>
+                        <div style={{ display: "flex", gap: "0.4rem" }}>
+                            <button
+                            type="button"
+                            onClick={handleInterveneClick}
+                            style={{ ...ghostButtonStyle, flex: 1, minHeight: "2rem", border: "1px solid rgba(251,191,36,0.8)", background: "rgba(251,191,36,0.22)" }}
+                            >
+                            <span>Stop here</span>
+                            </button>
+                            <button
+                            type="button"
+                            onClick={() => setInterveneState({ recordId: record.id, state: "idle" })}
+                            style={{ ...ghostButtonStyle, flex: 1, minHeight: "2rem", opacity: 0.8 }}
+                            >
+                            <span>Keep going</span>
+                            </button>
+                        </div>
+                        </div>
+                    ) : (
+                        <button
+                        type="button"
+                        onClick={handleInterveneClick}
+                        disabled={intervening === "working"}
+                        title="Stop the round here: what is revealed happened, what is not never does, and you act before it."
+                        style={{
+                            ...ghostButtonStyle,
+                            minHeight: "1.9rem",
+                            opacity: intervening === "working" ? 0.7 : 0.9,
+                            width: "100%",
+                            cursor: intervening === "working" ? "default" : "pointer",
+                        }}
+                        >
+                        <span>{intervening === "working" ? "Stopping the round…" : "✋ Intervene here"}</span>
+                        </button>
+                    )
+                )}
                 </>
             )}
+            </div>
+        )}
+        {/* Under the cards, so the list reads as a finished turn's would. */}
+        {progress && (
+            <div style={{ marginTop: totalEvents > 0 ? "0.75rem" : 0 }}>
+            <SkipProgressRow label={progress.label} onCancel={progress.onCancel} />
             </div>
         )}
         </PanelChrome>
@@ -1593,9 +2022,19 @@ const DateWidget = ({
     dockStyle = null,
     topOffset = "0.5rem",
 }) => {
-    const [gameData, setGameData] = useState(null);
-    const [events, setEvents] = useState([]);
-    const [worldState, setWorldState] = useState(null);
+    // Shared store rather than three local copies on a 5s poll of their own.
+    const gameData = useRuntimeState("game");
+    const events = useRuntimeState("events");
+    const worldState = useRuntimeState("world");
+    const setGameData = (game) => primeRuntimeValue("game", game);
+    const setEvents = (next) => primeRuntimeValue("events", next);
+    const setWorldState = (world) => primeRuntimeValue("world", world);
+    // The interactive event the last skip offered (runtime/interactiveOffer.js),
+    // once the reveal has reached its event; none while a scene is in progress.
+    const unseenEventIds = useUnseenEventIds();
+    const sceneInProgress = isSceneInProgress(worldState?.activeInteractive);
+    const offeredInteractive = offeredEvent({ offer: worldState?.interactiveOffer, events, sceneInProgress });
+    const shownOffer = offeredInteractive && !unseenEventIds.has(offeredInteractive.id) ? offeredInteractive : null;
     const [countryBounds, setCountryBounds] = useState(new Map());
     const [countryCatalog, setCountryCatalog] = useState([]);
     const [regionBounds, setRegionBounds] = useState(new Map());
@@ -1606,6 +2045,29 @@ const DateWidget = ({
     // the notice falls back to its own wording — and set per segment when a long
     // skip is generated in pieces (AI/jumpSegments.js).
     const [jumpProgress, setJumpProgress] = useState("");
+    // A phase of the skip as it starts: "Writing 1 month of events… (part 2 of 3)".
+    const showSkipPhase = ({ label, detail } = {}) =>
+        setJumpProgress(label ? `${label}…${detail ? ` (${detail})` : ""}` : "");
+    // The skip's events as the model writes them (AI/streamedEvents.js): the
+    // request already streamed, nothing was reading it. A preview, before the
+    // validators sort, clamp and screen; the list goes when the turn does.
+    const [streamedEvents, setStreamedEvents] = useState([]);
+    const showStreamedEvents = (list) => setStreamedEvents(Array.isArray(list) ? list : []);
+    // Not isLoading, which Undo and Intervene raise too: neither writes events,
+    // and a live panel over either promises cards that never come.
+    const [skipInFlight, setSkipInFlight] = useState(false);
+    // The span being written, for the panel's subtitle. Set when the skip starts.
+    const [liveRange, setLiveRange] = useState({ from: "", to: "" });
+    // The pre-jump world the live reveal stages onto. Null when no skip is running.
+    const [liveStageBase, setLiveStageBase] = useState(null);
+    // Cards the player has opened, by headline, so one opened mid-skip survives
+    // the validated turn replacing the preview.
+    const [openMapChanges, setOpenMapChanges] = useState(() => new Set());
+    const toggleMapChanges = (key) => setOpenMapChanges((open) => {
+        const next = new Set(open);
+        if (!next.delete(key)) next.add(key);
+        return next;
+    });
     const [error, setError] = useState("");
     const [fallbackWarning, setFallbackWarning] = useState("");
     // A turn that is generated and valid but NOT written, because the Projects &
@@ -1634,12 +2096,6 @@ const DateWidget = ({
     const [modeSuggestion, setModeSuggestion] = useState(null);
     // Holds the in-flight jump's AbortController so the Cancel button can stop it.
     const jumpAbortRef = React.useRef(null);
-    // Mirrors the latest applied turn (round + date) so the 5s refresh poll can tell a
-    // stale read from a genuinely newer one — and never revert a just-completed jump.
-    const gameStampRef = React.useRef({ round: 0, date: "" });
-    React.useEffect(() => {
-        gameStampRef.current = { round: Number(gameData?.round) || 0, date: gameData?.gameDate || "" };
-    }, [gameData]);
     const [visibleEventCount, setVisibleEventCount] = useState(1);
     const [undoCount, setUndoCount] = useState(0);
     const openPanel = typeof onSetPanel === "function" ? activePanel : localOpenPanel;
@@ -1653,28 +2109,35 @@ const DateWidget = ({
     useEffect(() => {
         let cancelled = false;
 
+        // Each on its own. The stock outlines come from tile archives that a
+        // drawn map does not use and an install may not have at all; they used
+        // to share one Promise.all with the names, so a missing archive (a 404)
+        // took the country and region names down with it — and with them the
+        // event camera, the cards' links and the names in "N map changes".
         const loadLookups = async () => {
-            try {
-                const [countries, regions, nextCountryBounds, nextRegionBounds] = await Promise.all([
-                    loadCountryNames(),
-                                                                                                    loadRegionCatalog(),
-                                                                                                    loadCountryBounds(),
-                                                                                                    loadRegionBounds(),
-                ]);
-
-                if (cancelled) {
-                    return;
+            const settle = async (label, load, fallback) => {
+                try {
+                    return (await load()) ?? fallback;
+                } catch (lookupError) {
+                    if (!cancelled) console.warn(`Timeline lookups: the ${label} could not be loaded; going on without them.`, lookupError);
+                    return fallback;
                 }
+            };
+            const [countries, regions, nextCountryBounds, nextRegionBounds] = await Promise.all([
+                settle("country names", loadCountryNames, []),
+                settle("region catalog", loadRegionCatalog, []),
+                settle("stock country outlines", loadCountryBounds, new Map()),
+                settle("stock region outlines", loadRegionBounds, new Map()),
+            ]);
 
-                setCountryBounds(nextCountryBounds);
-                setCountryCatalog(countries ?? []);
-                setRegionBounds(nextRegionBounds);
-                setRegionCatalog(regions ?? []);
-            } catch (lookupError) {
-                if (!cancelled) {
-                    console.error("Failed to load timeline lookups:", lookupError);
-                }
+            if (cancelled) {
+                return;
             }
+
+            setCountryBounds(nextCountryBounds);
+            setCountryCatalog(countries);
+            setRegionBounds(nextRegionBounds);
+            setRegionCatalog(regions);
         };
 
         loadLookups();
@@ -1684,77 +2147,28 @@ const DateWidget = ({
         };
     }, []);
 
+    // The store owns the refresh and the never-move-the-clock-backwards guard.
+    // Left here is the panel's own reaction to an undone turn: the live warning
+    // belongs to the discarded turn. The turn now newest was seen in full before
+    // the undone one was made, and the reel shows it so (the effect on the
+    // newest turn, below).
     useEffect(() => {
-        let cancelled = false;
-
-        const loadState = async () => {
-            try {
-                const [game, nextEvents, world] = await Promise.all([
-                    readGameData({ force: true }),
-                                                                    readEventsState({ force: true }),
-                                                                    readWorldState({ force: true }),
-                ]);
-
-                if (cancelled) {
-                    return;
-                }
-
-                // Never let this background poll overwrite a fresher turn with an older
-                // read. A jump advances the round (and date); if the store read comes
-                // back behind what's already on screen — a write still settling, an
-                // eventually-consistent read, a poll that fired mid-jump — applying it
-                // would revert the date and wipe the just-generated events. Skip it.
-                const local = gameStampRef.current;
-                const polledRound = Number(game?.round) || 0;
-                const polledDate = game?.gameDate || "";
-                if (polledRound < local.round || (polledRound === local.round && polledDate < local.date)) {
-                    return;
-                }
-
-                setGameData(game);
-                setEvents(nextEvents);
-                setWorldState(world);
-            } catch (loadError) {
-                if (!cancelled) {
-                    console.error("Failed to load timeline state:", loadError);
-                }
-            }
-        };
-
-        loadState();
-        const interval = setInterval(loadState, 5000);
-
-        // The staleness guard above cannot tell a stale read from a rollback — both
-        // arrive as "older than what is on screen" — so it rejected the restored
-        // state too, and the panel kept showing the undone turn's date, its events
-        // and its fallback warning until the app was restarted. rollBackToSnapshot
-        // announces itself (gameplay.js); clearing the stamp lets the restored read
-        // through, and reloading now means the player doesn't wait out the 5s tick.
         const handleRolledBack = () => {
-            gameStampRef.current = { round: 0, date: "" };
-            setVisibleEventCount(1);
-            // The live warning belongs to the turn that just got undone. The
-            // persisted one clears itself, since it is derived from the restored
-            // simulationHistory that loadState is about to pull in.
             setFallbackWarning("");
-            loadState();
         };
         window.addEventListener("oh:rolled-back", handleRolledBack);
-
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-            window.removeEventListener("oh:rolled-back", handleRolledBack);
-        };
+        return () => window.removeEventListener("oh:rolled-back", handleRolledBack);
     }, []);
 
     // Pre-game history: a fresh game (round 1, no events, no turns) whose
     // scenario wrote a "World Before Round One" briefing gets its backstory
     // generated once, the first time the player actually enters it. Waits out
-    // the main menu (the poll re-runs this every 5s) so tokens are never spent
-    // on a game the player is only hovering past; every other guard — busy
-    // lock, still-the-same-game check, the done-marker — lives in
-    // maybeGeneratePregameHistory itself.
+    // the main menu so tokens are never spent on a game the player is only
+    // hovering past; every other guard (busy lock, still-the-same-game check,
+    // the done-marker) lives in maybeGeneratePregameHistory itself. The menu
+    // state is a dependency because nothing else re-renders this when the
+    // player finally enters the game.
+    const mainMenuOpen = useMainMenuOpen();
     const pregameAttemptedRef = React.useRef(false);
     useEffect(() => {
         if (pregameAttemptedRef.current || !gameData || !worldState) {
@@ -1772,7 +2186,7 @@ const DateWidget = ({
         }
         pregameAttemptedRef.current = true;
         maybeGeneratePregameHistory().catch(() => {});
-    }, [gameData, worldState, events]);
+    }, [gameData, worldState, events, mainMenuOpen]);
 
     function setPanel(panelName) {
         // Where the player was looking, in detailed mode. On its own a panel
@@ -1825,9 +2239,32 @@ const DateWidget = ({
             return;
         }
 
-        setPanel("skip");
+        // Worked out before the flag goes up: only the finally lowers it, so a
+        // throw before the try would leave the panel live for good.
+        const landingDate = mode === "auto" ? "" : jumpTargetDate(currentDate, days);
+        // Settings, AI: off leaves the skip behind the Timeline panel's spinner.
+        const live = getMapSettingDefaultOn(MAP_SETTING_KEYS.liveSkipEvents);
+
+        // Watched from the Events panel, which fills as the model writes and
+        // carries the spinner underneath. A failed or held turn goes back to the
+        // Timeline panel, where those notices live.
+        setPanel(live ? "history" : "skip");
         setIsLoading(true);
+        setSkipInFlight(live);
         setJumpProgress("");
+        setStreamedEvents([]);
+        // A carry the last turn never consumed, because a skip landing on the
+        // same date leaves the record's identity unchanged, must not reach this one.
+        revealCarryRef.current = null;
+        if (live) {
+            setOpenMapChanges(new Set());
+            // Only when live: behind the spinner the reveal effect never re-runs,
+            // so a failed skip would leave the previous turn collapsed to one event.
+            setVisibleEventCount(1);
+            setLiveRange({ from: currentDate, to: landingDate });
+            // Nothing is written yet, so the world on screen is the base.
+            setLiveStageBase(cloneWorldForStaging(worldState));
+        }
         setError("");
         setFallbackWarning("");
         // simulateTimelineJump abandons any held turn when it starts, so a notice
@@ -1850,21 +2287,27 @@ const DateWidget = ({
         const controller = new AbortController();
         jumpAbortRef.current = controller;
         try {
+            // No onEvents with the setting off: nothing streams anywhere.
+            const onEvents = live ? showStreamedEvents : undefined;
             const result = mode === "auto"
-            ? await simulateAutoJump({ days, signal: controller.signal })
+            ? await simulateAutoJump({ days, signal: controller.signal, onProgress: showSkipPhase, onEvents })
             : await simulateTimelineJump({
                 days,
                 signal: controller.signal,
-                // A long skip is generated in segments (AI/jumpSegments.js) and can
-                // run for many minutes. Without this the spinner says the same
-                // thing throughout and a working turn reads as a frozen one.
-                onProgress: ({ segment, segmentCount }) =>
-                    setJumpProgress(`Simulating… segment ${segment} of ${segmentCount}`),
+                // What the skip is doing right now, in its own words
+                // (AI/skipPhases.js). Without this the spinner said the same
+                // thing throughout and a working turn read as a frozen one.
+                onProgress: showSkipPhase,
+                // And the events, as they are written.
+                onEvents,
             });
+            // Before the record changes, so what was uncovered stays uncovered.
+            // Not for a fallback turn: the canned period is not the round that
+            // was on screen, so it is read from the beginning.
+            if (result.generation?.source !== "fallback") carryLiveReveal();
             setGameData(result.game);
             setEvents(result.events);
             setWorldState(result.world);
-            setVisibleEventCount(1);
             const elapsed = `${Math.round((Date.now() - startedAt) / 1000)}s`;
             if (result.generation?.source === "fallback") {
                 setFallbackWarning(`Turn generated by fallback: ${result.generation.fallbackReason || "structured AI output was unavailable"}`);
@@ -1911,6 +2354,9 @@ const DateWidget = ({
 
             setPanel("history");
         } catch (jumpError) {
+            // Every notice that explains why lives in the Timeline panel, so go
+            // back rather than leave the player on a panel that stopped filling.
+            setPanel("skip");
             if (controller.signal.aborted || jumpError?.name === "AbortError") {
                 // Player cancelled — nothing was written, so just close out quietly.
                 setError("");
@@ -1940,7 +2386,10 @@ const DateWidget = ({
         } finally {
             jumpAbortRef.current = null;
             setIsLoading(false);
+            setSkipInFlight(false);
             setJumpProgress("");
+            setStreamedEvents([]);
+            setLiveStageBase(null);
             // Between turns, never during one. If the ladder has learned
             // something consistent about this endpoint, offer it now.
             setModeSuggestion(getStructuredModeSuggestion());
@@ -1997,22 +2446,34 @@ const DateWidget = ({
     // valid, and on a slow model each one may have cost minutes.
     const retryHeldSegment = async () => {
         if (isRetryingSegment) return;
+        const live = getMapSettingDefaultOn(MAP_SETTING_KEYS.liveSkipEvents);
         setIsRetryingSegment(true);
+        setSkipInFlight(live);
         setSegmentRetries((count) => count + 1);
         setJumpProgress("");
+        setStreamedEvents([]);
+        revealCarryRef.current = null;
+        if (live) {
+            setOpenMapChanges(new Set());
+            setVisibleEventCount(1);
+            // The finished segments are in hand; the retry writes the rest.
+            setLiveRange({ from: currentDate, to: "" });
+            setLiveStageBase(cloneWorldForStaging(worldState));
+            setPanel("history");
+        }
         const startedAt = Date.now();
         const controller = new AbortController();
         jumpAbortRef.current = controller;
         try {
             const result = await retryPendingJumpSegment({
                 signal: controller.signal,
-                onProgress: ({ segment, segmentCount }) =>
-                    setJumpProgress(`Simulating… segment ${segment} of ${segmentCount}`),
+                onProgress: showSkipPhase,
+                onEvents: live ? showStreamedEvents : undefined,
             });
+            carryLiveReveal();
             setGameData(result.game);
             setEvents(result.events);
             setWorldState(result.world);
-            setVisibleEventCount(1);
             setSegmentHeld("");
             setSegmentRetries(0);
             logDebugEvent("turn", `Held jump finished in ${Math.round((Date.now() - startedAt) / 1000)}s — now ${result.game?.gameDate || "unknown"}.`, {
@@ -2044,7 +2505,10 @@ const DateWidget = ({
         } finally {
             jumpAbortRef.current = null;
             setIsRetryingSegment(false);
+            setSkipInFlight(false);
             setJumpProgress("");
+            setStreamedEvents([]);
+            setLiveStageBase(null);
         }
     };
 
@@ -2082,8 +2546,9 @@ const DateWidget = ({
     // each turn). Re-checked whenever the round changes — after a jump or undo.
     useEffect(() => {
         let active = true;
-        loadRollbackSnapshots().then((list) => {
-            if (active) setUndoCount(list.length);
+        // The index, not the snapshots: the full list carries every prior world.
+        loadRollbackSnapshotCount().then((count) => {
+            if (active) setUndoCount(count);
         });
         return () => { active = false; };
     }, [gameData?.round]);
@@ -2127,6 +2592,53 @@ const DateWidget = ({
         return false;
     };
 
+    // Intervene (AI/intervene.js): whether the newest turn carries the journal
+    // it needs, re-checked with the round like the undo count. Cleared while a
+    // jump runs so a half-revealed turn is never stopped under a new one.
+    const [canInterveneTurn, setCanInterveneTurn] = useState(false);
+    const latestTurnDate = worldState?.simulationHistory?.[0]?.date ?? "";
+    useEffect(() => {
+        let active = true;
+        canInterveneInLastTurn()
+            .then((can) => { if (active) setCanInterveneTurn(Boolean(can)); })
+            .catch(() => { if (active) setCanInterveneTurn(false); });
+        return () => { active = false; };
+    }, [gameData?.round, latestTurnDate]);
+
+    // Stop the round after the events revealed so far. The engine rolls back to
+    // the turn's snapshot and applies the kept prefix again, without a request;
+    // the panel then shows the shorter turn, fully revealed.
+    const runIntervene = async () => {
+        const keep = Math.max(1, visibleEventCount);
+        if (isLoading || !canInterveneTurn) return false;
+        setIsLoading(true);
+        setError("");
+        setFallbackWarning("");
+        logDebugEvent("turn", `Intervening after event ${keep} of the last turn.`, { round: gameData?.round ?? 0 });
+        try {
+            const result = await interveneAfterEvent(keep);
+            if (result) {
+                logDebugEvent("turn", `Intervention complete — the round now stops on ${result.closingDate}.`, {
+                    kept: result.kept,
+                    dropped: result.dropped,
+                });
+                setGameData(result.bundle.game);
+                setEvents(result.bundle.events);
+                setWorldState(result.bundle.world);
+                setVisibleEventCount(result.kept);
+                setPanel("history");
+                return true;
+            }
+            setError("There was nothing to stop: the round has no events after the ones revealed.");
+        } catch (interveneError) {
+            console.error("Failed to intervene:", interveneError);
+            setError(interveneError.message || "Failed to stop the round.");
+        } finally {
+            setIsLoading(false);
+        }
+        return false;
+    };
+
     // Display-name lookups for the timeline's own labels, off the same catalogs
     // the camera resolves places from.
     const polityLookup = useMemo(
@@ -2159,10 +2671,24 @@ const DateWidget = ({
     const persistedFallbackWarning = latestTurnRecord?.source === "fallback"
     ? `Turn generated by fallback: ${latestTurnRecord.fallbackReason || "structured AI output was unavailable"}`
     : "";
-    const totalVisibleEvents = latestTurnRecord?.events?.length || 0;
+    // Built even with no events yet, so a skip that has not produced its first
+    // does not leave the previous turn on screen as if it were this one.
+    const liveTurnRecord = useMemo(() => (skipInFlight
+        ? buildLiveTurnRecord({
+            events: streamedEvents,
+            fromDate: liveRange.from,
+            toDate: liveRange.to,
+            round: (gameData?.round || 0) + 1,
+            lookups,
+        })
+        : null), [skipInFlight, streamedEvents, liveRange.from, liveRange.to, gameData?.round, lookups]);
+    const displayRecord = liveTurnRecord ?? latestTurnRecord;
+    const totalVisibleEvents = displayRecord?.events?.length || 0;
+    // The newest revealed event, written turn or not: the camera follows the
+    // live reveal for the same reason the map stages along with it.
     const activeVisibleEvent =
     openPanel === "history" && totalVisibleEvents > 0
-    ? latestTurnRecord.events[Math.min(Math.max(visibleEventCount, 1), totalVisibleEvents) - 1]
+    ? displayRecord.events[Math.min(Math.max(visibleEventCount, 1), totalVisibleEvents) - 1]
     : null;
 
     // Resolve a valid date defensively: gameDate, else startDate, else nothing.
@@ -2258,9 +2784,77 @@ const DateWidget = ({
     ? normalizeGameDate(rawGameDate)
     : dayjs().format("YYYY-MM-DD");
 
+    // Readable by the async turn handlers, which close over the render that made
+    // them while a skip outlives a great many renders.
+    const visibleEventCountRef = React.useRef(1);
+    const streamedEventsRef = React.useRef([]);
+    useEffect(() => { visibleEventCountRef.current = visibleEventCount; }, [visibleEventCount]);
+    useEffect(() => { streamedEventsRef.current = streamedEvents; }, [streamedEvents]);
+    // Set the moment a watched skip lands, read once by the effect below.
+    const revealCarryRef = React.useRef(null);
+    const carryLiveReveal = () => {
+        const streamed = streamedEventsRef.current;
+        if (!streamed.length) {
+            revealCarryRef.current = null;
+            return;
+        }
+        const revealed = Math.min(Math.max(1, visibleEventCountRef.current), streamed.length);
+        revealCarryRef.current = {
+            revealed,
+            streamed: streamed.length,
+            // Which events were uncovered, not how many: the engine can drop one
+            // and write a scripted beat in above it, so counting would restore a
+            // different stretch of the round than the player walked through.
+            keys: streamed.slice(0, revealed).map((event) => eventDisclosureKey(event)).filter(Boolean),
+        };
+    };
+
+    // The last written turn's count, not the panel's, which mid-skip is the turn
+    // being written.
+    const writtenEventCount = latestTurnRecord?.events?.length || 0;
+
+    // Where the reveal stands for the newest written turn (runtime/unseenEvents.js):
+    // a skip that just landed shows its first event, a reload resumes where the
+    // player was, and a turn with nothing unseen is shown whole. A failed or
+    // cancelled skip comes back through here, which restores the previous reveal.
     useEffect(() => {
-        setVisibleEventCount(1);
-    }, [latestTurnRecord?.id]);
+        // Mid-skip the reveal belongs to the turn being written, and the written
+        // turn is the one before it.
+        if (skipInFlight) return;
+        const ids = (latestTurnRecord?.events ?? []).map((event) => event?.id).filter(Boolean);
+        const carried = revealCarryRef.current;
+        revealCarryRef.current = null;
+        // Except for the turn just watched being written: making the player press
+        // "Next event" back to where they were is the jolt this exists to avoid.
+        if (carried && ids.length) {
+            // The furthest event they reached, found again. Everything before it
+            // stays walked past, including a beat the engine wrote in among them.
+            const written = latestTurnRecord?.events ?? [];
+            const wanted = new Set(carried.keys);
+            let furthest = -1;
+            written.forEach((event, index) => {
+                if (wanted.has(eventDisclosureKey(event))) furthest = index;
+            });
+            // None of them survived, so this is not the round they were reading:
+            // carrying the count would uncover a turn they have never seen.
+            const keep = Math.min(ids.length, furthest >= 0 ? furthest + 1 : 1);
+            unseenEvents.markSeenThrough(ids, keep);
+            setVisibleEventCount(keep);
+            // The engine screens the payload and the curator drops events, so a
+            // skip can honestly end with fewer cards than were watched arriving.
+            // That reads as a bug unless the log says it happened, and by how much.
+            if (carried.streamed !== ids.length) {
+                logDebugEvent("turn", `Live skip: ${carried.streamed} event(s) were written on screen, ${ids.length} survived the engine's checks.`, {
+                    streamed: carried.streamed,
+                    written: ids.length,
+                    revealed: keep,
+                });
+            }
+            return;
+        }
+        setVisibleEventCount(Math.max(1, ids.length - unseenEvents.unseenInTurn(ids).size));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [latestTurnRecord?.id, writtenEventCount, skipInFlight]);
 
     // Half of what the camera needs to turn the names an event carries
     // ("Ireland", "Donetsk") into a place on the map: the half that only moves
@@ -2273,16 +2867,63 @@ const DateWidget = ({
     }), [countryBounds, countryCatalog, regionBounds, regionCatalog]);
 
     // The other half is the live world (era polities, who owns what), which the
-    // 5s poll replaces wholesale. Reading it through a ref keeps that poll from
-    // re-running the camera effect — which would re-fly to the event already on
-    // screen every few seconds — and the finished context is cached so it is
-    // rebuilt only when an event is actually revealed against a newer world.
+    // store replaces wholesale. Reading it through a ref keeps a world update
+    // from re-running the camera effect, which would re-fly to the event already
+    // on screen, and the finished context is cached so it is rebuilt only when
+    // an event is actually revealed against a newer world.
     const focusWorldRef = React.useRef(null);
     const focusContextRef = React.useRef({ catalog: null, context: null, world: null });
 
     useEffect(() => {
         focusWorldRef.current = worldState;
     }, [worldState]);
+
+    // The cached context, rebuilt only when the catalog or the world moved on.
+    // Shared by the camera below and the event cards' links.
+    // The map's own region records come in when its worker has read the
+    // geometry — after this panel mounted — and on a drawn map they are the only
+    // frames there are, so their arrival re-derives the cards' links.
+    const [primedRegionsVersion, setPrimedRegionsVersion] = useState(0);
+    useEffect(() => {
+        const bump = () => setPrimedRegionsVersion((version) => version + 1);
+        window.addEventListener("oh:region-catalog-primed", bump);
+        return () => window.removeEventListener("oh:region-catalog-primed", bump);
+    }, []);
+
+    const currentFocusContext = useCallback(() => {
+        const world = focusWorldRef.current;
+        const drawn = getPrimedScenarioRegionCatalog();
+        const cached = focusContextRef.current;
+        if (cached.catalog !== focusCatalog || cached.world !== world || cached.drawn !== drawn || !cached.context) {
+            focusContextRef.current = {
+                catalog: focusCatalog,
+                context: buildFocusContext({ catalog: focusCatalog, world, drawnRegions: drawn }),
+                drawn,
+                world,
+            };
+        }
+        return focusContextRef.current.context;
+        // primedRegionsVersion is not read: it is what makes the cards ask again.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusCatalog, primedRegionsVersion]);
+
+    // What each event is about, as chips on its card that fly the map there
+    // (eventFocus.js deriveEventLinks). Re-derived once the map data has loaded,
+    // since currentFocusContext changes with the catalog.
+    // And the documents that reached the player with the event itself — a
+    // published text, or a paper only the player's government holds
+    // (runtime/reportDelivery.js). A letter came through diplomacy and a stolen
+    // copy through an agent; the card shows neither.
+    const documentReports = worldState?.reports;
+    const documentPlayer = gameData?.country;
+    const cardLookups = useMemo(() => ({
+        ...lookups,
+        eventLinks: (event) => deriveEventLinks(event, currentFocusContext(), {
+            unitName: (id) => getUnitById(id)?.name || "",
+        }),
+        focusLink: (bounds) => focusMapOnBounds(mapRef, bounds),
+        eventDocuments: (event) => documentsForEvent(documentReports, event?.id, documentPlayer),
+    }), [lookups, currentFocusContext, mapRef, documentReports, documentPlayer]);
 
     // The camera follows EVERY revealed event — impacts pin the exact spot,
     // otherwise the polities the event involves do, and its own words are the
@@ -2293,27 +2934,31 @@ const DateWidget = ({
             return;
         }
 
-        const world = focusWorldRef.current;
-        const cached = focusContextRef.current;
-        if (cached.catalog !== focusCatalog || cached.world !== world || !cached.context) {
-            focusContextRef.current = {
-                catalog: focusCatalog,
-                context: buildFocusContext({ catalog: focusCatalog, world }),
-                world,
-            };
+        try {
+            focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, currentFocusContext()));
+        } catch (error) {
+            // Unvalidated impacts, so this can fail where a written turn's never does.
+            console.warn("[OH event camera] could not place this event; the camera stays put.", error);
         }
+    }, [activeVisibleEvent, disableEventCamera, currentFocusContext, mapRef]);
 
-        focusMapOnBounds(mapRef, deriveEventFocusBounds(activeVisibleEvent, focusContextRef.current.context));
-    }, [activeVisibleEvent, disableEventCamera, focusCatalog, mapRef]);
-
+    // Each step of the reveal is remembered (runtime/unseenEvents.js): what it
+    // uncovers may now be shown everywhere — the thread an event opened, the copy
+    // an agent stole in it — and the advisor and the leaders may speak of it.
+    // Empty while a skip is in flight: the streamed events are not in the record
+    // yet, and the ids of the turn BEFORE this one must never be marked seen by
+    // a reveal that is walking through the turn after it.
+    const turnEventIdsInOrder = () => (liveTurnRecord
+        ? []
+        : (latestTurnRecord?.events ?? []).map((event) => event?.id).filter(Boolean));
     const revealNextEvent = () => {
-        setVisibleEventCount((current) => {
-            if (!totalVisibleEvents) {
-                return 1;
-            }
-
-            return Math.min(totalVisibleEvents, current + 1);
-        });
+        if (!totalVisibleEvents) {
+            setVisibleEventCount(1);
+            return;
+        }
+        const next = Math.min(totalVisibleEvents, visibleEventCount + 1);
+        setVisibleEventCount(next);
+        unseenEvents.markSeenThrough(turnEventIdsInOrder(), next);
     };
 
     // Skip the remaining reveals: the map snaps to the final post-jump state.
@@ -2322,6 +2967,7 @@ const DateWidget = ({
     const revealAllEvents = () => {
         if (totalVisibleEvents) {
             setVisibleEventCount(totalVisibleEvents);
+            unseenEvents.markSeenThrough(turnEventIdsInOrder(), totalVisibleEvents);
         }
     };
 
@@ -2346,7 +2992,8 @@ const DateWidget = ({
     // engaged for that turn.
     useEffect(() => {
         const record = latestTurnRecord;
-        if (openPanel !== "history" || !record || !(record.events?.length > 0)) {
+        // Not mid-skip: the snapshot that would load belongs to the turn before.
+        if (skipInFlight || openPanel !== "history" || !record || !(record.events?.length > 0)) {
             return undefined;
         }
         if (stagedBase.recordId === record.id && stagedBase.world) {
@@ -2367,11 +3014,38 @@ const DateWidget = ({
         return () => {
             cancelled = true;
         };
-    }, [latestTurnRecord?.id, openPanel, stagedBase.recordId]);
+    }, [latestTurnRecord?.id, openPanel, skipInFlight, stagedBase.recordId]);
 
     useEffect(() => {
+        // No snapshot needed while the skip writes: the world has not moved, so
+        // it is already the pre-jump base. Without this the map sits still all
+        // round, since the reveal now happens during the skip and the turn lands
+        // fully revealed, the one state the staging below never covers.
+        if (liveTurnRecord) {
+            const revealedLive = liveTurnRecord.events.slice(0, Math.max(1, visibleEventCount));
+            if (openPanel === "history" && liveStageBase && revealedLive.length) {
+                try {
+                    const { world: livePreview } = applyEventImpactsToWorld({
+                        colors: {},
+                        events: revealedLive,
+                        motion: { originDate: liveTurnRecord.fromDate || "", round: liveTurnRecord.round || 0, tick: 0 },
+                        world: liveStageBase,
+                    });
+                    setWorldStateOverride(livePreview);
+                    setUnitsOverride(livePreview.units ?? []);
+                    return;
+                } catch (error) {
+                    // Unvalidated impacts again: the map waits rather than taking the panel.
+                    console.warn("[OH staged reveal] the live preview could not be applied; the map waits for the turn.", error);
+                }
+            }
+            setWorldStateOverride(null);
+            setUnitsOverride(null);
+            return;
+        }
         const record = latestTurnRecord;
         const stagingActive =
+            !skipInFlight &&
             openPanel === "history" &&
             record &&
             stagedBase.recordId === record.id &&
@@ -2404,7 +3078,7 @@ const DateWidget = ({
         });
         setWorldStateOverride(stagedWorld);
         setUnitsOverride(stagedWorld.units ?? []);
-    }, [latestTurnRecord, openPanel, stagedBase, totalVisibleEvents, visibleEventCount]);
+    }, [latestTurnRecord, liveStageBase, liveTurnRecord, openPanel, skipInFlight, stagedBase, totalVisibleEvents, visibleEventCount]);
 
     // Never leave a stale override behind when this widget unmounts.
     useEffect(
@@ -2437,9 +3111,11 @@ const DateWidget = ({
         onRetryProjects={retryHeldProjects}
         onRetrySegment={retryHeldSegment}
         onUndo={runUndo}
+        offeredInteractive={skipInFlight ? null : shownOffer}
         progressLabel={jumpProgress}
         projectsHeld={projectsHeld}
         projectsRetries={projectsRetries}
+        sceneInProgress={sceneInProgress}
         segmentHeld={segmentHeld}
         segmentRetries={segmentRetries}
         topOffset={topOffset}
@@ -2449,17 +3125,27 @@ const DateWidget = ({
         isOpen={openPanel === "history"}
         onRevealNextEvent={revealNextEvent}
         onRevealAll={revealAllEvents}
-        lookups={lookups}
+        lookups={cardLookups}
         onClose={() => setPanel(null)}
         buildDebugIncident={buildFallbackIncident}
         // A fallback turn is usually a turn the player wants gone; the undo it
         // needs already exists over in the Timeline panel, so this just saves
         // the trip. Same restore point, same code path.
-        canRollbackTurn={undoCount > 0 && !isLoading}
+        // Nothing is written mid-skip, so there is no turn to roll back and no round to stop.
+        canRollbackTurn={undoCount > 0 && !isLoading && !skipInFlight}
         onRollbackTurn={() => runUndo({ stayOnHistory: true })}
-        record={latestTurnRecord}
+        canIntervene={canInterveneTurn && undoCount > 0 && !isLoading && !skipInFlight}
+        onIntervene={runIntervene}
+        // The last written turn's offer, never on a skip still being written:
+        // that skip replaces it.
+        offeredInteractiveId={!skipInFlight && shownOffer ? shownOffer.id : ""}
+        live={Boolean(liveTurnRecord)}
+        progress={skipInFlight ? { label: jumpProgress, onCancel: cancelJump } : null}
+        record={displayRecord}
         topOffset={topOffset}
         visibleEventCount={visibleEventCount}
+        openMapChanges={openMapChanges}
+        onToggleMapChanges={toggleMapChanges}
         warning={fallbackWarning || persistedFallbackWarning}
         />
 
@@ -2532,7 +3218,7 @@ const DateWidget = ({
         type="button"
         style={{
             ...buttonStyle,
-            color: openPanel === "skip" ? "rgba(196,165,255,0.9)" : buttonStyle.color,
+            color: openPanel === "skip" ? "#e4e4e7" : buttonStyle.color,
         }}
         onClick={() => {
             if (isLoading) {
@@ -2553,7 +3239,7 @@ const DateWidget = ({
             }
         }}
         >
-        {isLoading ? <SpinnerRing size={15} tone="rgba(196,165,255,0.95)" /> : "\u00BB"}
+        {isLoading ? <SpinnerRing size={15} tone="rgba(255,255,255,0.28)" /> : "\u00BB"}
         </button>
         </div>
         </>

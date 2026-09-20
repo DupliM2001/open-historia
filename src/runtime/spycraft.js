@@ -147,6 +147,21 @@ export const setCoverStory = (world, id, coverStory) => setStatus(world, id, { c
 // was skipped, with the reason in the words the UI would have shown.
 export const SPY_OP_KINDS = ["deploy", "recall"];
 
+// One order as it is STORED on an event. It used to be read straight off the raw
+// event and never normalized, so it did not survive a save: the order applied
+// during the turn, and a campaign reloaded from events.json had no record that
+// the agent was ever ordered anywhere. The shape is what applySpyOps reads, so
+// a replay of the stored event does exactly what the live turn did.
+export const normalizeSpyOp = (entry) => {
+  if (!entry || typeof entry !== "object") return null;
+  const op = String(entry.op ?? "").trim().toLowerCase();
+  const target = String(entry.target ?? entry.country ?? entry.polity ?? "").trim();
+  if (!SPY_OP_KINDS.includes(op) || !target) return null;
+  const coverStory = String(entry.coverStory ?? "").trim();
+  const note = String(entry.note ?? "").trim();
+  return { op, target, ...(coverStory ? { coverStory } : {}), ...(note ? { note } : {}) };
+};
+
 export const applySpyOps = (world, ops, { date = "", playerPolity = "" } = {}) => {
   const owner = String(playerPolity ?? "").trim();
   const same = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
@@ -369,12 +384,16 @@ const normalizeExchange = (exchange, index, target) => {
   const counterpart = String(exchange?.counterpart ?? "").trim();
   const messages = (Array.isArray(exchange?.messages) ? exchange.messages : []).map(normalizeMessage).filter(Boolean);
   if (!counterpart || messages.length === 0) return null;
+  // A copy stolen in a turn carries the event it came with, and is shown when
+  // that event is revealed (runtime/unseenEvents.js).
+  const eventId = String(exchange?.eventId ?? "").trim();
   return {
     id: String(exchange?.id ?? "").trim() || `${target}:${index}:${counterpart}`.toLowerCase().replace(/\s+/g, "-"),
     counterpart,
     date: String(exchange?.date ?? "").trim(),
     subject: String(exchange?.subject ?? "").trim(),
     messages,
+    ...(eventId ? { eventId } : {}),
   };
 };
 

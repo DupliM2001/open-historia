@@ -2186,11 +2186,12 @@ export const loadCountryLabelCollections = async ({ force = false, ownedCodes = 
   return request;
 };
 
+// No size: it meant serialising both FeatureCollections for a startup label.
+// normalizeTaskResult already treats a missing size as 0.
 export const warmCountryLabelCollections = async (options = {}) => {
-  const collections = await loadCountryLabelCollections(options);
+  await loadCountryLabelCollections(options);
   return {
     kind: "json",
-    size: JSON.stringify(collections).length,
     url: countryLabelsValueKey || COUNTRY_LABELS_CACHE_KEY,
   };
 };

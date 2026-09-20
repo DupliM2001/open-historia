@@ -5,6 +5,8 @@ import {
     AI_TASK_ROUTING,
     CONNECTION_TEMPLATES,
     DEFAULT_PROVIDER,
+    GEMINI_DEFAULT_CHAIN,
+    OPENAI_DEFAULT_MODEL,
     PROVIDER_OPTIONS,
     addConnection,
     addEntry,
@@ -23,7 +25,6 @@ import {
     getTaskPick,
     moveEntry,
     providerSetupRequirement,
-    providerSupportsModelDiscovery,
     removeConnection,
     removeEntry,
     resetEntryState,
@@ -34,6 +35,7 @@ import {
     updateEntry,
 } from "../AI/providerConfig.js";
 import { formatResetTime } from "../AI/fallbackRunner.js";
+import { REVIEW_SECTIONS, announceRequestBudgetChange, describeJumpCost, requestDay, requestSettings } from "../AI/requestBudget.js";
 import {
     isRatingEnabled,
     isTelemetryEnabled,
@@ -423,8 +425,8 @@ const ApiProviderSelector = ({ provider, onProviderChange }) => {
                             padding: "0.7rem 0.75rem",
                             borderRadius: "8px",
                             border: "1px solid",
-                            borderColor: selected ? "rgba(59,130,246,0.8)" : "rgba(255,255,255,0.08)",
-                            backgroundColor: selected ? "rgba(59,130,246,0.18)" : "rgba(0,0,0,0.16)",
+                            borderColor: selected ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
+                            backgroundColor: selected ? "rgba(0,0,0,0.42)" : "rgba(0,0,0,0.16)",
                             color: "white",
                             cursor: "pointer",
                             textAlign: "left",
@@ -581,7 +583,10 @@ const useFallbackView = () => {
     useEffect(() => {
         const refresh = () => setView(readFallbackView());
         window.addEventListener("ai:fallback-changed", refresh);
-        const timer = setInterval(refresh, 15000);
+        // The countdown only has to tick for someone watching it.
+        const timer = setInterval(() => {
+            if (document.visibilityState !== "hidden") refresh();
+        }, 15000);
         return () => {
             window.removeEventListener("ai:fallback-changed", refresh);
             clearInterval(timer);
@@ -608,9 +613,12 @@ const STATUS_COLORS = {
 const describeRowStatus = (status, at) => {
     if (status.status === "spent") return `Spent until ${formatResetTime(status.until)}`;
     if (status.status === "unusable") return `Unusable: ${status.reason}`;
+    // Not a skip: the next call still starts here (fallbackRunner.js). It says
+    // how long the provider asked for, which is how long it is likely to keep
+    // handing the call to the backup.
     if (status.status === "busy") {
         const seconds = Math.max(1, Math.ceil((status.until - at) / 1000));
-        return `${status.reason === "rate limited" ? "Rate limited" : "Busy"}, back in ${seconds < 90 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`}`;
+        return `${status.reason === "rate limited" ? "Rate limited" : "Busy"}, for about ${seconds < 90 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`}`;
     }
     return "Ready";
 };
@@ -711,8 +719,8 @@ const EntryEditor = ({ entry, connections, entries }) => {
         value={entry.model}
         onChange={set("model")}
         suggestions={suggestions}
-        placeholder={provider === "gemini" ? "gemini-3.5-flash-lite" : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
-        helperText={providerSupportsModelDiscovery(provider)
+        placeholder={provider === "gemini" ? GEMINI_DEFAULT_CHAIN[0] : provider === "openai" ? OPENAI_DEFAULT_MODEL : provider.startsWith("anthropic") ? "claude-haiku-4-5" : "Model id"}
+        helperText={provider === "openai-compatible"
             ? "Leave blank to auto-pick a chat-capable model from the server's /models."
             : "Leave blank to use the built-in default."}
         />
@@ -758,7 +766,7 @@ const FillPanel = ({ connections, onDone }) => {
             {connectionDisplayName(connection)} <span style={{ color: "rgba(255,255,255,0.45)" }}>({getProviderMeta(connection.provider).label})</span>
             </label>
         ))}
-        <SettingsInput label="Models, strongest first (one per line)" multiline value={models} onChange={setModels} placeholder={"gemini-3.7-flash\ngemini-3.6-flash\ngemini-3.5-flash\ngemini-3.5-flash-lite"} />
+        <SettingsInput label="Models, strongest first (one per line)" multiline value={models} onChange={setModels} placeholder={GEMINI_DEFAULT_CHAIN.join("\n")} />
         <div style={{ alignItems: "center", display: "flex", gap: "0.5rem" }}>
         <button type="button" onClick={fill} disabled={!ticked.length || !models.trim()} style={{ ...primaryButtonStyle, opacity: ticked.length && models.trim() ? 1 : 0.5 }}>Fill</button>
         <button type="button" onClick={onDone} style={smallButtonStyle}>Close</button>
@@ -800,7 +808,7 @@ const FallbackListSection = () => {
     return (
         <SettingsSection
         title="Models"
-        description="Backup models: when one runs out, the next one takes over. Every AI call starts at the top of the list and moves down only when a model can't answer."
+        description="Backup models: when one runs out, the next one takes over. Every AI call starts at the top of the list and moves down only when a model can't answer — including the call right after one failed, so a model is back in use the moment it can answer again."
         >
         {entries.length === 0 && (
             <div style={{ ...helperStyle, marginTop: 0, marginBottom: "0.7rem" }}>No models yet. Add one to let the game write turns and replies.</div>
@@ -833,7 +841,7 @@ const FallbackListSection = () => {
             <button type="button" onClick={() => moveEntry(entry.id, index - 1)} disabled={index === 0} aria-label="Move up" title="Move up" style={{ ...rowButtonStyle, opacity: index === 0 ? 0.4 : 1 }}>↑</button>
             <button type="button" onClick={() => moveEntry(entry.id, index + 1)} disabled={index === entries.length - 1} aria-label="Move down" title="Move down" style={{ ...rowButtonStyle, opacity: index === entries.length - 1 ? 0.4 : 1 }}>↓</button>
             <button type="button" onClick={() => setEditingId(editingId === entry.id ? null : entry.id)} style={rowButtonStyle}>{editingId === entry.id ? "Done" : "Edit"}</button>
-            {entry.status.status !== "ready" && <button type="button" onClick={() => resetEntryState(entry.id)} title="Try it again on the next call" style={rowButtonStyle}>Reset</button>}
+            {entry.status.status !== "ready" && <button type="button" onClick={() => resetEntryState(entry.id)} title="Clear this status. Every call tries this model again either way." style={rowButtonStyle}>Reset</button>}
             <button type="button" onClick={() => remove(entry)} aria-label="Remove" title="Remove from the list" style={rowButtonStyle}>✕</button>
             </div>
             {editingId === entry.id && (
@@ -852,12 +860,13 @@ const FallbackListSection = () => {
         <div style={{ ...fieldGroupStyle, marginTop: "0.9rem" }}>
         <label style={labelStyle}>When a model is rate limited</label>
         <select data-no-translate value={view.rateLimitPolicy} onChange={(event) => setRateLimitPolicy(event.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
-        <option value="wait" style={{ color: "black" }}>Wait, then try it again (default)</option>
-        <option value="next" style={{ color: "black" }}>Try the next one straight away</option>
+        <option value="next" style={{ color: "black" }}>Use the next one straight away (default)</option>
+        <option value="wait" style={{ color: "black" }}>Wait, then try it again</option>
         </select>
         <div style={helperStyle}>
-        A rate limit is a short pause, not a used-up allowance. Waiting keeps your
-        backups' daily allowance for when the top model has truly run out.
+        A rate limit is a short pause, not a used-up allowance, and it is usually
+        over by the next call — which starts at the top of the list again. Waiting
+        instead keeps your backups' daily allowance, at the cost of a slower turn.
         </div>
         </div>
         <div style={{ ...helperStyle, marginBottom: 0 }}>
@@ -995,6 +1004,163 @@ const ReasoningSection = () => {
     );
 };
 
+// The request budget (AI/requestBudget.js): what today has cost, and the
+// switches that decide what a time skip and an idle minute may spend. Its own
+// storage and its own change event, so it sits outside mapSettings.
+const REVIEW_SECTION_LABELS = {
+    units: ["Move units to match the events", "Armies advance, retreat and take losses where the events say they did."],
+    territory: ["Mark occupied and disputed land", "Captured towns change hands on the map; contested ones are striped."],
+    timeline: ["Take repeats and filler off the timeline", "Events that restate the record, or report a meeting with no outcome, are left out."],
+    board: ["Keep the Projects board in step", "Progress, stalls and new long-term efforts follow from what happened."],
+    spies: ["Collect your agents' reports", "Each agent files what it intercepted, at least every third skip."],
+};
+
+const useRequestDay = () => {
+    const [day, setDay] = useState(() => requestDay());
+    useEffect(() => {
+        const refresh = () => setDay(requestDay());
+        window.addEventListener("ai:request-budget", refresh);
+        // The day turns over at midnight Pacific whether or not anything is sent.
+        const timer = setInterval(refresh, 60000);
+        return () => {
+            window.removeEventListener("ai:request-budget", refresh);
+            clearInterval(timer);
+        };
+    }, []);
+    return day;
+};
+
+const RequestBudgetSection = () => {
+    const day = useRequestDay();
+    const [saving, setSaving] = useState(() => requestSettings.saveRequests());
+    const [background, setBackground] = useState(() => requestSettings.backgroundAi());
+    const [dailyLimit, setDailyLimit] = useState(() => String(requestSettings.dailyLimit()));
+    const [backgroundCap, setBackgroundCap] = useState(() => String(requestSettings.backgroundDailyCap()));
+    const [sections, setSections] = useState(() => Object.fromEntries(REVIEW_SECTIONS.map((section) => [section, requestSettings.reviewSection(section)])));
+
+    const apply = (message, write) => {
+        write();
+        logDebugEvent("setting", message);
+        announceRequestBudgetChange();
+    };
+    const cost = describeJumpCost({ saveRequests: saving });
+    const share = day.limit > 0 ? Math.min(1, day.used / day.limit) : 0;
+    const barColor = share >= 0.9 ? "#f87171" : share >= 0.7 ? "#fbbf24" : "#60a5fa";
+
+    return (
+        <SettingsSection
+        title="AI requests"
+        description="A free key allows a few hundred requests a day. These settings decide how many the game spends, and on what."
+        >
+            <div style={{ marginBottom: "0.95rem" }}>
+                <div style={{ alignItems: "baseline", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+                    <div style={{ color: "rgba(255,255,255,0.92)", fontSize: "0.82rem", fontWeight: 800 }}>
+                        <span data-no-translate>{day.used}</span> of <span data-no-translate>{day.limit}</span> used today
+                    </div>
+                    <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.64rem" }}>
+                        resets at <span data-no-translate>{formatResetTime(day.resetAt)}</span>
+                    </div>
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.07)", borderRadius: "999px", height: "6px", marginTop: "0.4rem", overflow: "hidden" }}>
+                    <div style={{ background: barColor, height: "100%", width: `${Math.round(share * 100)}%` }} />
+                </div>
+                <div style={{ ...helperStyle, marginTop: "0.4rem" }}>
+                    {day.lastJump ? <>Your last time skip used <span data-no-translate>{day.lastJump.used}</span>. </> : null}
+                    {day.background > 0 ? <>Background AI has used <span data-no-translate>{day.background}</span> of its <span data-no-translate>{day.backgroundCap}</span>. </> : null}
+                    {day.refused > 0 ? <>The provider turned away <span data-no-translate>{day.refused}</span> for coming too fast; those cost a wait, not allowance. </> : null}
+                    Counted on this device, from midnight Pacific time, which is when a Gemini key&apos;s day begins.
+                </div>
+            </div>
+
+            <Toggle
+            label="Save AI requests"
+            enabled={saving}
+            onToggle={() => {
+                const next = !saving;
+                setSaving(next);
+                apply(`Save AI requests turned ${next ? "on" : "off"}.`, () => requestSettings.setSaveRequests(next));
+            }}
+            />
+            <div style={settingsHelper}>
+                {saving
+                    ? <>On (default): a time skip is one request, two when there is something to check afterwards, and never more than <span data-no-translate>{cost.max}</span>. The model is handed the names it needs instead of looking them up, a small mistake in its answer is cut out rather than asked for again, and the checks below go out together.</>
+                    : <>Off: the most thorough turns, for a key with no daily limit. Every check after a skip makes its own request, the model may look things up (up to three extra requests per task), and a flawed answer is sent back to be redone. A busy skip can use twenty requests or more.</>}
+            </div>
+
+            <div style={fieldGroupStyle}>
+                <label style={labelStyle} htmlFor="ai-daily-request-limit">Requests a day your key allows</label>
+                <input
+                id="ai-daily-request-limit"
+                data-no-translate
+                inputMode="numeric"
+                style={{ ...inputStyle, maxWidth: "9rem" }}
+                value={dailyLimit}
+                onChange={(event) => setDailyLimit(event.target.value.replace(/[^\d]/g, ""))}
+                onBlur={() => {
+                    apply(`Daily request limit set to ${dailyLimit || "the default"}.`, () => requestSettings.setDailyLimit(dailyLimit));
+                    setDailyLimit(String(requestSettings.dailyLimit()));
+                }}
+                />
+                <div style={helperStyle}>Only used for the count above and to keep background AI from spending the end of your day. The game never stops you at the limit; your provider does.</div>
+            </div>
+
+            <Toggle
+            label="Background AI"
+            enabled={background}
+            onToggle={() => {
+                const next = !background;
+                setBackground(next);
+                apply(`Background AI turned ${next ? "on" : "off"}.`, () => requestSettings.setBackgroundAi(next));
+            }}
+            />
+            <div style={settingsHelper}>
+                {background
+                    ? <>On (default): while you are not skipping time, countries may write to you unprompted, forces may reposition, agents may file extra reports, and a country you look at gets its first intelligence reading — each of those is a request nobody pressed a button for, and together they stop at the daily cap below.</>
+                    : <>Off: the game only calls the model when you do something.</>}
+            </div>
+            {background && (
+                <div style={fieldGroupStyle}>
+                    <label style={labelStyle} htmlFor="ai-background-daily-cap">Background requests a day, at most</label>
+                    <input
+                    id="ai-background-daily-cap"
+                    data-no-translate
+                    inputMode="numeric"
+                    style={{ ...inputStyle, maxWidth: "9rem" }}
+                    value={backgroundCap}
+                    onChange={(event) => setBackgroundCap(event.target.value.replace(/[^\d]/g, ""))}
+                    onBlur={() => {
+                        apply(`Background AI daily cap set to ${backgroundCap || "the default"}.`, () => requestSettings.setBackgroundDailyCap(backgroundCap));
+                        setBackgroundCap(String(requestSettings.backgroundDailyCap()));
+                    }}
+                    />
+                    <div style={helperStyle}>It also stops by itself once less than a tenth of your day is left.</div>
+                </div>
+            )}
+
+            <div style={{ color: "rgba(255,255,255,0.78)", fontSize: "0.74rem", fontWeight: 800, margin: "0.4rem 0 0.2rem" }}>Checks after a time skip</div>
+            <div style={{ ...helperStyle, marginBottom: "0.7rem" }}>
+                {saving
+                    ? "All of these share ONE request, and only when the skip gave them something to look at. Turning one off never saves a request unless it was the only one with work to do; it does make that request smaller."
+                    : "With Save AI requests off, each of these is its own request after every skip and these switches are not used."}
+            </div>
+            {REVIEW_SECTIONS.map((section, index) => (
+                <React.Fragment key={section}>
+                    <Toggle
+                    label={REVIEW_SECTION_LABELS[section][0]}
+                    enabled={sections[section]}
+                    onToggle={() => {
+                        const next = !sections[section];
+                        setSections((current) => ({ ...current, [section]: next }));
+                        apply(`After-skip check "${REVIEW_SECTION_LABELS[section][0]}" turned ${next ? "on" : "off"}.`, () => requestSettings.setReviewSection(section, next));
+                    }}
+                    />
+                    <div style={{ ...settingsHelper, ...(index === REVIEW_SECTIONS.length - 1 ? { marginBottom: 0 } : {}) }}>{REVIEW_SECTION_LABELS[section][1]}</div>
+                </React.Fragment>
+            ))}
+        </SettingsSection>
+    );
+};
+
 const SocialLinks = ({ discordUrl, redditUrl, githubUrl }) => {
     const links = [
         discordUrl ? { label: "Discord", href: discordUrl } : null,
@@ -1013,8 +1179,8 @@ const SocialLinks = ({ discordUrl, redditUrl, githubUrl }) => {
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
-                    background: "rgba(255,255,255,0.035)",
-                    border: "1px solid rgba(255,255,255,0.075)",
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
                     borderRadius: "7px",
                     color: "rgba(255,255,255,0.58)",
                     fontSize: "0.68rem",
@@ -1532,8 +1698,8 @@ const diagnosticsButton = {
 
 const QuickAction = ({ title, description, symbol, tone = "neutral", onClick, href, compact = false }) => {
     const tones = {
-        neutral: { background: "rgba(255,255,255,0.035)", border: "rgba(255,255,255,0.08)", icon: "rgba(255,255,255,0.08)", color: "#f8fafc" },
-        violet: { background: "rgba(124,58,237,0.09)", border: "rgba(167,139,250,0.18)", icon: "rgba(124,58,237,0.18)", color: "#ddd6fe" },
+        neutral: { background: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)", icon: "rgba(255,255,255,0.08)", color: "#f8fafc" },
+        slate: { background: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.12)", icon: "rgba(255,255,255,0.08)", color: "#e4e4e7" },
         blue: { background: "rgba(59,130,246,0.08)", border: "rgba(96,165,250,0.18)", icon: "rgba(59,130,246,0.16)", color: "#dbeafe" },
         amber: { background: "rgba(245,158,11,0.07)", border: "rgba(251,191,36,0.17)", icon: "rgba(245,158,11,0.14)", color: "#fde68a" },
     };
@@ -1571,7 +1737,7 @@ const QuickAction = ({ title, description, symbol, tone = "neutral", onClick, hr
 };
 
 const SettingsSection = ({ title, description, right, children }) => (
-    <section style={{ background: "rgba(255,255,255,0.022)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "12px", padding: "1rem" }}>
+    <section style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "12px", padding: "1rem" }}>
         <div style={{ alignItems: "flex-start", display: "flex", gap: "0.75rem", justifyContent: "space-between", marginBottom: "0.9rem" }}>
             <div style={{ minWidth: 0 }}>
                 <div style={{ color: "rgba(255,255,255,0.92)", fontSize: "0.88rem", fontWeight: 850 }}>{title}</div>
@@ -1693,10 +1859,10 @@ const SettingsWorkspace = ({
                     onClick={() => onSectionChange(section.key)}
                     style={{
                         alignItems: "center",
-                        background: selected ? "rgba(59,130,246,0.12)" : "transparent",
-                        border: `1px solid ${selected ? "rgba(96,165,250,0.22)" : "transparent"}`,
+                        background: selected ? "rgba(0,0,0,0.42)" : "transparent",
+                        border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "transparent"}`,
                         borderRadius: "9px",
-                        color: selected ? "#e0f2fe" : "rgba(255,255,255,0.58)",
+                        color: selected ? "#f4f4f5" : "rgba(255,255,255,0.58)",
                         cursor: "pointer",
                         display: "flex",
                         flex: isMobile ? "0 0 auto" : "none",
@@ -1708,7 +1874,7 @@ const SettingsWorkspace = ({
                         width: isMobile ? "auto" : "100%",
                     }}
                     >
-                        <span aria-hidden="true" style={{ alignItems: "center", background: selected ? "rgba(59,130,246,0.16)" : "rgba(255,255,255,0.045)", borderRadius: "7px", display: "inline-flex", flexShrink: 0, fontSize: "0.76rem", fontWeight: 900, height: "1.8rem", justifyContent: "center", width: "1.8rem" }}>{section.icon}</span>
+                        <span aria-hidden="true" style={{ alignItems: "center", background: selected ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)", borderRadius: "7px", display: "inline-flex", flexShrink: 0, fontSize: "0.76rem", fontWeight: 900, height: "1.8rem", justifyContent: "center", width: "1.8rem" }}>{section.icon}</span>
                         <span>
                             <span style={{ display: "block", fontSize: "0.74rem", fontWeight: 850 }}>{section.label}</span>
                             {!isMobile && <span style={{ color: "rgba(255,255,255,0.3)", display: "block", fontSize: "0.57rem", lineHeight: 1.35, marginTop: "0.12rem" }}>{section.description}</span>}
@@ -1803,6 +1969,7 @@ const SettingsWorkspace = ({
                 <FallbackListSection />
                 <ConnectionsSection />
                 <ReasoningSection />
+                <RequestBudgetSection />
                 <SettingsSection title="Generation behavior" description="Bound model waiting behavior without changing the deterministic fallback path.">
                     <Toggle label="Limit AI generation" enabled={mapSettings.limitAiGeneration} onToggle={() => updateMapSetting("limitAiGeneration", MAP_SETTING_KEYS.limitAiGeneration, !mapSettings.limitAiGeneration)} />
                     <div style={settingsHelper}>
@@ -1814,7 +1981,11 @@ const SettingsWorkspace = ({
                     </div>
                     <Toggle label="AI lookup functions" enabled={mapSettings.lookupFunctions} onToggle={() => updateMapSetting("lookupFunctions", MAP_SETTING_KEYS.lookupFunctions, !mapSettings.lookupFunctions)} />
                     <div style={settingsHelper}>
-                    On (default): before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
+                    Only used while Save AI requests (above) is off, because every lookup is a whole extra request. On: before it answers, the model can call lookup functions — the exact power and region names, a region's neighbours, the war ledger, a chat — in up to three extra requests per task. Off: one request per task, with the region lists and ledgers written into the prompt instead. Needs a provider that supports function calling.
+                    </div>
+                    <Toggle label="Show time skip events as they are written" enabled={mapSettings.liveSkipEvents} onToggle={() => updateMapSetting("liveSkipEvents", MAP_SETTING_KEYS.liveSkipEvents, !mapSettings.liveSkipEvents)} />
+                    <div style={settingsHelper}>
+                    On (default): a skip opens the Events panel and fills it as the model writes, with the spinner and Cancel underneath. Reveal with Next event as they arrive, and the map and camera follow; wherever you get to is kept when the turn lands. Off: the skip stays behind the Timeline panel's spinner and the round appears at the end. The turn itself is the same either way, and Gemini arrives all at once regardless.
                     </div>
                     <Toggle label="Batch background AI tasks" enabled={mapSettings.batchBackgroundTasks} onToggle={() => updateMapSetting("batchBackgroundTasks", MAP_SETTING_KEYS.batchBackgroundTasks, !mapSettings.batchBackgroundTasks)} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
@@ -1860,7 +2031,7 @@ const SettingsWorkspace = ({
                     </div>
                     <Toggle label="Rate AI generations" enabled={ratingOn} onToggle={onToggleRating} />
                     <div style={{ ...settingsHelper, marginBottom: 0 }}>
-                    A small 1-10 bar after each time skip, Game Master edit and catalyst. Ratings sit beside the call in the console and its exports.
+                    A small 1-10 bar after each time skip, Game Master edit and interactive event. Ratings sit beside the call in the console and its exports.
                     </div>
                 </SettingsSection>
                 {!import.meta.env.VITE_OH_WEB && (
@@ -1881,7 +2052,7 @@ const SettingsWorkspace = ({
             <div ref={cardRef} className="oh-ws-card" style={{ background: "linear-gradient(180deg, rgba(46,46,50,0.72), rgba(17,17,19,0.62))", backdropFilter: "var(--oh-hud-blur)", WebkitBackdropFilter: "var(--oh-hud-blur)", border: "1px solid var(--oh-hud-border)", borderRadius: isMobile ? "12px" : "18px", boxShadow: "var(--oh-hud-shadow)", color: "white", display: "flex", flexDirection: "column", fontFamily: "sans-serif", height: isMobile ? "calc(100vh - 0.9rem)" : "min(800px, calc(100vh - 2.4rem))", maxWidth: "1120px", overflow: "hidden", width: isMobile ? "calc(100vw - 0.9rem)" : "min(94vw, 1120px)" }}>
                 <div aria-hidden="true" className="oh-ws-tint" style={{ background: "linear-gradient(180deg, rgba(46,46,50,0.68), rgba(17,17,19,0.58))", borderRadius: "inherit", inset: 0, pointerEvents: "none", position: "absolute" }} />
                 <div style={{ alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: "0.75rem", padding: "0.8rem 0.9rem" }}>
-                    <button type="button" onClick={onBack} aria-label="Back to game menu" title="Back to game menu" style={{ alignItems: "center", background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.66)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>←</button>
+                    <button type="button" onClick={onBack} aria-label="Back to game menu" title="Back to game menu" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.66)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>←</button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ alignItems: "baseline", display: "flex", flexWrap: "wrap", gap: "0.35rem 0.65rem" }}>
                             <span style={{ color: "#f8fafc", fontSize: "1rem", fontWeight: 900 }}>Settings</span>
@@ -1891,7 +2062,7 @@ const SettingsWorkspace = ({
                             {[context?.countryName ? `Playing as ${context.countryName}` : "", context?.date || ""].filter(Boolean).join(" · ") || "Game preferences"}
                         </div>
                     </div>
-                    <button type="button" onClick={onClose} aria-label="Close settings" style={{ alignItems: "center", background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.62)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>×</button>
+                    <button type="button" onClick={onClose} aria-label="Close settings" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.62)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>×</button>
                 </div>
                 <div style={{ display: "grid", flex: 1, gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "235px minmax(0, 1fr)", gridTemplateRows: isMobile ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", minHeight: 0 }}>
                     <aside style={{ backgroundColor: "rgba(9,9,10,0.24)", borderBottom: isMobile ? "1px solid rgba(255,255,255,0.07)" : "none", borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,0.07)", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>{nav}</aside>
@@ -1915,10 +2086,10 @@ const QuickMenuTabButton = ({ label, selected, onClick }) => (
     type="button"
     onClick={onClick}
     style={{
-        background: selected ? "rgba(59,130,246,0.16)" : "transparent",
-        border: `1px solid ${selected ? "rgba(96,165,250,0.28)" : "transparent"}`,
+        background: selected ? "rgba(0,0,0,0.42)" : "transparent",
+        border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "transparent"}`,
         borderRadius: "8px",
-        color: selected ? "#e0f2fe" : "rgba(255,255,255,0.56)",
+        color: selected ? "#f4f4f5" : "rgba(255,255,255,0.56)",
         cursor: "pointer",
         fontFamily: "inherit",
         fontSize: "0.72rem",
@@ -1950,7 +2121,7 @@ const ContextSummaryCard = ({ context }) => {
     ];
 
     return (
-        <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "11px", padding: "0.8rem 0.85rem" }}>
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "11px", padding: "0.8rem 0.85rem" }}>
             <div style={{ color: "rgba(255,255,255,0.82)", fontSize: "0.74rem", fontWeight: 800, marginBottom: "0.6rem" }}>Current session</div>
             <div style={{ display: "grid", gap: "0.45rem" }}>
                 {rows.map((row) => (
@@ -2024,6 +2195,8 @@ const SettingsMenu = ({
         chunkLongJumps: getMapSetting(MAP_SETTING_KEYS.chunkLongJumps),
         // Ships ON: an absent key reads as on (see mapSettings.js).
         lookupFunctions: getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions),
+        // Ships ON too.
+        liveSkipEvents: getMapSettingDefaultOn(MAP_SETTING_KEYS.liveSkipEvents),
         batchBackgroundTasks: getMapSetting(MAP_SETTING_KEYS.batchBackgroundTasks),
     }));
 
@@ -2154,7 +2327,7 @@ const SettingsMenu = ({
             <QuickMenuPanel title="Tools" description="High-frequency in-game tools should stay one click away.">
                 <div style={grid}>
                     {typeof onOpenCheats === "function" && (
-                        <QuickAction title="Cheats" description="Game master tools and world editing" symbol="⌁" tone="violet" onClick={() => runAndClose(onOpenCheats)} />
+                        <QuickAction title="Cheats" description="Game master tools and world editing" symbol="⌁" tone="slate" onClick={() => runAndClose(onOpenCheats)} />
                     )}
                     {typeof onOpenEvents === "function" && (
                         <QuickAction title="Events / Timeline" description="Review the current turn and world history" symbol="◷" tone="blue" onClick={() => runAndClose(onOpenEvents)} />
@@ -2208,7 +2381,7 @@ const SettingsMenu = ({
                 <button type="button" onClick={() => onClose?.()} aria-label="Close game menu" style={{ alignItems: "center", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", color: "rgba(255,255,255,0.58)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2rem", justifyContent: "center", width: "2rem" }}>×</button>
             </div>
 
-            <div style={{ background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", display: "flex", gap: "0.2rem", padding: "0.2rem", marginBottom: "0.8rem", overflowX: "auto", scrollbarWidth: "none" }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", display: "flex", gap: "0.2rem", padding: "0.2rem", marginBottom: "0.8rem", overflowX: "auto", scrollbarWidth: "none" }}>
                 {QUICK_MENU_TABS.map((tab) => (
                     <QuickMenuTabButton key={tab.key} label={tab.label} selected={activeQuickTab === tab.key} onClick={() => setActiveQuickTab(tab.key)} />
                 ))}

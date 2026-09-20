@@ -170,7 +170,7 @@ Defined at `server/libraryStore.js:240-324`. These maps drive every read/write/s
 | `STORAGE_JSON_ASSET_FILES` | `actions`,`advisor`,`chat`,`events` → `storage/*.json` | Array-shaped |
 | `JSON_ASSET_FILES` | CORE ∪ STORAGE | Copied into every new scenario/game |
 | `OPTIONAL_JSON_ASSET_FILES` | `colors`,`flags`,`tags` → `*.json` | Static author data kept **out** of the 5 s `world.json` poll |
-| `RUNTIME_ONLY_JSON_ASSET_FILES` | `snapshots`→`storage/snapshots.json` | Roll-back points; never copied/exported |
+| `RUNTIME_ONLY_JSON_ASSET_FILES` | `snapshots`→`storage/snapshots.json` | Roll-back points (each a pre-turn `state` and, for a time skip, the `turn` journal Intervene re-applies from — `src/Game/AI/intervene.js`); never copied/exported |
 | `PMTILES_ASSET_FILES` | `cities`,`countries`,`regions` → `*.pmtiles` | Per-scenario binary map overrides |
 | `SCENARIO_GEOJSON_ASSET_FILES` | `regionsGeojson`→`regions.geojson`, `citiesGeojson`→`cities.geojson`, `backgroundData`→`background.json` | Custom map geometry; always embedded in bundles |
 | `*_IMAGE_ASSET_FILES` | `cover`→`cover-image.bin` | Content type recorded in meta |
@@ -260,11 +260,13 @@ The mirror of this logic for the web build is `src/runtime/web/ownerMigration.js
 
 Bundles are the shareable unit strangers swap on the community hub. Schema string `pax-historia-scenario-bundle/2` is the **only** compatibility gate (`version` is written and read by nobody). `ACCEPTED_BUNDLE_SCHEMAS` also accepts the unversioned v1 string — old bundles import fine and get named by the migration on first read.
 
-- **Export** — `exportScenarioBundle(id)` (`server/libraryStore.js`) returns `{ schema, scenario{meta}, data{7 core assets}, assets{...}, mode: "full", exportedAt }`. Every export is full: cover, colors, flags, tags, geometry, background and any custom PMTiles archive are base64-embedded whenever the scenario has them. The former light mode (which dropped custom PMTiles) is gone; `?mode=` on the route is accepted and ignored, and older `mode: "light"` bundles still import.
+- **Export** — `exportScenarioBundle(id)` (`server/libraryStore.js`) returns `{ schema, scenario{meta}, data{7 core assets}, assets{...}, mode: "full", exportedAt }`. Every export is full: cover, colors, flags, tags, geometry, background and any custom PMTiles archive travel whenever the scenario has them. The former light mode (which dropped custom PMTiles) is gone; `?mode=` on the route is accepted and ignored, and older `mode: "light"` bundles still import.
+  - **What is base64 and what is not.** Binaries (the cover, a custom PMTiles archive) are base64. JSON assets — the region and city geometry, a vector background — are the JSON itself (`encodeJsonFile`), because base64 made every shared map a third bigger for nothing: in a real hub bundle the region geometry was 17.1 MB of the 18.1 MB file, against 12.8 MB of actual geometry. Anything that does not parse as JSON still falls back to base64, byte-exact. The importer reads both shapes, so the bundles already on the hub import unchanged (`server/scenarioBundleWeight.test.js`).
+  - **Inside a .zip the heavy assets are real entries.** `src/runtime/bundleFiles.js` lifts every embedded asset over 64 KB out of `scenario.json` into `assets/<file>` — text DEFLATEd, binaries STOREd — leaving `{ mode: "file", file, format }` behind, and puts them back on import before the bundle reaches the importer, which never learns it happened. The same lift is used by the scenario export, the hub publish and a game export carrying its map. That hub map: 18.1 MB as one JSON document, 13.8 MB with the geometry as JSON, **4.2 MB** as a zip.
 - **Import** — `importScenarioBundle` (`server/libraryStore.js:2529`) creates a **new** scenario, writes its core data via `updateScenario`, lays down each embedded asset via `applyScenarioBundleAsset`, then stamps `hubOrigin` last (so the import's own meta writes don't clear it) and selects it.
 - **Update-in-place** — `updateScenarioFromBundle` (`server/libraryStore.js:2635`) is the hub card's "Update" button: it keeps the local `id` (games reference scenarios by id) and `createdAt`, replaces meta/world/assets from the new bundle, and visits **every** uploadable key so an asset the new version dropped doesn't linger. `hubOrigin` is re-stamped last so the card reverts to "New Game" after refresh.
 
-`hubOrigin` (`{ postId, bundleUrl, syncedAt }`, normalized at `server/libraryStore.js:575-585`) is provenance for hub imports. **Any meta write that doesn't explicitly carry `hubOrigin` clears it** (`writeScenarioMeta`, `server/libraryStore.js:639-641`) — a local edit forks the copy and stops offering overwrites. GitHub mints a new immutable attachment URL per re-upload, so `bundleUrl` inequality is itself the update signal (and the reason `/api/hub/file`'s disk cache can never go stale). See [Scenario hub](scenario-hub.md).
+`hubOrigin` (`{ postId, bundleUrl, syncedAt }`, normalized at `server/libraryStore.js:575-585`) is provenance for hub imports. **Any meta write that doesn't explicitly carry `hubOrigin` clears it** (`writeScenarioMeta`, `server/libraryStore.js:639-641`) — a local edit forks the copy and stops offering overwrites. GitHub mints a new immutable attachment URL per re-upload, so `bundleUrl` inequality is itself the update signal (and the reason `/api/hub/file`'s disk cache can never go stale). See [Scenario hub](runtime-services.md).
 
 ---
 
@@ -304,4 +306,4 @@ Every store imports this one constant, so a single env var relocates **all** wri
 | `OH_ALLOW_CROSS_ORIGIN` | unset | `=1` disables the cross-origin-write guard (`server/server.js:111`) |
 | `OH_IMPORT_COUNTER_URL` | `https://oh-import-counter.…workers.dev` | Import-telemetry counter Worker; empty string disables pings (`server/server.js:653`) |
 
-Related sibling pages: [World state](world-state.md) · [Map editor](map-editor.md) · [Scenario hub](scenario-hub.md).
+Related sibling pages: [World state](world-state.md) · [Map editor](map-editor.md) · [Scenario hub](runtime-services.md).

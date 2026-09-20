@@ -15,6 +15,7 @@ import {
 } from "./runtime/preload.js";
 import { ensureLibraryCatalog, useLibraryState } from "./runtime/library.js";
 import { announceMapRerender } from "./runtime/mapReadiness.js";
+import { prefetchGameplay } from "./Game/AI/gameplayLazy.js";
 
 const WorldShell = {
   backgroundColor: "#000",
@@ -165,6 +166,10 @@ function GameApp() {
     if (worldIdleRef.current) return;
     worldIdleRef.current = true;
     setHasFirstWorldIdle(true);
+
+    // Warm the AI chunk now that the map has settled, so the player's first turn
+    // pays for the turn and not for the download too.
+    prefetchGameplay();
 
     if (preloadFinishedRef.current) {
       setIsReady(true);

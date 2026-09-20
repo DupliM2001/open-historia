@@ -17,6 +17,10 @@ import url from "node:url";
 import { after, test } from "node:test";
 import { OWNER_SCHEMA } from "./ownerMigration.js";
 
+// A complete configuration carries every feature; these tests are about the two
+// named in them, so the director rides along at its defaults.
+const WORLD_DIRECTION_DEFAULTS = { enabled: true, eventPace: 100, worldShare: 35, priorityRules: "", scriptedEvents: "", territoryTempo: 0 };
+
 const SERVER_DIR = path.dirname(url.fileURLToPath(import.meta.url));
 const STORE_URL = url.pathToFileURL(path.join(SERVER_DIR, "libraryStore.js")).href;
 const roots = [];
@@ -79,7 +83,7 @@ test("a scenario stores a complete configuration and a game only its overrides",
       untouchedName: scenario.name,
     }`)}
   `);
-  assert.deepEqual(result.scenario, { espionage: { enabled: false }, idleDiplomacy: { enabled: true, averageMinutes: 30 } });
+  assert.deepEqual(result.scenario, { espionage: { enabled: false }, idleDiplomacy: { enabled: true, averageMinutes: 30 }, worldDirection: WORLD_DIRECTION_DEFAULTS });
   assert.deepEqual(result.game, { idleDiplomacy: { enabled: false } });
   assert.deepEqual(result.gameScenario, result.scenario);
   assert.deepEqual(result.catalog, result.game);
@@ -100,7 +104,7 @@ test("a save that does not mention features keeps them, and a fresh install read
       game: store.getGameDetails("campaign").game.features,
     }`)}
   `);
-  assert.deepEqual(result.before, { espionage: { enabled: true }, idleDiplomacy: { enabled: true, averageMinutes: 8 } });
+  assert.deepEqual(result.before, { espionage: { enabled: true }, idleDiplomacy: { enabled: true, averageMinutes: 8 }, worldDirection: WORLD_DIRECTION_DEFAULTS });
   assert.equal(result.scenario.espionage.enabled, false);
   assert.deepEqual(result.game, { espionage: { enabled: true } });
 });

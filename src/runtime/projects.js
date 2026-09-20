@@ -822,3 +822,97 @@ export const unassessedHighPriorityEntries = (board, ops, { playerCountry = "" }
     canPlayerDirect(entry, playerCountry)
     && asText(entry?.priority) === "high"
     && !asArray(ops).some((op) => opTargetsEntry(op, entry)));
+
+// ---- Does the board need a pass this turn? -----------------------------------
+//
+// The board pass is a model request, and on a free key requests are what run out
+// (AI/requestBudget.js). It used to be made after every time skip that had a
+// board and an event. Most of those passes returned nothing: no event touched an
+// entry and nothing was due. Everything that makes a pass worth making is visible
+// from here, without asking anyone:
+//
+//   - an event names, or plainly describes, an open entry;
+//   - an event reads like the START of a long effort (the pass is the only thing
+//     that opens entries);
+//   - the calendar has caught up with an entry — overdue, a slipped milestone, or
+//     nothing reported for STALE_ROUNDS — and nobody has looked at it for
+//     BOARD_PASS_QUIET_ROUNDS;
+//   - one of the player's own HIGH PRIORITY entries has gone that long unassessed.
+//
+// The quiet-rounds rule is what keeps one permanently overdue programme from
+// buying a request every turn: it is looked at, and then left for a round. It is
+// counted twice over — from the entry's own last update, and from the last pass
+// that ran at all (`reviewedRound`, world.boardReviewedRound) — because a pass
+// may look at an overdue entry and rightly leave it alone, and an entry nobody
+// touched must not ask again the very next turn.
+// HIGH PRIORITY used to mean "assessed every jump"; while requests are being
+// saved it means "at least every second one", and sooner whenever an event
+// concerns it.
+//
+// Returns the reasons, for the turn log; empty means the pass can be skipped.
+export const BOARD_PASS_QUIET_ROUNDS = 2;
+
+const EFFORT_START_PATTERN = new RegExp(
+  "\\b(?:launch(?:es|ed|ing)?|begins?|began|begun|starts?|started|initiat\\w+|commission(?:s|ed|ing)?|"
+  + "authori[sz]\\w+|approv\\w+|green-?lights?|breaks? ground|broke ground|lays? (?:down )?the keel|"
+  + "funds?|funded|unveil\\w*|announc\\w+|orders?|ordered|embarks?|embarked|sets? up|establish\\w*)\\b"
+  + "[^.!?]{0,90}"
+  + "\\b(?:programmes?|programs?|projects?|operations?|construction|initiatives?|campaigns?|build-?up|"
+  + "moderni[sz]ation|rearmament|expansion|reactors?|canals?|railways?|railroads?|pipelines?|shipyards?|"
+  + "fleets?|five-year plan|reforms?|networks?|academ(?:y|ies)|bureau|agenc(?:y|ies))\\b",
+  "i",
+);
+
+export const eventStartsLongEffort = (event) =>
+  EFFORT_START_PATTERN.test(`${asText(event?.title)}. ${asText(event?.description)}`);
+
+// An entry the ENGINE keeps in step by itself: the covert-operation entries
+// spyOperationOps opens and closes for every agent in place (they carry
+// linkedSpyIds, and that sync runs before the board pass every turn). Such an
+// entry must never be the REASON a request is made. One is called "Agent in
+// Ukraine", so half its distinctive words are a country name — and in a
+// campaign fought over Ukraine, every event that mentions the place matched it
+// and bought the board job a request a skip (seen in a live run, 2026-09-17).
+// The model may still move one if it looks at the board for some other reason;
+// this only stops it being what wakes the board.
+const isEngineSyncedEntry = (entry) => asArray(entry?.linkedSpyIds).length > 0;
+
+export const boardPassReasons = ({ board, events = [], gameDate = "", round = 0, reviewedRound = 0, playerCountry = "" } = {}) => {
+  const open = asArray(board).filter(isProjectOpen);
+  const asks = open.filter((entry) => !isEngineSyncedEntry(entry));
+  const happened = asArray(events);
+  const reasons = [];
+
+  for (const event of happened) {
+    const concerned = asks.length ? boardEntriesConcernedByEvent(event, asks, { playerCountry }) : [];
+    if (concerned.length) {
+      reasons.push(`"${asText(event?.title)}" concerns ${concerned.slice(0, 2).map((entry) => `"${asText(entry?.name)}"`).join(", ")}`);
+    } else if (eventStartsLongEffort(event)) {
+      reasons.push(`"${asText(event?.title)}" may start a new entry`);
+    }
+  }
+
+  // The calendar only asks again once the board has been left alone for a round.
+  // A pass "later" than this round is a number carried over from another
+  // campaign (a save turned into a scenario), and counts as never.
+  const lastPass = Number(reviewedRound) || 0;
+  if (round > 0 && lastPass > 0 && lastPass <= round && round - lastPass < BOARD_PASS_QUIET_ROUNDS) return reasons;
+
+  for (const entry of asks) {
+    const updatedRound = Number(entry?.updatedRound) || 0;
+    // An entry with no round on it has never been looked at; one from a save that
+    // predates rounds is treated the same way, once.
+    const quietFor = round > 0 && updatedRound > 0 ? round - updatedRound : BOARD_PASS_QUIET_ROUNDS;
+    if (quietFor < BOARD_PASS_QUIET_ROUNDS) continue;
+    const flags = deriveProjectFlags(entry, gameDate, round);
+    const untouched = round > 0 && updatedRound > 0 && round - updatedRound >= STALE_ROUNDS;
+    if (flags.overdue) reasons.push(`"${asText(entry?.name)}" is past its target date`);
+    else if (flags.milestoneMissed) reasons.push(`"${asText(entry?.name)}" missed a milestone`);
+    else if (untouched) reasons.push(`"${asText(entry?.name)}" has had no report for ${round - updatedRound} rounds`);
+    else if (asText(entry?.priority) === "high" && isPlayerProject(entry, playerCountry)) {
+      reasons.push(`"${asText(entry?.name)}" is HIGH PRIORITY and was last assessed ${quietFor} rounds ago`);
+    }
+  }
+
+  return reasons;
+};

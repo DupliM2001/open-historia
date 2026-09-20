@@ -1,7 +1,8 @@
 /*! Open Historia — diplomatic chat visibility tests © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // Run: node --test src/Game/AI/chatVisibility.test.js
 //
-// Runs without node_modules: chatVisibility.js is import-free.
+// Runs without node_modules: chatVisibility.js imports only audience.js, which
+// imports nothing.
 //
 // This module decides what one government is allowed to know about another, so
 // the two failure directions are NOT equal:

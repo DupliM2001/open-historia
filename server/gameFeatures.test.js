@@ -8,7 +8,12 @@ import {
   normalizeFeatureOverrides,
   normalizeFeatureSettings,
   resolveFeatures,
+  worldDirectionOf,
 } from "./gameFeatures.js";
+
+// A feature this file is not about, at its defaults: a complete configuration
+// carries every feature, so the exact-object checks below spread it in.
+const worldDirection = featureDefaults().worldDirection;
 
 test("the defaults switch every feature on with its settings at their defaults", () => {
   const defaults = featureDefaults();
@@ -30,11 +35,13 @@ test("a scenario's configuration is made complete, with malformed values replace
   assert.deepEqual(settings, {
     espionage: { enabled: false },
     idleDiplomacy: { enabled: true, averageMinutes: 8 },
+    worldDirection,
   });
   // The boolean shorthand and clamping to the setting's range.
   assert.deepEqual(normalizeFeatureSettings({ espionage: false, idleDiplomacy: { averageMinutes: 100000 } }), {
     espionage: { enabled: false },
     idleDiplomacy: { enabled: true, averageMinutes: 720 },
+    worldDirection,
   });
   assert.deepEqual(normalizeFeatureSettings("garbage"), featureDefaults());
 });
@@ -68,4 +75,43 @@ test("isFeatureEnabled and the idle diplomacy chance read the resolved configura
   assert.equal(idleDiplomacyChancePerMinute(resolved), 0.25);
   assert.equal(idleDiplomacyChancePerMinute(resolveFeatures({ idleDiplomacy: false }, {})), 0);
   assert.equal(idleDiplomacyChancePerMinute(null), 0);
+});
+
+// ---- World direction: the director's settings ----
+
+test("world direction ships on, at the built-in pace, with the one-third floor checked and no priority rules", () => {
+  assert.deepEqual(featureDefaults().worldDirection, { enabled: true, eventPace: 100, worldShare: 35, priorityRules: "", scriptedEvents: "", territoryTempo: 0 });
+  assert.deepEqual(worldDirectionOf(featureDefaults()), { eventPace: 100, worldShare: 35, priorityRules: "", scriptedEvents: "", territoryTempo: 0 });
+});
+
+test("its numbers are clamped to their range and rounded to whole percents", () => {
+  const settings = normalizeFeatureSettings({ worldDirection: { eventPace: 1000, worldShare: -5 } }).worldDirection;
+  assert.equal(settings.eventPace, 250);
+  assert.equal(settings.worldShare, 0);
+  assert.equal(normalizeFeatureSettings({ worldDirection: { eventPace: "62.4" } }).worldDirection.eventPace, 62);
+});
+
+test("priority rules are text: trimmed, line endings normalised, bounded, and never a number", () => {
+  const read = (value) => normalizeFeatureSettings({ worldDirection: { priorityRules: value } }).worldDirection.priorityRules;
+  assert.equal(read("  No nuclear weapons before 1945.\r\nThe Ottoman Empire endures.  "), "No nuclear weapons before 1945.\nThe Ottoman Empire endures.");
+  assert.equal(read(42), "");
+  assert.equal(read(null), "");
+  assert.equal(read("   "), "");
+  assert.equal(read("x".repeat(5000)).length, 2400);
+});
+
+test("a game overrides the director field by field, and a blank rule follows the scenario", () => {
+  const scenario = { worldDirection: { eventPace: 60, worldShare: 50, priorityRules: "The Tsar survives." } };
+  assert.deepEqual(normalizeFeatureOverrides({ worldDirection: { eventPace: 150, priorityRules: "" } }), { worldDirection: { eventPace: 150 } });
+  const resolved = resolveFeatures(scenario, { worldDirection: { eventPace: 150, priorityRules: "  " } });
+  assert.deepEqual(worldDirectionOf(resolved), { eventPace: 150, worldShare: 50, priorityRules: "The Tsar survives.", scriptedEvents: "", territoryTempo: 0 });
+  const own = resolveFeatures(scenario, { worldDirection: { priorityRules: "The Tsar may fall." } });
+  assert.equal(worldDirectionOf(own).priorityRules, "The Tsar may fall.");
+});
+
+test("world direction switched off is nothing to enforce", () => {
+  assert.equal(worldDirectionOf(resolveFeatures({ worldDirection: false }, {})), null);
+  assert.equal(worldDirectionOf(resolveFeatures({ worldDirection: { priorityRules: "x" } }, { worldDirection: { enabled: false } })), null);
+  assert.equal(worldDirectionOf(null), null);
+  assert.equal(worldDirectionOf({}), null);
 });

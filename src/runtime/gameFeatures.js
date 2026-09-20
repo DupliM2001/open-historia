@@ -4,6 +4,7 @@ import {
   idleDiplomacyChancePerMinute as chancePerMinute,
   isFeatureEnabled,
   resolveFeatures,
+  worldDirectionOf,
 } from "../../server/gameFeatures.js";
 
 export {
@@ -44,3 +45,7 @@ export const useActiveFeatures = () =>
 export const isActiveFeatureEnabled = (key) => isFeatureEnabled(activeFeatures, key);
 
 export const idleDiplomacyChancePerMinute = () => chancePerMinute(activeFeatures);
+
+// The scenario author's settings for how the world is run, or null when world
+// direction is off for this game (src/Game/AI/worldDirection.js).
+export const getActiveWorldDirection = () => worldDirectionOf(activeFeatures);

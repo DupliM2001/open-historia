@@ -6,8 +6,8 @@
 // "the time skip is broken".
 //
 // The field report this exists for: EVERY timeline jump on Gemini failed, because
-// JUMP_FORWARD_SCHEMA carries `catalyst: anyOf[catalystSchema, {type: "null"}]`
-// (gameplaySchemas.js, nullableCatalystSchema) and Gemini's Schema.type enum has
+// JUMP_FORWARD_SCHEMA then carried a nullable scene, `anyOf[sceneSchema, {type: "null"}]`
+// (gameplaySchemas.js), and Gemini's Schema.type enum has
 // no `null` member — STRING, NUMBER, INTEGER, BOOLEAN, ARRAY, OBJECT and nothing
 // else. Nullability there is the separate `nullable: true` flag. idleDiplomacy
 // carries the same shape on `chat` and `sighting`, so unprompted diplomacy was
@@ -23,6 +23,33 @@
 const DROPPED_KEYS = new Set(["additionalProperties", "$schema"]);
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+// Array-length bounds on an array of OBJECTS inside an `anyOf` branch: another
+// shape Gemini refuses outright, found the same way as the `type: "null"` one —
+// every request carrying the chat action batch came back 400 until they were
+// gone (bisected against the live API, 2026-09-17). The same keywords are fine
+// on an array of strings, and fine outside a union, which is why the scene's
+// `choices` in the jump's answer always worked.
+//
+// They are a hint to the model either way: `validateGameplayPayload` is what
+// actually enforces a count, and it runs on the answer whatever the provider
+// was told. So inside a union they are dropped, and the field's own description
+// carries the requirement in words.
+const BOUND_KEYS = new Set(["minItems", "maxItems"]);
+// An array whose ITEMS are objects — `items.type === "object"`, or items with
+// properties of their own. An array of strings keeps its bounds: those Gemini
+// takes.
+const holdsObjects = (items) => isObject(items) && (items.type === "object" || isObject(items.properties));
+const stripArrayBounds = (value) => {
+    if (Array.isArray(value)) return value.map(stripArrayBounds);
+    if (!isObject(value)) return value;
+    const next = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (BOUND_KEYS.has(key) && holdsObjects(value.items)) continue;
+        next[key] = stripArrayBounds(entry);
+    }
+    return next;
+};
 
 // A branch that exists only to say "or null". It may carry a description as well
 // (idleDiplomacy writes `{type: "null", description: "No polity would plausibly
@@ -64,12 +91,14 @@ export function toGeminiSchema(value) {
     }
 
     if (Array.isArray(converted.anyOf)) {
+        // Every branch of a union, bounds stripped (see stripArrayBounds).
+        converted.anyOf = converted.anyOf.map(stripArrayBounds);
         const survivors = converted.anyOf.filter((branch) => !isNullBranch(branch));
         if (survivors.length !== converted.anyOf.length) {
             const nullBranch = converted.anyOf.find(isNullBranch);
             const { anyOf: _anyOf, ...rest } = converted;
 
-            // One real branch (the common case: catalyst, chat, sighting) — lift it
+            // One real branch (the common case: chat, sighting) — lift it
             // up so Gemini sees a plain nullable object instead of a one-member
             // union. The wrapper's own keys stay, and the branch wins where they
             // collide, since the branch is the actual shape being described.

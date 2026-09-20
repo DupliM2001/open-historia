@@ -17,10 +17,10 @@ Every LLM call the game makes is a template in `src/Game/AI/defaultPrompts.json`
 | Provider dispatch, `callAI`, advisor/leader assembly | `src/Game/AI/main.jsx` | `callAI`, `buildAdvisorSystemPrompt`, `buildDiplomaticSystemPrompt` |
 | Language directive (appended to *every* call) | `src/runtime/i18n.js` | `languageDirective` at line 137 |
 | Difficulty directive (appended to task + leader prompts) | `src/runtime/difficulty.js` | `difficultyDirective` at line 73 |
-| Where the active game's prompt overrides are read from | `src/runtime/assets.js:268` | `JSON_URLS.prompts = /api/runtime/json/prompts` |
+| Where the active game's prompt overrides are read from | `src/runtime/assets.js` | `JSON_URLS.prompts = /api/runtime/json/prompts` |
 | Per-scenario / per-game prompt editor UI ("Prompts" tab) | `src/Game/GameUI/libraryBar.jsx` | `PromptSectionEditor`, `handlePromptChange`, `serializePromptPack` on save |
 
-See [World state](world-state.md) for the `world.json` shapes (`regionOwnershipOverrides`, `polityOverrides`, `units`, `markers`, `activeCatalyst`, `consolidatedHistory`, `simulationHistory`) that the context builders read.
+See [World state](world-state.md) for the `world.json` shapes (`regionOwnershipOverrides`, `polityOverrides`, `units`, `markers`, `activeInteractive`, `consolidatedHistory`, `simulationHistory`) that the context builders read.
 
 ---
 
@@ -30,10 +30,10 @@ See [World state](world-state.md) for the `world.json` shapes (`regionOwnershipO
 
 | Kind | JSON key | Contains | Rendered by |
 |---|---|---|---|
-| Root: **advisor** | `advisor` (string) | Chief-advisor side-panel chat | `buildAdvisorSystemPrompt` (`main.jsx:1012`) |
-| Root: **leader** | `leader` (string) | AI diplomacy — polities replying in a chat | `buildDiplomaticSystemPrompt` (`main.jsx:1036`) |
-| **tasks** | `tasks.<key>` (strings) | 13 structured JSON tasks (below) | `runJsonTask` (`gameplay.js:382`) |
-| Helper map | `helpers` (object) | `${PLACEHOLDER}` → `${templateVar}` indirection | `resolveHelperValues` (`promptContext.js:23`) |
+| Root: **advisor** | `advisor` (string) | Chief-advisor side-panel chat | `buildAdvisorSystemPrompt` (`main.jsx`) |
+| Root: **leader** | `leader` (string) | AI diplomacy — polities replying in a chat | `buildDiplomaticSystemPrompt` (`main.jsx`) |
+| **tasks** | `tasks.<key>` (strings) | 13 structured JSON tasks (below) | `runJsonTask` (`gameplay.js`) |
+| Helper map | `helpers` (object) | `${PLACEHOLDER}` → `${templateVar}` indirection | `resolveHelperValues` (`promptContext.js`) |
 
 ### Storage model: guidance only (since 2026-09-16)
 
@@ -54,40 +54,54 @@ Before the guidance model a save carried a **frozen copy** of every prompt, so a
 
 ## 3. How a final prompt is assembled, end to end
 
-### 3a. Task path (`runJsonTask`, `gameplay.js:382`)
+### 3a. Task path (`runJsonTask`, `gameplay.js`)
 
 Order of concatenation onto the system prompt:
 
-1. **Load pack** — `loadPromptCatalog()` → `normalizePromptPack(readJson(JSON_URLS.prompts))` (the current defaults with the pack's guidance edits composed in, §2).
-2. **Resolve helpers** — `helperValues = resolveHelperValues(prompts.helpers, variables)` (`promptContext.js:23`). Two passes so a helper that references another helper resolves.
-3. **Render task text** — `systemPrompt = renderTemplate(prompts.tasks[taskKey], { ...variables, ...helperValues })` (`gameplay.js:392`). `renderTemplate` (`promptContext.js:17`) replaces `${key}` with `variables[key]` (missing/`null` → empty string). Both uppercase `${PLACEHOLDER}` keys (from `helperValues`) and lowercase `${var}` keys (from `variables`) are in scope.
-4. **+ Difficulty directive** — `\n\n${difficultyDirective(game.difficulty)}` for every task (`gameplay.js:400`).
-5. **+ Player Agency** and **+ Map Truth** — only `jumpForward`, `autoJumpForward` (`gameplay.js:411`–`420`).
-6. **+ International Reputation** — only `actions`, `jumpForward`, `autoJumpForward`, `catalystCreation`, `catalystExecutor` (`gameplay.js:425`).
-7. **Call `callAI(systemPrompt, [{role:"user", parts:[{text: userMessage}]}], { tool, maxTokens: 8192, ... })`.** Inside `callAI` (`main.jsx:942`): **+ Language directive** `\n\n${languageDirective()}` when the UI language ≠ English.
-8. **Provider layer** (`main.jsx`): native tool-use providers (Anthropic/OpenAI/Gemini) pass `tool.schema` as a tool; the JSON-schema fallback path appends `\n\nReturn only one JSON object matching this JSON Schema…\n${JSON.stringify(tool.schema)}` (`main.jsx:573`). `maxTokens` is floored at 8192 by capped providers; Gemini ignores it.
+1. **Load pack** — `loadPromptCatalog` → `normalizePromptPack(readJson(JSON_URLS.prompts))` (the current defaults with the pack's guidance edits composed in, §2).
+2. **Resolve helpers** — `helperValues = resolveHelperValues(prompts.helpers, variables)` (`promptContext.js`). Two passes so a helper that references another helper resolves.
+3. **Render task text** — `systemPrompt = renderTemplate(prompts.tasks[taskKey], {...variables,...helperValues })` (`gameplay.js`). `renderTemplate` (`promptContext.js`) replaces `${key}` with `variables[key]` (missing/`null` → empty string). Both uppercase `${PLACEHOLDER}` keys (from `helperValues`) and lowercase `${var}` keys (from `variables`) are in scope.
+4. **+ Difficulty directive** — `\n\n${difficultyDirective(game.difficulty)}` for every task (`gameplay.js`).
+5. **+ Player Agency** and **+ Map Truth** — only `jumpForward`, `autoJumpForward` (`gameplay.js`–`420`).
+6. **+ International Reputation** — only `actions`, `jumpForward`, `autoJumpForward`, `interactiveCreation`, `interactiveExecutor` (`gameplay.js`).
+7. **Call `callAI(systemPrompt, [{role:"user", parts:[{text: userMessage}]}], { tool, maxTokens: 8192,... })`.** Inside `callAI` (`main.jsx`): **+ Language directive** `\n\n${languageDirective}` when the UI language ≠ English.
+8. **Provider layer** (`main.jsx`): native tool-use providers (Anthropic/OpenAI/Gemini) pass `tool.schema` as a tool; the JSON-schema fallback path appends `\n\nReturn only one JSON object matching this JSON Schema…\n${JSON.stringify(tool.schema)}` (`main.jsx`). `maxTokens` is floored at 8192 by capped providers; Gemini ignores it.
 
 So the final task system prompt is:
 
 ```
 <rendered task text>
 \n\n<difficulty directive>
-[\n\n[Player Agency]…\n\n[Map Truth]…]        (jump tasks only)
-[\n\n[International Reputation]…]              (5 tasks only)
-\n\n<language directive>                        (non-English only)
-[\n\n Return only one JSON object … <schema>]  (json-schema fallback providers only)
+[\n\n[Player Agency]…\n\n[Map Truth]…] (jump tasks only)
+[\n\n[International Reputation]…] (5 tasks only)
+\n\n<language directive> (non-English only)
+[\n\n Return only one JSON object … <schema>] (json-schema fallback providers only)
 ```
 
-Retry (`gameplay.js:447`): each task gets **two output attempts**. On attempt-1 failure the model's raw answer plus a corrective user turn are appended to `history`, and attempt 2 runs against the same system prompt. `validatePayload` receives `{ attempt, finalAttempt }`; `finalAttempt` (attempt 2) switches validators from *strict* (return a corrective string) to *salvage* (repair in place). If both attempts fail, the deterministic `fallback()` runs (or, for tasks with no fallback, it throws). A user `signal` abort propagates and cancels rather than falling back.
+**The user message, for a jump.** `runJumpSegments` builds it as `[<application receipt>, <changes made outside the simulation>, buildSegmentInstruction(…), <scripted beats>]`, joined by a blank line, each empty part left out. The receipt is `[APPLICATION RESULT FROM YOUR LAST TURN]` (`runtime/applicationReceipt.js`): what the engine dropped, withheld or changed in the previous turn's answer, plus what it applied. The second block is `[CHANGES MADE OUTSIDE THE SIMULATION SINCE YOUR LAST TURN]` (`runtime/gmChanges.js`): every change the Game Master made by hand in the round this skip starts from — told once, because the round moves on when the skip lands, and again after a rollback. Both go in the **user** message, not the system prompt, so the cacheable static prefix is untouched; both are repeated on every segment, because each segment is a separate request; and both are empty when there is nothing to say, when the message is byte‑for‑byte `buildSegmentInstruction`'s output. See [AI overview](ai-overview.md#the-application-receipt-what-salvage-did-told-to-the-next-turn) and [the Game Master's hand](ai-overview.md#the-game-masters-hand-changes-made-outside-the-simulation-and-standing-reminders).
+
+Retry (`gameplay.js`): each task gets **two output attempts**. On attempt-1 failure the model's raw answer plus a corrective user turn are appended to `history`, and attempt 2 runs against the same system prompt. `validatePayload` receives `{ attempt, finalAttempt }`; `finalAttempt` (attempt 2) switches validators from *strict* (return a corrective string) to *salvage* (repair in place). If both attempts fail, the deterministic `fallback` runs (or, for tasks with no fallback, it throws). A user `signal` abort propagates and cancels rather than falling back.
 
 ### 3b. Advisor / leader path (`main.jsx`)
 
-These do **not** go through `runJsonTask` or `buildTemplateVariables`; they build variables directly from `buildPromptContext` (`buildPromptVariables`, `main.jsx:989`, with `eventLimit: 16`).
+These do **not** go through `runJsonTask` or `buildTemplateVariables`; they build variables directly from `buildPromptContext` (`buildPromptVariables`, `main.jsx`, with `eventLimit: 16`).
 
-- **Advisor** (`buildAdvisorSystemPrompt`, `main.jsx:1012`): `renderTemplate(promptPack.advisor, { ...variables, ...helperValues })` → `callAI` (language directive only). No difficulty, no schema (free-form text reply). Called by `sendMessage` (`main.jsx:1084`) with a rolling `advisorHistory`.
-- **Leader** (`buildDiplomaticSystemPrompt`, `main.jsx:1036`): `renderTemplate(promptPack.leader, …)` **+ `\n\n${difficultyDirective}`** (`main.jsx:1063`). Then `sendDiplomaticMessage` (`main.jsx:1138`) appends a per-turn user instruction telling the model to speak as one specific polity and optionally emit a trailing `REACTION:<emoji>` line (`main.jsx:1144`), which `parseReaction` strips. `callAI` adds the language directive.
+- **Advisor** (`buildAdvisorSystemPrompt`, `main.jsx`): `renderTemplate(promptPack.advisor, {...variables,...helperValues })` → `callAI` (language directive only). No difficulty, no schema (free-form text reply). Called by `sendMessage` (`main.jsx`) with a rolling `advisorHistory`.
+- **Leader** (`buildDiplomaticSystemPrompt`, `main.jsx`): `renderTemplate(promptPack.leader, …)` **+ `\n\n${difficultyDirective}`** (`main.jsx`). Then `sendDiplomaticMessage` (`main.jsx`) appends a per-turn user instruction telling the model to speak as one specific polity and optionally emit a trailing `REACTION:<emoji>` line (`main.jsx`), which `parseReaction` strips. `callAI` adds the language directive.
 
 Because the advisor/leader path skips `buildTemplateVariables`, `playerPolityReputationContext` is empty and the military-feasibility doctrine (§5) is **not** appended to their unit text.
+
+**The conversation is sent once, as the turns.** `ALL_ADVISOR_MESSAGES` (advisor) and `THIS_CHAT_HISTORY` (leader) used to render the transcript into the system prompt as well as sending it as the message turns — the same conversation twice, and, because it sat near the end of the system prompt, everything after it changed with every message, so no provider's prefix cache could reuse it. Both variables now render `CONVERSATION_IN_TURNS` (`main.jsx`), a pointer the templates' own sentences read naturally around, and a leader's own thread is also left out of the digest of its other chats (`buildDiplomaticSystemPrompt(…, { chatId })`). Measured on the Fault Lines save (`.lab/probes/conversation-anatomy.mjs`): an advisor message 124.4 K → 103.7 K characters with its system prompt identical from one message to the next (was 59%); a leader 70.2 K → 67.3 K, 100% (was 88%). Checked live: an advisor still recalls a code word from three exchanges back. The group-chat batch (`runChatActionBatch`) always sent its thread once.
+
+**A player's message can carry a catch-up note** (`AI/conversationCatchUp.js`): written by the advisor panel when the world moved on since the last exchange — what became of the advisor's last reply (a chart not drawn, a block that half landed), the time that passed and the newest events since, and the Game Master's changes by hand. It rides ahead of what the player typed, is stored on the message, and is sent with it again after a reload (`loadHistory`).
+
+**A leader's thread carries one too** (`buildThreadCatchUp`): the chat panel writes it onto the player's line when the world moved on since the thread's last dated line — the span, the newest events on the public record since, the borders they moved and the polities they renamed, founded or dissolved, and in a group the votes cast since the player's last turn. It rides ahead of the player's words (`withCatchUp`) in `sendDiplomaticMessage({ catchUp })` and in the group batch's user message (`runChatActionBatch({ catchUp })`), and is stored on the message (`catchUp`, `catchUpLabel`) so a reload or a retry sends the same words.
+
+**Both get the Game Master's reminders** (`renderReminders`, `runtime/gmChanges.js`): the advisor among its directives before the formatting rules, a leader after its intelligence block.
+
+**Only the advisor gets the player's standing goal** (`runtime/playerGoal.js`): `[Our Standing Goal]`, after the documents and before the reminders — the government's aim, to weigh advice by and to say plainly when an order works against it. A leader is never told it.
+
+**Both read the documents file** (`world.reports`), bounded to eight, each body cut to 220 characters: the advisor `[Documents Our Government Holds]` — every paper the player's government can read, saying how it came by each (held with whom, ours alone, published, or a copy its agents took, which the holders do not know it has; `describeDocumentsForAdvisor`, `runtime/reportDelivery.js`); a leader `[Documents Your Government Holds]` — its own and the published ones, by the audience rule, never who stole a copy.
 
 ---
 
@@ -101,7 +115,7 @@ Because the advisor/leader path skips `buildTemplateVariables`, `playerPolityRep
 | `PLAYER_POLITY_REGIONS` | `playerPolityRegions` | Comma list of regions the player owns, or the LANDLESS notice | advisor |
 | `PLAYER_POLITY_BATTALION_SUMMARIES` | `playerBattalionSummaries` | Player + world unit lines (no feasibility doctrine) | advisor |
 | `PLAYER_POLITY_REPUTATION_CONTEXT` | `playerPolityReputationContext` | "International reputation: N/100 (band)." | *(none — injected via the [International Reputation] directive, not the placeholder)* |
-| `PLAYER_ACTIONS_THIS_ROUND` | `plannedActions` | Planned (unresolved) actions | advisor, actions, jumpForward, autoJumpForward, catalystCreation, gameMaster, descriptionToAction |
+| `PLAYER_ACTIONS_THIS_ROUND` | `plannedActions` | Planned (unresolved) actions | advisor, actions, jumpForward, autoJumpForward, interactiveCreation, gameMaster, descriptionToAction |
 | `PLAYER_EVERY_ACTION` / `PLAYER_EVERY_ACTION_NOT_PREVIOUS` | `allActions` | All actions incl. resolved | advisor, jumpForward, autoJumpForward |
 | `GRAND_MAP_DESCRIPTION` | `worldSummary` | Full world snapshot (see §5 `worldSummary`) | advisor, countryStatSheet |
 | `GRAND_MAP_DESCRIPTION_NO_CITY` | `worldSummaryNoCity` | **Identical string** to `worldSummary` (name is historical) | leader, actions, jumpForward, autoJumpForward, descriptionToAction, gameMaster, pregameHistory |
@@ -109,21 +123,20 @@ Because the advisor/leader path skips `buildTemplateVariables`, `playerPolityRep
 | `CURRENT_MAP_STRUCTURES` | `markersSummary` | `world.markers` structures with coords | jumpForward, autoJumpForward |
 | `CITY_COORDINATES` | `citiesSummary` | City coordinate catalog (custom era set or stock significant slice) | jumpForward, autoJumpForward |
 | `NUMBER_OF_REGIONS` | `numberOfRegions` | Count of regions in the map catalog | jumpForward, autoJumpForward, gameMaster |
-| `WORLD_BEFORE_ROUND_ONE_TEXT` | `worldBeforeRoundOne` | Scenario "World Before Round One" briefing | advisor, leader, actions, jumpForward, autoJumpForward, catalyst×3, descriptionToAction, gameMaster, pregameHistory |
-| `HISTORICAL_PRESET_SIMULATION_RULES` | `simulationRules` | Scenario simulation rules | advisor, leader, countryStatSheet, actions, jump×2, catalyst×3, descriptionToAction, gameMaster, pregameHistory |
-| `ALL_EVENTS_WITH_CONSOLIDATION` | `recentEventsLong` | STORY SO FAR (consolidated) + RECENT EVENTS | leader, jumpForward |
-| `ALL_EVENTS_WITH_CONSOLIDATION_CATALYSTS` | `recentEventsLong` | Same value as above | advisor, actions, autoJumpForward, catalystCreation, catalystExecutor |
+| `WORLD_BEFORE_ROUND_ONE_TEXT` | `worldBeforeRoundOne` | Scenario "World Before Round One" briefing | advisor, leader, actions, jumpForward, autoJumpForward, interactive×3, descriptionToAction, gameMaster, pregameHistory |
+| `HISTORICAL_PRESET_SIMULATION_RULES` | `simulationRules` | Scenario simulation rules | advisor, leader, countryStatSheet, actions, jump×2, interactive×3, descriptionToAction, gameMaster, pregameHistory |
+| `ALL_EVENTS_WITH_CONSOLIDATION` | `recentEventsLong` | STORY SO FAR (consolidated) + RECENT EVENTS | leader, advisor, actions, jumpForward, autoJumpForward, interactiveCreation, interactiveExecutor |
 | `CONSOLIDATED_HISTORY` | `consolidatedHistory` | Just the consolidated "STORY SO FAR" | *(declared in editor sections; not in current default text)* |
-| `PREVIOUS_ROUND_EVENTS` | `recentEvents` | Recent unconsolidated events (short window) | countryStatSheet, catalystCreation |
+| `PREVIOUS_ROUND_EVENTS` | `recentEvents` | Recent unconsolidated events (short window) | countryStatSheet, interactiveCreation |
 | `NON_CONSOLIDATED_ROUNDS_WITH_DATES` | `worldInitiativeContext` | The native world director's live analysis for the jump segment: focused and deferred storylines, the exploration slate, the era's conflict posture, economic and diplomatic attention, the storyline record contract | `runJumpSegments` (`buildWorldInitiativeContextBackground`, worker) |
 | `canonicalStorylineContext` | `world.storylines` for the GM prompt: id, status, pressure, momentum, title, participants, state (≤24) | `buildGameMasterStorylineContext` |
 | `recentRoundsWithDates` | `from → to` date pairs from `simulationHistory` | advisor, leader, actions, jumpForward, autoJumpForward |
 | `CHATS_NON_CONSOLIDATED_ROUNDS` | `chatHistoryLong` | Detailed multi-chat transcript | advisor, leader, actions, jumpForward, autoJumpForward |
 | `CHAT_PARTICIPANTS` | `chatParticipants` | Names of the current chat's participants | leader, nextSpeaker |
-| `THIS_CHAT_HISTORY` | `chatHistory` | The current chat's message lines | leader, nextSpeaker |
+| `THIS_CHAT_HISTORY` | `chatHistory` | The current chat's message lines — for the leader, `CONVERSATION_IN_TURNS` instead: the thread rides as the turns (§3b) | leader, nextSpeaker |
 | `THIS_CHATS_MOST_RECENT_SPEAKER` | `lastSpeaker` | Name of the last speaker (to exclude) | nextSpeaker |
 | `RESPONDING_POLITY_NAME` | `respondingPolityName` | Which polity the leader model should voice | leader |
-| `ALL_ADVISOR_MESSAGES` | `advisorMessages` | Prior advisor↔player transcript | advisor |
+| `ALL_ADVISOR_MESSAGES` | `advisorMessages` | `CONVERSATION_IN_TURNS`: the transcript rides as the turns, once (§3b) | advisor |
 | `ORIGIN_ROUND_DATE` | `date` | Current game date (`game.gameDate`, raw ISO/text) | leader, countryStatSheet, nextSpeaker, eventConsolidator, gameMaster, descriptionToAction |
 | `ORIGIN_ROUND_GRAMMATICAL_DATE` | `dateReadable` | Current date formatted "D MMMM YYYY" | advisor, actions, jumpForward |
 | `STARTING_ROUND_DATE` | `startDate` | Campaign start date (`game.startDate`) | advisor, jumpForward, autoJumpForward, pregameHistory |
@@ -136,71 +149,71 @@ Because the advisor/leader path skips `buildTemplateVariables`, `playerPolityRep
 | `EVENTS_TO_CONSOLIDATE` | `eventsToConsolidate` | Event batch to compress | eventConsolidator |
 | `CHATS_TO_CONSOLIDATE` | `chatsToConsolidate` | Chat batch to compress | eventConsolidator |
 | `GAME_MASTER_PLAYER_REQUEST` | `gameMasterRequest` | Raw GM/cheat request text | gameMaster |
-| `RUNNING_CATALYST_DATE` | `catalystDate` | Catalyst date (= current date) | catalystCreation, catalystExecutor, catalystSummary |
-| `RUNNING_CATALYST_PERCENT` | `catalystPercent` | Catalyst progress %, `min(100, history.length*50)` | catalystExecutor |
-| `CATALYST_PREMISE_DESCRIPTION` | `catalystPremise` | The catalyst's premise text | catalystExecutor, catalystSummary |
-| `CATALYST_SIMULATION_HISTORY` | `catalystHistory` | Choice→summary log so far | catalystExecutor, catalystSummary |
+| `RUNNING_INTERACTIVE_DATE` | `interactiveDate` | Interactive event date (= current date) | interactiveCreation, interactiveExecutor, interactiveSummary |
+| `RUNNING_INTERACTIVE_PERCENT` | `interactivePercent` | Interactive event progress %, `min(100, history.length*50)` | interactiveExecutor |
+| `INTERACTIVE_PREMISE_DESCRIPTION` | `interactivePremise` | The interactive event's premise text | interactiveExecutor, interactiveSummary |
+| `INTERACTIVE_SIMULATION_HISTORY` | `interactiveHistory` | Choice→summary log so far | interactiveExecutor, interactiveSummary |
 
-Lowercase variables referenced **directly** by task text (no helper alias): `${language}` (all tasks), and in `idleDiplomacy` — `${playerPolity}`, `${dateReadable}`, `${worldSummary}`, `${recentEvents}`, `${chatSummary}`; in `catalystExecutor` — `${catalystChoice}`.
+Lowercase variables referenced **directly** by task text (no helper alias): `${language}` (all tasks), and in `idleDiplomacy` — `${playerPolity}`, `${dateReadable}`, `${worldSummary}`, `${recentEvents}`, `${chatSummary}`; in `interactiveExecutor` — `${interactiveChoice}`.
 
 ---
 
 ## 5. Template variable reference (the full map)
 
-Every key on the object returned by `buildPromptContext` (`promptContext.js:379`, return block 413–462), plus the two keys `buildTemplateVariables` (`gameplay.js:367`) adds/overrides. This is the master set available to `renderTemplate`.
+Every key on the object returned by `buildPromptContext` (`promptContext.js`, return block 413–462), plus the two keys `buildTemplateVariables` (`gameplay.js`) adds/overrides. This is the master set available to `renderTemplate`.
 
 | Variable | Inserts | Computed at |
 |---|---|---|
-| `playerPolity` | `game.country` or "Unknown polity" | `promptContext.js:447` |
-| `playerPolityRegions` | Player's owned-region names, "No player polity…", "No explicit… override list", or the LANDLESS block | `buildPlayerPolityRegionsText` `promptContext.js:293` (LANDLESS text 287) |
-| `playerBattalionSummaries` | `buildUnitsSummaryText(world)` (up to 60 units, coords/type/owner/strength/status) | `promptContext.js:447` / builder `195` |
-| `unitsSummary` | Same unit text; **`buildTemplateVariables` appends `buildMilitaryFeasibilityText`** (era-reach/type/distance doctrine) only when units exist or the actions text matches the military regex | `promptContext.js:458`; override `gameplay.js:372`; feasibility builder `319` |
-| `playerPolityReputationContext` | "International reputation: N/100 (poor/mixed/well-regarded)." from `world.internationalReputation[player]`, else last viewed stat sheet, else 50 | `buildPlayerPolityReputationText` `gameplay.js:348` (added `371`) |
-| `worldSummary` | Multi-section snapshot: player line + tags, round, date, language, difficulty, world-before-round-one, simulation rules, up-to-24 territorial overrides, up-to-16 polity overrides (incl. `note` lore), up-to-40 country tag lines, active-catalyst line | `buildWorldSummary` `promptContext.js:317` |
-| `worldSummaryNoCity` | **Identical** to `worldSummary` | `promptContext.js:461` |
-| `citiesSummary` | City coordinate lines: custom-city scenarios use the era geojson (tier/pop sorted, ≤200); otherwise the stock significant slice (capitals + pop ≥ 2M, cached) | `buildCityCatalogText` `promptContext.js:239` |
-| `markersSummary` | `world.markers` structures (≤60) with kind/owner/coords/note | `buildMarkersSummaryText` `promptContext.js:211` |
-| `numberOfRegions` | `String(regionCatalog.length)` | `promptContext.js:444` |
-| `recentEvents` | Unconsolidated event history, `eventLimit` window (10 default; 16 on advisor/leader path) | `buildEventHistoryText` `promptContext.js:48` |
-| `recentEventsLong` | `buildCampaignHistoryText`: "STORY SO FAR" (consolidated) + "RECENT EVENTS" (≤`longEventLimit`, 24) | `promptContext.js:450` / builder `95` |
-| `consolidatedHistory` | `buildConsolidatedHistoryText(world)` — the `consolidatedHistory[]` summaries | `promptContext.js:433` / builder `86` |
-| `recentRoundsWithDates` | `from → to` date pairs from `world.simulationHistory` (≤8) | `buildRecentRoundsWithDates` `promptContext.js:187` |
-| `chatHistory` | Current chat's `speaker: text` lines, or "No chat history." | `promptContext.js:428` |
-| `chatHistoryLong` | `buildDetailedChatHistoryText(unconsolidatedChats, {limit: chatLimit})` | `promptContext.js:429` / builder `114` |
-| `chatSummary` | One-line-per-chat last-message summary | `buildChatSummaryText` `promptContext.js:431` / builder `103` |
-| `chatParticipants` | Current chat's participant names, comma-joined | `promptContext.js:430` (overridden with a bulleted list in `buildDiplomaticSystemPrompt`, `main.jsx:1058`) |
-| `chatsToConsolidate` | Explicit batch, else detailed transcript (≤12 chats, ≤50 msgs) | `promptContext.js:432` |
-| `chat` | `JSON.stringify(unconsolidatedChats)` | `promptContext.js:427` |
-| `lastSpeaker` | Current chat's last speaker name | `promptContext.js:442` |
-| `respondingPolityName` | Option override, else first non-player participant | `promptContext.js:452` |
-| `advisorMessages` | `buildAdvisorHistoryText(bundle.advisor, {limit: advisorLimit=18})` | `promptContext.js:416` / builder `127` |
-| `actions` | `formatActionsForPrompt(bundle.actions)` (title + display text) | `promptContext.js:415` / builder `156` |
-| `plannedActions` | `buildActionHistoryText(bundle.actions)` (planned only) | `promptContext.js:445` / builder `140` |
-| `allActions` | `buildActionHistoryText(…, {includeResolved:true})` | `promptContext.js:417` |
-| `actionInput` | The `actionInput` option (raw player text) | `promptContext.js:414` |
-| `date` | `game.gameDate` (raw) | `promptContext.js:434` |
-| `dateReadable` | `formatDateReadable(date)` → "D MMMM YYYY" (dayjs); raw text if unparseable | `promptContext.js:435` / builder `165` |
-| `startDate` | `game.startDate` | `promptContext.js:456` |
-| `round` | `String(game.round || 1)` | `promptContext.js:453` |
-| `targetDate` | `targetDate` option or `date` | `promptContext.js:457` |
-| `targetDateReadable` | `formatDateReadable(target)` | `promptContext.js:457` |
-| `language` | `world.language ‖ game.language ‖ "English"` | `promptContext.js:441` |
-| `difficulty` | `game.difficulty || "standard"` | `promptContext.js:436` |
-| `difficultyGuidanceChats` | `buildDifficultyGuidance(difficulty, "chats")` | `promptContext.js:437` / builder `170` |
-| `difficultyGuidanceJumpForward` | `buildDifficultyGuidance(difficulty, "jump")` | `promptContext.js:438` |
-| `simulationRules` | `world.simulationRules` or "No extra simulation rules were provided." | `promptContext.js:454` |
-| `worldBeforeRoundOne` | `world.startingTimelineText` or "No pre-game world briefing…" | `promptContext.js:459` |
-| `numberOfRegions` | (above) | `promptContext.js:444` |
-| `eventsToConsolidate` | Explicit batch, else `buildEventHistoryText(events, {limit:12})` | `promptContext.js:439` |
-| `gameMasterRequest` | The `gameMasterRequest` option | `promptContext.js:440` |
-| `catalystDate` | `= date` | `promptContext.js:420` |
-| `catalystPercent` | `min(100, activeCatalyst.history.length*50)%`, else "0%" | `promptContext.js:422` |
-| `catalystPremise` | `catalystPremise` option | `promptContext.js:425` |
-| `catalystHistory` | `catalystHistory` option (choice→summary log) | `promptContext.js:423` |
-| `catalystChoice` | `catalystChoice` option (the just-chosen option) | `promptContext.js:418` |
-| `catalystOpening` | `catalystOpening` option | `promptContext.js:419` |
+| `playerPolity` | `game.country` or "Unknown polity" | `promptContext.js` |
+| `playerPolityRegions` | Player's owned-region names, "No player polity…", "No explicit… override list", or the LANDLESS block | `buildPlayerPolityRegionsText` `promptContext.js` (LANDLESS text 287) |
+| `playerBattalionSummaries` | `buildUnitsSummaryText(world)` (up to 60 units, coords/type/owner/strength/status) | `promptContext.js` / builder `195` |
+| `unitsSummary` | Same unit text; **`buildTemplateVariables` appends `buildMilitaryFeasibilityText`** (era-reach/type/distance doctrine) only when units exist or the actions text matches the military regex | `promptContext.js`; override `gameplay.js`; feasibility builder `319` |
+| `playerPolityReputationContext` | "International reputation: N/100 (poor/mixed/well-regarded)." from `world.internationalReputation[player]`, else last viewed stat sheet, else 50 | `buildPlayerPolityReputationText` `gameplay.js` (added `371`) |
+| `worldSummary` | Multi-section snapshot: player line + tags, round, date, language, difficulty, world-before-round-one, simulation rules, up-to-24 territorial overrides, up-to-16 polity overrides (incl. `note` lore), up-to-40 country tag lines, the interactive event in progress | `buildWorldSummary` `promptContext.js` |
+| `worldSummaryNoCity` | **Identical** to `worldSummary` | `promptContext.js` |
+| `citiesSummary` | City coordinate lines: custom-city scenarios use the era geojson (tier/pop sorted, ≤200); otherwise the stock significant slice (capitals + pop ≥ 2M, cached) | `buildCityCatalogText` `promptContext.js` |
+| `markersSummary` | `world.markers` structures (≤60) with kind/owner/coords/note | `buildMarkersSummaryText` `promptContext.js` |
+| `numberOfRegions` | `String(regionCatalog.length)` | `promptContext.js` |
+| `recentEvents` | Unconsolidated event history, `eventLimit` window (10 default; 16 on advisor/leader path) | `buildEventHistoryText` `promptContext.js` |
+| `recentEventsLong` | `buildCampaignHistoryText`: "STORY SO FAR" (consolidated) + "RECENT EVENTS" (≤`longEventLimit`, 24) | `promptContext.js` / builder `95` |
+| `consolidatedHistory` | `buildConsolidatedHistoryText(world)` — the `consolidatedHistory[]` summaries | `promptContext.js` / builder `86` |
+| `recentRoundsWithDates` | `from → to` date pairs from `world.simulationHistory` (≤8) | `buildRecentRoundsWithDates` `promptContext.js` |
+| `chatHistory` | Current chat's `speaker: text` lines, or "No chat history." | `promptContext.js` |
+| `chatHistoryLong` | `buildDetailedChatHistoryText(unconsolidatedChats, {limit: chatLimit})` | `promptContext.js` / builder `114` |
+| `chatSummary` | One-line-per-chat last-message summary | `buildChatSummaryText` `promptContext.js` / builder `103` |
+| `chatParticipants` | Current chat's participant names, comma-joined | `promptContext.js` (overridden with a bulleted list in `buildDiplomaticSystemPrompt`, `main.jsx`) |
+| `chatsToConsolidate` | Explicit batch, else detailed transcript (≤12 chats, ≤50 msgs) | `promptContext.js` |
+| `chat` | `JSON.stringify(unconsolidatedChats)` | `promptContext.js` |
+| `lastSpeaker` | Current chat's last speaker name | `promptContext.js` |
+| `respondingPolityName` | Option override, else first non-player participant | `promptContext.js` |
+| `advisorMessages` | `buildAdvisorHistoryText(bundle.advisor, {limit: advisorLimit=18})` | `promptContext.js` / builder `127` |
+| `actions` | `formatActionsForPrompt(bundle.actions)` (title + display text) | `promptContext.js` / builder `156` |
+| `plannedActions` | `buildActionHistoryText(bundle.actions)` (planned only) | `promptContext.js` / builder `140` |
+| `allActions` | `buildActionHistoryText(…, {includeResolved:true})` | `promptContext.js` |
+| `actionInput` | The `actionInput` option (raw player text) | `promptContext.js` |
+| `date` | `game.gameDate` (raw) | `promptContext.js` |
+| `dateReadable` | `formatDateReadable(date)` → "D MMMM YYYY" (dayjs); raw text if unparseable | `promptContext.js` / builder `165` |
+| `startDate` | `game.startDate` | `promptContext.js` |
+| `round` | `String(game.round || 1)` | `promptContext.js` |
+| `targetDate` | `targetDate` option or `date` | `promptContext.js` |
+| `targetDateReadable` | `formatDateReadable(target)` | `promptContext.js` |
+| `language` | `world.language ‖ game.language ‖ "English"` | `promptContext.js` |
+| `difficulty` | `game.difficulty || "standard"` | `promptContext.js` |
+| `difficultyGuidanceChats` | `buildDifficultyGuidance(difficulty, "chats")` | `promptContext.js` / builder `170` |
+| `difficultyGuidanceJumpForward` | `buildDifficultyGuidance(difficulty, "jump")` | `promptContext.js` |
+| `simulationRules` | `world.simulationRules` or "No extra simulation rules were provided." | `promptContext.js` |
+| `worldBeforeRoundOne` | `world.startingTimelineText` or "No pre-game world briefing…" | `promptContext.js` |
+| `numberOfRegions` | (above) | `promptContext.js` |
+| `eventsToConsolidate` | Explicit batch, else `buildEventHistoryText(events, {limit:12})` | `promptContext.js` |
+| `gameMasterRequest` | The `gameMasterRequest` option | `promptContext.js` |
+| `interactiveDate` | `= date` | `promptContext.js` |
+| `interactivePercent` | `min(100, activeInteractive.history.length*50)%`, else "0%" | `promptContext.js` |
+| `interactivePremise` | `interactivePremise` option | `promptContext.js` |
+| `interactiveHistory` | `interactiveHistory` option (choice→summary log) | `promptContext.js` |
+| `interactiveChoice` | `interactiveChoice` option (the just-chosen option) | `promptContext.js` |
+| `interactiveOpening` | `interactiveOpening` option | `promptContext.js` |
 
-`buildPromptContext` accepts an options bag (`promptContext.js:379`): `actionInput`, `advisorLimit`, `catalystChoice/History/Opening/Premise`, `chat`, `chatLimit`, `chatsToConsolidate`, `eventLimit`, `eventsToConsolidate`, `gameMasterRequest`, `longEventLimit`, `respondingPolityName`, `targetDate`. Each task's entry point passes the ones it needs (e.g. `simulateTimelineJump` passes `targetDate`; `advanceActiveCatalyst` passes `catalystChoice/History/Premise/Opening`).
+`buildPromptContext` accepts an options bag (`promptContext.js`): `actionInput`, `advisorLimit`, `interactiveChoice/History/Opening/Premise`, `chat`, `chatLimit`, `chatsToConsolidate`, `eventLimit`, `eventsToConsolidate`, `gameMasterRequest`, `longEventLimit`, `respondingPolityName`, `targetDate`. Each task's entry point passes the ones it needs (e.g. `simulateTimelineJump` passes `targetDate`; `advanceActiveInteractive` passes `interactiveChoice/History/Premise/Opening`).
 
 ---
 
@@ -220,20 +233,25 @@ Concatenated onto the system prompt in `runJsonTask` / `callAI` **after** the te
 
 | Directive | Applies to | Source |
 |---|---|---|
-| **Difficulty** — one of 6 blurbs steering success rates | every task (via `readGameData`); leader (via `buildDiplomaticSystemPrompt`) | `gameplay.js:400`, `main.jsx:1063`; text in `difficulty.js` |
-| **[Player Agency]** — never commit the player to treaties/wars they did not order; surface offers as open chats/events | `jumpForward`, `autoJumpForward` | `gameplay.js:411` |
+| **Difficulty** — one of 6 blurbs steering success rates | every task (via `readGameData`); leader (via `buildDiplomaticSystemPrompt`) | `gameplay.js`, `main.jsx`; text in `difficulty.js` |
+| **[Player Agency]** — never commit the player to treaties/wars they did not order; surface offers as open chats/events | `jumpForward`, `autoJumpForward` | `gameplay.js` |
 | **[Espionage Orders]** — a queued action or explicit chat statement that orders an agent deployed or recalled is executed through `impacts.spyOps` (`deploy` / `recall` by country); the engine applies it with the Spy tab's rules (three agents, one per country, never at home), logs a skipped order, and never emits one for other powers | `jumpForward`, `autoJumpForward` | appended after `ACTIONS_REFERENCE` in `gameplay.js`; text in `spyOrdersDirective.js`; applied in `applySimulationResult` via `spycraft.js applySpyOps` |
 | **[Projects & Operations]** (jump view) — the board as it stands, read-only: the jump returns no `projectOps` (the board pass records them from its events) but must move an effort its orders name, a HIGH PRIORITY one, or one on the "Needs a decision this jump" list — in its events, in terms of what the effort actually is; THEIRS entries are reported, never narrated from inside; names copied exactly. Skipped when the board is empty | `jumpForward`, `autoJumpForward` | `projectsDirective.js`, appended in `runJsonTask` |
-| **[Map Truth — Control is not Sovereignty]** + **[Current Non-Normal Territorial State]** — capture/occupation/liberation language *requires* `impacts.regionControlOps` (control / contest); cession, annexation, sale, unification or settlement *requires* `impacts.regionTransfers`; the current occupations and contested regions (`territorialControlContext`) are listed; resolving the player's own ordered offensives is allowed | `jumpForward`, `autoJumpForward` | `gameplay.js:420` |
+| **[Map Truth — Control is not Sovereignty]** + **[Current Non-Normal Territorial State]** — capture/occupation/liberation language *requires* `impacts.regionControlOps` (control / contest); cession, annexation, sale, unification or settlement *requires* `impacts.regionTransfers`; the current occupations and contested regions (`territorialControlContext`) are listed; resolving the player's own ordered offensives is allowed | `jumpForward`, `autoJumpForward` | `gameplay.js` |
+| **[The World's Share — counted by the engine]** and **[PRIORITY RULES — set by this scenario's author]** — the scenario author's world direction (`worldDirection.js` `buildWorldDirectionDirective`), appended **last of all**, after the lookup directive: the end of a long prompt is what a model follows best, and the priority rules are meant to outrank everything above them. One paragraph by default (the share); nothing when world direction is off. | `jumpForward`, `autoJumpForward` |
+| **[The Player's Standing Goal]** — what the player's government is steering toward (`describeGoalForSimulation`, `runtime/playerGoal.js`), as a guiding philosophy, not an order: the player's own ministers conduct the business the orders did not address in its spirit; it never creates an action the player did not order, never decides what Player Agency reserves for the player, never makes success likelier. Before the author's direction, which outranks it. Nothing while no goal is set | `jumpForward`, `autoJumpForward`, `worldMotionRepair`, `worldBreadthRepair` (`PLAYER_GOAL_TASKS`) | `playerGoalBlock` in `buildTaskSystemPrompt` (`gameplay.js`) |
+| **[REMINDERS FROM THE GAME MASTER]** — the GM's standing facts (`runtime/gmChanges.js` `renderReminders`), after the priority rules: a fact declared mid-game is newer than any rule written before it. Every task that writes the world or speaks for a polity (`GM_REMINDER_TASKS`); the turn review carries it once for the whole request, not once per job (`buildTaskSystemPrompt(…, { reminders: false })` per job). Nothing while there are none. | the skip, the review and its directors, `projects`, `gameMaster`, `actions`, `idleDiplomacy`, the interactive event tasks, `spyIntercept`, `chatActions` |
+| **[Why the Land Moves]** — every `regionTransfers` entry and every `regionControlOps` control carries a `basis`; choose by what happened on the ground, not what was announced; says what the engine **does** with the answer (a `claim` is recorded as a dispute, a `threat` or `raid` changes nothing), because a model told only "fill this in" fills it in to please | `jumpForward`, `autoJumpForward` | appended after [Map Truth] in `runJsonTask`; text is `TERRITORY_BASIS_DIRECTIVE` in `runtime/territoryBasis.js`, beside the vocabulary so the two cannot drift |
 | **[Native World Director — authoritative live causal context]** — the segment's `worldInitiativeContext` (attention and deferred storylines, exploration slate, conflict posture, the `id~status~pressure~momentum~startedDate~kind~title~participantsCSV~eventNumbersCSV~state` record contract); see §7.12c | `jumpForward`, `autoJumpForward` | `gameplay.js` `runJsonTask` |
 | **[Region and City Capture]** — regions are the unit of territory; a city-grounded operation keeps the grounded wording in `regionId` with `fromCode` set so the geography resolver can map it; `wholeCountry` only for a total occupation (control) or total annexation (transfer) | `jumpForward`, `autoJumpForward` | `gameplay.js` `runJsonTask` |
+| **[Placing Things — say WHERE in words]** — every unit spawned or moved and every structure built may be placed with `at`, a phrase naming places the map knows ("near Kharkiv", "eastern Ukraine", "Donetsk Oblast facing Russia", "off Sevastopol" for fleets); the engine finds the point, keeps it inside the right borders and moves it clear of anything already standing there; `lng`/`lat` only for a spot no name describes, and `at` wins over both | `jumpForward`, `autoJumpForward` (before the Place Renaming block), `unitDirector`, `gameMaster`, `idleDiplomacy`, `interactiveExecutor` | `PLACEMENT_DIRECTIVE` in `placement.js`, appended in `buildTaskSystemPrompt`; resolved by `resolvePlacements` (`gameplay.js`) |
 | **[GM Territorial Semantics — live override]** + **[GM Geographic Completeness]** + **[GM Physical-World Completeness]** — control vs sovereignty for the GM, one operation per narrated place, marker lifecycle audit | `gameMaster` | `gameplay.js` `runJsonTask` |
-| **[International Reputation]** — how the world regards the player biases behavior; record changes via `polityChanges.reputation` (0–100) | `actions`, `jumpForward`, `autoJumpForward`, `catalystCreation`, `catalystExecutor` | `gameplay.js:425` |
-| **Language** — write all human-readable text in the UI language; keep JSON keys/ISO codes/dates unchanged | every `callAI` call (advisor, leader, all tasks, intel briefing) when language ≠ `en` | `callAI` `main.jsx:945`; text `i18n.js:137` |
-| **Military feasibility** — era-reach/unit-type/distance doctrine; folded into `${CURRENT_UNITS}` not appended separately | conditional: only when units exist or actions text matches the military regex | `buildMilitaryFeasibilityText` `gameplay.js:319`, injected `372` |
-| **Leader turn instruction** — "speak only as `<polity>`… optionally append `REACTION:<emoji>`" (a user-role turn, not system) | leader only | `main.jsx:1144` |
+| **[International Reputation]** — how the world regards the player biases behavior; record changes via `polityChanges.reputation` (0–100) | `actions`, `jumpForward`, `autoJumpForward`, `interactiveCreation`, `interactiveExecutor` | `gameplay.js` |
+| **Language** — write all human-readable text in the UI language; keep JSON keys/ISO codes/dates unchanged | every `callAI` call (advisor, leader, all tasks, intel briefing) when language ≠ `en` | `callAI` `main.jsx`; text `i18n.js` |
+| **Military feasibility** — era-reach/unit-type/distance doctrine; folded into `${CURRENT_UNITS}` not appended separately | conditional: only when units exist or actions text matches the military regex | `buildMilitaryFeasibilityText` `gameplay.js`, injected `372` |
+| **Leader turn instruction** — "speak only as `<polity>`… optionally append `REACTION:<emoji>`" (a user-role turn, not system) | leader only | `main.jsx` |
 
-Difficulty text (`difficulty.js`): `very-easy`, `easy`, `medium` (default; `"standard"`/empty normalize to medium), `hard`, `very-hard`, `impossible`. `buildDifficultyGuidance` (`promptContext.js:170`) is a *separate* softer paragraph used inside the jump/chat prompt bodies via `DIFFICULTY_DESCRIPTION_*`.
+Difficulty text (`difficulty.js`): `very-easy`, `easy`, `medium` (default; `"standard"`/empty normalize to medium), `hard`, `very-hard`, `impossible`. `buildDifficultyGuidance` (`promptContext.js`) is a *separate* softer paragraph used inside the jump/chat prompt bodies via `DIFFICULTY_DESCRIPTION_*`.
 
 ---
 
@@ -243,75 +261,80 @@ Each subsection: purpose · default prompt location · entry point · key inputs
 
 ### 7.1 `jumpForward` — manual time skip
 - **Purpose:** Simulate every event between the origin date and a player-chosen target date; move the map, units, structures, diplomacy.
-- **Prompt:** `tasks.jumpForward`. **Entry:** `simulateTimelineJump({days, mode:"jump", signal})` `gameplay.js:1852`.
-- **Inputs:** full state bundle; `targetDate`; event-count band from `eventCountRangeForDays(days)` (`1834`) with a floor of one event per queued action; duration label; `${CURRENT_UNITS/MAP_STRUCTURES/CITY_COORDINATES}`.
-- **Tool/schema:** `submit_jump_result` / `JUMP_FORWARD_SCHEMA` (`gameplaySchemas.js:399`). Payload: `events[]` (each `date/title/description` + `impacts`), `stopDate`, `summary`, `clearActions`, nullable `catalyst`, top-level `diplomaticOutreach[]`.
-- **Validation:** `validatePayload` (`gameplay.js:1897`) — strict on attempt 1 / salvage on final: event-count range, `validateTimelineDates` (`125`) then `clampTimelineDates` (`187`) on salvage, then `validateGeneratedWorldChanges` (`1002`) resolving region names → ids (`resolveRegionTransfers` `831`) with a corrective owner-region list (`buildTransferFeedback` `940`) and the **capture-reluctance guard** (`CAPTURE_LANGUAGE` `994`, guard `1020`). **Fallback:** `fallbackJumpSimulation` (`1142`). Timeout: unbounded unless the "Limit AI generation" map setting is on (then 5 min); `signal` aborts cleanly.
-- **Applied by:** `applySimulationResult` (`1305`) — appends events, bumps round/date, resolves planned actions, applies impacts, opens generated chats, writes a `simulationHistory` entry, snapshots for rollback.
+- **Prompt:** `tasks.jumpForward`. **Entry:** `simulateTimelineJump({days, mode:"jump", signal})` `gameplay.js`.
+- **Inputs:** full state bundle; `targetDate`; event-count band from `eventCountRangeForDays(days)` with a floor of one event per queued action; duration label; `${CURRENT_UNITS/MAP_STRUCTURES/CITY_COORDINATES}`.
+- **Tool/schema:** `submit_jump_result` / `JUMP_FORWARD_SCHEMA` (`gameplaySchemas.js`). Payload: `events[]` (each `date/title/description` + `impacts`), `stopDate`, `summary`, `clearActions`, top-level `diplomaticOutreach[]`. No scene: now and then the skip offers one of its events as an interactive event instead, at no cost (`runtime/interactiveOffer.js`).
+- **Validation:** `validatePayload` (`gameplay.js`) — strict on attempt 1 / salvage on final: event-count range, `validateTimelineDates` then `clampTimelineDates` on salvage, then `validateGeneratedWorldChanges` resolving region names → ids (`resolveRegionTransfers` `831`) with a corrective owner-region list (`buildTransferFeedback` `940`) and the **capture-reluctance guard** (`CAPTURE_LANGUAGE` `994`, guard `1020`). **Fallback:** `fallbackJumpSimulation`. Timeout: unbounded unless the "Limit AI generation" map setting is on (then 5 min); `signal` aborts cleanly.
+- **Applied by:** `applySimulationResult` — appends events, bumps round/date, resolves planned actions, applies impacts, opens generated chats, writes a `simulationHistory` entry, snapshots for rollback.
+
+- **What the jump is told about writing, orders and the world** (both jump templates, all inside the cacheable static prefix — pinned by `jumpPromptCraft.test.js`):
+ - `[What an Order Can Do]` *(guidance, id `orders`)* — a queued action is an **attempt**. Means (who really commands the army, the railways, the treasury; difficulty decides how *well* a feasible order goes, never supplies a division that does not exist); authority (a colony, dominion, protectorate or puppet cannot by its own word cede land, conclude a treaty or declare war — the attempt meets the chain above it, and *that* is the event); an order that cannot be carried out fails where it is given and is never rescued by a convenient coup or a hidden reserve; failure still moves the world; and wars take time — pace from force ratios, readiness, season and supply as of the date, never the borrowed script of a later or better-known war.
+ - `[What Is True Now]` *(technical — deliberately **not** editable)* — the order of authority: the current map, records and last turn's application result; then the game's events, which explain the present and are never evidence of who holds what today; then the world before round 1 and real history, which are background. A scenario that edited this away would go back to calling a polity an ally because it was one when the game began.
+ - `[The World Answers Back]` *(guidance, id `reactions`)* — the rule against acting for the player binds the player's polity alone. A large move by the player **requires** answers from the powers with a stake in it, each an event of its own with a date; the map and the records decide who answers and how hard; about a third of a jump's events are not centred on the player at all; and the player's own reply is never decided for them.
+ - `[Event Voice]` *(guidance, id `voice`)* — an event is a dated dispatch, not commentary: no adjectives that tell the reader what to think; an opinion needs a named owner; stop when the facts stop (no closing sentence on what it "signals"); nothing happening is not an event; and the record cannot read minds — it knows what a power did and said, never what it was trying to achieve.
 
 ### 7.2 `autoJumpForward` — auto skip to the next notable event
-- **Purpose:** Same engine, but **stop early** at the first strategically notable / player-relevant / catalyst-worthy event and set it `notable:true`.
-- **Prompt:** `tasks.autoJumpForward`. **Entry:** `simulateAutoJump({days=365, signal})` → `simulateTimelineJump(mode:"auto")` `gameplay.js:1946`.
-- **Tool/schema:** `submit_jump_result` / `AUTO_JUMP_FORWARD_SCHEMA` (= `JUMP_FORWARD_SCHEMA`, `gameplaySchemas.js:429`).
+- **Purpose:** Same engine, but **stop early** at the first strategically notable / player-relevant / memorable event and set it `notable:true` (a notable event is preferred when the skip offers an interactive event).
+- **Prompt:** `tasks.autoJumpForward`. **Entry:** `simulateAutoJump({days=365, signal})` → `simulateTimelineJump(mode:"auto")` `gameplay.js`.
+- **Tool/schema:** `submit_jump_result` / `AUTO_JUMP_FORWARD_SCHEMA` (= `JUMP_FORWARD_SCHEMA`, `gameplaySchemas.js`).
 - **Validation:** same validator; in `auto` mode `stopDate` may be any date after origin and ≤ target (`validateTimelineDates` `153`); the event-count range is not strictly enforced.
 
 ### 7.3 `actions` — strategic action suggestions
 - **Purpose:** Produce 6–9 "Topics of Concern," each with 2–5 concrete actions (kind `action`, or `chat` for outreach).
-- **Prompt:** `tasks.actions`. **Entry:** `generateActionSuggestions({force})` `gameplay.js:1430`.
-- **Tool/schema:** `submit_actions` / `ACTIONS_SCHEMA` (`gameplaySchemas.js:369`): `topics[] { title, description, actions[] { title, text, kind, invitees, chatStarter } }`.
+- **Prompt:** `tasks.actions`. **Entry:** `generateActionSuggestions({force})` `gameplay.js`.
+- **Tool/schema:** `submit_actions` / `ACTIONS_SCHEMA` (`gameplaySchemas.js`): `topics[] { title, description, actions[] { title, text, kind, invitees, chatStarter } }`.
 - **Validation/fallback:** accepts array/`topics`/`suggestions` shapes; empty → `fallbackActionSuggestions` (`678`, from `DEFAULT_SUGGESTION_TOPICS`). Result stored on `world.actionSuggestions`.
 
 ### 7.4 `descriptionToAction` — freeform text → structured command
 - **Purpose:** Turn the player's raw sentence into one action (or a chat invitation), ~50% longer, tone-matched, ≤650 chars.
-- **Prompt:** `tasks.descriptionToAction`. **Entry:** `refinePlayerAction(rawInput, {persist})` `gameplay.js:1597` (passes `actionInput`).
-- **Tool/schema:** `submit_description_to_action` / `DESCRIPTION_TO_ACTION_SCHEMA` (`483`): `{ title, text, kind, invitees[], chatStarter }`.
-- **Fallback:** `fallbackDescriptionToAction` (`708`) — heuristic chat detection via `CHAT_HINT_PATTERNS` (`46`) and `inferInviteeNames`.
+- **Prompt:** `tasks.descriptionToAction`. **Entry:** `refinePlayerAction(rawInput, {persist})` `gameplay.js` (passes `actionInput`).
+- **Tool/schema:** `submit_description_to_action` / `DESCRIPTION_TO_ACTION_SCHEMA`: `{ title, text, kind, invitees[], chatStarter }`.
+- **Fallback:** `fallbackDescriptionToAction` — heuristic chat detection via `CHAT_HINT_PATTERNS` and `inferInviteeNames`.
 
 ### 7.5 `nextSpeaker` — pick the next diplomat
 - **Purpose:** Choose which participant speaks next in an open chat (never the last speaker).
-- **Prompt:** `tasks.nextSpeaker`. **Entry:** `chooseNextDiplomaticSpeaker({chat, excludeSpeaker})` `gameplay.js:1630`.
-- **Tool/schema:** `submit_next_speaker` / `NEXT_SPEAKER_SCHEMA` (`497`): `{ nextSpeaker }`.
-- **Fallback:** `fallbackNextSpeaker` (`740`) — mentioned polity, else first non-excluded participant. (The chosen polity's actual reply is generated by the **leader** root prompt, §7.14.)
+- **Prompt:** `tasks.nextSpeaker`. **Entry:** `chooseNextDiplomaticSpeaker({chat, excludeSpeaker})` `gameplay.js`.
+- **Tool/schema:** `submit_next_speaker` / `NEXT_SPEAKER_SCHEMA`: `{ nextSpeaker }`.
+- **Fallback:** `fallbackNextSpeaker` — mentioned polity, else first non-excluded participant. (The chosen polity's actual reply is generated by the **leader** root prompt, §7.14.)
 
 ### 7.6 `eventConsolidator` — compress history
 - **Purpose:** Fold a batch of events + closed chats into one continuity summary (~≤360 words) so old detail leaves the context window without losing map/diplomacy facts.
-- **Prompt:** `tasks.eventConsolidator`. **Entries:** `consolidateHistoryBatch` (`535`, auto-run by `compactHistoryIfNeeded` `554` after jumps) and `consolidateRecentHistory({limit})` (`1662`).
-- **Tool/schema:** `submit_event_consolidation` / `EVENT_CONSOLIDATOR_SCHEMA` (`507`): `{ summary }`.
-- **Fallback:** concatenate raw event lines + `buildChatSummaryText`. Triggers: `CONSOLIDATION_*` thresholds (`gameplay.js:530`).
+- **Prompt:** `tasks.eventConsolidator`. **Entries:** `consolidateHistoryBatch` (`535`, auto-run by `compactHistoryIfNeeded` `554` after jumps) and `consolidateRecentHistory({limit})`.
+- **Tool/schema:** `submit_event_consolidation` / `EVENT_CONSOLIDATOR_SCHEMA`: `{ summary }`.
+- **Fallback:** concatenate raw event lines + `buildChatSummaryText`. Triggers: `CONSOLIDATION_*` thresholds (`gameplay.js`).
 
-### 7.7 `catalystCreation` — open a branching scene
-- **Purpose:** Design an immersive interactive "catalyst" scene with an opening and 2–5 choices.
-- **Prompt:** `tasks.catalystCreation`. **Entry:** `createCatalyst({force})` `gameplay.js:1670`.
-- **Tool/schema:** `submit_catalyst_creation` / `CATALYST_CREATION_SCHEMA` (= `catalystSchema`, `gameplaySchemas.js:346`): `{ title, premise, opening, choices[2..5] }`. Written to `world.activeCatalyst`.
+### 7.7 `interactiveCreation` — open a branching scene
+- **Purpose:** Design an immersive scene for the interactive event a time skip offered, with an opening and 2–5 choices.
+- **Prompt:** `tasks.interactiveCreation`, with `[THE MOMENT TO PLAY OUT — BINDING]` (the offered event) and, when the player gave one, `[THE PLAYER'S ANGLE — BINDING]` in the user message. **Entry:** `createInteractive({ eventId, angle })` `gameplay.js`.
+- **Tool/schema:** `submit_interactive_creation` / `INTERACTIVE_CREATION_SCHEMA` (= `interactiveSchema`, `gameplaySchemas.js`): `{ title, premise, opening, choices[2..5] }`. Written to `world.activeInteractive`.
 
-### 7.8 `catalystExecutor` — advance a scene
+### 7.8 `interactiveExecutor` — advance a scene
 - **Purpose:** React to the player's chosen option, advance the scene, add to a progress bar, and offer next choices (or resolve).
-- **Prompt:** `tasks.catalystExecutor` (uses `${catalystChoice}` and `${RUNNING_CATALYST_PERCENT}`). **Entry:** `advanceActiveCatalyst(choiceText)` `gameplay.js:1701`.
-- **Tool/schema:** `submit_catalyst_execution` / `CATALYST_EXECUTOR_SCHEMA` (`519`): `{ summary, resolved, nextChoices[] }`. Validator (`926`) enforces: empty `nextChoices` when resolved, ≥2 distinct otherwise.
+- **Prompt:** `tasks.interactiveExecutor` (uses `${interactiveChoice}` and `${RUNNING_INTERACTIVE_PERCENT}`). **Entry:** `advanceActiveInteractive(choiceText)` `gameplay.js`.
+- **Tool/schema:** `submit_interactive_execution` / `INTERACTIVE_EXECUTOR_SCHEMA`: `{ summary, resolved, nextChoices[] }`. Validator enforces: empty `nextChoices` when resolved, ≥2 distinct otherwise.
 
-### 7.9 `catalystSummary` — resolved scene → one event
-- **Purpose:** When a catalyst resolves, condense it into a single campaign event.
-- **Prompt:** `tasks.catalystSummary`. **Entry:** the resolution branch of `advanceActiveCatalyst` (`gameplay.js:1775`), then `applySimulationResult` with `mode:"catalyst"`.
-- **Tool/schema:** `submit_catalyst_summary` / `CATALYST_SUMMARY_SCHEMA` (`539`): `{ title, description, importance }`.
-- ⚠️ **Caveat:** the default `catalystSummary` string contains a large stray **"Game Master" / "Master Cheat Assistant"** block pasted mid-prompt (legacy content). The task still returns the `{title,description,importance}` shape; the real GM task is the separate `gameMaster` key (§7.11). If you rewrite this prompt, delete the embedded GM text.
+### 7.9 `interactiveSummary` — finished scene → one event
+- **Purpose:** When an interactive event resolves, condense it into a single campaign event.
+- **Prompt:** `tasks.interactiveSummary`. **Entry:** the resolution branch of `advanceActiveInteractive` (`gameplay.js`), then `applySimulationResult` with `mode:"interactive"`.
+- **Tool/schema:** `submit_interactive_summary` / `INTERACTIVE_SUMMARY_SCHEMA`: `{ title, description, importance }`.
 
 ### 7.10 `pregameHistory` — backstory generator
 - **Purpose:** On the first open of a fresh game with a "World Before Round One" briefing, write 4–10 dated events **strictly before** the start date. Runs once (the `simulationHistory` entry doubles as the done-marker); events carry **no impacts** (world already reflects them); clock stays at start, round stays 1.
-- **Prompt:** `tasks.pregameHistory`. **Entry:** `maybeGeneratePregameHistory()` `gameplay.js:2050`.
-- **Tool/schema:** `submit_pregame_history` / `PREGAME_HISTORY_SCHEMA` (`448`): `{ events[1..12] { date,title,description,importance,kind }, summary }` — note the impact-free `pregameEventSchema` (`434`).
-- **Validation:** `validatePregameEvents` (`2013`) — strict/salvage: all dates before start, chronological; non-Gregorian scenarios skip date checks. No fallback (silent null on failure).
+- **Prompt:** `tasks.pregameHistory`. **Entry:** `maybeGeneratePregameHistory` `gameplay.js`.
+- **Tool/schema:** `submit_pregame_history` / `PREGAME_HISTORY_SCHEMA`: `{ events[1..12] { date,title,description,importance,kind }, summary }` — note the impact-free `pregameEventSchema`.
+- **Validation:** `validatePregameEvents` — strict/salvage: all dates before start, chronological; non-Gregorian scenarios skip date checks. No fallback (silent null on failure).
 
 ### 7.11 `gameMaster` — direct map/state cheat
 - **Purpose:** Apply an explicit player/GM request to the map/world; never argue or refuse.
-- **Prompt:** `tasks.gameMaster`. **Entry:** `applyGameMasterCommand(requestText)` `gameplay.js:1949` (passes `gameMasterRequest`).
-- **Tool/schema:** `submit_game_master` / `GAME_MASTER_SCHEMA` (`551`): `{ summary, impacts { regionTransfers, polityChanges, markerOps } }`.
+- **Prompt:** `tasks.gameMaster`. **Entry:** `applyGameMasterCommand(requestText)` `gameplay.js` (passes `gameMasterRequest`).
+- **Tool/schema:** `submit_game_master` / `GAME_MASTER_SCHEMA`: `{ summary, impacts { regionTransfers, polityChanges, markerOps } }`.
 - **Validation:** `validateGeneratedWorldChanges` (strict on attempt 1). **Fallback:** empty impacts + neutral summary. Wrapped as a "Game master intervention" event.
 
 ### 7.12 `countryStatSheet` — structured national stats
 - **Purpose:** Compile a full stat sheet for a selected polity for the Stats tab.
-- **Prompt:** `tasks.countryStatSheet`. **Entry:** `generateCountryStatSheet({code, name})` `gameplay.js:1580` (userMessage carries a `buildTargetDossier` (`1498`) + era slice).
-- **Tool/schema:** `submit_country_stat_sheet` / `COUNTRY_STAT_SHEET_SCHEMA` (`569`): `capital, continent, government, leader, stability(0–100), indices{sovereignty,foodAutonomy,energyAutonomy,economicIndependence,internalSecurity,internationalReputation}, economy{gdp,gdpGrowth,gdpPerCapita,currency,inflation,unemployment,publicDebt,budgetBalance}, gdpBreakdown{agriculture,industry,services}`.
-- **Validation:** all strings non-blank; all indices 0–100 integers; `agriculture+industry+services === 100` (`gameplaySchemas.js:940`). No fallback.
+- **Prompt:** `tasks.countryStatSheet`. **Entry:** `generateCountryStatSheet({code, name})` `gameplay.js` (userMessage carries a `buildTargetDossier` + era slice).
+- **Tool/schema:** `submit_country_stat_sheet` / `COUNTRY_STAT_SHEET_SCHEMA`: `capital, continent, government, leader, stability(0–100), indices{sovereignty,foodAutonomy,energyAutonomy,economicIndependence,internalSecurity,internationalReputation}, economy{gdp,gdpGrowth,gdpPerCapita,currency,inflation,unemployment,publicDebt,budgetBalance}, gdpBreakdown{agriculture,industry,services}`.
+- **Validation:** all strings non-blank; all indices 0–100 integers; `agriculture+industry+services === 100` (`gameplaySchemas.js`). No fallback.
 
 ### 7.12a `timelineCurator` — the native timeline curator
 
@@ -334,7 +357,9 @@ Each subsection: purpose · default prompt location · entry point · key inputs
 ### 7.12d `territoryDirector` — the native territory director
 
 - **Prompt:** `tasks.territoryDirector` (uses `${territorialControlContext}`, `${territoryDirectorState}`, `${territoryDirectorCandidates}`). **Entry:** `directGeneratedTerritoryOps` (`nativeTerritoryDirector.js`) in `finishTimelineJump`, after the unit director. **Tool/schema:** `submit_territory_director` / `TERRITORY_DIRECTOR_SCHEMA` (`eventOrders[{eventIndex, regionControlOps[], reason}]`).
-- **Purpose:** the jump writes history; this pass turns the surviving front state into de-facto `regionControlOps` (contest / control / clear_contest) without inventing legal transfers. Legacy wartime `regionTransfers` on capture-worded events are converted to control ops first; deterministic rules sanitize the proposals (a control flip needs explicit capture wording and different sides, a contest needs fighting wording, clearAll needs a final settlement, duplicates dropped); accepted ops are resolved through the geography resolver bounded by current control. `window.__OH_NATIVE_TERRITORY_DIRECTOR__.last()` shows the last pass.
+- **What it is shown of the map:** `summarizeTerritorialState` (`nativeTerritoryDirector.js`) — the two sparse stores (`regionSovereigntyOverrides`, `regionClaimants`) and, of `regionOwnershipOverrides`, only the rows for the regions those two name: the occupied and disputed regions, capped at 400 with the front the candidate events are about kept first and anything left out counted. It used to be all three stores whole, pretty-printed. On a hand-drawn world every region carries an ownership override, so on the built-in scenario that was 4,848 rows of a numeric id and an owner — no region name, nothing to reason from — and a request of **215,323 characters, now 23,550**. It is also handed `placesTheseEventsName`: every region and city the candidate events name, each with who controls it now, who lawfully owns it where that differs, and who claims it (`placesNamedIn`, `lookupTools.js`) — because the controller is what the director writes into `fromCode`. For one day this was left to a lookup ("ask `find_region`"), which saved characters and cost a request: the wrong way round on a free key, where every lookup round re-sends the whole prompt ([the request budget](ai-overview.md#the-request-budget)). The template now says to take `fromCode` from that list, and the state never tells the model to go and ask for anything (pinned by `nativeTerritoryDirector.state.test.js`).
+- **Asked as a job, not a request, while requests are being saved.** `buildTerritoryDirectorInput` returns exactly what the director's analyzer would be sent, or `null` when no event is territorial, so [the turn review](ai-overview.md#the-turn-review-every-check-after-a-skip-in-one-request) can carry it in its one request; the director then runs unchanged with that part of the answer in place of a call of its own. The unit director (`buildUnitDirectorInput`), the curator (`buildCuratorInput`) and the board follow the same pattern.
+- **Purpose:** the jump writes history; this pass turns the surviving front state into de-facto `regionControlOps` (contest / control / clear_contest) without inventing legal transfers. Legacy wartime `regionTransfers` on capture-worded events are converted to control ops first; deterministic rules sanitize the proposals (a control flip needs explicit capture wording and different sides, a contest needs fighting wording, clearAll needs a final settlement, duplicates dropped); accepted ops are resolved through the geography resolver bounded by current control. `window.__OH_NATIVE_TERRITORY_DIRECTOR__.last` shows the last pass.
 
 ### 7.12e `geographyResolver` — the bounded semantic geography pass
 
@@ -343,8 +368,8 @@ Each subsection: purpose · default prompt location · entry point · key inputs
 
 ### 7.13 `idleDiplomacy` — unprompted note drip
 - **Purpose:** Between jumps, on each real-minute tick, a small chance a single polity sends the player a short note; usually the answer is silence (`chat: null`).
-- **Prompt:** `tasks.idleDiplomacy` (uses lowercase `${playerPolity}`, `${dateReadable}`, `${worldSummary}`, `${recentEvents}`, `${chatSummary}`). **Entry:** `maybeSendIdleDiplomacy({chance})` `gameplay.js:2128` (1/20 default; suspended by the simulation busy-lock, `628`).
-- **Tool/schema:** `submit_idle_diplomacy` / `IDLE_DIPLOMACY_SCHEMA` (`468`): `{ chat: null | createdChat }`. No editor section; no canned fallback (silent). A note from a country the player already 1:1s with lands in that thread.
+- **Prompt:** `tasks.idleDiplomacy` (uses lowercase `${playerPolity}`, `${dateReadable}`, `${worldSummary}`, `${recentEvents}`, `${chatSummary}`). **Entry:** `maybeSendIdleDiplomacy({chance})` in `gameplay.js`, rolled once a visible minute by `GameUI/main.jsx`. It is **background AI**: it does nothing while the player has Background AI turned off (Settings → AI → AI requests; on by default) or has reached that day's cap, and its calls are counted as background ([the request budget](ai-overview.md#the-request-budget)). Its one cadence is the game's Idle diplomacy feature — one attempt every N minutes, 8 by default, zero when the feature is off — and the same request also asks whether any forces would visibly move. It used to run at least one roll in four regardless of the feature, so that the map "breathed"; that floor is gone. Suspended by the simulation busy-lock.
+- **Tool/schema:** `submit_idle_diplomacy` / `IDLE_DIPLOMACY_SCHEMA`: `{ chat: null | createdChat }`. No editor section; no canned fallback (silent). A note from a country the player already 1:1s with lands in that thread.
 
 ### 7.17 `projects` — the Projects & Operations board
 
@@ -359,47 +384,48 @@ Its rules live in the template, with one exception injected at call time: `build
 
 ### 7.14 Root prompt: `leader` — AI diplomacy
 - **Purpose:** Roleplay a single non-player polity replying in an ongoing chat; hard rule to **match the player's average message length** and tone; simulate a polity leaving.
-- **Prompt:** top-level `leader` string. **Assembly:** `buildDiplomaticSystemPrompt(countries, playerCountry)` (`main.jsx:1036`, `+difficultyDirective`) then `sendDiplomaticMessage(playerMessage, speakingAs, countries)` (`1138`) adds the per-turn instruction + optional `REACTION:<emoji>`. Free-form text (no tool/schema). `${RESPONDING_POLITY_NAME}` selects the voiced polity.
+- **Prompt:** top-level `leader` string. **Assembly:** `buildDiplomaticSystemPrompt(countries, playerCountry)` (`main.jsx`, `+difficultyDirective`) then `sendDiplomaticMessage(playerMessage, speakingAs, countries)` adds the per-turn instruction + optional `REACTION:<emoji>`. Free-form text (no tool/schema). `${RESPONDING_POLITY_NAME}` selects the voiced polity.
 
 - **Durable memory:** every reply also carries a hidden `DIPLOMATIC_MEMORY:<summary>` line — the thread's COMPLETE durable memory, modal force and attribution preserved (`buildDiplomaticTurnInstruction`, `runtime/diplomaticEnvelope.js`). `parseDiplomaticEnvelope` strips it and the chat stores it on the message as `memorySummary`; the newest one is fed back as a system-side context entry ahead of the dated, attributed transcript tail (`loadDiplomaticHistory`), and `diplomaticContinuity` (§5.1) shows it to the jump.
 ### 7.15 Root prompt: `advisor` — chief advisor chat
-- **Purpose:** In-character strategic advice, ≤3000 chars, may append a `chart`-fenced Chart.js block. **Assembly:** `buildAdvisorSystemPrompt` (`main.jsx:1012`) + `sendMessage` (`1084`) with rolling `advisorHistory`; language directive only (no difficulty, no schema).
+- **Purpose:** In-character strategic advice, ≤3000 chars, may append a `chart`-fenced Chart.js block. **Assembly:** `buildAdvisorSystemPrompt` (`main.jsx`) + `sendMessage` with rolling `advisorHistory`; language directive only (no difficulty, no schema).
 
 ### 7.16 Not in the prompt pack: `generateCountryStats` — intel briefing
-- **Purpose:** Free-text bulleted intelligence briefing on a polity. Builds its **own inline system prompt** (dossier + world snapshot + recent events) and calls `callAI` **directly** (no tool, no `runJsonTask`, so only the language directive is appended). Entry: `generateCountryStats({code, name})` `gameplay.js:1551`. Distinct from `countryStatSheet` (§7.12).
+- **Purpose:** Free-text bulleted intelligence briefing on a polity. Builds its **own inline system prompt** (dossier + world snapshot + recent events) and calls `callAI` **directly** (no tool, no `runJsonTask`, so only the language directive is appended). Entry: `generateCountryStats({code, name})` `gameplay.js`. Distinct from `countryStatSheet` (§7.12).
 
 ---
 
 ## 8. Impacts / output-shape reference
 
-Shared `impacts` object (`impactsSchema` `gameplaySchemas.js:282`) carried by jump/auto/gameMaster events. All entries are optional arrays; omit empties.
+Shared `impacts` object (`impactsSchema` `gameplaySchemas.js`) carried by jump/auto/gameMaster events. All entries are optional arrays; omit empties.
 
 | Field | Entry shape | Resolution / notes |
 |---|---|---|
 | `regionControlOps` | `{ op: contest\|control\|clear_contest, regionId, regionName?, fromCode, actorCode\|toCode\|claimantCode, clearAll?, wholeCountry?, note? }` | De-facto control (world-state.md §2b). Resolved through the same geography resolver as transfers, bounded by current control; `control` moves the controller and anchors the lawful sovereign, `contest` adds a contender, `clear_contest` removes one. |
-| `regionTransfers` | `{ regionId, regionName?, fromCode?, toCode, note? }` (LEGAL sovereignty only) | `regionId` may be a plain name; `resolveRegionTransfers` (`gameplay.js:831`) maps name→id (owner-disambiguated). Unresolved → strict corrective feedback (attempt 1) or dropped (final). Required whenever event text claims a capture (Map Truth guard). A `toCode` the map does not know **founds** a polity of exactly that name (`runtime/polityFounding.js`): the resolver prepends a `polityChanges` create to the same event, and the world state founds again as a safety net for impacts that never met the resolver; only `fromCode` must already exist. Same for a `regionControlOps` control's `toCode`, a contest's `actorCode` and a live claim's `claimantCode`. |
-| `polityChanges` | `{ operation: update\|create\|rename\|restore\|dissolve, code, name?, color?, aliases?, reputation?(0–100), intelligence?, tags?, stats?, note? }` | `reputation` was recently added to the schema (`107`); without the schema entry, json-schema providers could never emit it. `tags` is the *complete* new trait list, not a delta. |
-| `createdChats` | `{ countries[≥1], title, openingMessage, speaker }` | Initiating polity speaks first, never the player. `validateChatOpener` (`979`) requires title + opening. Built into a real chat by `buildGeneratedChat` (`762`). |
-| `unitOps` | `spawn{unit{name,type∈enum,ownerCode,strength 1–1000,lng,lat,regionId?}}` · `move{unitId,toLng,toLat,regionId?,note?}` · `strength{unitId,strength 0–1000}` · `remove{unitId}` | `unitOpSchema` (`178`). Ops on unknown unit ids: strict error / salvage drop. `strength:0` or `remove` deletes the unit. |
-| `markerOps` | `build{marker{name,kind(free lowercase),ownerCode?,lng,lat,note?,foundedAt?}}` · `remove{name}` | `markerOpSchema` (`256`). Structures never move borders (no `regionTransfers`). |
+| `regionTransfers` | `{ regionId, regionName?, fromCode?, toCode, note? }` (LEGAL sovereignty only) | `regionId` may be a plain name; `resolveRegionTransfers` (`gameplay.js`) maps name→id (owner-disambiguated). Unresolved → strict corrective feedback (attempt 1) or dropped (final). Required whenever event text claims a capture (Map Truth guard). A `toCode` the map does not know **founds** a polity of exactly that name (`runtime/polityFounding.js`): the resolver prepends a `polityChanges` create to the same event, and the world state founds again as a safety net for impacts that never met the resolver; only `fromCode` must already exist. Same for a `regionControlOps` control's `toCode`, a contest's `actorCode` and a live claim's `claimantCode`. |
+| `polityChanges` | `{ operation: update\|create\|rename\|restore\|dissolve, code, name?, color?, aliases?, reputation?(0–100), intelligence?, tags?, stats?, note? }` | `reputation` was recently added to the schema; without the schema entry, json-schema providers could never emit it. `tags` is the *complete* new trait list, not a delta. |
+| `createdChats` | `{ countries[≥1], title, openingMessage, speaker }` | Initiating polity speaks first, never the player. `validateChatOpener` requires title + opening. Built into a real chat by `buildGeneratedChat`. |
+| `unitOps` | `spawn{unit{name,type∈enum,ownerCode,strength 1–100,composition,at\|lng+lat,regionId?,posture?,note?}}` · `move{unitId,at\|toLng+toLat,regionId?,posture?,note?}` · `strength{unitId,strength 0–100}` · `remove{unitId}` | `unitOpSchema`. **`at` is where, in words** ("near Kharkiv", "off Sevastopol"), resolved to a point at validation by `placement.js` and then spaced off whatever already stands there (`runtime/featureSpacing.js`); see [placing things by name](ai-overview.md#placing-things-by-name-and-keeping-them-apart). Ops on unknown unit ids: strict error / salvage drop. `strength:0` or `remove` deletes the unit. |
+| `markerOps` | `build{marker{name,kind(free lowercase),ownerCode?,status?,at\|lng+lat,note?,foundedAt?}}` (or flat beside `op`) · `update{markerId\|name, …, at?}` · `remove{name}` | `markerOpSchema`. `at` as for units. Structures never move borders (no `regionTransfers`). |
+| `reports` | `create{reportId?,title,body,visibleTo[],from?,dateline?}` · `share{reportId,visibleTo[],from?}` | `reportOpSchema`. The document itself, in its own voice, held by the polities named; `visibleTo` empty = published; `from` whose it is (or, on a share, who passed it on). Holders are resolved at validation against the country catalog (unknown: strict error / receipt note; none known: dropped). `[Reports — documents, not summaries]` + `[Reports on File]` (with who stole a copy) ride on the jump; a leader gets `[Documents Your Government Holds]`, the advisor `[Documents Our Government Holds]`. |
 
-Jump payloads also carry a top-level `diplomaticOutreach[]` (same shape as `createdChats`, not tied to an event) and a nullable `catalyst`. The schema validator (`validateGameplayPayload` `852`) additionally enforces non-blank `stopDate`/event fields, "at least one event, summary, or meaningful catalyst," and distinct catalyst choices.
+Jump payloads also carry a top-level `diplomaticOutreach[]` (same shape as `createdChats`, not tied to an event). The schema validator (`validateGameplayPayload` `852`) additionally enforces non-blank `stopDate`/event fields, "at least one event, summary, or meaningful interactive event," and distinct interactive event choices.
 
 ---
 
 ## 9. Recipes
 
 ### Add a new template variable
-1. **Compute it** in `buildPromptContext`'s return object (`promptContext.js:413`) — e.g. `myThing: buildMyThing(bundle.world)`. Add a builder next to the others if non-trivial. (If it needs reputation/feasibility-style augmentation only for tasks, add it in `buildTemplateVariables` `gameplay.js:367` instead — but remember advisor/leader won't see those.)
+1. **Compute it** in `buildPromptContext`'s return object (`promptContext.js`) — e.g. `myThing: buildMyThing(bundle.world)`. Add a builder next to the others if non-trivial. (If it needs reputation/feasibility-style augmentation only for tasks, add it in `buildTemplateVariables` `gameplay.js` instead — but remember advisor/leader won't see those.)
 2. **Expose a placeholder** in `defaultPrompts.json` `helpers`: `"MY_THING": "${myThing}"`.
 3. **Reference it** in the task/root text as `${MY_THING}` (or the lowercase `${myThing}` directly).
 4. **Editor:** nothing — helpers are technical and never shown. If the sentence that uses the variable is guidance an author should be able to reword, keep it inside a segment declared in `promptGuidance.js` (or declare one, with unique `start`/`end` anchors) and keep the placeholder inside the passage.
-5. Nothing else — `renderTemplate` picks up any key present in the merged `{...variables, ...helperValues}` map.
+5. Nothing else — `renderTemplate` picks up any key present in the merged `{...variables,...helperValues}` map.
 
 ### Add a new task
-1. **Schema + tool:** define `MY_TASK_SCHEMA` and `MY_TASK_TOOL = makeTool("submit_my_task", …)` in `gameplaySchemas.js`; register both in `GAMEPLAY_SCHEMAS` (`621`) and `GAMEPLAY_TOOLS` (`717`) under the new key; add any task-specific checks to `validateGameplayPayload` (`852`).
-2. **Prompt text:** add `tasks.myTask` to `defaultPrompts.json` ending with the JSON output contract. It is auto-picked-up: `PROMPT_TASK_KEYS = Object.keys(tasks)` and `normalizePromptPack` iterate it (`gameplayPrompts.js:230`, `246`).
-3. **Entry point:** in `gameplay.js`, build variables (`buildTemplateVariables(bundle, {…})`) and call `runJsonTask("myTask", { userMessage, variables, fallback?, validatePayload?, timeoutMs? })`. Wrap state-writing tasks in `beginSimulation()/endSimulation()`.
+1. **Schema + tool:** define `MY_TASK_SCHEMA` and `MY_TASK_TOOL = makeTool("submit_my_task", …)` in `gameplaySchemas.js`; register both in `GAMEPLAY_SCHEMAS` and `GAMEPLAY_TOOLS` under the new key; add any task-specific checks to `validateGameplayPayload`.
+2. **Prompt text:** add `tasks.myTask` to `defaultPrompts.json` ending with the JSON output contract. It is auto-picked-up: `PROMPT_TASK_KEYS = Object.keys(tasks)` and `normalizePromptPack` iterate it (`gameplayPrompts.js`, `246`).
+3. **Entry point:** in `gameplay.js`, build variables (`buildTemplateVariables(bundle, {…})`) and call `runJsonTask("myTask", { userMessage, variables, fallback?, validatePayload?, timeoutMs? })`. Wrap state-writing tasks in `beginSimulation/endSimulation`.
 4. **Call-time directives:** only for text that depends on runtime state; a rule in the template reaches every campaign (§2).
 5. **(Optional) editor:** add a `PROMPT_SECTION_DEFINITIONS` entry (`type:"task"`) **and** at least one guidance segment in `promptGuidance.js`; a section without segments stays hidden, and only the segments are editable.
 
@@ -409,8 +435,7 @@ Jump payloads also carry a top-level `diplomaticOutreach[]` (same shape as `crea
 
 - **`worldSummary` and `worldSummaryNoCity` are the same string** — the "no city" name is historical; city coordinates are a separate `citiesSummary`/`${CITY_COORDINATES}`.
 - **`worldSummary` embeds the briefing and the simulation rules**, so a prompt that also renders `${WORLD_BEFORE_ROUND_ONE_TEXT}` or `${HISTORICAL_PRESET_SIMULATION_RULES}` would send them twice. `collapseRepeatedWorldContext` (`promptDedupe.js`) keeps the first copy of each and swaps later copies for a pointer; `runJsonTask` applies it to every task and `main.jsx` to the advisor and leader prompts. Values under 400 characters are left alone. Don't strip them from the summary instead: `actions` and `idleDiplomacy` see the rules only there.
-- **Two output attempts per task**, then a deterministic fallback (or throw). `finalAttempt` comes from `runJsonTask`, never from counting validator calls — attempt-1 schema failures skip `validatePayload` entirely (`gameplay.js:464` comment).
+- **Two output attempts per task**, then a deterministic fallback (or throw). `finalAttempt` comes from `runJsonTask`, never from counting validator calls — attempt-1 schema failures skip `validatePayload` entirely (`gameplay.js` comment).
 - **Reputation and military-feasibility reach only the task path** (`buildTemplateVariables`). Advisor/leader use `buildPromptContext` directly and never see them.
-- **`catalystSummary` contains stray embedded "Game Master" text** (§7.9) — the actual GM task is `gameMaster`.
 - **The intel `generateCountryStats` briefing is invisible to the Prompts editor** — it is an inline prompt not in `defaultPrompts.json`. (`idleDiplomacy` has had a section, with one guidance passage, since 2026-09-16.)
 - **Editing `defaultPrompts.json` reaches every campaign** (the guidance model, §2) — but an edit that moves or rewrites a guidance passage must keep, or update, that passage's anchors in `promptGuidance.js`; `promptGuidance.test.js` fails otherwise, and a passage whose anchors are gone silently drops out of the editor.

@@ -8,12 +8,17 @@ import { formatReportFields, logDebugEvent } from "../../runtime/debugLog.js";
 import { useFailureReportButton } from "../../runtime/saveDebugLog.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { chatLanguageDiffersFromUi, isRtlLanguage, resolveChatLanguage } from "../../runtime/i18n.js";
-import { applyProjectOpsToWorld, normalizeActionEntry, readActionsState, readWorldState, writeActionsState, writeWorldState } from "../../runtime/gameState.js";
-import { extractFencedJson, looksLikeProjectOps } from "./advisorBlocks.js";
+import { applyProjectOpsToWorld, normalizeActionEntry, readActionsState, readWorldState, viewAsSeen, writeActionsState, writeWorldState } from "../../runtime/gameState.js";
+import { describeReplyProblems, extractFencedJson, looksLikeProjectOps, validateChartConfig } from "./advisorBlocks.js";
 import { buildMessageDrafts, splitAtBlockquotes } from "./advisorDrafts.js";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
 import Markdown, { MarkdownStyleInjector } from "./markdown.jsx";
 import StatsPane from "./stats.jsx";
+import { buildCatchUpNote } from "../AI/conversationCatchUp.js";
+import { gmChangesSince } from "../../runtime/gmChanges.js";
+import { compareGameDates, formatGameDateReadable } from "../../runtime/gameDates.js";
+import { useRuntimeState } from "../../runtime/useRuntimeState.js";
+import { useUnseenEventIds } from "./useUnseenEvents.js";
 
 Chart.register(...registerables);
 
@@ -48,8 +53,21 @@ const ThinkingDots = () => {
 
 const UNIT_TYPES_ALLOWED = new Set(["infantry", "armor", "air", "naval", "artillery", "garrison"]);
 
+// A ```chart fence that never closed (the reply ran out) is not matched by
+// extractFencedJson and would print its JSON into the bubble.
+const UNCLOSED_CHART = /```chart[\s\S]*$/;
+
 const parseMessage = (rawText) => {
-    const { rest: afterChart, json: chartConfig } = extractFencedJson(rawText, "chart");
+    const { rest: chartRest, json: chartJson, reason: chartReason } = extractFencedJson(rawText, "chart");
+    const unclosedChart = !chartJson && !chartReason && UNCLOSED_CHART.test(chartRest);
+    const afterChart = unclosedChart ? chartRest.replace(UNCLOSED_CHART, "") : chartRest;
+    // Checked before it is drawn (advisorBlocks.js validateChartConfig): a chart
+    // the panel cannot lay out is replaced by a line saying why, and the advisor
+    // is told the same thing before the next question.
+    const chart = chartJson
+        ? validateChartConfig(chartJson)
+        : { config: null, problem: chartReason ? `the chart block was ${chartReason}` : unclosedChart ? "the chart block was cut off before it closed" : "" };
+    const chartConfig = chart.config;
     const { rest: afterActions, json: actionsRaw } = extractFencedJson(afterChart, "actions");
     const { rest: afterDrafts, json: draftsRaw } = extractFencedJson(afterActions, "senddraft");
     const { rest: afterDeploy, json: deployRaw } = extractFencedJson(afterDrafts, "deploy");
@@ -68,6 +86,7 @@ const parseMessage = (rawText) => {
     return {
         text: rest.trim(),
         chartConfig,
+        chartProblem: chart.problem,
         actionsProposal: Array.isArray(actionsRaw) ? actionsRaw : null,
         messageDrafts,
         deployments: deployments && deployments.length ? deployments : null,
@@ -82,7 +101,9 @@ const parseMessage = (rawText) => {
 // rather than just echoing the model's request back. Runs ONCE, right when a
 // reply arrives (see handleSend) — never at render time, since parseMessage
 // above runs on every re-render and must stay a pure read.
-const applyAdvisorActions = async (proposal) => {
+// `problems` collects, in sentences, what the advisor asked for and did not get
+// — its receipt, told to it before the next question (advisorBlocks.js).
+const applyAdvisorActions = async (proposal, problems = []) => {
     if (!Array.isArray(proposal) || proposal.length === 0) return null;
 
     const current = await readActionsState({ force: true });
@@ -90,14 +111,21 @@ const applyAdvisorActions = async (proposal) => {
     const items = [];
 
     for (const raw of proposal) {
-        if (!raw || typeof raw !== "object") continue;
+        if (!raw || typeof raw !== "object") {
+            problems.push("an entry was not an object and was ignored");
+            continue;
+        }
         const id = String(raw.id ?? "").trim();
 
         if (raw.remove) {
-            if (!id) continue;
+            if (!id) {
+                problems.push("a removal named no id, so nothing was removed");
+                continue;
+            }
             const before = next.length;
             next = next.filter((action) => action.id !== id);
             if (next.length < before) items.push({ change: "removed", title: raw.title || id });
+            else problems.push(`the removal of ${id} matched no queued action, so nothing was removed`);
             continue;
         }
 
@@ -117,7 +145,9 @@ const applyAdvisorActions = async (proposal) => {
 
         // No id, or an id that doesn't match anything current — either a genuinely
         // new proposal, or the model referencing a stale/already-resolved id. Both
-        // land as a fresh queued action rather than being silently dropped.
+        // land as a fresh queued action rather than being silently dropped — and
+        // the second is said, because the advisor believes it edited something.
+        if (id) problems.push(`the edit of ${id} matched no queued action, so it was queued as a new one`);
         const created = normalizeActionEntry({
             title: raw.title,
             text: raw.text,
@@ -402,11 +432,11 @@ const AdvisorActionsCard = ({ items, onOpenActions }) => {
         .join(", ");
 
     return (
-        <div style={{ marginTop: "0.75rem", background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: "10px", padding: "0.65rem 0.8rem" }}>
+        <div style={{ marginTop: "0.75rem", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "10px", padding: "0.65rem 0.8rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
-        <span style={{ fontSize: "0.76rem", fontWeight: 700, color: "rgba(216,196,255,0.95)" }}>📋 Actions {summary}</span>
+        <span style={{ fontSize: "0.76rem", fontWeight: 700, color: "#f4f4f5" }}>📋 Actions {summary}</span>
         {onOpenActions && (
-            <button type="button" onClick={onOpenActions} style={{ background: "none", border: "1px solid rgba(139,92,246,0.5)", borderRadius: "6px", color: "rgba(216,196,255,0.9)", cursor: "pointer", fontSize: "0.7rem", fontWeight: 600, padding: "0.2rem 0.5rem" }}>
+            <button type="button" onClick={onOpenActions} style={{ background: "none", border: "1px solid rgba(255,255,255,0.25)", borderRadius: "6px", color: "#e4e4e7", cursor: "pointer", fontSize: "0.7rem", fontWeight: 600, padding: "0.2rem 0.5rem" }}>
             Open Actions
             </button>
         )}
@@ -484,10 +514,10 @@ const AdvisorDeployPlace = ({ deployment, placed, onPlace }) => {
     return (
         <button type="button" onClick={handleClick} disabled={busy} style={{
             display: "flex", alignItems: "center", gap: "0.4rem",
-            background: status === "placed" ? "rgba(52,211,153,0.12)" : "rgba(139,92,246,0.16)",
-            border: `1px solid ${status === "placed" ? "rgba(52,211,153,0.4)" : "rgba(139,92,246,0.45)"}`,
+            background: status === "placed" ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.06)",
+            border: `1px solid ${status === "placed" ? "rgba(52,211,153,0.4)" : "rgba(255,255,255,0.23)"}`,
             borderRadius: "8px",
-            color: status === "placed" ? "rgba(167,243,208,0.95)" : "rgba(216,196,255,0.95)",
+            color: status === "placed" ? "rgba(167,243,208,0.95)" : "#f4f4f5",
             cursor: busy ? "default" : "pointer",
             fontFamily: "sans-serif", fontSize: "0.76rem", fontWeight: 600, padding: "0.35rem 0.65rem",
         }}>
@@ -500,7 +530,7 @@ const AdvisorDeployPlace = ({ deployment, placed, onPlace }) => {
     );
 };
 
-const CHART_COLORS = ["#60a5fa","#34d399","#f472b6","#fbbf24","#a78bfa","#f87171","#38bdf8"];
+const CHART_COLORS = ["#60a5fa","#34d399","#f472b6","#fbbf24","#94a3b8","#f87171","#38bdf8"];
 
 const AdvisorChart = ({ config }) => {
     const canvasRef = useRef(null);
@@ -699,11 +729,60 @@ const AdvisorReplyBody = ({ text, drafts, onDraftMessage }) => {
     );
 };
 
+// The moment the player is asking from: the events they have been shown and the
+// date of the last of them — while a skip is being revealed, the reveal's front,
+// not the end of the finished turn (runtime/unseenEvents.js, gameState.js
+// viewAsSeen). The question is dated there, so the next one's catch-up picks up
+// what the rest of the reveal showed.
+const readSeenMoment = async (gameDate) => {
+    try {
+        const [events, world] = await Promise.all([
+            readJson(JSON_URLS.events, { defaultValue: [] }),
+            readJson(JSON_URLS.world, { defaultValue: {}, clone: false }),
+        ]);
+        const seen = await viewAsSeen({ world, events, game: { gameDate } });
+        return { events: seen.events, world, date: seen.game?.gameDate || gameDate || "" };
+    } catch {
+        return { events: [], world: {}, date: gameDate || "" };
+    }
+};
+
+// What the world did since the conversation last spoke (AI/conversationCatchUp.js):
+// the time that passed, the newest events since, and the Game Master's changes by
+// hand. A fresh conversation has nothing to catch up on — it reads the present.
+// A note that cannot be built is no note: the question still goes.
+const buildAdvisorCatchUp = async (messages, moment) => {
+    const previous = [...(Array.isArray(messages) ? messages : [])].reverse()
+        .find((msg) => (msg.role === "user" || msg.role === "advisor") && !msg.streaming);
+    if (!previous) return { text: "", label: "" };
+    try {
+        const { events, world, date } = moment;
+        return buildCatchUpNote({
+            previousDate: previous.time || "",
+            currentDate: date || "",
+            events,
+            gmChanges: previous.at ? gmChangesSince(world, previous.at) : [],
+            // The advisor's receipt for its own last reply: a chart not drawn, a
+            // block that half landed.
+            replyProblems: previous.role === "advisor" ? describeReplyProblems(previous) : [],
+            compareDates: compareGameDates,
+            formatDate: (value) => formatGameDateReadable(value),
+        });
+    } catch (error) {
+        console.warn("[advisor] could not work out what changed since the last exchange:", error);
+        return { text: "", label: "" };
+    }
+};
+
 // No closure over component state, so hoisted rather than redefined on every
 // AdvisorPanel render (and needed at module scope by the memoized row below).
+//
+// Through gameDates.js, not new Date(): "2016-01-01" parses as UTC midnight and
+// toLocaleDateString shows it in local time, so every reply west of Greenwich was
+// dated the day before — and a BC date not at all.
 const formatAdvisorDate = (dateStr) => {
     if (!dateStr) return "";
-    return new Date(dateStr).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+    return formatGameDateReadable(dateStr, "MMM D, YYYY") || String(dateStr);
 };
 
 // One chat bubble, memoized. AdvisorPanel's `input` (the composer text) used to
@@ -720,13 +799,20 @@ const formatAdvisorDate = (dateStr) => {
 // default shallow prop comparison skips everything else, including every
 // keystroke in the composer below.
 const AdvisorMessageRow = React.memo(({ msg, msgIndex, chatDiffers, chatDir, onOpenActions, onOpenProjects, onRetryProjects, onRetry, retrying, onDraftMessage, onPlaceDeployment }) => {
-    const { text, chartConfig, messageDrafts, deployments } = msg.role === "advisor"
+    const { text, chartConfig, chartProblem, messageDrafts, deployments } = msg.role === "advisor"
         ? parseMessage(msg.text)
-        : { text: msg.text, chartConfig: null, messageDrafts: null, deployments: null };
+        : { text: msg.text, chartConfig: null, chartProblem: "", messageDrafts: null, deployments: null };
     const asWritten = msg.role === "advisor" && chatDiffers;
 
     return (
         <div style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
+        {/* The world moved on before this question; the advisor was told how
+            (the whole note is in the tooltip). */}
+        {msg.role === "user" && msg.catchUpLabel && (
+            <span title={msg.catchUp} style={{ alignSelf: "center", color: "rgba(255,255,255,0.38)", fontSize: "0.66rem", marginBottom: "0.45rem" }}>
+            ⏳ {msg.catchUpLabel}
+            </span>
+        )}
         {msg.role !== "user" && (
             <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)", marginBottom: "0.25rem" }}>
             {msg.role === "error" ? "⚠️ Error" : "🧭 Advisor"}
@@ -750,7 +836,13 @@ const AdvisorMessageRow = React.memo(({ msg, msgIndex, chatDiffers, chatDir, onO
             />
         )}
         {chartConfig && <AdvisorChart config={chartConfig} />}
-        {msg.actionsSummary && <AdvisorActionsCard items={msg.actionsSummary} onOpenActions={onOpenActions} />}
+        {/* Not while streaming: a chart still arriving is not a broken one. */}
+        {chartProblem && !msg.streaming && (
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", marginTop: "0.6rem" }}>
+            📉 The chart could not be drawn: {chartProblem}.
+            </div>
+        )}
+        {msg.actionsSummary &&<AdvisorActionsCard items={msg.actionsSummary} onOpenActions={onOpenActions} />}
         {msg.projectsSummary && <AdvisorProjectsCard items={msg.projectsSummary} onOpenProjects={onOpenProjects} />}
         {msg.projectsProblem && <AdvisorProjectsProblem kind={msg.projectsProblem} detail={msg.projectsDetail} excerpt={msg.projectsExcerpt} onRetry={onRetryProjects} />}
         {msg.role === "error" && <AdvisorErrorDetails message={msg.text} diagnostics={msg.diagnostics} onRetry={onRetry} retrying={retrying} />}
@@ -776,6 +868,62 @@ const AdvisorMessageRow = React.memo(({ msg, msgIndex, chatDiffers, chatDir, onO
     );
 });
 
+// The advisor flagging a paper a turn put in the government's hands
+// (runtime/reportDelivery.js documentNotices): one line, the document a click
+// away. Shown once the reveal reaches the event it came with; gone if the paper
+// is (an undone turn).
+const selectReports = (world) => (Array.isArray(world?.reports) ? world.reports : []);
+const noticeHow = (notice) => (notice.channel === "intelligence"
+    ? `a copy our agents took${notice.from ? ` in ${notice.from}` : ""}; they do not know we have it`
+    : notice.channel === "diplomacy"
+    ? `from ${notice.from || "abroad"}, filed in our correspondence with them`
+    : "for our government's eyes alone");
+
+const AdvisorDocumentNotice = ({ notice }) => {
+    const reports = useRuntimeState("world", selectReports);
+    const unseen = useUnseenEventIds();
+    const [open, setOpen] = useState(false);
+    if (unseen.has(String(notice?.eventId ?? ""))) return null;
+    const report = reports.find((entry) => String(entry?.id) === String(notice?.reportId));
+    if (!report) return null;
+    return (
+        <div style={{ alignItems: "flex-start", display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>🧭 Advisor</span>
+            <div style={{ background: "rgba(250,204,21,0.06)", border: "1px solid rgba(250,204,21,0.22)", borderRadius: "12px 12px 12px 2px", boxSizing: "border-box", fontSize: "0.82rem", lineHeight: 1.5, maxWidth: "90%", padding: "0.55rem 0.8rem" }}>
+                <div>
+                    📄 A new paper on your desk: <span data-no-translate style={{ fontWeight: 800 }}>{report.title}</span>, {noticeHow(notice)}.
+                </div>
+                <button type="button" onClick={() => setOpen((value) => !value)} style={{ background: "none", border: "none", color: "#fde68a", cursor: "pointer", fontFamily: "inherit", fontSize: "0.74rem", fontWeight: 700, marginTop: "0.3rem", padding: 0 }}>
+                    {open ? "Put it away" : "Read it"}
+                </button>
+                {open && (
+                    <div data-no-translate style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: "0.4rem", paddingTop: "0.45rem", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {report.dateline ? `${report.dateline}\n\n` : ""}{report.body}
+                    </div>
+                )}
+            </div>
+            {notice.time && (
+                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.65rem", marginTop: "0.25rem" }}>{formatAdvisorDate(notice.time)}</span>
+            )}
+        </div>
+    );
+};
+
+// Notices a turn posted while the panel held its conversation (gameplay.js
+// postDocumentNotices), and those an undo took back, merged in from the file —
+// never the other way — so the panel's next save keeps them.
+const mergeNotices = (current, stored) => {
+    const storedNotices = (Array.isArray(stored) ? stored : []).filter((message) => message?.role === "notice");
+    const storedIds = new Set(storedNotices.map((message) => message.id));
+    const kept = current.filter((message) => message?.role !== "notice" || storedIds.has(message.id));
+    const present = new Set(kept.filter((message) => message?.role === "notice").map((message) => message.id));
+    const added = storedNotices.filter((message) => !present.has(message.id));
+    if (!added.length && kept.length === current.length) return current;
+    // A reply still streaming stays last: the panel finds it there.
+    const last = kept.at(-1);
+    return last?.streaming ? [...kept.slice(0, -1), ...added, last] : [...kept, ...added];
+};
+
 // The whole scrollable history, also memoized as a unit — so a keystroke in
 // the composer (state that lives in AdvisorPanel, outside this component)
 // never even reaches AdvisorMessageRow's own per-row check above.
@@ -790,10 +938,12 @@ const AdvisorMessageList = React.memo(({ messages, isLoading, chatDiffers, chatD
     {/* The retry is offered on the LAST message only, and only when it is the
         error: retrying anything older would re-ask a question the conversation
         has already moved past. */}
-    {messages.map((msg, i) => (
+    {messages.map((msg, i) => (msg.role === "notice"
+        ? <AdvisorDocumentNotice key={msg.id || i} notice={msg} />
+        : (
         <AdvisorMessageRow key={i} msg={msg} msgIndex={i} chatDiffers={chatDiffers} chatDir={chatDir} onOpenActions={onOpenActions} onOpenProjects={onOpenProjects} onRetryProjects={onRetryProjects} onDraftMessage={onDraftMessage} onPlaceDeployment={onPlaceDeployment}
         onRetry={i === messages.length - 1 && msg.role === "error" ? onRetry : undefined} retrying={retrying} />
-    ))}
+    )))}
 
     {isLoading && !(messages[messages.length - 1]?.role === "advisor" && messages[messages.length - 1]?.streaming) && (
         <div style={{ display: "flex", alignItems: "flex-start", flexDirection: "column", gap: "0.25rem" }}>
@@ -886,6 +1036,20 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
         return () => { cancelled = true; };
     }, [hasBootstrapped, isAdvisorOpen]);
 
+    // A turn flags new papers in the file while the panel holds the conversation
+    // (and an undo takes them back): merge them in (mergeNotices), so they show
+    // and the panel's next save keeps them. Before the panel has loaded, the load
+    // itself brings them.
+    useEffect(() => {
+        if (!hasBootstrapped) return undefined;
+        const onRuntimeUpdate = (event) => {
+            if (event?.detail?.url !== JSON_URLS.advisor) return;
+            setMessages((prev) => mergeNotices(prev, event.detail.value));
+        };
+        window.addEventListener("oh:runtime-json-updated", onRuntimeUpdate);
+        return () => window.removeEventListener("oh:runtime-json-updated", onRuntimeUpdate);
+    }, [hasBootstrapped]);
+
     useEffect(() => {
         if (!shouldAutoScrollRef.current) return;
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -952,13 +1116,32 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             force: true,
         }).catch(() => ({ gameDate: null, round: 0 }));
 
+        // Written once, for a new question, and kept on it; a retry sends the
+        // note its question was first sent with.
+        const askedBefore = replaceTrailingError
+            ? [...messagesRef.current].reverse().find((msg) => msg.role === "user")
+            : null;
+        const moment = await readSeenMoment(gameDate);
+        const askedOn = moment.date || gameDate;
+        const catchUp = replaceTrailingError
+            ? { text: askedBefore?.catchUp || "", label: askedBefore?.catchUpLabel || "" }
+            : await buildAdvisorCatchUp(messagesRef.current, moment);
+
         // A fresh question re-engages auto-scroll even if the player had
         // paused it reading up through history — the pause is scoped to the
         // reply they scrolled away from, not the whole session.
         shouldAutoScrollRef.current = true;
         setMessages(prev => (replaceTrailingError
             ? (prev[prev.length - 1]?.role === "error" ? prev.slice(0, -1) : prev.slice())
-            : [...prev, { role: "user", text, time: gameDate }]));
+            : [...prev, {
+                role: "user",
+                text,
+                time: askedOn,
+                // When it was asked, by the clock: the next question's catch-up
+                // counts the Game Master's changes from here.
+                at: new Date().toISOString(),
+                ...(catchUp.text ? { catchUp: catchUp.text, catchUpLabel: catchUp.label } : {}),
+            }]));
         setIsLoading(true);
 
         // Streaming: the ThinkingDots show until the first token, then a live
@@ -970,20 +1153,24 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             if (last && last.role === "advisor" && last.streaming) {
                 next[next.length - 1] = { ...last, text: fullText };
             } else {
-                next.push({ role: "advisor", text: fullText, time: gameDate, streaming: true });
+                next.push({ role: "advisor", text: fullText, time: askedOn, streaming: true });
             }
             return next;
         });
 
         try {
-            const reply = await sendMessage(text, { onChunk: (_delta, full) => showStreaming(full) });
+            const reply = await sendMessage(text, { onChunk: (_delta, full) => showStreaming(full), catchUp: catchUp.text });
             // Apply any ```actions proposal in the reply to the real queue BEFORE
             // finalising the message, so the confirmation card that renders with it
             // reflects what actually happened — not a re-derivation done later at
             // render time (which can't know what the queue looked like when this
             // reply arrived).
-            const { json: actionsProposal } = extractFencedJson(reply, "actions");
-            const actionsSummary = await applyAdvisorActions(actionsProposal).catch((error) => {
+            const { json: actionsProposal, reason: actionsReason } = extractFencedJson(reply, "actions");
+            // What the advisor asked for and did not get, kept on the reply and
+            // told to it before the next question (advisorBlocks.js).
+            const actionsProblems = actionsReason ? [`it was ${actionsReason}, so nothing in it was applied`] : [];
+            const { chartProblem } = parseMessage(reply);
+            const actionsSummary = await applyAdvisorActions(actionsProposal, actionsProblems).catch((error) => {
                 console.error("Failed to apply advisor-proposed actions:", error);
                 return null;
             });
@@ -1039,7 +1226,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             setMessages(prev => {
                 const next = prev.slice();
                 const last = next[next.length - 1];
-                const finalMessage = { role: "advisor", text: reply, time: gameDate, ...(actionsSummary ? { actionsSummary } : {}), ...(projectsSummary ? { projectsSummary } : {}), ...(projectsProblem ? { projectsProblem } : {}), ...(projectsDetail ? { projectsDetail } : {}), ...(projectsExcerptText ? { projectsExcerpt: projectsExcerptText } : {}) };
+                const finalMessage = { role: "advisor", text: reply, time: askedOn, at: new Date().toISOString(), ...(chartProblem ? { chartProblem } : {}), ...(actionsProblems.length ? { actionsProblems } : {}), ...(actionsSummary ? { actionsSummary } : {}), ...(projectsSummary ? { projectsSummary } : {}), ...(projectsProblem ? { projectsProblem } : {}), ...(projectsDetail ? { projectsDetail } : {}), ...(projectsExcerptText ? { projectsExcerpt: projectsExcerptText } : {}) };
                 // Finalise the streaming bubble, or append the full reply if the
                 // provider never streamed a chunk.
                 if (last && last.role === "advisor" && last.streaming) {
@@ -1059,7 +1246,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
                 const updated = [...base, {
                     role: "error",
                     text: err.message,
-                    time: gameDate,
+                    time: askedOn,
                     ...(err?.diagnostics ? { diagnostics: err.diagnostics } : {}),
                 }];
                 saveMessages(updated);

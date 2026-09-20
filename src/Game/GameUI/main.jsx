@@ -89,6 +89,10 @@ const LazyCheatsPanel = lazy(() =>
 const LazyDebugConsole = lazy(() =>
   import("./debugConsole.jsx").then((module) => ({ default: module.DebugConsole })),
 );
+// Interactive events (interactive.jsx): nothing of them loads until the player takes one up.
+const LazyInteractivePanel = lazy(() =>
+  import("./interactive.jsx").then((module) => ({ default: module.InteractivePanel })),
+);
 
 const checkWebGL = () => {
   try {
@@ -177,7 +181,7 @@ const AdvisorButton = ({ isAdvisorOpen, dockStyle, onToggle }) => (
       height: "4rem", width: "4rem",
       cursor: "pointer", fontSize: "1.5rem",
       background: isAdvisorOpen
-        ? "linear-gradient(180deg, rgba(91,155,255,0.22), rgba(59,130,246,0.12))"
+        ? "linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.05))"
         : "linear-gradient(180deg, rgba(53,53,58,0.58), rgba(17,17,19,0.48))",
       transition: `${dockStyle.transition}, background 0.15s ease`,
     }}
@@ -201,6 +205,7 @@ const Main = ({
   const [shouldLoadCheats, setShouldLoadCheats] = useState(false);
   const [isDebugConsoleOpen, setIsDebugConsoleOpen] = useState(false);
   const [shouldLoadDebugConsole, setShouldLoadDebugConsole] = useState(false);
+  const [isInteractiveOpen, setIsInteractiveOpen] = useState(false);
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
   const [advisorWidth, setAdvisorWidth] = useState(readAdvisorWidth);
   // A starter message queued for the advisor's input box — set when something
@@ -267,7 +272,7 @@ const Main = ({
   // running game), there is a small chance a polity messages the player's
   // inbox unprompted. Everything that could break it is guarded inside
   // maybeSendIdleDiplomacy — it skips entirely while a time skip, game-master
-  // command, or catalyst stage is in flight, never overlaps itself, and stays
+  // command, or interactive event stage is in flight, never overlaps itself, and stays
   // silent on any failure. Hidden tabs don't roll the dice.
   useEffect(() => {
     if (hasNoGames) return undefined;
@@ -411,6 +416,15 @@ const Main = ({
     ));
   }, []);
 
+  // An interactive event opens from the card of the event a time skip offered,
+  // and from the time panel's note while one is offered or in progress (time.jsx
+  // dispatches this).
+  useEffect(() => {
+    const openInteractive = () => setIsInteractiveOpen(true);
+    window.addEventListener("oh:open-interactive-event", openInteractive);
+    return () => window.removeEventListener("oh:open-interactive-event", openInteractive);
+  }, []);
+
   return (
     <>
       {showWebGLWarning && <WebGLWarningPopup />}
@@ -466,6 +480,15 @@ const Main = ({
       <Suspense fallback={null}>
         <Presence open={isDebugConsoleOpen}>
           <LazyDebugConsole open={isDebugConsoleOpen} onClose={() => setIsDebugConsoleOpen(false)} />
+        </Presence>
+      </Suspense>
+      <Suspense fallback={null}>
+        <Presence open={isInteractiveOpen}>
+          <LazyInteractivePanel
+            open={isInteractiveOpen}
+            onClose={() => setIsInteractiveOpen(false)}
+            onOpenTimeline={() => { setIsInteractiveOpen(false); setActiveBottomPanel("history"); }}
+          />
         </Presence>
       </Suspense>
       <GenerationRatingToast />

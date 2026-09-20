@@ -71,6 +71,7 @@ export const JSON_URLS = {
   colors: "",
   flags: "",
   tags: "",
+  stats: "",
   events: "",
   game: "",
   prompts: "",
@@ -179,6 +180,10 @@ const pmtilesCache = new SharedPromiseCache(256);
 // "did the custom geometry resolve?" stays answerable (see loadRegionCatalog).
 const jsonLoadedUrls = new Set();
 
+// Wire-text length of the last parsed payload per URL, for warmJson's
+// display-only size. Recording the text we already read beats re-serialising.
+const jsonByteLengths = new Map();
+
 // The scenario geometry is never worth retaining: its only long-lived reader
 // keeps it in React state (Nations.jsx / Cities.jsx, both force:true), so the
 // value-cache copy is a second parsed FeatureCollection — ~190 MB on a 55 MB
@@ -207,10 +212,13 @@ const isMutableRuntimeJsonUrl = (url) =>
   url === JSON_URLS.colors ||
   url === JSON_URLS.flags ||
   url === JSON_URLS.tags ||
+  url === JSON_URLS.stats ||
   url === JSON_URLS.events ||
   url === JSON_URLS.game ||
+  url === JSON_URLS.intercepts ||
   url === JSON_URLS.prompts ||
   url === JSON_URLS.snapshots ||
+  url === JSON_URLS.snapshotsIndex ||
   url === JSON_URLS.world;
 
 const pmtilesProtocol = new Protocol();
@@ -379,6 +387,7 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
       // Must rotate with the URLs: a stale entry would claim the NEXT
       // generation's geometry had already resolved.
       jsonLoadedUrls.delete(url);
+      jsonByteLengths.delete(url);
       // The workers' staged copy (website) belongs to the old generation too.
       releaseWorkerFetchableUrl(url);
     }
@@ -421,10 +430,12 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
   JSON_URLS.colors = withRuntimeToken("/api/runtime/json/colors");
   JSON_URLS.flags = withRuntimeToken("/api/runtime/json/flags");
   JSON_URLS.tags = withRuntimeToken("/api/runtime/json/tags");
+  JSON_URLS.stats = withRuntimeToken("/api/runtime/json/stats");
   JSON_URLS.events = withRuntimeToken("/api/runtime/json/events");
   JSON_URLS.game = withRuntimeToken("/api/runtime/json/game");
   JSON_URLS.prompts = withRuntimeToken("/api/runtime/json/prompts");
   JSON_URLS.snapshots = withRuntimeToken("/api/runtime/json/snapshots");
+  JSON_URLS.snapshotsIndex = withRuntimeToken("/api/runtime/json/snapshotsIndex");
   JSON_URLS.regionsGeojson = withRuntimeToken("/api/runtime/json/regionsGeojson");
   JSON_URLS.citiesGeojson = withRuntimeToken("/api/runtime/json/citiesGeojson");
   JSON_URLS.backgroundData = withRuntimeToken("/api/runtime/json/backgroundData");
@@ -903,6 +914,7 @@ export const readJson = async (url, { cache, defaultValue, force = false, signal
     // carrying a defaultValue resolves the SHARED batched promise to that
     // default on failure, so every awaiter sees a value either way.
     jsonLoadedUrls.add(url);
+    jsonByteLengths.set(url, text.length);
     if (store) jsonValueCache.set(url, data);
     return data;
   })()
@@ -924,11 +936,16 @@ export const readJson = async (url, { cache, defaultValue, force = false, signal
   return clone ? cloneJsonFor(url, value) : value;
 };
 
+// Did the document come back, or is this a defaultValue served after a failed read?
+export const jsonReadSucceeded = (url) => jsonLoadedUrls.has(url);
+
+// clone: false is safe because the payload is discarded here, and size reads
+// the recorded wire text. A primed or defaulted URL has none and reports 0.
 export const warmJson = async (url, options = {}) => {
-  const data = await readJson(url, options);
+  await readJson(url, { ...options, clone: false });
   return {
     kind: "json",
-    size: JSON.stringify(data).length,
+    size: jsonByteLengths.get(url) ?? 0,
     url,
   };
 };
@@ -936,6 +953,8 @@ export const warmJson = async (url, options = {}) => {
 export const primeJson = (url, data, { cache, clone = true } = {}) => {
   const store = cache === undefined ? !isNoStoreJsonUrl(url) : cache !== false;
   jsonLoadedUrls.add(url);
+  // The primed value came with no wire text, so drop the stale length.
+  jsonByteLengths.delete(url);
   jsonRequestCache.delete(url);
   if (!store) {
     // DELETE rather than merely skip: leaving an older entry behind would let
@@ -1413,16 +1432,26 @@ export const loadCountryNames = async ({ force = false } = {}) => {
   countryNamesPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.countries;
-      if (!layer) return [];
+      // The STOCK world's countries, from the tile archive — one of two sources,
+      // and the optional one. This used to return an empty catalog the moment the
+      // archive could not be read, before the world's own polities below had been
+      // looked at: a hand-drawn map, whose every country lives in polityOverrides,
+      // lost all of them to a missing tile file, and with them the country pickers,
+      // the map labels and every name a chat participant or a report holder is
+      // resolved against. (The same gap loadRegionCatalog had.) The archive is
+      // tried; the world's declared polities are always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.countries ?? null;
+      } catch (error) {
+        console.warn("The stock country tiles could not be read; the catalog carries this world's own polities only.", error);
+      }
 
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const code = props?.GID_0 || props?.gid_0 || props?.ISO_A3 || props?.iso_a3 || "";
         const name = resolveCountryDisplayName(
@@ -1484,7 +1513,12 @@ export const primeCustomRegionCatalogEntries = (
     const lng = Number(raw?.lng);
     const lat = Number(raw?.lat);
     entries.push({
-      country: raw?.country ? String(raw.country) : "",
+      // A drawn region's baked owner is its `owner` (see primeCustomRegionCatalog
+      // below, which reads the geojson itself and has always done this). The map
+      // worker's records carry it as `owner` beside an empty `country`, so without
+      // this every drawn region primed by the map lost its base owner — and with it
+      // who holds what, wherever this catalog is read.
+      country: raw?.country ? String(raw.country) : raw?.owner ? String(raw.owner) : "",
       countryCode: raw?.countryCode ? String(raw.countryCode) : "",
       id,
       name: name || id,
@@ -1495,6 +1529,7 @@ export const primeCustomRegionCatalogEntries = (
       adjacencies: Array.isArray(raw?.adjacencies)
         ? raw.adjacencies.map((value) => String(value)).filter(Boolean)
         : [],
+      ...(isBox(raw?.bounds) ? { bounds: raw.bounds } : {}),
     });
   }
   primedCustomRegionCatalog = entries;
@@ -1503,6 +1538,14 @@ export const primeCustomRegionCatalogEntries = (
     regionCatalogPromise = null;
     regionCatalogPromiseKey = "";
   }
+  // The map's worker primes this well after the panels have mounted. A panel
+  // that frames things with it (the event cards' links, time.jsx) listens for
+  // this and derives again, instead of keeping what it made without it.
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    try {
+      window.dispatchEvent(new CustomEvent("oh:region-catalog-primed"));
+    } catch { /* a listener's failure is not the catalog's */ }
+  }
   reportPerfOperation(
     "prime compact custom region catalog",
     perfNow() - startedAt,
@@ -1510,6 +1553,50 @@ export const primeCustomRegionCatalogEntries = (
   );
   return entries;
 };
+
+// A drawn region's bounding box, taken while its geometry is in memory anyway.
+// The stock outline tables are keyed by GADM id and know nothing of a drawn
+// map, so this is the only frame the event camera and an event card's links can
+// fly to there. A box wider than half the world has crossed the antimeridian
+// (Chukotka): it is measured again with the western longitudes wrapped east, so
+// `east` may exceed 180, which is what MapLibre's fitBounds expects.
+const geometryBounds = (geometry) => {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  const longitudes = [];
+  const visit = (coordinates) => {
+    if (!Array.isArray(coordinates)) return;
+    if (typeof coordinates[0] === "number") {
+      const [lng, lat] = coordinates;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      longitudes.push(lng);
+      if (lng < west) west = lng;
+      if (lng > east) east = lng;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+      return;
+    }
+    for (const part of coordinates) visit(part);
+  };
+  visit(geometry?.coordinates);
+  if (!longitudes.length) return null;
+  if (east - west > 180) {
+    let wrappedWest = Infinity;
+    let wrappedEast = -Infinity;
+    for (const lng of longitudes) {
+      const wrapped = lng < 0 ? lng + 360 : lng;
+      if (wrapped < wrappedWest) wrappedWest = wrapped;
+      if (wrapped > wrappedEast) wrappedEast = wrapped;
+    }
+    return [[wrappedWest, south], [wrappedEast, north]];
+  }
+  return [[west, south], [east, north]];
+};
+
+const isBox = (value) => Array.isArray(value) && value.length === 2
+  && [value[0]?.[0], value[0]?.[1], value[1]?.[0], value[1]?.[1]].every(Number.isFinite);
 
 export const primeCustomRegionCatalog = (
   geojson,
@@ -1537,6 +1624,7 @@ export const primeCustomRegionCatalog = (
       tags: Array.isArray(props?.tags) ? props.tags : [],
       type: props?.type ?? "",
       adjacencies: Array.isArray(props?.adjacencies) ? props.adjacencies : [],
+      bounds: geometryBounds(feature?.geometry),
     });
   }
   return primeCustomRegionCatalogEntries(rawEntries, options);
@@ -1579,6 +1667,19 @@ export const loadScenarioRegionCatalog = async ({ force = false } = {}) => {
   });
 };
 
+// The server's derived projection of the restore points: id/round/dates only.
+// snapshots.json itself carries every prior world and hits 8+ MB late in a game.
+export const loadRollbackSnapshotIndex = async () => {
+  const data = await readJson(JSON_URLS.snapshotsIndex, {
+    defaultValue: { entries: [] },
+    force: true,
+    clone: false,
+  }).catch(() => null);
+  return Array.isArray(data?.entries) ? data.entries : [];
+};
+
+export const loadRollbackSnapshotCount = async () => (await loadRollbackSnapshotIndex()).length;
+
 export const loadRegionCatalog = async ({ force = false } = {}) => {
   // Keyed on BOTH sources: switching games/scenarios (new runtime token) must
   // refresh the custom-region names merged in below.
@@ -1591,16 +1692,26 @@ export const loadRegionCatalog = async ({ force = false } = {}) => {
   regionCatalogPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.regions;
-      if (!layer) return [];
-
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+
+      // The stock world's regions, from the tile archive — ONE of two sources,
+      // and the optional one. This used to return an empty catalog the moment
+      // the archive could not be read, before the scenario's own regions below
+      // had been looked at: a hand-drawn map with every region named in its
+      // geojson lost all of them to a missing tile file, and with them every
+      // lookup, every place name the engine reads, and every prompt's region
+      // list. The archive is tried; the scenario's geometry is always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.regions ?? null;
+      } catch (error) {
+        console.warn("The stock region tiles could not be read; the catalog carries the scenario's own regions only.", error);
+      }
+
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
         // A few GADM regions carry the literal placeholder "NA" as their name (England
