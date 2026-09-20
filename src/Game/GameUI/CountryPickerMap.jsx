@@ -183,7 +183,7 @@ const CountryPickerMap = ({
           fill: new Fill({
             color: isSelected
               ? withAlpha(selectionColorRef.current, 0.6)
-              : isHovered ? "#a1a1aa" : "rgba(66,66,70,0.3)",
+              : isHovered ? "rgba(255,255,255,0.28)" : "rgba(66,66,70,0.3)",
           }),
           stroke: new Stroke({
             color: isSelected ? withAlpha(selectionColorRef.current, 0.95) : "rgba(150,155,170,0.4)",
@@ -208,11 +208,11 @@ const CountryPickerMap = ({
 
       return new Style({
         fill: new Fill({
-          color: isHovered ? "#a1a1aa" : codeToColor(code),
+          color: isHovered ? "rgba(255,255,255,0.35)" : codeToColor(code),
         }),
         stroke: new Stroke({
           color: isHovered
-            ? "#a1a1aa"
+            ? "rgba(255,255,255,0.85)"
             : "rgba(255,255,255,0.3)",
           width: isHovered ? 2.5 : 1,
         }),

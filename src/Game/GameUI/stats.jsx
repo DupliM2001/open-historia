@@ -583,10 +583,10 @@ const DiplomacySection = ({ world, targetCountry }) => {
 
 const statsSubtabStyle = (selected) => ({
     alignItems: "center",
-    backgroundColor: selected ? "rgba(59,130,246,0.13)" : "rgba(255,255,255,0.03)",
-    border: `1px solid ${selected ? "rgba(96,165,250,0.5)" : "rgba(255,255,255,0.09)"}`,
+    backgroundColor: selected ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.03)",
+    border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.09)"}`,
     borderRadius: "8px",
-    color: selected ? "#bfdbfe" : "rgba(255,255,255,0.58)",
+    color: selected ? "#f4f4f5" : "rgba(255,255,255,0.58)",
     cursor: "pointer",
     display: "flex",
     flex: 1,
@@ -699,10 +699,10 @@ const historyDateMs = (value) => {
 };
 
 const advancedRangeStyle = (active) => ({
-    backgroundColor: active ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.04)",
-    border: `1px solid ${active ? "rgba(96,165,250,0.55)" : "rgba(255,255,255,0.08)"}`,
+    backgroundColor: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
+    border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)"}`,
     borderRadius: "7px",
-    color: active ? "#dbeafe" : "rgba(255,255,255,0.5)",
+    color: active ? "#f4f4f5" : "rgba(255,255,255,0.5)",
     cursor: "pointer",
     fontSize: "0.68rem",
     fontWeight: 800,
@@ -1142,10 +1142,10 @@ const HistoricalTrackingModal = ({
                                             type="button"
                                             onClick={() => setIntervalMonths(months)}
                                             style={{
-                                                backgroundColor: active ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.04)",
-                                                border: `1px solid ${active ? "rgba(96,165,250,0.5)" : "rgba(255,255,255,0.08)"}`,
+                                                backgroundColor: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
+                                                border: `1px solid ${active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)"}`,
                                                 borderRadius: "999px",
-                                                color: active ? "#dbeafe" : "rgba(255,255,255,0.68)",
+                                                color: active ? "#f4f4f5" : "rgba(255,255,255,0.68)",
                                                 cursor: "pointer",
                                                 fontSize: "0.72rem",
                                                 fontWeight: active ? 800 : 700,

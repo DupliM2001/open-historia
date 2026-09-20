@@ -229,7 +229,7 @@ const GenerationRow = ({ record, selected, onSelect }) => (
             padding: "0.45rem 0.7rem",
             border: "none",
             borderBottom: "1px solid #262628",
-            backgroundColor: selected ? "rgba(59,130,246,0.12)" : "transparent",
+            backgroundColor: selected ? "rgba(0,0,0,0.42)" : "transparent",
             color: COLORS.text,
             cursor: "pointer",
             display: "flex",
