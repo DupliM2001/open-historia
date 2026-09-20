@@ -52,6 +52,7 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
+import { restoreBundleFiles, splitBundleFiles } from "../../runtime/bundleFiles.js";
 import { buildGameZipBlob, formatZipSize, readGameZip, saveGameZipToDisk } from "../../runtime/gameZip.js";
 import { isNativeApp } from "../../runtime/web/nativeBoot.js";
 
@@ -2282,13 +2283,18 @@ const LibraryTopBar = () => {
         // hub shares. With no custom basemap there's nothing to split out, so the zip
         // just holds scenario.json (still a valid, self-contained bundle).
         const split = await splitScenarioBundleImage(bundle).catch(() => null);
-        const files = { "scenario.json": JSON.stringify(bundle) };
+        const files = {};
         if (split) {
           delete bundle.assets.backgroundData; // the basemap now travels as a real file
-          files["scenario.json"] = JSON.stringify(bundle);
           files[split.imageName] = split.imageBytes;
           if (split.previewBytes) files[split.previewName] = split.previewBytes;
         }
+        // The heavy assets — the region geometry, a custom tile archive — ride as
+        // real entries too, so the zip actually compresses them instead of carrying
+        // them as one long JSON string (src/runtime/bundleFiles.js).
+        const lifted = splitBundleFiles(bundle);
+        Object.assign(files, lifted.files);
+        files["scenario.json"] = JSON.stringify(lifted.bundle);
         saveBlobToDisk(await zipBundle(files), `${id}-scenario.zip`);
       } else {
         saveJsonBundleToDisk(bundle, `${id}-scenario.json`);
@@ -2322,7 +2328,7 @@ const LibraryTopBar = () => {
         const zip = await unzipBundle(buffer);
         const scenarioText = await zip.text("scenario.json");
         if (!scenarioText) throw new Error("That .zip is missing scenario.json.");
-        bundle = JSON.parse(scenarioText);
+        bundle = await restoreBundleFiles(JSON.parse(scenarioText), zip);
         const imageName = zip.names().find((n) => /(^|\/)basemap\.(png|jpe?g|webp|gif|svg)$/i.test(n));
         if (imageName) {
           embedScenarioBundleImage(bundle, await zip.bytes(imageName), imageName);

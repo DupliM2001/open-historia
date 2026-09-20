@@ -3203,6 +3203,20 @@ const resolveRuntimeBinaryAsset = (assetKey) => {
 
 const encodeBinaryFile = (sourcePath) => fs.readFileSync(sourcePath).toString("base64");
 
+// A JSON asset travels as JSON. Base64 made every shared map a third bigger for
+// nothing: in a real hub bundle the region geometry was 17.1 MB of the 18.1 MB
+// file. Anything that does not parse as JSON still travels byte-exact as base64,
+// so a hand-edited or half-written file is never silently lost.
+const encodeJsonFile = (sourcePath) => {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
+    if (parsed && typeof parsed === "object") return { data: parsed };
+  } catch {
+    // Not JSON we can re-serialise; fall through to the bytes.
+  }
+  return { data: encodeBinaryFile(sourcePath), encoding: "base64" };
+};
+
 const buildScenarioBundleAsset = (scenarioId, assetKey) => {
   if (assetKey === COVER_IMAGE_ASSET_KEY) {
     const uploadPath = getScenarioUploadPath(scenarioId, assetKey);
@@ -3248,8 +3262,7 @@ const buildScenarioBundleAsset = (scenarioId, assetKey) => {
 
     return {
       contentType: "application/json",
-      data: encodeBinaryFile(geojsonPath),
-      encoding: "base64",
+      ...encodeJsonFile(geojsonPath),
       fileName: SCENARIO_GEOJSON_ASSET_FILES[assetKey],
       mode: "embedded",
     };
@@ -3417,9 +3430,13 @@ const applyScenarioBundleAsset = (scenarioId, assetKey, assetValue) => {
   if (assetValue?.mode === "embedded") {
     if (Object.hasOwn(OPTIONAL_JSON_ASSET_FILES, assetKey)) {
       writeJsonFile(getScenarioJsonPath(scenarioId, assetKey), assetValue.data ?? {});
-    } else {
+    } else if (assetValue.encoding === "base64" || typeof assetValue.data === "string") {
+      // Binary, or a bundle written before JSON assets stopped being base64'd.
       const decoded = Buffer.from(String(assetValue.data ?? ""), "base64");
       fs.writeFileSync(getScenarioUploadPath(scenarioId, assetKey), decoded);
+    } else {
+      // A JSON asset that travelled as JSON (geometry, a vector basemap).
+      fs.writeFileSync(getScenarioUploadPath(scenarioId, assetKey), JSON.stringify(assetValue.data ?? {}), "utf-8");
     }
     return;
   }

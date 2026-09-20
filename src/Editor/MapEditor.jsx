@@ -296,7 +296,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
   // This list is a whitelist and it drops anything not named here, silently. A
   // field left off does not fail to save — it fails to EXIST, and only when someone
   // reopens the document.
-  const buildPayload = () => ({
+  const buildDocumentFields = () => ({
     name: d.name,
     metadata: d.metadata,
     types: d.types,
@@ -312,7 +312,14 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     // forever — and, far worse, a document saved after being migrated still reads
     // as legacy to everything downstream.
     ownerSchema: d.doc?.ownerSchema ?? OWNER_SCHEMA,
-    regions: api?.serializeRegions() || { type: "FeatureCollection", features: [] },
+  });
+
+  // The whole document, map and all: what an export writes and what a save falls
+  // back to. `regions` may be handed in when the caller has already written them,
+  // so the map is never serialised twice for one save.
+  const buildPayload = (regions = null) => ({
+    ...buildDocumentFields(),
+    regions: regions || api?.serializeRegions() || { type: "FeatureCollection", features: [] },
   });
 
   // Persist the Workshop map into the scenario without forcing a new game.
@@ -370,12 +377,32 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
     }
   };
 
+  // A save carries the document plus either the whole map or only the regions
+  // that moved since the last one (OlMap serializeRegionChanges). That matters
+  // because this runs every two seconds while the map is dirty: it used to write
+  // the entire world each time, whether or not a polygon had moved.
+  //
+  // A store that cannot apply a difference — one built against another copy of
+  // the map, or a document whose geometry it does not have — says so, and the
+  // save is made again with the whole map. The record of what was last written is
+  // committed only once the save has landed, so a failure is retried in full.
   const saveNow = async () => {
     if (!api) return;
     try {
       d.setSaveStatus("saving");
-      const saved = await saveDocument(docId, buildPayload());
+      const changes = api.serializeRegionChanges?.() ?? null;
+      const creating = !docId;
+      const payload = !changes || creating || changes.full
+        ? buildPayload(changes?.full ?? null)
+        : { ...buildDocumentFields(), regionsDelta: { changed: changes.changed, count: changes.count, removed: changes.removed } };
+      let saved = await saveDocument(docId, payload);
+      if (saved?.needsFullRegions) {
+        console.warn("[editor] the store could not apply the map difference; writing the whole map:", saved.needsFullRegions);
+        api.forgetSavedRegions?.();
+        saved = await saveDocument(saved.id ?? docId, buildPayload());
+      }
       if (!docId) setDocId(saved.id);
+      changes?.commit?.();
       d.setSaveStatus("saved");
     } catch (e) {
       console.warn("[editor] save failed:", e);
