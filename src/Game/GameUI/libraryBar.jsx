@@ -229,7 +229,7 @@ const buildScenarioEditorState = (details) => {
   const world = details?.data?.world ?? {};
 
   return {
-    accentColor: scenario.accentColor ?? "#7c3aed",
+    accentColor: scenario.accentColor ?? "#a1a1aa",
     allowedUnitTypes: Array.isArray(world.allowedUnitTypes) ? world.allowedUnitTypes : [...UNIT_TYPES],
     country: game.country ?? "",
     description: scenario.description ?? "",
@@ -257,7 +257,7 @@ const buildGameEditorState = (details) => {
   const world = details?.data?.world ?? {};
 
   return {
-    accentColor: gameMeta.accentColor ?? "#7c3aed",
+    accentColor: gameMeta.accentColor ?? "#a1a1aa",
     country: game.country ?? "",
     description: gameMeta.description ?? "",
     eyebrow: gameMeta.eyebrow ?? "",
@@ -502,9 +502,9 @@ const PromptSectionEditor = ({
             style={{
               ...actionButtonStyle,
               background:
-                section.key === currentSection.key ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
+                section.key === currentSection.key ? "#a1a1aa" : "rgba(255,255,255,0.05)",
               borderColor:
-                section.key === currentSection.key ? "rgba(124,58,237,0.42)" : "rgba(255,255,255,0.08)",
+                section.key === currentSection.key ? "#a1a1aa" : "rgba(255,255,255,0.08)",
               minHeight: "2rem",
               padding: "0 0.8rem",
             }}
@@ -520,8 +520,8 @@ const PromptSectionEditor = ({
       </div>
       <div
         style={{
-          background: "rgba(124,58,237,0.08)",
-          border: "1px solid rgba(124,58,237,0.22)",
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.11)",
           borderRadius: "12px",
           color: "rgba(255,255,255,0.62)",
           fontSize: "0.76rem",
@@ -545,7 +545,7 @@ const PromptSectionEditor = ({
               <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
                 <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>
                   {segment.label}
-                  {edited ? <span style={{ color: "#c4b5fd", marginLeft: "0.4rem" }}>· edited</span> : null}
+                  {edited ? <span style={{ color: "#e4e4e7", marginLeft: "0.4rem" }}>· edited</span> : null}
                 </label>
                 {edited ? (
                   <button
@@ -1100,9 +1100,9 @@ const SectionTabs = ({ currentSection, sections, setSection }) => (
         style={{
           ...actionButtonStyle,
           background:
-            currentSection === sectionKey ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
+            currentSection === sectionKey ? "#a1a1aa" : "rgba(255,255,255,0.05)",
           borderColor:
-            currentSection === sectionKey ? "rgba(124,58,237,0.42)" : "rgba(255,255,255,0.08)",
+            currentSection === sectionKey ? "#a1a1aa" : "rgba(255,255,255,0.08)",
           minHeight: "2rem",
           padding: "0 0.8rem",
         }}
@@ -1263,8 +1263,8 @@ const EditorDrawer = ({
                         }}
                         style={{
                           ...actionButtonStyle,
-                          background: checked ? "rgba(124,58,237,0.3)" : "rgba(255,255,255,0.04)",
-                          borderColor: checked ? "rgba(124,58,237,0.5)" : "rgba(255,255,255,0.1)",
+                          background: checked ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                          borderColor: checked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
                           minHeight: "2rem",
                           padding: "0 0.7rem",
                         }}
@@ -1475,7 +1475,7 @@ const EditorDrawer = ({
         {kind === "scenario" && onOpenMapEditor && (
           <button
             onClick={onOpenMapEditor}
-            style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.24)", borderColor: "rgba(124,58,237,0.38)", color: "#fff", minWidth: "9rem" }}
+            style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.19)", color: "#fff", minWidth: "9rem" }}
             type="button"
           >
             🗺️ Open Map Editor
@@ -1649,7 +1649,7 @@ const LibraryTopBar = () => {
       const gameDetails = await loadGameDetails(gameId).catch(() => null);
       const world = { ...(gameDetails?.data?.world ?? {}) };
       const name = faction.name;
-      const hexColor = /^#[0-9a-fA-F]{6}$/.test(faction.color) ? faction.color : "#7c3aed";
+      const hexColor = /^#[0-9a-fA-F]{6}$/.test(faction.color) ? faction.color : "#a1a1aa";
 
       world.polityOverrides = {
         ...(world.polityOverrides ?? {}),
@@ -2840,8 +2840,8 @@ const LibraryTopBar = () => {
                         ...actionButtonStyle,
                         flex: 1,
                         fontWeight: 700,
-                        background: pickerTab === "country" ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "country" ? "rgba(124,58,237,0.7)" : undefined,
+                        background: pickerTab === "country" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
+                        borderColor: pickerTab === "country" ? "rgba(255,255,255,0.28)" : undefined,
                       }}
                     >
                       Pick a country
@@ -2853,8 +2853,8 @@ const LibraryTopBar = () => {
                         ...actionButtonStyle,
                         flex: 1,
                         fontWeight: 700,
-                        background: pickerTab === "faction" ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "faction" ? "rgba(124,58,237,0.7)" : undefined,
+                        background: pickerTab === "faction" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
+                        borderColor: pickerTab === "faction" ? "rgba(255,255,255,0.28)" : undefined,
                       }}
                     >
                       Create a faction
@@ -2873,7 +2873,7 @@ const LibraryTopBar = () => {
                     <button
                       type="button"
                       onClick={() => pickCountry("")}
-                      style={{ ...actionButtonStyle, justifyContent: "flex-start", background: "rgba(124,58,237,0.18)", marginBottom: "0.4rem" }}
+                      style={{ ...actionButtonStyle, justifyContent: "flex-start", background: "rgba(255,255,255,0.06)", marginBottom: "0.4rem" }}
                     >
                       {playGameId ? "Keep scenario default" : "Scenario default"}
                     </button>
@@ -2932,7 +2932,7 @@ const LibraryTopBar = () => {
                   <button
                     disabled={isBusy}
                     onClick={() => handleMissingScenarioImport(pending)}
-                    style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.3)", borderColor: "rgba(139,92,246,0.55)", minHeight: "2.6rem" }}
+                    style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.6rem" }}
                     type="button"
                   >
                     {isBusy ? "Getting the scenario…" : "Import & play"}
@@ -3045,8 +3045,8 @@ const LibraryTopBar = () => {
                   onClick={() => setActiveTab(tab)}
                   style={{
                     ...actionButtonStyle,
-                    background: activeTab === tab ? "rgba(124,58,237,0.24)" : "rgba(255,255,255,0.05)",
-                    borderColor: activeTab === tab ? "rgba(124,58,237,0.38)" : "rgba(255,255,255,0.08)",
+                    background: activeTab === tab ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)",
+                    borderColor: activeTab === tab ? "rgba(255,255,255,0.19)" : "rgba(255,255,255,0.08)",
                     minWidth: isMobile ? "0" : "6.6rem",
                     padding: isMobile ? "0.55rem 0.6rem" : undefined,
                   }}
@@ -3113,7 +3113,7 @@ const LibraryTopBar = () => {
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", justifyContent: "center" }}>
                     <button
                       type="button"
-                      style={{ ...actionButtonStyle, background: "rgba(124,58,237,0.3)", borderColor: "rgba(139,92,246,0.55)", minHeight: "2.8rem", padding: "0 1.4rem" }}
+                      style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.8rem", padding: "0 1.4rem" }}
                       onClick={() => setActiveTab("scenarios")}
                     >
                       Start from a scenario

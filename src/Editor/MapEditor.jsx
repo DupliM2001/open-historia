@@ -119,9 +119,10 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
   const [customBgId, setCustomBgId] = useState(null); // library basemap id applied (null = built-in / doc's own)
   const [basemapPickerOpen, setBasemapPickerOpen] = useState(false);
   // Which country's flag we're picking, or null. Owned HERE, not in the inspector:
-  // panelSurface has backdrop-filter, which makes a containing block for
-  // position:fixed — an overlay rendered inside the panel gets clipped to it and
-  // trapped under its z-index, whatever z-index the overlay itself asks for.
+  // panelSurface used to carry backdrop-filter, which makes a containing block
+  // for position:fixed — an overlay rendered inside the panel was clipped to it
+  // and trapped under its z-index. The panels are flat grey now, but this stays
+  // owned here: a full-screen overlay belongs at the root either way.
   const [flagPickerFor, setFlagPickerFor] = useState(null);
   // Session-only tracing aid ({ dataUrl, aspect, opacity, visible }) — kept out
   // of the document on purpose so it can never leak into saves or game exports.
@@ -799,8 +800,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap } = {}
                   alignItems: "center",
                   justifyContent: "center",
                   gap: isMobile ? 0 : 6,
-                  background: scenarioAction ? "rgba(59,130,246,0.35)" : "rgba(59,130,246,0.85)",
-                  border: "1px solid rgba(147,197,253,0.5)",
+                  background: scenarioAction ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.23)",
                   opacity: scenarioAction || !hydrated ? 0.8 : 1,
                 }}
               >
