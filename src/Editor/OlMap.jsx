@@ -61,12 +61,12 @@ import {
 } from "./geometry.js";
 
 const BASEMAP_BG = {
-  dark: "#0b1020",
+  dark: "#131315",
   black: "#000000",
   white: "#ffffff",
   grayscale: "#3a3a3f",
-  osm: "#0b1020",
-  light: "#0b1020",
+  osm: "#131315",
+  light: "#131315",
 };
 
 // Web-Mercator world extent (±180° lon, ±85.0511° lat) — a custom image
@@ -2682,7 +2682,7 @@ const OlMap = ({
     if (el) {
       el.style.background = customActive
         ? "#0b1a2b"
-        : esri?.editorBackground || BASEMAP_BG[basemap] || "#0b1020";
+        : esri?.editorBackground || BASEMAP_BG[basemap] || "#131315";
     }
   }, [basemap, customBackground]);
 

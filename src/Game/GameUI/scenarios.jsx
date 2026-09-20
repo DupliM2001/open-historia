@@ -18,12 +18,9 @@ const BAR_HEIGHT = 64;
 const TOP_BAR_OFFSET = "4.75rem";
 
 const surfaceStyle = {
-  background:
-  "linear-gradient(180deg, rgba(13, 13, 15, 0.97) 0%, rgba(8, 10, 15, 0.94) 100%)",
+  background: "#131315",
   border: "1px solid rgba(255,255,255,0.08)",
   boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
 };
 
 const actionButtonStyle = {
@@ -120,7 +117,7 @@ const buildEditorState = (details) => {
   };
 
   return {
-    accentColor: scenario.accentColor ?? "#7c3aed",
+    accentColor: scenario.accentColor ?? "#a1a1aa",
     advancedPromptsText: JSON.stringify(advancedPrompts, null, 2),
     country: game.country ?? "",
     description: scenario.description ?? "",
@@ -979,8 +976,8 @@ const ScenarioTopBar = () => {
     onClick={handleCreateScenario}
     style={{
       ...actionButtonStyle,
-      background: `${activeScenario?.accentColor ?? "#7c3aed"}cc`,
-      borderColor: `${activeScenario?.accentColor ?? "#7c3aed"}dd`,
+      background: `${activeScenario?.accentColor ?? "rgba(255,255,255,0.06)"}cc`,
+      borderColor: `${activeScenario?.accentColor ?? "rgba(255,255,255,0.22)"}dd`,
       color: "#fff",
     }}
     >

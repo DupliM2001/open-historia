@@ -102,7 +102,7 @@ const Bar = ({ label, value, max, right }) => (
     <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", padding: "0.2rem 0" }}>
         <div style={{ width: "10rem", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.72rem", fontWeight: 700, color: COLORS.text }} title={label}>{label || "—"}</div>
         <div style={{ flex: 1, height: "1rem", backgroundColor: COLORS.bg, borderRadius: "4px", overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
-            <div style={{ height: "100%", background: "linear-gradient(90deg, #2563eb, #60a5fa)", width: max > 0 ? `${Math.max(2, Math.round((value / max) * 100))}%` : "0%" }} />
+            <div style={{ height: "100%", background: "rgba(231,231,234,0.65)", width: max > 0 ? `${Math.max(2, Math.round((value / max) * 100))}%` : "0%" }} />
         </div>
         <div style={{ width: "7rem", flexShrink: 0, textAlign: "right", fontSize: "0.72rem", fontWeight: 700, color: COLORS.muted, fontFamily: MONO }}>{right ?? fmtInt(value)}</div>
     </div>

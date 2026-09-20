@@ -333,9 +333,9 @@ const ScenarioCard = ({ post, busy, onImport, onSelect }) => (
         <div
           title={post.official ? "Official: posted by a hub maintainer (verified by GitHub, not by the title)" : undefined}
           style={{
-            // Purple = verified official (hub-owner post). A random poster writing
+            // The OFFICIAL badge marks a verified post (hub-owner). A random poster writing
             // "official" in their title stays white.
-            color: post.official ? "#c4b5fd" : "#fff",
+            color: post.official ? "#e4e4e7" : "#fff",
             fontSize: "0.95rem",
             fontWeight: 800,
             letterSpacing: "-0.02em",
@@ -348,7 +348,7 @@ const ScenarioCard = ({ post, busy, onImport, onSelect }) => (
         </div>
         <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.7rem" }}>
           {post.official && (
-            <span style={{ background: "rgba(124,58,237,0.25)", border: "1px solid rgba(167,139,250,0.45)", borderRadius: "999px", color: "#c4b5fd", fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.06em", marginRight: "0.35rem", padding: "0.08rem 0.4rem", textTransform: "uppercase" }}>
+            <span style={{ background: "rgba(255,255,255,0.13)", border: "1px solid rgba(255,255,255,0.23)", borderRadius: "999px", color: "#e4e4e7", fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.06em", marginRight: "0.35rem", padding: "0.08rem 0.4rem", textTransform: "uppercase" }}>
               ✓ Official
             </span>
           )}
@@ -384,8 +384,8 @@ const ScenarioCard = ({ post, busy, onImport, onSelect }) => (
         style={{
           ...pillButton,
           minHeight: "1.8rem",
-          background: post.bundleUrl ? "rgba(124,58,237,0.35)" : "rgba(255,255,255,0.04)",
-          borderColor: post.bundleUrl ? "rgba(124,58,237,0.5)" : "rgba(255,255,255,0.08)",
+          background: post.bundleUrl ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+          borderColor: post.bundleUrl ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)",
           color: post.bundleUrl ? "#fff" : "rgba(255,255,255,0.35)",
           cursor: post.bundleUrl && !busy ? "pointer" : "default",
         }}
@@ -469,7 +469,7 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
       <a href={post.url} target="_blank" rel="noopener noreferrer" title="Like this scenario on its GitHub post" style={{ ...detailStat, textDecoration: "none" }}>👍 {post.upvotes} liked</a>
       <a href={post.url} target="_blank" rel="noopener noreferrer" title="Comment on its GitHub post" style={{ ...detailStat, textDecoration: "none" }}>💬 {post.comments} comments</a>
     </div>
-    <div style={{ color: "rgba(196,181,253,0.9)", fontSize: "0.78rem", marginBottom: "1rem" }}>
+    <div style={{ color: "#e4e4e7", fontSize: "0.78rem", marginBottom: "1rem" }}>
       Likes and comments live on the scenario's GitHub post — tap 👍 or 💬 above (or the button below) to open it and react there.
     </div>
 
@@ -484,7 +484,7 @@ const ScenarioDetail = ({ post, busy, onImport, onBack, notice, error }) => (
         onClick={() => onImport(post)}
         style={{
           alignItems: "center",
-          background: post.bundleUrl ? "rgba(124,58,237,0.85)" : "rgba(255,255,255,0.08)",
+          background: post.bundleUrl ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.08)",
           border: "none",
           borderRadius: "10px",
           color: post.bundleUrl ? "#fff" : "rgba(255,255,255,0.35)",
@@ -765,7 +765,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
           <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.9rem" }}>
             <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.78rem" }}>
               Community scenarios from the hub — ⬇ = imports, 👍 = likes. Open any post to 👍 like or 💬 comment on GitHub.
-              {" "}<span style={{ color: "#c4b5fd" }}>Purple = verified official post.</span>
+              {" "}<span style={{ color: "#e4e4e7" }}>The OFFICIAL badge marks a verified post.</span>
             </div>
             <div style={{ flex: 1 }} />
             <input
@@ -780,7 +780,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
             <button
               type="button"
               onClick={() => setPublishPickerOpen((open) => !open)}
-              style={{ ...pillButton, background: "rgba(124,58,237,0.3)", borderColor: "rgba(124,58,237,0.5)" }}
+              style={{ ...pillButton, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)" }}
             >
               ⬆ Publish to Hub
             </button>
