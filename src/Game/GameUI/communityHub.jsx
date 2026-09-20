@@ -23,6 +23,7 @@ import {
   resolveScenarioBundleBackground,
   splitScenarioBundleImage,
 } from "../../runtime/communityBasemaps.js";
+import { restoreBundleFiles, splitBundleFiles } from "../../runtime/bundleFiles.js";
 import { unzipBundle, zipBundle } from "../../runtime/bundleZip.js";
 import { sha256Hex } from "../../runtime/basemapLibrary.js";
 import { listFlags } from "../../runtime/flagLibrary.js";
@@ -200,7 +201,7 @@ export const downloadHubBundle = async (bundleUrl) => {
     const zip = await unzipBundle(await response.arrayBuffer());
     const scenarioText = await zip.text("scenario.json");
     if (!scenarioText) throw new Error("That .zip is missing scenario.json.");
-    bundle = JSON.parse(scenarioText);
+    bundle = await restoreBundleFiles(JSON.parse(scenarioText), zip);
     const imageName = zip.names().find((n) => /(^|\/)basemap\.(png|jpe?g|webp|gif|svg)$/i.test(n));
     if (imageName) {
       embedScenarioBundleImage(bundle, await zip.bytes(imageName), imageName);
@@ -698,8 +699,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
       // complete and browsable on its own. It ALSO downloads separately, because GitHub
       // can't render an image that lives inside a .zip: the author drags that copy into
       // the post, where the hub reads it as the card cover — like a basemap/flag preview.
-      // The base64 copy already in scenario.json is what import reads, so the .zip stays
-      // self-contained with no import-side changes needed.
+      // The copy inside the .zip is what import reads, so the .zip stays self-contained.
       let hasCover = false;
       let coverBlob = null;
       let coverDownloadName = "";
@@ -713,7 +713,12 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
           hasCover = true;
         } catch { /* the cover is a nicety — never block the publish over it */ }
       }
-      files["scenario.json"] = JSON.stringify(bundle);
+      // The heavy assets ride as real entries rather than as base64 inside
+      // scenario.json, which is most of what a shared map weighs
+      // (src/runtime/bundleFiles.js).
+      const lifted = splitBundleFiles(bundle);
+      Object.assign(files, lifted.files);
+      files["scenario.json"] = JSON.stringify(lifted.bundle);
       const fileName = `${scenario.id}-scenario.zip`;
       saveBlobToDisk(await zipBundle(files), fileName);
       if (coverBlob && coverDownloadName) saveBlobToDisk(coverBlob, coverDownloadName);
