@@ -692,7 +692,7 @@ const MetricPill = ({ children, icon = null, tone = "default", onClick = null, a
         onClick={onClick ?? undefined}
         style={{
             alignItems: "center",
-            background: active ? "rgba(96,165,250,0.24)" : resolved.background,
+            background: active ? "rgba(0,0,0,0.42)" : resolved.background,
             border: resolved.border,
             borderRadius: "999px",
             color: resolved.color,
@@ -1875,8 +1875,8 @@ const TimelineHistoryPanel = ({
                         style={{
                             padding: "0.2rem 0.6rem",
                             borderRadius: "999px",
-                            border: active ? "1px solid rgba(96,165,250,0.8)" : "1px solid rgba(255,255,255,0.16)",
-                            background: active ? "rgba(59,130,246,0.35)" : "rgba(255,255,255,0.06)",
+                            border: active ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.16)",
+                            background: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.06)",
                             color: "white",
                             fontSize: "0.68rem",
                             fontWeight: 700,

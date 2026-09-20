@@ -434,7 +434,7 @@ const PollCard = ({ poll, playerCountry, onVote }) => {
                         title={voters.length ? voters.join(", ") : "No vote yet"}
                         style={{
                             background: `linear-gradient(to right, rgba(96,165,250,0.28) ${share}%, rgba(255,255,255,0.05) ${share}%)`,
-                            border: chosen ? "1px solid rgba(96,165,250,0.85)" : "1px solid rgba(255,255,255,0.12)",
+                            border: chosen ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.12)",
                             borderRadius: "8px",
                             color: "white",
                             cursor: mine ? "default" : "pointer",
@@ -749,7 +749,7 @@ const CountrySelectorModal = ({
         onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
         onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}>Cancel</button>
         <button onClick={() => selected.length > 0 && onStart(selected)} disabled={selected.length === 0}
-        style={{ flex: 2, padding: "0.65rem", borderRadius: "10px", border: "none", background: selected.length > 0 ? "#3b82f6" : "rgba(59,130,246,0.3)", color: "white", fontSize: "0.85rem", fontWeight: 600, cursor: selected.length > 0 ? "pointer" : "not-allowed", fontFamily: "sans-serif" }}
+        style={{ flex: 2, padding: "0.65rem", borderRadius: "10px", border: "none", background: selected.length > 0 ? "rgba(255,255,255,0.28)" : "rgba(59,130,246,0.3)", color: "white", fontSize: "0.85rem", fontWeight: 600, cursor: selected.length > 0 ? "pointer" : "not-allowed", fontFamily: "sans-serif" }}
         onMouseEnter={e => { if (selected.length > 0) e.currentTarget.style.background = "#2563eb"; }}
         onMouseLeave={e => { if (selected.length > 0) e.currentTarget.style.background = "#3b82f6"; }}>
         {confirmLabel(selected.length)}

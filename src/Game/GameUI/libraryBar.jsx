@@ -72,6 +72,10 @@ const CommunityPanel = lazy(() => import("./communityHub.jsx"));
 // Lazy so OpenLayers only loads when the country picker map is opened.
 const CountryPickerMap = lazy(() => import("./CountryPickerMap.jsx"));
 
+// The accent a scenario or game falls back to when it carries none: the same
+// default the stores hand out (server/libraryStore.js, web/storeConstants.js).
+const DEFAULT_ACCENT_COLOR = "#2bc1f3";
+
 const BAR_HEIGHT = 64;
 
 // "#rrggbb" -> [r,g,b], the shape colors.json stores. Faults to a neutral grey
@@ -229,7 +233,7 @@ const buildScenarioEditorState = (details) => {
   const world = details?.data?.world ?? {};
 
   return {
-    accentColor: scenario.accentColor ?? "#a1a1aa",
+    accentColor: scenario.accentColor ?? DEFAULT_ACCENT_COLOR,
     allowedUnitTypes: Array.isArray(world.allowedUnitTypes) ? world.allowedUnitTypes : [...UNIT_TYPES],
     country: game.country ?? "",
     description: scenario.description ?? "",
@@ -257,7 +261,7 @@ const buildGameEditorState = (details) => {
   const world = details?.data?.world ?? {};
 
   return {
-    accentColor: gameMeta.accentColor ?? "#a1a1aa",
+    accentColor: gameMeta.accentColor ?? DEFAULT_ACCENT_COLOR,
     country: game.country ?? "",
     description: gameMeta.description ?? "",
     eyebrow: gameMeta.eyebrow ?? "",
@@ -502,9 +506,9 @@ const PromptSectionEditor = ({
             style={{
               ...actionButtonStyle,
               background:
-                section.key === currentSection.key ? "#a1a1aa" : "rgba(255,255,255,0.05)",
+                section.key === currentSection.key ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
               borderColor:
-                section.key === currentSection.key ? "#a1a1aa" : "rgba(255,255,255,0.08)",
+                section.key === currentSection.key ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
               minHeight: "2rem",
               padding: "0 0.8rem",
             }}
@@ -1018,7 +1022,7 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
               onClick={() => onActivate(game.id)}
               style={{
                 ...actionButtonStyle,
-                background: active ? "rgba(255,255,255,0.16)" : `${game.accentColor}cc`,
+                background: active ? "rgba(0,0,0,0.42)" : `${game.accentColor}cc`,
                 borderColor: active ? "rgba(255,255,255,0.22)" : `${game.accentColor}dd`,
                 color: "#fff",
                 flexBasis: "100%",
@@ -1100,9 +1104,9 @@ const SectionTabs = ({ currentSection, sections, setSection }) => (
         style={{
           ...actionButtonStyle,
           background:
-            currentSection === sectionKey ? "#a1a1aa" : "rgba(255,255,255,0.05)",
+            currentSection === sectionKey ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
           borderColor:
-            currentSection === sectionKey ? "#a1a1aa" : "rgba(255,255,255,0.08)",
+            currentSection === sectionKey ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
           minHeight: "2rem",
           padding: "0 0.8rem",
         }}
@@ -1263,7 +1267,7 @@ const EditorDrawer = ({
                         }}
                         style={{
                           ...actionButtonStyle,
-                          background: checked ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                          background: checked ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
                           borderColor: checked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
                           minHeight: "2rem",
                           padding: "0 0.7rem",
@@ -3045,7 +3049,7 @@ const LibraryTopBar = () => {
                   onClick={() => setActiveTab(tab)}
                   style={{
                     ...actionButtonStyle,
-                    background: activeTab === tab ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)",
+                    background: activeTab === tab ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
                     borderColor: activeTab === tab ? "rgba(255,255,255,0.19)" : "rgba(255,255,255,0.08)",
                     minWidth: isMobile ? "0" : "6.6rem",
                     padding: isMobile ? "0.55rem 0.6rem" : undefined,

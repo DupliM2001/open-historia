@@ -2670,8 +2670,8 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                 style={{
                                     ...buttonStyle,
                                     alignItems: "flex-start",
-                                    background: active ? "rgba(59,130,246,0.16)" : "rgba(255,255,255,0.04)",
-                                    borderColor: active ? "rgba(96,165,250,0.42)" : "rgba(255,255,255,0.1)",
+                                    background: active ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
+                                    borderColor: active ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.1)",
                                     flexDirection: "column",
                                     gap: "0.18rem",
                                     justifyContent: "flex-start",
@@ -2680,7 +2680,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                                     textAlign: "left",
                                 }}
                             >
-                                <span style={{ color: active ? "#dbeafe" : "rgba(255,255,255,0.8)", fontSize: "0.74rem" }}>{option.title}</span>
+                                <span style={{ color: active ? "#f4f4f5" : "rgba(255,255,255,0.8)", fontSize: "0.74rem" }}>{option.title}</span>
                                 <span style={{ color: "rgba(255,255,255,0.42)", fontSize: "0.63rem", fontWeight: 400, lineHeight: 1.3 }}>{option.description}</span>
                             </button>
                         );
@@ -4346,7 +4346,7 @@ const ToolView = ({ tool, header, busy, status, game, polities, refresh, runBusy
                     const isEditing = editingId === key;
                     const tier = Math.max(1, Math.min(4, Number(props.tier) || (props.capital === "primary" || props.capital === true ? 4 : 2)));
                     return (
-                        <div key={key} style={{ background: "rgba(255,255,255,0.04)", border: isEditing ? "1px solid rgba(59,130,246,0.4)" : "1px solid rgba(255,255,255,0.09)", borderRadius: 10, padding: "0.55rem 0.62rem" }}>
+                        <div key={key} style={{ background: "rgba(255,255,255,0.04)", border: isEditing ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.09)", borderRadius: 10, padding: "0.55rem 0.62rem" }}>
                             <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
                                 <div style={{ minWidth: 0 }}>
                                     <div style={{ alignItems: "center", display: "flex", gap: "0.36rem", minWidth: 0 }}>

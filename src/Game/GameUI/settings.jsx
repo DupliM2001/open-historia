@@ -425,8 +425,8 @@ const ApiProviderSelector = ({ provider, onProviderChange }) => {
                             padding: "0.7rem 0.75rem",
                             borderRadius: "8px",
                             border: "1px solid",
-                            borderColor: selected ? "rgba(59,130,246,0.8)" : "rgba(255,255,255,0.08)",
-                            backgroundColor: selected ? "rgba(59,130,246,0.18)" : "rgba(0,0,0,0.16)",
+                            borderColor: selected ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
+                            backgroundColor: selected ? "rgba(0,0,0,0.42)" : "rgba(0,0,0,0.16)",
                             color: "white",
                             cursor: "pointer",
                             textAlign: "left",
@@ -1859,10 +1859,10 @@ const SettingsWorkspace = ({
                     onClick={() => onSectionChange(section.key)}
                     style={{
                         alignItems: "center",
-                        background: selected ? "rgba(59,130,246,0.12)" : "transparent",
-                        border: `1px solid ${selected ? "rgba(96,165,250,0.22)" : "transparent"}`,
+                        background: selected ? "rgba(0,0,0,0.42)" : "transparent",
+                        border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "transparent"}`,
                         borderRadius: "9px",
-                        color: selected ? "#e0f2fe" : "rgba(255,255,255,0.58)",
+                        color: selected ? "#f4f4f5" : "rgba(255,255,255,0.58)",
                         cursor: "pointer",
                         display: "flex",
                         flex: isMobile ? "0 0 auto" : "none",
@@ -1874,7 +1874,7 @@ const SettingsWorkspace = ({
                         width: isMobile ? "auto" : "100%",
                     }}
                     >
-                        <span aria-hidden="true" style={{ alignItems: "center", background: selected ? "rgba(59,130,246,0.16)" : "rgba(255,255,255,0.05)", borderRadius: "7px", display: "inline-flex", flexShrink: 0, fontSize: "0.76rem", fontWeight: 900, height: "1.8rem", justifyContent: "center", width: "1.8rem" }}>{section.icon}</span>
+                        <span aria-hidden="true" style={{ alignItems: "center", background: selected ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)", borderRadius: "7px", display: "inline-flex", flexShrink: 0, fontSize: "0.76rem", fontWeight: 900, height: "1.8rem", justifyContent: "center", width: "1.8rem" }}>{section.icon}</span>
                         <span>
                             <span style={{ display: "block", fontSize: "0.74rem", fontWeight: 850 }}>{section.label}</span>
                             {!isMobile && <span style={{ color: "rgba(255,255,255,0.3)", display: "block", fontSize: "0.57rem", lineHeight: 1.35, marginTop: "0.12rem" }}>{section.description}</span>}
@@ -2086,10 +2086,10 @@ const QuickMenuTabButton = ({ label, selected, onClick }) => (
     type="button"
     onClick={onClick}
     style={{
-        background: selected ? "rgba(59,130,246,0.16)" : "transparent",
-        border: `1px solid ${selected ? "rgba(96,165,250,0.28)" : "transparent"}`,
+        background: selected ? "rgba(0,0,0,0.42)" : "transparent",
+        border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "transparent"}`,
         borderRadius: "8px",
-        color: selected ? "#e0f2fe" : "rgba(255,255,255,0.56)",
+        color: selected ? "#f4f4f5" : "rgba(255,255,255,0.56)",
         cursor: "pointer",
         fontFamily: "inherit",
         fontSize: "0.72rem",
