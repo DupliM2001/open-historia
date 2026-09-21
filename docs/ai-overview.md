@@ -94,13 +94,13 @@ Notes:
 
 Every call starts at the top of the list — or at the task's own pick — and moves down only when an entry cannot answer. It never spreads calls across entries to get more usage (`docs/adr/0001-fallback-never-rotation.md`). The rules are in `fallbackRunner.js` (import-free, tested); the provider callers only say how a call failed, via `error.providerFailure` from `classifyProviderFailure` (`providerErrors.js`):
 
-**Every call starts at the top again.** A mark says what a Settings row shows and what the "nothing can answer" message says; it never takes an entry out of a call's order. The strongest model is asked first every time, so a quota that came back, a key that was topped up or a busy spell that passed is used the moment it can answer — at the cost of one fast failed request per marked entry above the one that answers (a 404 or a 429 is refused in well under a tenth of a second; see `.lab/probes/fallback-timing-probe.mjs`).
+**Every call starts at the top again, except past a Spent or a busy entry.** A rate-limit mark says what a Settings row shows and what the "nothing can answer" message says; it never takes an entry out of a call's order. A Spent mark sinks the entry to the back of the order until its reset, and a busy mark does the same for ten minutes: a 503 is the provider saying it is overloaded, and a night's log (2026-09-21) showed the same model asked again within the minute answering with 503s that took 10–70 s each to arrive, or serving in 191 s what its backup served in 34. The strongest model that can answer is asked first every time, so a key that was topped up or a rate limit that passed is used the moment it can answer — at the cost of one fast failed request per marked entry above the one that answers (a 404 or a 429 is refused in well under a tenth of a second; see `.lab/probes/fallback-timing-probe.mjs`).
 
 | Failure | What the entry is marked | Clears |
 |---------|--------------------------|--------|
 | Spent (daily allowance, billing, `insufficient_quota`) | `spentUntil` | Gemini: next midnight Pacific. Others: an hour on. Or an answer, or the Reset button. |
 | Unusable (401/403, a bad key, an unknown model, no key set) | `unusable: reason` | When the entry or its Connection is edited, or when it answers again. |
-| Busy (502/503/504/529, an overloaded frame, a server that cannot be reached) | `skipUntil` +60 s | By itself. |
+| Busy (502/503/504/529, an overloaded frame, a server that cannot be reached) | `skipUntil` +10 min; the entry waits at the back of the order until then | By itself, or an answer. |
 | Rate limited, setting `"next"` (the default) | `skipUntil` + the provider's RetryInfo, or 60 s | As busy. On `"wait"` the provider retries as before and nothing is marked. |
 | Too big for the model's context window (`tooBig`) | nothing — the request is the problem, not the entry | The call moves to the next entry, whose window may be larger, and the model's window is remembered (see [the context preflight](#the-context-preflight-not-sending-what-cannot-fit)). |
 | Anything else (a bad answer, a parse failure) | nothing | — the call fails as it always did. |
