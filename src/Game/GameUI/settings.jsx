@@ -59,6 +59,8 @@ import {
 } from "../../runtime/i18n.js";
 import { LABEL_FONT_SUGGESTIONS, MAP_SETTING_KEYS, getMapSetting, getMapSettingDefaultOn, setMapSetting, setMapSettingValue, useMapSettingValue } from "../../runtime/mapSettings.js";
 import { getLibraryState } from "../../runtime/library.js";
+import { DISCORD_URL, REDDIT_URL } from "../../runtime/communityLinks.js";
+import { CommunityTile, DISCORD_BLURPLE, DiscordMark, REDDIT_ORANGERED, RedditMark } from "./communityLogos.jsx";
 import { copyToClipboard } from "../../runtime/clipboard.js";
 import {
     buildLoggingFile,
@@ -2337,6 +2339,13 @@ const SettingsMenu = ({
                     {typeof onOpenDebugConsole === "function" && (
                         <QuickAction title="AI debug console" description="Every AI call, its prompt, answer and cost" symbol="◈" onClick={() => runAndClose(onOpenDebugConsole)} />
                     )}
+                    {/* The last slot of the row is the community's: two half-width
+                        tiles, each nothing but the brand's own mark on the brand's own
+                        colour. No words - the logos say where they go. */}
+                    <div style={{ display: "grid", gap: "0.55rem", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+                        <CommunityTile href={DISCORD_URL} label="Join the Discord" color={DISCORD_BLURPLE}><DiscordMark /></CommunityTile>
+                        <CommunityTile href={REDDIT_URL} label="Open r/OpenHistoria on Reddit" color={REDDIT_ORANGERED}><RedditMark /></CommunityTile>
+                    </div>
                 </div>
             </QuickMenuPanel>
         );

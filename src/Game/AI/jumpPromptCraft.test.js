@@ -99,12 +99,71 @@ test("none of the passages costs the prompt cache anything", () => {
   }
 });
 
-test("the voice passage states its five rules, and the orders passage its five", () => {
+test("the voice passage states its five rules, the orders passage five, the reactions six", () => {
   for (const task of JUMP_TASKS) {
     const text = template(task);
     const section = (header) => { const at = text.indexOf(header); return text.slice(at, text.indexOf("\n[", at + 1)); };
     assert.equal((section(EDITABLE.voice).match(/^ {2}• /gm) ?? []).length, 5, `${task} voice`);
     assert.equal((section(EDITABLE.orders).match(/^ {2}• /gm) ?? []).length, 5, `${task} orders`);
-    assert.equal((section(EDITABLE.reactions).match(/^ {2}• /gm) ?? []).length, 4, `${task} reactions`);
+    // Six since the world was told to act first: the two rules that make a
+    // rival move on its own, and make both sides of a fight fight.
+    assert.equal((section(EDITABLE.reactions).match(/^ {2}• /gm) ?? []).length, 6, `${task} reactions`);
   }
+});
+
+// The world used to answer and never ask. Every rule about conflict was framed
+// as a reply to something the player had already done, so a campaign could run
+// for years with nobody ever wanting anything from the player — which is what a
+// player reported, and what two of their saves showed: 42 events, no wars, no
+// territory changes, no relation changes. These two rules are the other half.
+test("the world is told it may move first, and that both sides of a fight fight", () => {
+  for (const task of JUMP_TASKS) {
+    const text = template(task);
+    assert.ok(once(text, "THE PRESSURE DOES NOT HAVE TO START WITH THE PLAYER"), `${task}: initiative`);
+    assert.ok(once(text, "WHEN THERE IS A FIGHT, BOTH SIDES FIGHT"), `${task}: both sides`);
+    // Both rules sit inside the passage about how the world answers, which is
+    // the one an author may rewrite — deliberately, so a scenario CAN choose a
+    // gentler world.
+    const section = text.slice(text.indexOf(EDITABLE.reactions), text.indexOf("\n[", text.indexOf(EDITABLE.reactions) + 1));
+    assert.ok(section.includes("THE PRESSURE DOES NOT HAVE TO START WITH THE PLAYER"), `${task}: initiative is part of the editable passage`);
+    assert.ok(section.includes("WHEN THERE IS A FIGHT, BOTH SIDES FIGHT"), `${task}: both sides is part of the editable passage`);
+    // And the licence to diverge is no longer reaction-only.
+    if (task === "jumpForward") assert.ok(text.includes("of their own accord where their interests point that way"), "jumpForward: divergence is not reaction-only");
+  }
+});
+
+// "Do not manufacture aggression" was meant to forbid a rivalry nobody in the
+// campaign had a reason for. Sitting in a prompt this long, beside the player's
+// name, it read instead as "do not attack the player" — so the rule now names
+// what it is actually about, and says the player is one polity in the pair like
+// any other.
+test("the ban is on inventing a rivalry, not on hostility", () => {
+  for (const task of JUMP_TASKS) {
+    const text = template(task);
+    assert.ok(once(text, "What is forbidden is INVENTING A RIVALRY"), `${task}: the ban names itself`);
+    assert.ok(text.includes("covers every pair of polities on the map"), `${task}: it is not about the player`);
+    assert.ok(
+      text.includes("never was, a ban") || text.includes("never been a rule against writing the hostility"),
+      `${task}: and says what it is not`,
+    );
+  }
+});
+
+// The description's budget came back, at 25-50 words instead of 25-30, and with
+// the job the body is for written into it: the owner's call, after a spell with
+// no number at all left the model as terse as ever. What must not come back is
+// the old floor of twenty and the instruction to keep them short.
+test("event descriptions run 25-50 words, sized by importance, and describe what happens", () => {
+  for (const task of JUMP_TASKS) {
+    const text = template(task);
+    assert.ok(!text.includes("25–30 words"), `${task}: the old 25-30 budget is gone`);
+    assert.ok(!text.includes("never under 20 words"), `${task}: and its floor of twenty`);
+    assert.ok(!text.includes("keep descriptions short and concise"), `${task}: and the instruction to keep them short`);
+    assert.ok(text.includes("25–50"), `${task}: the 25-50 budget`);
+    assert.ok(text.includes("who did what, where, with what, against whom"), `${task}: the description describes what happens`);
+  }
+  const jump = template("jumpForward");
+  assert.ok(jump.includes("Stick to these lengths strictly"), "jumpForward keeps its strict lengths");
+  assert.ok(jump.includes("No description may be under 25 words"), "with the floor raised to 25");
+  assert.ok(jump.includes("varies with how noteworthy the event is"), "and the length tied to importance");
 });
