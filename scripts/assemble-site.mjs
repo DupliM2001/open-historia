@@ -35,7 +35,7 @@ const ROOT_ASSETS = [
   "logo.png",
   "loading_screen.jpg", "loading_screen_2.jpg", "loading_screen_3.jpg",
   "loading_screen_4.jpg", "loading_screen_5.png",
-  "icon-192.png", "icon-512.png", "screenshot.png",
+  "icon-192.png", "icon-512.png",
 ];
 
 if (!existsSync(path.join(gameDir, "index.html"))) {
