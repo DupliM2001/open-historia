@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { OWNER_SCHEMA } from "./documentMigration.js";
 import { normalizeTagList } from "../runtime/countryTags.js";
+import { renamePolityInDocument } from "../../server/polityRename.js";
+import { mergeCityMarkers } from "./cityMarkers.js";
 
 // The official editor ships a handful of region "types" carrying render +
 // gameplay settings. We seed the two core ones (Land / Coastal); users add more.
@@ -73,6 +75,9 @@ export const createDocument = ({ name = "Untitled Map", kind = "import-world" } 
     },
     types: structuredClone(DEFAULT_TYPES),
     features: [],
+    // Starting units (world.units, source "scenario"): what stands on the map at
+    // round one. Placed with the Unit tool; the game moves them from there.
+    units: [],
     // The map-maker's own choices, and the only colour/flag state that belongs to
     // the document. The base palette (293 countries) and any scenario palette are
     // fetched at mount and merged for display only — saving those into every doc
@@ -93,6 +98,11 @@ export const createDocument = ({ name = "Untitled Map", kind = "import-world" } 
     // country does, and can rewrite them as the world changes (a revolution can
     // drop "socialist"), which lands in world.countryTags — not here.
     tags: {},
+    // Scenario polity registry keyed by STABLE polity identity. `name` is only
+    // presentation state and may change without re-keying region ownership. This
+    // mirrors world.polityOverrides instead of the old editor rule that
+    // "a country exists because a region contains its display name".
+    polities: {},
   };
 };
 
@@ -169,6 +179,227 @@ export const useMapDocument = (initial) => {
     setSaveStatus("dirty");
   }, []);
 
+
+  const setPolities = useCallback((updater) => {
+    setDoc((d) => ({
+      ...d,
+      polities: typeof updater === "function"
+        ? updater(d.polities || {})
+        : (updater || {}),
+    }));
+    setSaveStatus("dirty");
+  }, []);
+
+  const upsertPolity = useCallback((key, patch = {}) => {
+    const stableKey = String(key || "").trim();
+    if (!stableKey) return;
+    setDoc((d) => {
+      const current = d.polities?.[stableKey] || {};
+      const next = {
+        ...(d.polities || {}),
+        [stableKey]: {
+          ...current,
+          ...patch,
+          name: String(patch.name ?? current.name ?? stableKey).trim() || stableKey,
+          aliases: Array.isArray(patch.aliases ?? current.aliases)
+            ? [...new Set((patch.aliases ?? current.aliases).map((v) => String(v || "").trim()).filter(Boolean))]
+            : [],
+        },
+      };
+      return { ...d, polities: next };
+    });
+    setSaveStatus("dirty");
+  }, []);
+
+  // Renaming a polity re-keys it: the record moves to the new name and every
+  // colour, flag, tag and city marker keyed by the old one follows, with the old
+  // name kept as a former name (server/polityRename.js). The map's regions are
+  // re-keyed by OlMap.renameOwner; MapEditor calls both.
+  const renamePolity = useCallback((key, nextName) => {
+    const from = String(key || "").trim();
+    const to = String(nextName || "").trim();
+    if (!from || !to) return;
+    setDoc((d) => {
+      try {
+        return renamePolityInDocument(d, from, to);
+      } catch (error) {
+        console.warn("[editor] polity rename refused:", error);
+        return d;
+      }
+    });
+    setSaveStatus("dirty");
+  }, []);
+
+  const removePolity = useCallback((key) => {
+    const stableKey = String(key || "").trim();
+    if (!stableKey) return;
+    setDoc((d) => {
+      const polities = { ...(d.polities || {}) };
+      delete polities[stableKey];
+      const colorOverrides = { ...(d.colorOverrides || {}) };
+      const flags = { ...(d.flags || {}) };
+      const tags = { ...(d.tags || {}) };
+      delete colorOverrides[stableKey];
+      delete flags[stableKey];
+      delete tags[stableKey];
+      return { ...d, polities, colorOverrides, flags, tags };
+    });
+    setSaveStatus("dirty");
+  }, []);
+
+  const removePolities = useCallback((keys) => {
+    const stableKeys = [...new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean))];
+    if (!stableKeys.length) return;
+    setDoc((d) => {
+      const polities = { ...(d.polities || {}) };
+      const colorOverrides = { ...(d.colorOverrides || {}) };
+      const flags = { ...(d.flags || {}) };
+      const tags = { ...(d.tags || {}) };
+      for (const stableKey of stableKeys) {
+        delete polities[stableKey];
+        delete colorOverrides[stableKey];
+        delete flags[stableKey];
+        delete tags[stableKey];
+      }
+      return { ...d, polities, colorOverrides, flags, tags };
+    });
+    setSaveStatus("dirty");
+  }, []);
+
+  // Scenario Workshop bulk polity import. A 1911 roster can contain dozens of
+  // landless polity identities before any of the newly imported regions have
+  // been painted. Do the whole merge in ONE document update instead of calling
+  // upsertPolity/setColor/setTags eighty-plus times.
+  const importPolityRoster = useCallback((rows) => {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const normalized = [];
+    const seen = new Set();
+
+    const parseRgb = (value) => {
+      if (Array.isArray(value) && value.length >= 3) {
+        const rgb = value.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(Number(v)))));
+        return rgb.every(Number.isFinite) ? rgb : null;
+      }
+      const m = /^#?([a-f0-9]{6})$/i.exec(String(value || "").trim());
+      if (!m) return null;
+      return [
+        Number.parseInt(m[1].slice(0, 2), 16),
+        Number.parseInt(m[1].slice(2, 4), 16),
+        Number.parseInt(m[1].slice(4, 6), 16),
+      ];
+    };
+
+    for (const raw of sourceRows) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const key = String(
+        raw.key ?? raw.stableKey ?? raw.stable_key ?? raw.code ?? raw.id ?? raw.name ?? "",
+      ).trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+
+      const name = String(
+        raw.name ?? raw.displayName ?? raw.display_name ?? raw.label ?? key,
+      ).trim() || key;
+      const aliasesRaw = Array.isArray(raw.aliases)
+        ? raw.aliases
+        : typeof raw.aliases === "string"
+          ? raw.aliases.split("|")
+          : [];
+      const aliases = [...new Set(
+        [key, name, ...aliasesRaw]
+          .map((v) => String(v || "").trim())
+          .filter(Boolean),
+      )];
+
+      const color = parseRgb(raw.color ?? raw.rgb ?? raw.colour ?? null);
+      const flag = String(raw.flag ?? raw.flagUrl ?? raw.flag_url ?? raw.flagDataUrl ?? "").trim();
+      const rowTags = Array.isArray(raw.tags)
+        ? raw.tags
+        : typeof raw.tags === "string"
+          ? raw.tags.split("|")
+          : [];
+
+      normalized.push({
+        key,
+        name,
+        aliases,
+        color,
+        flag: flag || null,
+        tags: normalizeTagList(rowTags),
+        status: String(raw.status || "active").trim() || "active",
+        note: String(raw.note || ""),
+        mapRefs: raw.mapRefs && typeof raw.mapRefs === "object" && !Array.isArray(raw.mapRefs)
+          ? raw.mapRefs
+          : null,
+      });
+    }
+
+    if (!normalized.length) {
+      return { count: 0, created: 0, updated: 0, colors: 0, flags: 0, tags: 0, firstKey: "" };
+    }
+
+    const existingBefore = new Set(Object.keys(doc.polities || {}));
+    const summary = {
+      count: normalized.length,
+      created: normalized.filter((row) => !existingBefore.has(row.key)).length,
+      updated: normalized.filter((row) => existingBefore.has(row.key)).length,
+      colors: normalized.filter((row) => row.color).length,
+      flags: normalized.filter((row) => row.flag).length,
+      tags: normalized.filter((row) => row.tags.length).length,
+      firstKey: normalized[0]?.key || "",
+    };
+
+    setDoc((d) => {
+      const polities = { ...(d.polities || {}) };
+      const colorOverrides = { ...(d.colorOverrides || {}) };
+      const flags = { ...(d.flags || {}) };
+      const tags = { ...(d.tags || {}) };
+
+      for (const row of normalized) {
+        const current = polities[row.key] || {};
+        const aliases = [...new Set([
+          ...(Array.isArray(current.aliases) ? current.aliases : []),
+          current.name,
+          ...row.aliases,
+        ].map((v) => String(v || "").trim()).filter(Boolean))];
+
+        polities[row.key] = {
+          ...current,
+          code: current.code || row.key,
+          name: row.name,
+          aliases,
+          status: row.status || current.status || "active",
+          note: row.note || current.note || "",
+          ...(row.mapRefs ? { mapRefs: row.mapRefs } : {}),
+        };
+
+        if (row.color) colorOverrides[row.key] = row.color;
+        if (row.flag) flags[row.key] = row.flag;
+        if (row.tags.length) tags[row.key] = row.tags;
+      }
+
+      return { ...d, polities, colorOverrides, flags, tags };
+    });
+    setSaveStatus("dirty");
+    return summary;
+  }, [doc.polities]);
+
+  // City markers from the Province Map Importer (its "Import explicit city Point
+  // markers" option): the rows collectImportedCityPoints builds become point
+  // features next to the hand-placed ones, so they reach the scenario's
+  // cities.geojson through buildGameSeed like any other city. The merge itself is
+  // the import-free cityMarkers.js; this is the state wrapper. Returns the
+  // summary the importer's status line reports ({ count, created, updated,
+  // replaced, skipped }) — computed from the document as it is now; the state
+  // update recomputes on whatever the document is when React applies it.
+  const importCityMarkers = useCallback((rows, { replaceExisting = false } = {}) => {
+    const options = { replaceExisting, nextId: () => newId("feat") };
+    const { count, created, updated, replaced, skipped } = mergeCityMarkers(doc.features, rows, options);
+    setDoc((d) => ({ ...d, features: mergeCityMarkers(d.features, rows, options).features }));
+    setSaveStatus("dirty");
+    return { count, created, updated, replaced, skipped };
+  }, [doc.features]);
+
   const patchMetadata = useCallback((patch) => {
     setDoc((d) => ({ ...d, metadata: { ...d.metadata, ...patch } }));
     setSaveStatus("dirty");
@@ -182,6 +413,10 @@ export const useMapDocument = (initial) => {
   }, []);
   const setFeatures = useCallback((updater) => {
     setDoc((d) => ({ ...d, features: typeof updater === "function" ? updater(d.features) : updater }));
+    setSaveStatus("dirty");
+  }, []);
+  const setUnits = useCallback((updater) => {
+    setDoc((d) => ({ ...d, units: typeof updater === "function" ? updater(d.units || []) : (updater || []) }));
     setSaveStatus("dirty");
   }, []);
 
@@ -201,11 +436,21 @@ export const useMapDocument = (initial) => {
     setFlag,
     tags: doc.tags || {},
     setTags,
+    polities: doc.polities || {},
+    setPolities,
+    upsertPolity,
+    renamePolity,
+    removePolity,
+    removePolities,
+    importPolityRoster,
+    importCityMarkers,
     mergeColors,
     types: doc.types,
     setTypes,
     features: doc.features,
     setFeatures,
+    units: doc.units || [],
+    setUnits,
     metadata: doc.metadata,
     basemap: doc.metadata.basemap,
     setBasemap,
@@ -225,6 +470,7 @@ export const useMapDocument = (initial) => {
     counts: {
       regions: regionCount,
       features: doc.features.length,
+      units: (doc.units || []).length,
       types: doc.types.length,
     },
   };

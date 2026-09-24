@@ -5,6 +5,7 @@
 
 import { STORES, idbGet, idbGetAll, idbPut, idbDelete, kvGet, kvUpdate } from "./idb.js";
 import { cloneJson, nowIso, normalizeId, ensureUniqueId, jsonResponse, errorResponse } from "./util.js";
+import { applyRegionDelta, isRegionDelta } from "../../../server/regionDelta.js";
 
 const MANIFEST_KEY = "mapeditor-manifest";
 
@@ -59,8 +60,11 @@ const createDocument = async (body = {}) => {
     // Mirrors server/mapEditorStore.js:105-118 — the map-maker's palette and flags.
     // Both stores build the record field by field, so a field added to one and not
     // the other silently survives on desktop and vanishes on the website.
+    ownerSchema: Number(body.ownerSchema || 1),
     colorOverrides: body.colorOverrides && typeof body.colorOverrides === "object" ? cloneJson(body.colorOverrides) : {},
     flags: body.flags && typeof body.flags === "object" ? cloneJson(body.flags) : {},
+    tags: body.tags && typeof body.tags === "object" ? cloneJson(body.tags) : {},
+    polities: body.polities && typeof body.polities === "object" ? cloneJson(body.polities) : {},
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -69,18 +73,32 @@ const createDocument = async (body = {}) => {
     const order = current && Array.isArray(current.order) ? current.order.filter((entry) => entry !== id) : [];
     return { version: 1, order: [id, ...order] };
   }, { version: 1, order: [] });
-  return doc;
+  // The summary, mirroring the desktop store: the editor reads only `id`, and a
+  // document can be tens of MB.
+  return summarize(doc);
 };
 
 const updateDocument = async (id, updates = {}) => {
   const existing = await idbGet(STORES.mapeditorDocs, id);
   if (!existing) throw new Error(`Map document not found: ${id}`);
+  // The same difference the desktop store applies (server/regionDelta.js): the
+  // editor sends only the regions that moved, and a difference that does not
+  // agree with the stored map is refused rather than half-applied.
+  const { regionsDelta, ...fields } = updates;
+  let mergedRegions = null;
+  let needsFullRegions = "";
+  if (isRegionDelta(regionsDelta)) {
+    const merged = applyRegionDelta(existing.regions, regionsDelta);
+    if (merged.applied) mergedRegions = merged.regions;
+    else needsFullRegions = merged.reason;
+  }
   const next = {
     ...existing,
-    ...updates,
+    ...fields,
+    ...(mergedRegions ? { regions: mergedRegions } : {}),
     id,
-    name: String(updates.name || updates.metadata?.name || existing.name || "Untitled Map"),
-    metadata: { ...existing.metadata, ...(updates.metadata && typeof updates.metadata === "object" ? updates.metadata : {}) },
+    name: String(fields.name || fields.metadata?.name || existing.name || "Untitled Map"),
+    metadata: { ...existing.metadata, ...(fields.metadata && typeof fields.metadata === "object" ? fields.metadata : {}) },
     updatedAt: nowIso(),
   };
   await idbPut(STORES.mapeditorDocs, next);
@@ -88,7 +106,7 @@ const updateDocument = async (id, updates = {}) => {
     const order = current && Array.isArray(current.order) ? current.order : [];
     return order.includes(id) ? { version: 1, order } : { version: 1, order: [...order, id] };
   }, { version: 1, order: [id] });
-  return next;
+  return needsFullRegions ? { ...summarize(next), needsFullRegions } : summarize(next);
 };
 
 const deleteDocument = async (id) => {

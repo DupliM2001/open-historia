@@ -12,17 +12,19 @@ import {
   uploadScenarioAsset,
   useScenarioState,
 } from "../../runtime/scenarios.js";
+import { LABEL_FONT_SUGGESTIONS } from "../../runtime/mapSettings.js";
+
+// The accent a scenario or game falls back to when it carries none: the same
+// default the stores hand out (server/libraryStore.js, web/storeConstants.js).
+const DEFAULT_ACCENT_COLOR = "#2bc1f3";
 
 const BAR_HEIGHT = 64;
 const TOP_BAR_OFFSET = "4.75rem";
 
 const surfaceStyle = {
-  background:
-  "linear-gradient(180deg, rgba(13, 13, 15, 0.97) 0%, rgba(8, 10, 15, 0.94) 100%)",
+  background: "#131315",
   border: "1px solid rgba(255,255,255,0.08)",
   boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
 };
 
 const actionButtonStyle = {
@@ -106,19 +108,20 @@ const buildEditorState = (details) => {
   const advancedPrompts = {
     actions: prompts.actions ?? GAMEPLAY_PROMPT_DEFAULTS.actions,
     autoJumpForward: prompts.autoJumpForward ?? GAMEPLAY_PROMPT_DEFAULTS.autoJumpForward,
-    catalystCreation: prompts.catalystCreation ?? GAMEPLAY_PROMPT_DEFAULTS.catalystCreation,
-    catalystExecutor: prompts.catalystExecutor ?? GAMEPLAY_PROMPT_DEFAULTS.catalystExecutor,
-    catalystSummary: prompts.catalystSummary ?? GAMEPLAY_PROMPT_DEFAULTS.catalystSummary,
+    interactiveCreation: prompts.interactiveCreation ?? GAMEPLAY_PROMPT_DEFAULTS.interactiveCreation,
+    interactiveExecutor: prompts.interactiveExecutor ?? GAMEPLAY_PROMPT_DEFAULTS.interactiveExecutor,
+    interactiveSummary: prompts.interactiveSummary ?? GAMEPLAY_PROMPT_DEFAULTS.interactiveSummary,
     countryStatSheet: prompts.countryStatSheet ?? GAMEPLAY_PROMPT_DEFAULTS.countryStatSheet,
     descriptionToAction: prompts.descriptionToAction ?? GAMEPLAY_PROMPT_DEFAULTS.descriptionToAction,
     eventConsolidator: prompts.eventConsolidator ?? GAMEPLAY_PROMPT_DEFAULTS.eventConsolidator,
     gameMaster: prompts.gameMaster ?? GAMEPLAY_PROMPT_DEFAULTS.gameMaster,
+    idleDiplomacy: prompts.idleDiplomacy ?? GAMEPLAY_PROMPT_DEFAULTS.idleDiplomacy,
     jumpForward: prompts.jumpForward ?? GAMEPLAY_PROMPT_DEFAULTS.jumpForward,
     nextSpeaker: prompts.nextSpeaker ?? GAMEPLAY_PROMPT_DEFAULTS.nextSpeaker,
   };
 
   return {
-    accentColor: scenario.accentColor ?? "#7c3aed",
+    accentColor: scenario.accentColor ?? DEFAULT_ACCENT_COLOR,
     advancedPromptsText: JSON.stringify(advancedPrompts, null, 2),
     country: game.country ?? "",
     description: scenario.description ?? "",
@@ -284,7 +287,7 @@ const ScenarioCard = ({
     onClick={() => onActivate(scenario.id)}
     style={{
       ...actionButtonStyle,
-      background: active ? "rgba(255,255,255,0.16)" : `${scenario.accentColor}cc`,
+      background: active ? "rgba(0,0,0,0.42)" : `${scenario.accentColor}cc`,
           borderColor: active ? "rgba(255,255,255,0.22)" : `${scenario.accentColor}dd`,
           color: "#fff",
           flex: 1,
@@ -491,18 +494,19 @@ const ScenarioEditor = ({
     </div>
     {/* Country-label styling. The font renders from each player's LOCAL fonts
         (the map rasterizes glyphs client-side), so any installed family works —
-        the list only offers common ones. Empty font = the Impact default. */}
+        the list only offers common ones. Empty font = the Georgia default (the
+        map's serif stack in Nations.jsx). */}
     <div>
     <label style={fieldLabelStyle}>Country Label Font</label>
     <input
     list="oh-label-font-options"
-    placeholder="Impact (default)"
+    placeholder="Georgia (default)"
     style={inputStyle}
     value={formState.labelFont}
     onChange={(event) => onChange("labelFont", event.target.value)}
     />
     <datalist id="oh-label-font-options">
-    {["Impact", "Arial Black", "Arial", "Georgia", "Times New Roman", "Trebuchet MS", "Verdana", "Courier New", "Garamond", "Comic Sans MS"].map((font) => (
+    {LABEL_FONT_SUGGESTIONS.map((font) => (
       <option key={font} value={font} />
     ))}
     </datalist>
@@ -976,8 +980,8 @@ const ScenarioTopBar = () => {
     onClick={handleCreateScenario}
     style={{
       ...actionButtonStyle,
-      background: `${activeScenario?.accentColor ?? "#7c3aed"}cc`,
-      borderColor: `${activeScenario?.accentColor ?? "#7c3aed"}dd`,
+      background: `${activeScenario?.accentColor ?? DEFAULT_ACCENT_COLOR}cc`,
+      borderColor: `${activeScenario?.accentColor ?? DEFAULT_ACCENT_COLOR}dd`,
       color: "#fff",
     }}
     >

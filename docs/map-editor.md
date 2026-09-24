@@ -37,7 +37,7 @@ The editor writes a game seed in one of two tiers: **tier 1 (re-ownership)** kee
 | `SelectionInspector.jsx` | Right panel for the current region selection: name/type/country/disputed-by/colour/flag/tags + merge/copy/zoom/delete. |
 | `TypeManager.jsx` | Region "type" editor (render + gameplay settings). |
 | `RegionsPanel.jsx` | Searchable region list → select + zoom. |
-| `FeatureManager.jsx` | City/point-feature list; bulk import from the seed. |
+| `FeatureManager.jsx` | City/point-feature list; bulk import from the seed, or from the author's own file (`featureImport.js`). |
 | `CityPopup.jsx` | Inline city editor anchored at the click. |
 | `SearchBar.jsx` | Unified place search (this map's cities, regions, ~70k world places). |
 | `LayersPanel.jsx` | Region / label layer visibility toggles. |
@@ -95,6 +95,7 @@ TypeManager / Features … ──┼──► MapEditor ──► OlMap  ──�
 | `metadata.simulationRules`, `startingTimelineText`, `startDate`, `gameDate` | string | Carried into the game seed. |
 | `types` | Type[] | Region types (see §11). Seeded with `DEFAULT_TYPES` (Land, Coastal). |
 | `features` | Feature[] | Point features / cities (see §12). |
+| `units` | Unit[] | Starting military units (see §9b): `{ id, name, type, ownerCode, strength, composition, note, lng, lat, regionId }`, placed with the Unit tool. |
 | `ownerSchema` | number | `OWNER_SCHEMA` marker — says "owners are NAMEs, not codes". Critical: a doc without it re-migrates every open. |
 | `colorOverrides` | `{ [countryName]: [r,g,b] }` | The map-maker's own colour choices. |
 | `flags` | `{ [countryName]: dataURL }` | Author-set flags (downscaled PNG data URLs). |
@@ -111,10 +112,10 @@ Setters (all set `saveStatus="dirty"`):
 | `setColorOverride(country, rgb)` | `null` rgb deletes the key. |
 | `setFlag(country, dataUrl)` | `null` deletes. Value is an already-downscaled PNG data URL. |
 | `setTags(country, list)` | Uses `.length` (not truthiness) so an empty `[]` deletes rather than persisting `[]` for every touched country (`:160`). |
-| `setTypes`, `setFeatures` | Accept updater fn or value. |
+| `setTypes`, `setFeatures`, `setUnits` | Accept updater fn or value. |
 | `patchMetadata` / `setBasemap` / `setName` / `setAuthor` | Metadata patches. |
 
-`saveStatus` ∈ `saved | dirty | saving | error`; `counts` = `{ regions, features, types }`.
+`saveStatus` ∈ `saved | dirty | saving | error`; `counts` = `{ regions, features, units, types }`.
 
 ---
 
@@ -153,6 +154,8 @@ This is the surface every panel drives. Each mutating call pushes an undo/redo c
 | `deleteRegions(ids)` | Remove regions. |
 | `mergeRegions(ids)` | Union ≥2 regions into the first; others removed. Uses `unionGeoms` (`geometry.js`). |
 | `copyRegions(ids)` | Duplicate with a view-scaled offset; new ids, `" copy"` name, carries typeId/owner/gid0/claimants. |
+| `exportRegions(ids)` | The regions as a GeoJSON FC (EPSG:4326, 5 decimals, ids in the properties) for the region clipboard (§9c). |
+| `pasteRegions(fc)` | Adds regions copied from another map, carving each one's land out of whatever already covers it (`overlaps` + `subtractFrom`, the Draw tool's rule: a bite, a hole, or the region beneath removed, survivors marked `edited`). A pasted region keeps its id when the target has none by that id, else gets a fresh `reg_` id, and is always marked `edited`. Selects the pasted regions; returns `{ added, trimmed, removed }`; one undo step. |
 | `getRegionSummary(id)` | `{ id, name, owner, typeId, country, claimants }`. |
 | `listOwners()` | Sorted unique owner names — backs the Country field's suggestions so re-owning offers existing names (avoids near-miss forks). |
 | `queryRegions(text, limit=200)` | Search id/name/owner. |
@@ -174,6 +177,8 @@ Keyboard: **Ctrl/⌘+Z** undo, **Ctrl/⌘+Shift+Z / Ctrl+Y** redo, **Delete/Back
 
 Single-choice; the active tool mounts/unmounts OL interactions in the `[activeTool]` effect (`src/Editor/OlMap.jsx:854`).
 
+The strip sits in a band between the documents chip and the Save / Apply / Close group (on a phone, the whole window) and wraps into more rows when the band is narrower than the strip; it publishes its bottom edge as the CSS variable `--editor-toolbar-bottom`, which every side panel (`Panel.jsx`) uses as its top, so a wrapped strip never sits under a panel and no tool ever sits under a Save button.
+
 | Tool | id | Interaction / behaviour |
 |---|---|---|
 | Select | `select` | Click = select region; Ctrl/Shift = additive; double-click = whole country. |
@@ -186,6 +191,8 @@ Single-choice; the active tool mounts/unmounts OL interactions in the `[activeTo
 | Delete border (dissolve) | `dissolve` | Click a region; probes neighbouring pixels for the region across the nearest border and unions the two into one (`:428`). |
 | Paint owner | `paint` | Click stamps the current **Paint owner** value (a country NAME, trimmed, never case-folded) onto the clicked region (`:394`). A floating owner input + swatch appears at the top (`MapEditor.jsx:553`). |
 | City tool | `feature` | Click empty map → `onFeatureCreate` (drops a city + opens `CityPopup`); click a city → `onFeatureEdit`. Carries the underlying region's owner/regionId (`:410`). |
+| Unit tool | `unit` | Click empty map → `onUnitCreate` (drops a starting unit owned by the region's owner and opens `UnitPopup`); click a unit → `onUnitEdit`. The Delete tool removes a unit under the cursor. See §9b. |
+| Box-select features | `feature-box` | Drag a rectangle (`DragBox`) over cities and features → `onFeatureSelectionChange(ids)`; Shift adds to the selection. Selected features draw a yellow ring, and the Features panel's selection bar tags or deletes them together (§9). |
 | Undo / Redo / Fit | — | Toolbar buttons wired to `api.undo/redo/fitToData`. |
 
 The **`edited` flag** is the linchpin of tier-2 correctness: a reshaped GADM region's true geometry now lives in the exported GeoJSON while the stock tiles still hold its original shape. The exporter carries `edited:true` into the game so `Nations.jsx` renders it from the GeoJSON and excludes it from the stock-tile fill (otherwise the original shape repaints on top, darker — the "edited-region shade" bug).
@@ -200,13 +207,13 @@ Shown whenever ≥1 region is selected. Writes go straight through `api.setRegio
 |---|---|---|
 | **Name** (single only) | `{ name }` | The region label. |
 | **Type** | `{ typeId }` | `— mixed —` shown when a multi-selection disagrees. |
-| **Country** (owner) | `{ owner: v.trim() \| null }` | Free-text country NAME, backed by a `<datalist>` of existing owners (`listOwners()`). **Typing a name that doesn't exist creates that country** — there is no separate "add country" step. Field keeps raw text but applies trimmed (`:118`). No case-folding. |
+| **Polity** (owner) | `{ owner: key \| null }` | Free text over the polity registry, backed by a `<datalist>` of existing polities (registry entries plus `listOwners()`), shown by display name. An existing polity is matched by its stable key or display name without regard to case and its key is stored unchanged, so "france" cannot fork a second France. **A name nobody has yet becomes a new polity** — `upsertPolity` writes the same record the Polities panel creates (`name`, `code`, `aliases`, `status`) and the selection is assigned to it — but only on **Enter** or the **Create “…”** button that appears under the field; leaving the field assigns only an existing match, and Escape reverts, so a half-typed name never mints a one-province country by accident. Blanking the field offers **Make unowned**. |
 | **Disputed by** (claimants) | `{ claimants }` | `TagField` of country names. Any claimant makes the region render **striped** (owner colour + each claimant's), here and in-game. |
 | **Colour** | `setColorOverride(owner, rgb)` | Only shown with an owner. **Reset** appears when an override exists (`colorOverrides[owner]`). |
 | **Flag** | opens `FlagPicker` via `onOpenFlagPicker(owner)` | Renders current flag thumbnail. |
 | **Tags** | `setTags(owner, next)` | `TagField` with `TAG_SUGGESTIONS`; free vocabulary. |
 
-Footer buttons: **Clear country** (`owner:null`), **Merge** (≥2), **Copy**, **Zoom**, **Delete**.
+Footer buttons: **Clear country** (`owner:null`), **Merge** (≥2), **Duplicate** (`copyRegions`, a copy beside the original on this map), **Copy to clipboard** (§9c), **Zoom**, **Delete**.
 
 Note the owner/colour/flag/tag edits are keyed to the *country name*, so editing one region's colour recolours the whole country everywhere.
 
@@ -249,10 +256,26 @@ Point features (mostly cities) live in `doc.features`. Feature schema (`citiesIm
 
 **Editing paths:**
 - **City tool + `CityPopup`** (`CityPopup.jsx`) — inline editor at the click. Name, **Size** select (Town 20k / City 250k / Major 1.5M — maps to population) and a **★ Capital** checkbox (toggles the `capital` tag). Enter/Esc closes.
-- **Feature Manager** (`FeatureManager.jsx`) — searchable list; per-feature name/symbol/tags, locate, delete, **Delete All**, and **Import all cities** / **Major only** which pull from `public/assets/cities-seed.json` (~70k, deduped by `name|coord`).
+- **Feature Manager** (`FeatureManager.jsx`) — searchable list; per-feature name/symbol/tags, locate, delete, **Delete All**, and **Import all cities** / **Major only** which pull from `public/assets/cities-seed.json` (~70k, deduped by `name|coord`). **Import from file…** adds the author's own point features — GeoJSON Point/MultiPoint features (other geometries are counted as skipped), a Workshop document or its `features` array, or a JSON list of rows with lon/lat (`featureImport.js`: names from name/title/city/label, tags from tags/kind/category, a country from country/owner); exact duplicates of features already listed are dropped, and the panel reports what was added. **Selection:** every row has a checkbox (Shift-click selects a range), the **Box-select features** tool selects by dragging a rectangle on the map, and the selection bar above the list adds a tag to every selected feature at once, removes one from all of them, deletes them all, or clears the selection. The selection (`featureSelection` in `MapEditor.jsx`) is shared by the map and the panel, so a box drawn on the map ticks the rows and a ticked row rings its marker.
 - **Search bar** (`SearchBar.jsx`) — unified search over this map's cities, its regions, and the ~70k world place index; world results get a **＋ Add** button to drop them as a city.
 
 Prominence tier (`exportPreset.js:100`, `cityTier`): `capital`→4, ≥1M→3, ≥100k→2, else 1. This gates when a city label appears in-game (`Cities.jsx`).
+
+---
+
+## 9b. Starting units (`UnitsPanel.jsx`, `UnitPopup.jsx`)
+
+`doc.units` holds the formations that stand on the map at round one. Place one with the **Unit tool** (click the map: the unit belongs to the region's owner, and `UnitPopup` opens at the click for name, type — `UNIT_TYPES` from `src/runtime/gameState.js` — strength 1..100, owner, composition and note; click an existing unit to edit it; the Delete tool removes one). The **Units** chip opens `UnitsPanel`: a searchable list with locate / edit / delete per unit, **Remove all**, and a toggle for the tool. Units draw on their own layer (`unitLayer`, z 31: a diamond in the owner's colour with a type glyph).
+
+Export (`buildUnitsForGame`, `exportPreset.js`) writes them as `world.units` with `source: "scenario"` and `status: "idle"`; the scenario's `world.json` gets them on Save (`applyMapToScenario`), the editor reads them back on open (`mapEditorSeed.units`), and every new game starts with them — `"units"` is in `TEMPLATE_WORLD_OVERRIDE_KEYS` (server and web stores), so a game made from a scenario that has been played still gets the authored formations rather than the played-out ones.
+
+---
+
+## 9c. Combining maps: the region clipboard (`regionClipboard.js`, `ClipboardPanel.jsx`)
+
+Pieces of one map can be pasted into another. **Copy to clipboard** in the selection panel (or Ctrl/⌘+C with regions selected and no text selected) calls `api.exportRegions(ids)` and stores, through `buildClipboardPayload`, the regions as GeoJSON plus everything they need elsewhere: for every country they name as owner or claimant, the source document's registry record, effective colour, flag and tags, and the region types they use. The clipboard is one slot in IndexedDB (`oh-workshop` / `clipboard`), mirrored in a module store the editor reads with `useSyncExternalStore`, so it survives closing the Workshop and switching scenarios: open the built-in map, copy a country, open your own scenario's map, paste.
+
+**Paste into this map** (the Clipboard chip's panel, or Ctrl/⌘+V) first gives the document what it lacks — `planClipboardMerge`: a country the target already knows keeps its record, colour, flag and tags, only the missing ones arrive; missing region types are added — then `api.pasteRegions(fc)` carves and adds: each pasted region takes its land out of whatever already covers it exactly as the Draw tool does (a region beneath keeps what is not covered, a hole or a bite, and is marked `edited`; one covered entirely is removed), then the copies are added, selected and zoomed to. A pasted region keeps its id when the target has no region by that id (a stock-world id keeps its tile linkage; a region the paste removed entirely frees its id for its replacement), otherwise it gets a fresh `reg_` id; it is always marked `edited`. The whole paste is one undo step, and the panel reports what happened ("12 regions · 3 underneath trimmed · 1 replaced entirely"). Cities and units are not copied. Tests: `regionClipboard.test.js`.
 
 ---
 
@@ -265,7 +288,7 @@ This is the single most important invariant and the source of most historical bu
 Where names come from and stay clean:
 
 1. **Seed load** (`regionImport.js:68`) — each stock region's owner is resolved from its `gid0` through `COUNTRY_NAMES` (`gid0 → name`), **not** the seed's own `country` string (which disagrees: "México" vs "Mexico", truncated names). The seed's `country` is unset after resolution so a second copy can't drift.
-2. **Paint / inspector** — owner text is trimmed but **never case-folded** (`OlMap.jsx:401`, `SelectionInspector.jsx:118`); a trailing space would fork a duplicate polity.
+2. **Paint / inspector** — owner text is trimmed but the STORED key is **never case-folded** (`OlMap.jsx`, `SelectionInspector.jsx`). The inspector's lookup of an existing polity is case-insensitive (it stores that polity's own key, not the typed spelling); a genuinely new name is stored exactly as typed.
 3. **Legacy documents** — `migrateDocumentOwners` (§23) rekeys code→name on open.
 
 **Export polity logic** (`exportPreset.js:184`): `STOCK_COUNTRY_NAMES = new Set(Object.values(COUNTRY_NAMES))`. For each owner:
@@ -348,7 +371,14 @@ Boolean ops run directly on OL geometries in EPSG:3857 via `polygon-clipping` (n
 
 Server REST at `/api/mapeditor/documents` (web build routes through `runtime/web/editorStore.js`): `GET` list, `GET /:id`, `POST` create, `PUT /:id` update, `DELETE /:id`. `downloadJson` writes a local `.json`.
 
-`buildPayload()` (`MapEditor.jsx:180`) is a **strict whitelist** — `name, metadata, types, features, colorOverrides, flags, tags, ownerSchema, regions`. **Anything not named here is silently dropped on save**; a new document field appears to work until the first reload. `regions` = `api.serializeRegions()`.
+`buildDocumentFields()` (`MapEditor.jsx`) is a **strict whitelist** — `name, metadata, types, features, colorOverrides, flags, tags, polities, ownerSchema`. **Anything not named here is silently dropped on save**; a new document field appears to work until the first reload. `buildPayload(regions?)` adds the map to it, for an export or a full save.
+
+**A save carries only the regions that moved.** The autosave runs every 2 seconds while the document is dirty, and it used to write the whole world each time — 5.5 MB of JSON on the shipped map, an ~83 MB string on the z9 seed, whether or not a polygon had moved. Now `api.serializeRegionChanges()` writes each region on its own, stamps it (`src/Editor/regionChanges.js`) and compares the stamp with what the last save wrote, so an autosave after a rename sends nothing at all and one after redrawing a border sends that border. Nothing asks a tool to declare what it touched: the comparison is against the geometry itself, so an edit cannot be missed however it was made.
+
+- The payload is then `regionsDelta: { changed, removed, count }` instead of `regions`, applied by `server/regionDelta.js` — shared by the desktop store (`server/mapEditorStore.js`) and the website's IndexedDB one (`src/runtime/web/editorStore.js`).
+- A difference that does not add up — `count` disagreeing with the merge, a region with no id, a document whose geometry the store does not have — is **refused whole**, the stored map is left exactly as it was, and the store answers `needsFullRegions`; `saveNow` then immediately writes the whole map. A half-applied difference would be a map the author silently loses; one extra full save is not.
+- The whole map travels anyway on the first save after a document is opened, loaded or reseeded (the record of stamps is empty), on create, and when any region has no id to key it by.
+- The stamps are committed only once the save has landed, so a failed save is retried with the same contents.
 
 Save robustness:
 - **Debounced autosave** every 2s while `dirty`, keyed on `d.doc` (a fresh object per change) rather than a hand-listed field set — the old field list went stale and silently lost colour/flag/tag edits (`:289`).
@@ -376,6 +406,7 @@ Save robustness:
 | `stats` | `{ ownedRegions, owners, customGeometry }`. |
 | `world.regionOwnershipOverrides` | `{regionId: ownerName}`. |
 | `world.polityOverrides` | `{name:{name,aliases:[],color:'#hex',note:'',verbatim?}}`. |
+| `world.units` | Starting units (`buildUnitsForGame`, §9b), `[]` when none. |
 | `world.customRegions` | `hasCustomGeometry \|\| Boolean(background)`. |
 | `world.background` / `world.basemap` | Light background descriptor / chosen ESRI basemap id. |
 | `world.customCities` | `true` if authored cities exist or geometry is custom. |
@@ -391,7 +422,7 @@ Save robustness:
 
 ---
 
-## 19. How edits reach the game — Apply & Play (`libraryBar.jsx` `applyMapToScenario`)
+## 19. How edits reach the game — Save / Save & Exit / Apply & Play (`libraryBar.jsx` `applyMapToScenario`)
 
 In embedded mode, **▶ Apply & Play** calls `onApplyToScenario(seed)` (`MapEditor.jsx:198`), which runs `applyMapToScenario(scenario, seed)` (`libraryBar.jsx:1754`). It writes `world`/`game` via `saveScenario` (merging over the current world; sets `ownerCodes` for the start-country picker, `customRegions:true`) then uploads each seed piece as a scenario asset:
 
@@ -431,7 +462,7 @@ The editor was split into a standalone repo (`Open-Historia/open-historia-map-ed
 
 ## 23. Gotchas & invariants (quick reference)
 
-- **Owner is a NAME, everywhere.** Never re-introduce a code path or case-fold owner text (`OlMap.jsx:401`, `SelectionInspector.jsx:118`).
+- **Owner is the polity's NAME, everywhere, and a rename re-keys it.** Never re-introduce a code path or case-fold stored owner text (`OlMap.jsx`, `SelectionInspector.jsx`). Matching typed text to an EXISTING key case-insensitively is a lookup, not a fold — the key stored is the registry's. Changing a name goes through `renamePolity` (`MapEditor.jsx`), never through editing the record's `name` alone.
 - **`buildPayload` is a whitelist** — a new doc field that isn't listed silently fails to persist (`MapEditor.jsx:180`).
 - **`edited`/`mergedFrom`/non-GADM id ⇒ tier 2.** These are the only signals that ship geometry (`exportPreset.js:87`).
 - **`flags`/`tags`/`background` null = "clear the scenario asset."** Always re-hydrate them on open so a round-trip is a no-op (`MapEditor.jsx:352`, `libraryBar.jsx:2525`).
@@ -441,3 +472,23 @@ The editor was split into a standalone repo (`Open-Historia/open-historia-map-ed
 - Region geometry is verified in-app; a headless WebGL context can't pixel-check the game map.
 
 Related: [World state](world-state.md) (`world.json` fields the seed writes — `regionOwnershipOverrides`, `polityOverrides`, `customRegions`, `countryTags`).
+
+## 24. Scenario Workshop: polities, topology, province import
+
+Ported from kernely's Continuum branch. The editor's document gained an explicit **polity registry** (`doc.polities`, keyed by the STABLE polity identity; `name` is presentation) and three panels reached from the bottom bar.
+
+| Panel / tool | File | What it does |
+|---|---|---|
+| **Countries** (`Countries: N` chip) | `PolitiesPanel.jsx` | The map's countries (polities): every owner and claimant on the map, and every country registered in the document whether or not it holds a region — a registered country stays until it is removed, and `buildGameSeed` ships it to the game with or without land (a government in exile, a nation registered before it is painted). Clicking a country selects its whole territory and zooms to it; under its name a **Regions** list names each region it owns (click one to select and zoom to it). **Create country** registers a name at once — with a selection it takes those regions, otherwise it waits, landless, for the paint tool or **Assign selected**. **Rename** (a country is keyed by its name, so a rename re-keys it everywhere in one undo step — regions and claims via `OlMap.renameOwner`, the record, colour, flag, tags and city markers via `renamePolityInDocument` in `server/polityRename.js`; the old name is kept as a former name), recolour, tag, flag, transfer all territory from another country, and **Remove from the map** (its regions become unowned, claims in its name are dropped, the record goes with its colour, flag and tags — the only way a registered country leaves). "Fill standard flags" copies the built-in flag for recognised stock countries. Bulk import a roster (`importPolityRoster`). "Paint this polity" hands the country to the paint tool. |
+| **Topology** chip | `TopologyPanel.jsx` + `geometry.js` (`planarGeometryArea`, `intersectionGeom`, `unionAllGeoms`, `enclosedGapGeoms` / `enclosedGapsOfUnion`, `overlapGeoms`) | Finds slivers, overlaps and enclosed gaps between the selected regions and repairs them; the map highlights diagnostics (`topologyDiagnosticStyle`). The same pass runs over the whole map on every scenario save (see **Saving**). |
+| **Import Map** chip | `ProvinceImportPanel.jsx` + `provinceRasterWorker.js` | Turns a colour-coded province raster (a HOI4-style `provinces.bmp`, any PNG) into regions in a worker, entirely in the browser; optional definition CSV / GeoJSON metadata assign polities, names and city markers (`importCityMarkers`); a GeoJSON backup of the current regions and cities is downloaded first. Colours are never assigned by feature order — ambiguous sources are refused. |
+| **Paint** tool | `OlMap.jsx`, `MapEditor.jsx` | Paints a stable polity key by click or drag (one stroke = one undo), with a "paint over" filter (any region / unowned only / only regions of one polity); the picker lists registry polities by display name. |
+| **Edit vertices** / **Shared border precision** | `OlMap.jsx` (`weldPointIntoFeature`, `sharedBorderPoint`, `removeSharedVertexNear`) | Vertex editing with snapping and undo; with exactly two neighbouring regions selected, a dragged border vertex or edge is welded into BOTH regions. |
+| **Selection inspector** | `SelectionInspector.jsx` | The owner field is free text over the registry: existing polities are suggested and matched by key or display name, and a name nobody has becomes a new polity on Enter or the Create button — never on blur or a keystroke — so a country that does not exist yet can be made from the map without a typo silently minting one. |
+| **Basemaps** | `basemaps.js`, `BasemapPicker.jsx`, `OlMap.jsx` | Two dark physical presets (`ocean-dark`, `atlas-relief-dark`) with graded preview cards and a dark editor presentation (`editorOpacity`, `editorBackground`). |
+
+**Saving.** The Workshop has three actions: **Save** (write the map into the scenario and keep editing), **Save & Exit**, and **Apply & Play** (the old flow: save, then create and activate a fresh game). `libraryBar.jsx` `applyMapToScenario(scenario, seed, { play })` replaces the scenario's `polityOverrides` with the Workshop's registry (it hydrated the full registry, landless polities included, so merging would resurrect deleted entries), writes `ownerSchema`, and refreshes the drawer's cached scenario details from the save's response so a later ordinary scenario save cannot write a stale basemap back. A "Scenario unsaved" chip shows while the document has autosaved edits not yet written into the scenario, and closing asks first. All three actions stay disabled (the Save button reads "Loading map…") until the scenario's map has arrived: the Workshop opens empty and its geometry downloads afterwards, and a save in that window used to write an empty map over the scenario — the first click wiped it, the second, once the map had appeared, wrote it back. `applyMapToScenario` also refuses an empty map for a scenario that has territory.
+
+**Border cleanup on save.** All three actions first run the Topology panel's conservative repair over **every region at 500 m** (`repairTopologyEverywhere` in `OlMap.jsx`; the pure parts — chunk grid, progress wording — in `topologySweep.js`): enclosed cracks are filled into the neighbour they touch most, thin overlaps are trimmed from the smaller region, as one Undo step, and only then is the map written. It is not an all-pairs check: overlap discovery asks the map's spatial index for extent neighbours only (the stock 4,848-region world is 14,011 pairs, ~3 s), and the gap search reads the holes of ONE union of every region, built as the union of chunk unions — the same polygon set as a single call (the stock world yields the identical 324 cracks either way), with bounded memory and a repaint between chunks. A per-chunk search was rejected because a crack longer than a chunk (a double-traced border between two large countries) could go unseen. Two measured facts shape the rest: trimming a sliver can expose a hairline between the winner and a third region, so a pass that repaired something is followed by another until one finds nothing (at most three; the stock world is 98 cracks and 57 slivers, then nothing), and the save writes coordinates at five decimals (about a metre), which leaves centimetre slivers along every repaired border on reload — so defects narrower than **2 m** are ignored (`BORDER_CLEANUP.minWidth`; the panel itself keeps its 0 m floor), or every save would move hundreds of regions by centimetres. Repairs are applied in one go (a repaint between them redraws the whole world each time), every crack of one target in a single union. A follow-up pass looks only around the previous pass's repairs (`hotspotsOf` in `topologySweep.js`: the padded footprints of the slivers trimmed and the cracks filled — a repair can only expose something inside its own footprint, and the first pass has seen everything else), so passes two and three cost a fraction of the first. **Time is bounded.** The search stops at `BORDER_CLEANUP.maxMillis` (60 s), or when the player presses **Save now** on the screen (offered after ten seconds); what it has found by then is applied (until `maxApplyMillis`, 90 s) and the note says the check stopped and why. An error inside a phase (polygon-clipping's precision refusals, which a detailed map can hit on a follow-up pass) ends the search the same way and keeps the repairs already made, instead of throwing the cleanup away. **Each pair check and each trim is local.** `geometry.js` clips both inputs to the box their extents share before polygon-clipping sees them (Sutherland–Hodgman against the box; exact — the same pieces and areas, pinned by `geometry.test.js` on the built-in map's own pairs — and the cost of the neighbourhood rather than of the region), and the crack-target touch score reads a region's boundary from an R-tree instead of walking every segment for every point. Measured in Node: the built-in map's pass 11 s → 4.5 s; the map with its borders drawn eight times finer 103 s → 25 s; a map with a single 41,000-vertex sea zone, which every coastal region is a neighbour of, 914 s → 14 s a pass — the case that held a player's save for forty minutes. The `BorderCleanupOverlay.jsx` screen ("Cleaning up the borders", progress bar, what is being checked, which pass, the seconds so far, Save now) is painted before the work starts so the page never looks frozen, and stays up until the scenario is written; a failure in the pass never blocks the save, and a plain Save leaves a one-line note beside the buttons saying what was fixed — or that the check stopped after so many seconds and what it left for the next save.
+
+**Export.** `buildGameSeed` emits one `polityOverrides` record per registry entry and per owner (code = stable key, display name, cumulative aliases, colour, status, `verbatim` for a code-shaped key) plus `ownerSchema`, and cities export their authored `tier` (1 town, 2 city, 3 major) with `capital` as an independent flag (`CityPopup.jsx`).

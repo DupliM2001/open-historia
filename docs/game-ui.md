@@ -3,7 +3,7 @@
 The in-game UI is a flat set of `position: fixed` React components layered over a full-screen MapLibre canvas — there is no single container div, each widget positions itself against the viewport edges and competes for the stacking order through an explicit z-index ladder. `src/Game/GameUI/main.jsx` is the shell: it mounts every HUD element, owns the panel-open booleans, and computes `rightShift` (the horizontal offset that slides the bottom-right cluster left when the advisor drawer opens). Everything the UI reads or writes flows through the runtime state stores (`readJson`/`writeJson`, `readGameData`/`readWorldState`, `useLibraryState`) and the AI layer (`src/Game/AI/*`) — the components hold almost no game data of their own, they poll the stores on a 5-second cadence and push edits back.
 
 - Shell & mount point: `src/App.jsx` (`GameApp`) renders `<UI>` = `src/Game/GameUI/main.jsx` once `isReady`, passing `mapRef`, `isGlobeEnabled`, `isTerrainEnabled`, and their setters.
-- Related pages: [World state](world-state.md) · [AI gameplay pipeline](ai-gameplay.md) · [Map rendering](map-rendering.md) · [Library & scenarios runtime](library-runtime.md) · [Diplomacy & chat](diplomacy.md)
+- Related pages: [World state](world-state.md) · [AI gameplay pipeline](ai-overview.md) · [Map rendering](game-map.md) · [Library & scenarios runtime](runtime-services.md) · [Diplomacy & chat](ai-overview.md)
 
 ---
 
@@ -31,8 +31,7 @@ The in-game UI is a flat set of `position: fixed` React components layered over 
 | `activeBottomPanel` | `null` | Which bottom panel (`"chat"`, `"actions"`, `"skip"`, `"history"`) is open — single-slot, so opening one closes another |
 | `isFullscreenEnabled` | `false` | Mirrors the Fullscreen API state; persisted `localStorage["Fullscreen"]` |
 | `showWebGLWarning` | `false` | Set true if `checkWebGL()` fails on mount → renders `WebGLWarningPopup` |
-| `apiProvider` | `getStoredProvider()` | AI provider id; persisted `localStorage["api_provider"]` via effect |
-| `providerSettings` | `loadProviderSettingsFormState()` | Per-provider keys/models/params form state |
+| `aiSetup` | `readAiSetup()` | `{ ready, provider }`: whether the Fallback list has an entry its provider can call, and the top entry's provider for the start-of-game prompt. Re-read on `ai:fallback-changed` |
 | `{ games, loaded }` | `useLibraryState()` | `hasNoGames = loaded && games.length === 0` gates the idle-diplomacy timer |
 
 ### 1.3 Side effects owned by the shell
@@ -43,7 +42,7 @@ The in-game UI is a flat set of `position: fixed` React components layered over 
 | **Idle diplomacy drip** | Every 60 s, if the tab is visible and a game exists, lazy-imports `../AI/gameplay.js` and calls `maybeSendIdleDiplomacy()` | `src/Game/AI/gameplay.js`; drops a message into the diplomatic chat store unprompted |
 | Advisor lazy-load latch | `isAdvisorOpen` → `setShouldLoadAdvisor(true)` (one-way) | Keeps the Chart.js/markdown chunk out of first paint |
 | Fullscreen persist + sync | Writes `localStorage["Fullscreen"]`; listens `fullscreenchange`/`webkitfullscreenchange` | `toggleFullscreen()` probes prefixed APIs (mobile Safari safe) |
-| Provider persist | Writes `localStorage["api_provider"]`; reloads provider form when settings opens | `src/Game/AI/providerConfig.js` |
+| AI header + setup | `syncAiDebugContext()` on mount; re-reads `aiSetup` whenever the Fallback list or a Connection changes | `src/Game/AI/providerConfig.js` |
 | Advisor-width resize guard | On window `resize`, re-clamps `advisorWidth` so a shrunk window never leaves the drawer wider than the viewport | — |
 
 ### 1.4 What `Main` mounts (render order)
@@ -62,8 +61,11 @@ The in-game UI is a flat set of `position: fixed` React components layered over 
 | `AdvisorButton` (🧭) | `main.jsx` (inline) | Toggles the advisor drawer; sits at `rightShift` |
 | `AdvisorPanel` | `advisor.jsx` (lazy) | Advisor chat + Stats tabs, resizable drawer |
 | `CheatsPanel` | `cheats.jsx` (lazy) | God-mode tools (opened from Settings) |
-| `SettingsButton` (⋮) | `settings.jsx` | Toggles the settings menu |
-| `SettingsMenu` | `settings.jsx` | AI provider, language, map/AI toggles, cheats/guides/social |
+| `InteractivePanel` | `interactive.jsx` (lazy) | Interactive events: an event a time skip offered, played out as a scene beat by beat (opened by `oh:open-interactive-event` from the offered event's card or the time panel). See [§10-bis](#10-bis-interactive-events--srcgamegameuiinteractivejsx) |
+| `SettingsButton` (☰) | `settings.jsx` | Toggles the game menu; same corner and size as before, glass finish |
+| `SettingsMenu` | `settings.jsx` | Ported from kernely's Continuum branch as it is there: a quick menu with Game / Tools / Settings / Help tabs (session card, Game Management, Cheats, Events, AI debug console, Guides, bug report, community links) and `SettingsWorkspace`, a full-screen portal with Continuum's four sections — General, Map (with the basemap picker), AI, Advanced. This branch's own settings (profiles, per-task models, segments, batching, telemetry, beta units, network sharing, diagnostics) sit inside those four sections |
+| `ApiSetupPrompt` | `apiSetupPrompt.jsx` | Shown once per game per session when nothing in the Fallback list has what its provider needs (`providerConfig.js isFallbackListConfigured`). The prompt IS the setup: a provider select, the key (or the endpoint for a self-hosted provider) and an optional model, saved by `applyQuickAiSetup` (completes a key-less connection for that provider or adds one, and moves its entry to the top of the list); the `ai:fallback-changed` refresh then hides the prompt. Above the form: an embedded YouTube tutorial on getting a free Gemini key (privacy-enhanced embed, hideable) and a **Get a key at Google AI Studio** button (external link). **Open full settings** opens the game menu on the AI section (`SettingsMenu initialSection`), **Not now** dismisses it |
+| `GameLoadingScreen` | `gameLoadingScreen.jsx` | The screen a game opens under: the logo turning over a dark ground until the map is drawn. `useGameLoading` starts loading with every game (this UI is remounted per game), waits for `oh:map-polities-ready` for the game's regions asset (`runtime/mapReadiness.js`; Nations.jsx marks it after the boundary worker answers, or at once on a stock map) and then for the next `oh:map-idle` (World.jsx), with a 60 s ceiling; fades off through `Presence`. Also shown when the 3D globe is switched on or off: App.jsx calls `announceMapRerender()` before the projection state changes, since the map instance is keyed on it and redraws from nothing |
 
 ---
 
@@ -73,10 +75,10 @@ Every fixed element declares its own `zIndex`. From back to front (source-verifi
 
 | z-index | Element | File |
 |---:|---|---|
-| 9997 | In-game floating cluster (session summary pill, **⌂ Exit Game**, **⏻**) | `libraryBar.jsx:1993` / `:2061` |
+| 9997 | In-game floating cluster (session summary pill, **⌂ Exit Game**) | `libraryBar.jsx:1993` / `:2061` |
 | 9998 | Timeline panels (`panelSurface`), **Actions** panel, **Chat** panel | `time.jsx:149`, `actions.jsx:427`, `chat.jsx:851` |
 | 9999 | `DateWidget` pill, bottom `Toolbar`, `Search`, `Other` flag badge, 🧭 `AdvisorButton`, ⋮ `SettingsButton`, `SettingsMenu`, `ForcesPanel` body, `WebGLWarningPopup` | shared `baseStyle`/`widgetSurface` |
-| 10000 | Forces **mode banner** (deploy/move/attack hint) | `forces.jsx:156` |
+| 10000 | Forces **mode banner** (deploy hint) | `forces.jsx:156` |
 | 10028 | "Loading games and scenarios…" indicator | `libraryBar.jsx:2565` |
 | 10040 | **Advisor drawer** | `advisor.jsx:320` |
 | 10045 | **Cheats panel** | `cheats.jsx:280` |
@@ -98,7 +100,7 @@ Design intent captured in comments: the advisor drawer (10040) sits above every 
 
 | Button | Component | Opens | Notes |
 |---|---|---|---|
-| 💬 Chat | `Chat` (`chat.jsx:886`) | `ChatPanel` (bottom-left, z 9998) | Unread badge: polls stored chats every 15 s, counts open chats that gained messages since last opened |
+| 💬 Chat | `Chat` (`chat.jsx:886`) | `ChatPanel` (bottom-left, z 9998) | Unread badge plus incoming-message notifications: one event-driven watcher (runtime JSON writes, `oh:diplomacy-chats-updated`, tab visibility, a 30 s safety interval) keeps a per-chat cursor (`oh:chat-notification-cursors-v2`), toasts a foreign message that lands while its thread is not on screen (top-right, 12 s, click opens the thread), plays a two-note chime (`oh:chat-notification-sound-v1`, 🔊 toggle), keeps a 🔔 notification center bottom-left until the panel opens (bell and toasts stay off the main menu — `useMainMenuOpen` from `libraryBar.jsx`), and can raise desktop notifications once permitted; `window.__OH_DIPLO_NOTIFICATIONS__` (`status`, `test`, `testExistingChat`, `testSound`, `enableDesktop`, `clear`) exercises it |
 | ✦ Actions | `Actions` (`actions.jsx:700`) | `ActionsPanel` | See [§7](#7-actions-panel--srcgamegameuiactionsjsx) |
 
 Both launchers use `hasOpened` latches so the panel body isn't mounted until first opened.
@@ -110,10 +112,12 @@ Both launchers use `hasOpened` latches so the panel body isn't mounted until fir
 | Data | `chats` from `readChatsState`/`writeChatsState`; player country + date polled from `JSON_URLS.game` every 5 s | `src/runtime/gameState.js` |
 | Country list | `loadCountryNames()` (PMTiles-derived), filtered to exclude the player | `src/runtime/assets.js` |
 | Live sync | While open, polls stored chats every 5 s and merges additions (jump invitations, idle drip) without clobbering the active conversation | — |
-| Send | `sendDiplomaticMessage(text, countryName, countries)` → `{ reply, reaction }`; multi-country chats rotate speakers via `chooseNextDiplomaticSpeaker` | `src/Game/AI/main.jsx`, `src/Game/AI/gameplay.js` |
+| Send | `sendDiplomaticMessage(text, countryName, countries)` → `{ reply, reaction, memorySummary }` (the leader appends a hidden `DIPLOMATIC_MEMORY:` line, stored on the reply as `memorySummary` and fed back as system-side context — `runtime/diplomaticEnvelope.js`); multi-country chats rotate speakers via `chooseNextDiplomaticSpeaker`, at most 3 NPC replies per player message | `src/Game/AI/main.jsx`, `src/Game/AI/gameplay.js` |
 | Group turn UI | `phase` = `player`/`pending`/`leader`; "Let X speak →" vs "Speak" buttons offer each queued country | `ConversationView` |
+| Conversation view | A date separator opens every new game day; the last 12 messages render first with a "Show earlier" button; stacked flags on list rows; a leader's message is dated through `gameDates.js` (it used to show a day early west of Greenwich); a document delivered through diplomacy is a message like any other, its `📄` heading in bold ([§6.2-bis](#62-bis-documents-where-they-arrive)) | `ConversationView`, `ChatListItem` |
 | External trigger | `requestDiplomaticChat(country)` bridge (`chat.jsx:697`) lets the map region popup open/reuse a 1-on-1 chat | Map selection layer |
 | Reactions | Leader reactions attach an emoji to the player's last message; hover tooltip is a portal at z 99999 | — |
+| Catch-up line | A line the player sends after the world moved on carries a note for the leader (`buildLeaderCatchUp` → `conversationCatchUp.js buildThreadCatchUp`, from the moment the player has been shown): the bubble shows `⏳ Since 1 December 2015 · 3 events · 1 border change`, the whole note on hover. Stored on the message (`catchUp`, `catchUpLabel`), sent ahead of the words one-to-one and in the group batch | `src/Game/AI/main.jsx`, `src/Game/AI/gameplay.js` |
 
 ---
 
@@ -138,7 +142,7 @@ Full-page overlay at z 10046. Header is a 3-column grid: **logo/title** | **tab 
 | Scenarios | 🔥 Most Played, 🕐 Last Updated, ✦ Your Scenarios (with `CreateScenarioTile`) | `ScenarioCard` |
 | Community | Lazy `CommunityPanel fullPage` | `communityHub.jsx` |
 
-Header action buttons (right cell): **Refresh** (`refreshLibraryCatalog({force:true})`, hidden on Community), **Import JSON** (Scenarios only → hidden file input `handleImportScenarioFile`), **⏻** shutdown (hidden on the web build via `import.meta.env.VITE_OH_WEB`).
+Header action buttons (right cell): **Refresh** (`refreshLibraryCatalog({force:true})`, hidden on Community), **Import JSON** (Scenarios only → hidden file input `handleImportScenarioFile`).
 
 The Games tab's empty state ("No games yet") offers **Start from a scenario** / **Browse community scenarios** shortcuts.
 
@@ -187,13 +191,14 @@ The Games tab's empty state ("No games yet") offers **Start from a scenario** / 
 
 `EditorDrawer` (`libraryBar.jsx:692`) — the fixed right-side form (z 10048, `width: min(34rem, …)`), the primary scenario/game authoring surface. Driven by `editorKind` (`"scenario"`|`"game"`), `editorDetails`, `editorState`, `editorSection`, `promptSectionKey`.
 
-Section tabs (`SectionTabs`): scenarios show `overview | world | prompts | assets | bundles`; games drop `bundles`.
+Section tabs (`SectionTabs`): scenarios show `overview | world | features | prompts | assets | bundles`; games drop `bundles`.
 
 | Section | Fields | Writes via |
 |---|---|---|
 | overview | Name, Eyebrow, Accent (color), Subtitle, Description, Hero Title, Hero Subtitle | `saveScenario`/`saveGame` meta |
 | world | Player Country, Game Date, Language, **Deployable Troop Types** (scenario only, `UNIT_TYPES` toggles), World Before Round One (`startingTimelineText`), Simulation Rules, Country Label Font/Letter Color/Border Color | merged into `world` |
-| prompts | `PromptSectionEditor`: per-section prompt textareas + helpers from `PROMPT_SECTION_DEFINITIONS` | `serializePromptPack` → `prompts` |
+| features | `FeaturesSectionEditor` (`FeaturesSectionEditor.jsx`): one card per entry of `FEATURE_DEFINITIONS` (`server/gameFeatures.js`) — today Espionage, Idle diplomacy with its "one attempt every N minutes" setting, and World direction (the pace, the world's share, the map's tempo, and two `type: "text"` settings — the priority rules and the scripted events, one dated beat per line — rendered as textareas that show what was typed rather than the normalized value, because the normalizer trims and a field that trims on every keystroke cannot hold the space between two words; see [world direction](ai-overview.md#world-direction-what-an-author-sets-as-numbers)). A scenario edits its complete configuration (On/Off + settings), the default for every game made from it; a game edits only overrides, each control offering **Scenario default** so an unset field keeps following the scenario, including changes made to the scenario later (`resolveFeatures`). The library resolves the active game's features into `src/runtime/gameFeatures.js` (`useActiveFeatures` for the UI, `isActiveFeatureEnabled` for the simulation): espionage off hides the Spy tab and stops spy reports, intercept refreshes, the turn's espionage resolution and the simulator's spy orders; idle diplomacy's setting sets the per-minute chance of `maybeSendIdleDiplomacy`'s chat half (off keeps only the movement pulse). Scenario and game bundles carry `features`. | `saveScenario`/`saveGame` meta `features` (`readScenarioMeta`/`readGameMeta` normalise it on both stores) |
+| prompts | `PromptSectionEditor`: one tab per section of `PROMPT_EDITOR_SECTIONS` (the prompts with guidance), and inside it one textarea per guidance passage declared in `promptGuidance.js` (the role, the tone, what to simulate, what makes a good event…) with **Reset to default** per passage and per section. The technical text — placeholders, output contracts, map rules — is never shown or stored, so it cannot be broken here and it follows the app's defaults as they change; a pack in the old whole-prompt shape is ignored (ai-prompts.md §2). | `serializePromptPack` → `prompts` as `{ promptModel: 2, guidance }` |
 | assets | Upload/Reset per asset (cover; scenario adds cities/colors/countries/regions) via hidden file inputs | `uploadScenarioAsset`/`clearScenarioAsset` etc. |
 | bundles | **Download .zip** / **Download JSON** (`exportScenarioBundle` + `splitScenarioBundleImage`) | disk download |
 
@@ -207,7 +212,7 @@ When the Scenarios tab shows any scenario carrying `hubOrigin`, an effect (`libr
 
 ### 4.8 In-game floating cluster & server shutdown
 
-When the menu is closed, `LibraryTopBar` renders a compact cluster (z 9997): a session-summary pill (`summaryText` = name / country / date), **⌂ Exit Game** (→ `setMenuOpen(true)`), and **⏻** (`handleShutdownServer` → `POST /api/server/shutdown`, then a full-screen "Server stopped" overlay at z 20000). Desktop lays them out top-left of the date widget; phones stack **⌂**/**⏻** vertically in the left gutter. **⏻** is stripped from the web build (`!import.meta.env.VITE_OH_WEB`).
+When the menu is closed, `LibraryTopBar` renders a compact cluster (z 9997): a session-summary pill (`summaryText` = name / country / date), **⌂ Exit Game** (→ `setMenuOpen(true)`). Desktop lays them out top-left of the date widget; phones put **⌂** in the left gutter. The ⏻ server-shutdown button that used to sit beside it is gone from the beta; `POST /api/server/shutdown` stays for scripts and the launcher.
 
 ---
 
@@ -217,7 +222,7 @@ When the menu is closed, `LibraryTopBar` renders a compact cluster (z 9997): a s
 
 | Tab | Component | Behavior |
 |---|---|---|
-| 🧭 Advisor | inline chat | Loads/saves history to `JSON_URLS.advisor`; `startChat()`/`loadHistory()` bootstrap; `sendMessage(text)` → advisor reply. Renders markdown (`react-markdown`) and inline ` ```chart ` blocks via `AdvisorChart` (Chart.js). 🗑 clears the chat; ✕ closes (the only exit on phones where the drawer covers 🧭) |
+| 🧭 Advisor | inline chat | Loads/saves history to `JSON_URLS.advisor`; `startChat()`/`loadHistory()` bootstrap; `sendMessage(text)` → advisor reply. Renders markdown (`react-markdown`) and inline ` ```chart ` blocks via `AdvisorChart` (Chart.js) — only after `validateChartConfig` (`advisorBlocks.js`) passes them: bar, line, pie or doughnut, with labels and a number somewhere; one that fails shows `📉 The chart could not be drawn: <why>` instead of throwing mid-render. A question asked after the world moved on carries a line above it — `⏳ Since 1 January 2016 · 3 events · 1 change by the Game Master` — whose tooltip is the whole catch-up note the advisor was given (see [conversations](ai-overview.md#conversations-one-copy-a-stable-prefix-and-a-catch-up-note)). Dates under replies go through `gameDates.js` (they used to show a day early west of Greenwich). A document that reached the government in a turn shows as a notice between the messages — `📄 A new paper on your desk: <title>, <how it came>` with **Read it** / **Put it away** (`AdvisorDocumentNotice`) — hidden until the reveal reaches its event, merged in while the drawer is open, never sent to the model, and taken back with an undone turn (see [reports](ai-overview.md#reports-what-only-some-governments-know)). 🗑 clears the chat; ✕ closes (the only exit on phones where the drawer covers 🧭) |
 | 📊 Stats | `StatsPane` | National stat sheet (see [§5.2](#52-statspane--srcgamegameuistatsjsx)) |
 
 ### 5.1 Advisor width state
@@ -263,14 +268,46 @@ Shows player country + formatted date (`«` opens Events history, `»` opens the
 | Fixed jumps (6h…1yr) | `runJump(days, "jump")` → `simulateTimelineJump` | `src/Game/AI/gameplay.js` |
 | Custom amount + unit | same, arbitrary days | — |
 | **Auto-jump** | `runJump(365, "auto")` → `simulateAutoJump` (AI picks how far) | — |
-| **↩ Undo last turn** | `runUndo()` → `rollBackToSnapshot(0)`; `undoCount` from `loadRollbackSnapshots` | rollback snapshots |
+| **↩ Undo last turn** | `runUndo()` → `rollBackToSnapshot(0)`; `undoCount` from `loadRollbackSnapshots` — the Spies file goes back with the turn | rollback snapshots |
 | Cancel (during load) | `cancelJump()` aborts the in-flight `AbortController` | — |
 
 On success it swaps to the **history panel** with `visibleEventCount = 1`. Fallback generations surface a warning banner.
 
+While an interactive event is in progress (`isSceneInProgress(world.activeInteractive)`), the jumps, auto-jump and the custom amount are disabled and a yellow note says why, with **Return to the scene** (`oh:open-interactive-event`). Undo stays available, and undoing the turn a scene was built on takes the scene with it. While one is on offer instead (the last skip's, once the reveal has reached its event), a quieter yellow note names it — *⚡ An interactive event is on offer: «title». The next time skip lets it pass.* — with **Play it out**; the skips stay available.
+
+While a skip runs the spinner says what it is doing, in the skip's own words as each phase starts (`showSkipPhase`, fed by `onProgress` from `skipPhases.js`): *Reading the world…*, *Writing 1 month of events… (part 2 of 3)*, *Moving the armies, redrawing the fronts and hearing from 2 agents…*, *Placing the armies and the fronts…*, *Updating the Projects board…*, *Folding older history into the history document…*, *Writing it into the record…*. Auto-jump and a held segment's retry report the same way.
+
+### 6.2-ter Group chats: one request, said a line at a time, and binding votes
+
+A group turn no longer rotates one leader at a time. `runGroupTurn` (`chat.jsx`) calls `runChatActionBatch` once for the whole table (see [group diplomacy](ai-overview.md#group-diplomacy-one-request-for-the-whole-table)); the answer is applied to the thread's event log and the panel re-renders from its projection. A failure falls back to the old rotation, which is exactly the behaviour it replaces.
+
+The answer is **said a line at a time** (`planChatReveal`, `GameUI/chatReveal.js`): the first line at once, with anything before it and the reactions, votes or newcomers that follow it; then each later line after its speaker has been seen typing for five seconds — a *Typing…* bubble with the speaker's flag (`TypingBubble` with `label="Typing"`, where the request's own wait says *Thinking…*) and the hint *Send a message now to cut in: what is still to come will not be said.* The composer stays open meanwhile. **Sending a message cuts in**: the lines still to come are never said — they were never written into the thread — and the next request is told whose lines went unsaid. **Leaving the thread** (back, or another thread) is not cutting in: the rest is written at once. Each line is written onto the thread as it stands, so a vote cast in between is kept, and nothing is written once the player has switched campaign.
+
+A binding vote renders as a `PollCard` above the composer: who called it, each option as a bar with its share and tally, the voters on hover, and the player's own vote cast once by clicking. A model can never cast it for them — `chatActions.js` refuses any action whose actor is human-controlled — and there is no closing a poll or changing a vote, because neither is a thing a government gets to do.
+
+### 6.2-bis Documents, where they arrive
+
+There is no document panel (a Dossier launcher existed briefly in the lab and was removed). The documents the simulation writes — secret protocols, private letters, intelligence assessments, treaty articles (`world.reports`, see [reports](ai-overview.md#reports-what-only-some-governments-know)) — reach the player through the panels they already use (`runtime/reportDelivery.js`):
+
+- **Diplomacy.** A document the player holds with other governments arrives as a message in the thread with them, spoken by its sender: a bold `📄` heading and dateline over the document in full. It raises the unread badge and the notification like any message — once the reveal reaches the event that brought it (see 6.3).
+- **The Spy tab.** A document held by a government where the player has an agent arrives among that agent's intercepts, listed with `📄` rather than `📡`, sealed like the rest and redacted to the player's signal clarity.
+- **The event card.** A published document, or one only the player's government holds, sits under the text of the event that produced it (`EventDocument` in `time.jsx`): `📄 title`, `Published` or `Our government's`, and the document a click away.
+
+The advisor reads all of them as the government's own staff; the dock is back to three launchers.
+
 ### 6.3 Event history panel (`«`) + staged reveal
 
-Renders the latest turn's events (`buildTurnRecord`) one at a time; **Next event** / **Skip to end** reveal more. The camera follows every revealed event (`deriveEventFocusBounds` → `focusMapOnBounds`), unless the **Disable camera movement during events** map setting is on. A **staged reveal** (`time.jsx:1558`) replays the pre-jump world from the rollback snapshot and applies only revealed events' impacts through a purely visual override (`setWorldStateOverride`/`setUnitsOverride`) so ownership/units/markers animate in; finishing/closing clears the override.
+Renders the latest turn's events (`buildTurnRecord`) one at a time; **Next event** / **Skip to end** reveal more. The camera follows every revealed event (`deriveEventFocusBounds` → `focusMapOnBounds`), unless the **Disable camera movement during events** map setting is on. A **staged reveal** replays the pre-jump world from the rollback snapshot and applies only revealed events' impacts through a purely visual override (`setWorldStateOverride`/`setUnitsOverride`) so ownership/units/markers animate in; finishing/closing clears the override.
+
+The reveal is remembered (`runtime/unseenEvents.js`): each step marks what it uncovered, a reload resumes where the player was, and a turn with nothing left unseen — an older one, an undone-to one, a stopped one — opens whole. Until the reveal reaches an event, nothing it brought is shown anywhere else: a thread it opened or a letter it delivered is not in the chat list (nor its unread count or notification), a copy an agent stole in it is not in the Spy tab, and the advisor and the leaders speak from the world as the player has seen it (see [what the player has not been shown yet](ai-overview.md#what-the-player-has-not-been-shown-yet)).
+
+**✋ Intervene here** sits under those two while events remain unrevealed (and no category filter is on, since the count is by reveal order). It asks once — *Stop the round after «title»? The N events not yet revealed will be discarded — they never happen — and the date becomes …* — then `runIntervene` calls `interveneAfterEvent(visibleEventCount)` (`gameplayLazy.js`): the engine rolls the game back to the turn's snapshot and applies the kept prefix of the turn's journal again, without a request (see [Intervene](ai-overview.md#intervene-stopping-a-round-where-the-player-wants-to-act)). The panel then shows the shorter turn fully revealed, the date widget the last kept event's date, and **Undo last turn** still works. Offered only when the newest snapshot carries a journal (`canInterveneInLastTurn`, re-checked with the round), never while a jump runs.
+
+Each card shows what the event is about as **link chips** after its category tags — ⚑ a power, ⌖ a region, ⛊ a formation, ▣ a structure (`deriveEventLinks`, see [the event cards' links](ai-overview.md#the-event-cards-links)); a click flies the map there (`focusMapOnBounds`), which also serves a player who switched the event camera off. They replace the old unclickable participant tags wherever the map can frame something. The lookups they need (country names, the region catalog, the stock outlines) now load independently: a missing stock archive used to take the names and the catalog down with it, blinding the camera, the chips and the map-changes names alike. On a drawn map they frame by the map's own region boxes, and re-derive when the map's worker has primed them (`oh:region-catalog-primed`).
+
+**⚡ Interactive event.** Now and then a skip offers one of its events to be played out as a scene (see [Interactive events](ai-overview.md#interactive-events-a-moment-a-time-skip-offers-to-play-out)). That event's card carries a yellow strip under its text (`InteractiveOfferStrip`, `time.jsx`): **Play it out** opens the interactive event panel (`oh:open-interactive-event`, §10-bis), **Let it pass** clears the offer (`declineInteractiveOffer`, free). Neither spends a request. The strip is there only once the reveal reaches the event, and goes when the offer is taken up, let pass or replaced by the next skip.
+
+Each card's **N map changes** pill is a button: it opens a *What changed on the map* list under the card (`describeEventMapChanges`, `time.jsx`) — one line per territory transfer, control or contest change, claim, polity change (create / rename / restore / dissolve / update), unit spawn / move / strength / removal and structure build / update / rename / removal, with polity, region and unit names resolved (`resolvePolityName`, `resolveRegionName`, `getUnitById`). The count on the pill is the length of that list, so the two never disagree.
 
 ### 6.4 Pregame history
 
@@ -280,7 +317,7 @@ If a fresh game (round 1, no events/turns) has a "World Before Round One" briefi
 
 ## 7. Actions panel — `src/Game/GameUI/actions.jsx`
 
-`ActionsPanel` (`actions.jsx:225`) — bottom-left slide-up (z 9998). The player's planned-action queue for the current turn.
+`ActionsPanel` (`actions.jsx:225`) — bottom-left slide-up (z 9998). The player's planned-action queue for the current turn. An order that deploys or recalls a spy ("deploy a spy in Germany") is executed by the next time skip through the event's `impacts.spyOps` ([Espionage Orders] in `docs/ai-prompts.md`); the Spy tab still shows and manages the agents.
 
 | Control | Effect | Connects to |
 |---|---|---|
@@ -290,10 +327,29 @@ If a fresh game (round 1, no events/turns) has a "World Before Round One" briefi
 | **Get/Refresh AI suggestions** | `generateActionSuggestions({force:true})` → `SuggestionCard`s | AI |
 | Queue a suggestion | `normalizeSuggestionAction` → persisted; button flips to "✓ Queued" | — |
 | Delete an action | `handleDelete`; if it was a queued unit order (`unitRevert`, still `planned`), also `revertUnitOrder` to undo its map effect | `src/Game/Map/unitsController.js` |
+| **🎯 Standing goal** (`StandingGoal`) | Under the date line: *Set a standing goal*, or the goal with **Edit**; editing offers Save (Enter), Cancel (Esc) and **Clear goal**. Locked while a turn runs (polls `isSimulationBusy()`), since the turn writes the world the goal lives in. The advisor, the time skip and the suggestions steer by it; a leader never sees it | `withPlayerGoal` → `writeWorldState` (`src/runtime/playerGoal.js`); read with `useRuntimeState("world", playerGoalOf)` |
 
 Only `status === "planned"` actions render. Country + date poll `JSON_URLS.game` every 5 s (display only). The launcher button (`Actions`, `actions.jsx:700`) lives in the toolbar.
 
 ---
+
+## 7-bis. Projects & Operations panel — `src/Game/GameUI/projects.jsx`
+
+`ProjectsPanel` (`projects.jsx:697`) — bottom-left slide-up (z 9998), the third `activePanel` slot after Chat and Actions. Its launcher `Projects` (the `ProjectsDockIcon` glyph) sits in the same `Toolbar` (`chat.jsx:2962`), which widened to hold three buttons (`12.8rem` at this commit). Entries are created and edited by the AI, by design; the player owns exactly two things on the board — a project's priority (`PrioritySwitch`) and whether to abandon it — see [World state](world-state.md) §2e-bis.
+
+| Element | Behavior | Connects to |
+|---|---|---|
+| Data | Its own 5 s `setInterval` while open: `readWorldState({force:true})` + `JSON_URLS.game`, signature-gated so a poll that changed nothing does not re-render the list under the cursor | `src/runtime/gameState.js` |
+| Cards | Kind glyph, name, status pill, owner, summary, tag chips, progress bar (`Bar`, copied from `stats.jsx:153`), timeline row, next milestone, last update | — |
+| Derived badges | ⚠ Overdue / ⏳ Due in Nd / Milestone slipped / No recent progress — all from `deriveProjectFlags` against the game clock, never from what the model wrote, so they cannot go stale | `src/runtime/projects.js` |
+| Sort & filter | `PROJECT_SORTS` dropdown, Mine/Foreign/All, and tag chips built from the live vocabulary (`collectProjectTags`). Open work always sorts above closed work whatever the chosen sort |
+| Closed view | An **exclusive** switch, not an "also include" filter: off shows only running work, on shows only completed/failed/cancelled. It previously widened the list to everything, which — because the sort ranks open above closed — buried the closed entries under a screen of active ones and made the button look broken. `isProjectClosed` (`runtime/projects.js`) is the one definition the filter, the count and the sort all share | `src/runtime/projects.js` |
+| **🧭 Ask advisor** | `onOpenAdvisor(seed)` — opens the drawer with a per-project brief request **pre-filled, never sent**; the same path the Actions panel's "Help brainstorm actions" button uses | `Main.openAdvisor` |
+| **📍 Show on map** | Resolves `project.focus` → first linked marker → first linked unit, then `map.flyTo`. Hidden entirely when nothing resolves, rather than offered and inert | `mapRef`, threaded through `Toolbar` |
+| Activity feed | Expanding a card resolves `project.eventIds` against `readEventsState()`, fetched **once and only after a first expand** — `events.json` is the largest runtime document and most opens never expand anything | `src/runtime/gameState.js` |
+| Empty state | The **backfill path**, not a dead end: a button seeding the advisor with "put my ongoing efforts on the board". An existing campaign's history is already in the advisor's prompt, so it can reconstruct one | — |
+
+Two authors create the board's entries (the player only sets a priority or abandons one): events through `impacts.projectOps` — supplied by the separate `projects` AI task after a jump, or inline by the game master — and the advisor through a ```` ```projects ```` block — `applyAdvisorProjects` in `advisor.jsx`, with an `AdvisorProjectsCard` receipt, the same "advisor creates, I review" contract as ```` ```actions ````. The advisor's write does a read-modify-write that spreads the **whole** world back; a shallow patch there would drop `polityOverrides`/`regionOwnershipOverrides` and blank the map.
 
 ## 8. Forces panel — `src/Game/GameUI/forces.jsx`
 
@@ -303,7 +359,7 @@ Only `status === "planned"` actions render. Country + date poll `JSON_URLS.game`
 |---|---|---|
 | Unit list | `subscribeUnits`/`getUnits`; split into "Your units" (`getPlayerCode`) and dimmed "Other forces". Clicking a unit `flyTo`s it | `src/Game/Map/unitsController.js` |
 | Deploy controls | type (restricted by scenario `getAllowedUnitTypes()`), strength (1–1000), optional name → `setInteractionMode({kind:"deploy", params})` then closes the panel | unitsController |
-| **Mode banner** (z 10000) | Global hint while `mode.kind !== "idle"` (deploy/move/attack) + Cancel (`clearInteractionMode`) | interaction-mode state |
+| **Mode banner** (z 10000) | Global hint while `mode.kind !== "idle"` (deploy) + Cancel (`clearInteractionMode`) | interaction-mode state |
 
 Owner codes render as full names via `ensurePolityNames`/`polityDisplayName` (re-renders once the lookup warms). `TYPE_GLYPH`/`TYPE_LABEL` map unit types to icons/labels; strength color-codes >600 green / >250 amber / else red.
 
@@ -315,16 +371,23 @@ Owner codes render as full names via `ensurePolityNames`/`polityDisplayName` (re
 
 | Tool id | Does | Writes / calls |
 |---|---|---|
-| `master-ai` | Free-text world command | `applyGameMasterCommand(text)` (`src/Game/AI/gameplay.js`) — records a game-master event |
+| `master-ai` | **GM Console**: a natural-language request in one of three modes (direct correction, exact event, world intervention) is planned by the AI into a structured transaction, shown operation by operation, and only then applied | `previewGameMasterCommand(text, { mode })` → `applyGameMasterPreview(preview)` (`src/Game/AI/gameplay.js`). Apply revalidates the preview against a fresh world, fails closed if canonical state changed since the preview (fingerprint), writes through the event-impact seam plus the war/diplomatic ledgers and the Stats seam, links the events into the Events panel, and records `world.gmAudit`. Direct prose execution (`applyGameMasterCommand`) is disabled. |
+| `reminders` | **Simulation Reminders**: issue, edit and withdraw the Game Master's standing facts (twelve at most), which every AI in the game is told until withdrawn; below them, *What the next time skip will be told* — every change made by hand this round, exactly as the skip will read it | `addReminder` / `editReminder` / `removeReminder` on `world.simulationReminders`; reads `world.gmChanges` (`src/runtime/gmChanges.js`). See [the Game Master's hand](ai-overview.md#the-game-masters-hand-changes-made-outside-the-simulation-and-standing-reminders). |
+| `events` | **Event Editor**: search, create ("exact events"), edit and delete canonical events with quotations and metadata; an exact event may allow one NPC diplomatic reaction after a 12-second undo window | `writeEventsState`; manual events are linked into `world.simulationHistory`; reactions queue in `world.pendingEventOutreach` and are evaluated by `processPendingEventOutreach` (scheduled from the chat panel) |
+| `interactive-event` | **Interactive Event**: pick any event on the record and it becomes the moment to play out as a scene — the offer a time skip makes on its own one skip in three (`runtime/interactiveOffer.js`). Rows say whether a skip could have offered that event (`isOfferableEvent`); an event the reveal has not reached cannot be offered, and neither can anything while a scene is in progress. Offering costs nothing; the scene costs what it always costs | writes `world.interactiveOffer` (never `lastInteractiveOfferRound`, so skips go on offering their own), dispatches `oh:open-interactive-event` and closes the Cheats panel so the scene is not covered |
+| `history-document` | **History Document**: the living history the AI is shown in place of the folded events — read and edit it, fold the older events now, or reset compression; the timeline keeps every event in full | `world.historyDocument` and `world.consolidatedHistory` via `writeWorldState`; `consolidateHistoryNow` (`gameplay.js`) runs the `eventConsolidator` task on everything but the newest 24 events (`historyConsolidation.js` decides what a pass folds and how the document is revised) |
 | `roll-back-turn` | Restore to the start of an earlier turn (discards later turns) | reads `JSON_URLS.snapshots`; writes game/world/events/actions/chat/colors |
 | `your-country` | Switch which country you play | `writeGameData({…country})` |
-| `difficulty` | Set difficulty | `writeGameData({…difficulty})` (`DIFFICULTY_LEVELS`) |
+| `difficulty` | Set difficulty (Difficulty 2.0: per-scope directives for simulation, diplomacy and interactive events) | `writeGameData({…difficulty})` (`DIFFICULTY_LEVELS`, `src/runtime/difficulty.js`) |
 | `annex-country` | Click a country → fold all its regions into a target | resolves current owner via overrides + `loadRegionCatalog`; writes `regionOwnershipOverrides` |
 | `annex-regions` | Click individual regions → transfer to a target | per-region `regionOwnershipOverrides` write |
-| `edit-country` / `add-country` | Rename/recolor or create a polity (name **is** the identifier) | `polityOverrides` + `colors.json` |
-| `regions` | Click a region → edit name/owner | owner via overrides; name only on custom-geometry maps (`regionsGeojson`) |
-| `edit-feature` / `add-feature` / `clear-features` | Edit/add/clear cities & landmarks | `citiesGeojson`; adding the first custom feature flips `customCities: true` |
-| `events` | Edit/delete recorded events | `writeEventsState` |
+| `edit-country` / `add-country` | **Country Editor** (identity, colour, tags, reputation, the persistent stat sheet) or create a polity (name **is** the identifier) | `polityOverrides` + `colors.json`; stats through `applyCountryStatPatchToWorld` |
+| `regions` | **Region Inspector**: click a region → controller, lawful sovereign, claimants, provenance; change de-facto control (a control op), restore sovereign control, transfer legal sovereignty (a transfer), add/withdraw claims; rename on custom-geometry maps | `applyEventImpactsToWorld` with `regionTransfers` / `regionClaims` (the same seam events use); name via `regionsGeojson` |
+| `edit-feature` / `add-feature` / `clear-features` | **Map Feature Editor**: runtime features (`world.markers`, with lifecycle status, owner, kind, location) and scenario cities | marker ops through `applyEventImpactsToWorld`; `citiesGeojson`; adding the first custom city flips `customCities: true` |
+
+Every tool that changes the world records one sentence of it in `world.gmChanges` after its save succeeds (`noteGmChange`; a failed note never costs the edit): the GM console's transaction, a whole-country or region-by-region annexation (one growing line), a Region Inspector edit, a country edited or created, the player's country switched, cities and map features, an event written, edited or deleted, the history document rewritten, a rollback. The next time skip opens with them.
+
+The log viewer that used to be a Cheats tool is now **View log** in Settings → Diagnostics (section 10).
 
 Ownership/name resolution is done in **one namespace** (country display name) — the file's comments call out the recurring bug where a GADM code (`RUS`) and a name (`Russia`) never compared equal. All map changes repaint within ~5 s (the map's own poll).
 
@@ -338,21 +401,39 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 
 | Section | Control | Persists to / calls |
 |---|---|---|
-| AI Provider | `ApiProviderSelector` — searchable catalog of `PROVIDER_OPTIONS` | `onApiProviderChange`→`Main.apiProvider`→`localStorage["api_provider"]` |
-| Provider settings | `ProviderSettingsPanel` — per-provider API key/model/custom-params (gemini, openai, anthropic, openai-compatible, anthropic-compatible) + global **Model reasoning** toggle | `persistProviderSetting` (browser localStorage); `setReasoningEnabled` |
+| Models | `FallbackListSection` — the Fallback list: one row per entry with its status (ready / Spent until … / Unusable: reason / busy, for about …; a status is what the row shows, never where a call starts) and when it last answered; reorder, edit, reset, remove; **Add a backup**, **Fill…** (`FillPanel`), and the rate-limit choice. With one entry it is the old single form: provider (`ApiProviderSelector`), key or endpoint, model. See `docs/ai-overview.md` | `providerConfig.js` (`addEntry`, `updateEntry`, `moveEntry`, `fillFallbackList`, `setRateLimitPolicy`…) |
+| Connections | `ConnectionsSection` — saved provider + name + key + endpoint + custom parameters (+ **Strict tool schema** for OpenAI Compatible); templates for Groq, OpenRouter, Local Ollama | `addConnection`, `updateConnection`, `removeConnection` |
+| Model reasoning | `ReasoningSection` — the global **Model reasoning** toggle | `setReasoningEnabled` |
 | Language | `LanguageSelector` — searchable; applying reloads the page | `setStoredLanguage` (server + browser) |
 | Display | **Fullscreen**, **3D Globe**, **3D Terrain** (labeled "Very Experimental") toggles | `Main` toggles / `App.jsx` state |
 | Map | Hide country labels, **Reduce motion** (umbrella over the two below), Disable idle globe rotation, Disable camera movement during events | `setMapSetting(MAP_SETTING_KEYS.*)` (`src/runtime/mapSettings.js`) |
-| AI | **Limit AI generation** (5-min cap then canned fallback vs. wait-as-long-as-needed) | `MAP_SETTING_KEYS.limitAiGeneration` |
+| AI | **Limit AI generation** (off by default; 5-min silence cap then canned fallback vs. wait-as-long-as-needed); **Generate long time skips in segments** (off by default); **AI lookup functions** (on by default: the model may call lookup functions before answering, see `docs/ai-overview.md`); **Batch background AI tasks** (Anthropic only, off by default — the event consolidator rides the Message Batches API, see `docs/ai-overview.md`) | `MAP_SETTING_KEYS.limitAiGeneration`, `MAP_SETTING_KEYS.batchBackgroundTasks`; **Record AI telemetry** / **Rate AI generations** (`telemetry.js`; recording on, rating off by default) and the **📊 AI debug console** button (`debugConsole.jsx`, lazy; see `docs/ai-overview.md`) |
+| Diagnostics | `DiagnosticsPanel` — **📋 Copy log** / **💾 Save as file** (the Logging file, Desktop log merged in), **🔎 View log** (`DiagnosticsLogViewer`: the same entries, newest first, problems-only filter, click to expand), Clear, and the **Keep a diagnostics log** / **Detailed logging** switches | `buildLoggingFile` / `getLoggingFileEntries` / `setDebugLogEnabled` / `setDebugLogVerbose` (`src/runtime/debugLog.js`, see `docs/runtime-services.md`) |
 | Footer | **🧪 Cheats** (→ `onOpenCheats`), **📖 Guides** (`/guides/`), Discord/Reddit/GitHub links | — |
 
 `Toggle` (`settings.jsx:156`) is the shared switch primitive (also exported). Map-setting toggles read initial values from `getMapSetting` and mirror them locally.
+
+
+---
+
+## 10-bis. Interactive events — `src/Game/GameUI/interactive.jsx`
+
+`InteractivePanel` — a centred yellow-edged dialog (z 10001), lazy, opened by `oh:open-interactive-event`: from **Play it out** on the card of the event a time skip offered, from the time panel's note about that offer, and from its *Return to the scene*. There is no other way in: the player does not start an interactive event, a skip offers one now and then (see [Interactive events](ai-overview.md#interactive-events-a-moment-a-time-skip-offers-to-play-out)).
+
+| State | Controls | Calls |
+|---|---|---|
+| On offer | the event's title, date and description; *Your angle (optional)*; **Play it out** and **Let it pass**, the cost said beside them; a note, and **Play it out** off, while the reveal is unfinished | `createInteractive({ eventId, angle })`, `declineInteractiveOffer()` (then the panel closes) |
+| A scene | title, premise, *Your angle*, each move played (**↶ Take back**), the scene's current text, the offered choices and an own-move box with **Play**, **End the scene** (off with no move played) and **Set aside** | `advanceActiveInteractive`, `rewindActiveInteractive({ beatIndex })`, `endActiveInteractive`, `setAsideActiveInteractive` |
+| Finished | *The scene is over and written into the record* with **See it on the timeline** | — |
+| Nothing | *No interactive event is waiting*, and when one comes | — |
+
+One engine call at a time; a failed step changes nothing and its reason shows in the panel. **✕ Leave** closes the dialog and leaves a scene where it is, and an offer until the next time skip. A scene an older skip proposed and nobody took up is not shown.
 
 ---
 
 ## 11. Search — `src/Game/GameUI/search.jsx`
 
-`Search` (`search.jsx:144`, memoized) — collapsed 3rem circle just right of the toolbar (z 9999), expands to an input (rightward on desktop, full-width above the toolbar on mobile). Debounced (200 ms) autocomplete against **Nominatim** (`nominatim.openstreetmap.org/search`), results deduped + cached in-module. Picking a result (click / Enter / ↑↓) calls `mapRef.current.flyTo({center:[lon,lat], zoom:5})`. Purely a camera control — it does not touch game state.
+`Search` (`search.jsx:144`, memoized) — a small 2.4rem square just right of the three-launcher toolbar (13.8rem from the left, z 9999), its bottom edge level with the bottoms of the dock's buttons rather than the dock, so it reads as a utility beside the launchers and not another one; expands to an input (rightward on desktop, a full-width 3rem bar above the toolbar on mobile). Its position is derived from the dock's geometry in `hudDock.js`, which the `Toolbar` reads too: the two used to be separate literals, and when a fourth launcher (the since-removed Dossier) widened the dock the search control sat on top of it. Adding or removing a launcher moves it on its own. Debounced (200 ms) autocomplete against **Nominatim** (`nominatim.openstreetmap.org/search`), results deduped + cached in-module. Picking a result (click / Enter / ↑↓) calls `mapRef.current.flyTo({center:[lon,lat], zoom:5})`. Purely a camera control — it does not touch game state.
 
 ---
 
@@ -387,7 +468,7 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 | 19 | Game/Scenario editor drawer | `libraryBar.jsx` | panel | `editorKind`/`editorDetails` | scenario/game details | `saveScenario`/`saveGame`, asset up/clear, `exportScenarioBundle` |
 | 20 | Country / faction picker | `libraryBar.jsx` | modal | `countryPicker` | country options, custom regions | `createGame`, `saveGame`, `activateGame` |
 | 21 | Map editor host | `libraryBar.jsx` | overlay | `isMapEditorOpen` | scenario assets | `applyMapToScenario` → many asset writes + new game |
-| 22 | ⌂ Exit Game / ⏻ shutdown / summary | `libraryBar.jsx` | cluster | `!menuOpen` | `activeGame` | `setMenuOpen(true)`, `POST /api/server/shutdown` |
+| 22 | ⌂ Exit Game / summary | `libraryBar.jsx` | cluster | `!menuOpen` | `activeGame` | `setMenuOpen(true)` |
 | 23 | Community hub tab | `communityHub.jsx` | panel | menu tab | GitHub hub API, `/api/hub/*` | `downloadHubBundle`+`importScenarioBundle`, publish/export |
 
 ---
@@ -395,7 +476,7 @@ Ownership/name resolution is done in **one namespace** (country display name) �
 ## 14. Shared conventions
 
 - **Surface styling**: most HUD elements share a `baseStyle`/`surface` object — `rgba(17,24,39,0.9)` bg, `backdrop-filter: blur`, 12px radius, subtle border/shadow. The main menu/editor use `surfaceStyle` (darker gradient + heavier blur).
-- **5-second polling**: Chat, Actions, Stats, `Other`, and `DateWidget` each run their own `setInterval(refresh, 5000)` against the runtime stores rather than sharing a subscription — the map's own poll then repaints ownership within ~5 s of any cheat/edit.
+- **Runtime state**: panels do not poll. They subscribe to a slice of the shared store (`src/runtime/runtimeStore.js`, usually via `useRuntimeState`), which is pushed by canonical write events (same-tab, and cross-tab over a `BroadcastChannel`) rather than polled, and wakes a panel only when its own slice changed. A 60-second backstop read covers writers no event reaches. See [World state §9](world-state.md#9-state-distribution-three-stores-no-panel-polls).
 - **`data-no-translate`**: player-typed text, economic figures, and raw dropdown values are marked so the UI translator ([i18n](i18n.md)) leaves them verbatim.
 - **Mobile branching**: `useIsMobile()` (`src/runtime/useIsMobile.js`) reshapes the search box, the date/country row, the exit cluster, and menu paddings. The advisor drawer and bottom panels clamp to `calc(100vw − …)`.
 - **Lazy chunks**: advisor (Chart.js + markdown), cheats, community hub, the map editor, and the OpenLayers country picker are all `React.lazy` — none are in the first paint.

@@ -27,8 +27,8 @@ const Chip = ({ icon, label, active, onClick }) => (
       alignItems: "center",
       gap: 6,
       padding: "5px 10px",
-      background: active ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.06)",
-      border: active ? "1px solid rgba(59,130,246,0.8)" : "1px solid rgba(255,255,255,0.1)",
+      background: active ? "rgba(0,0,0,0.48)" : "rgba(255,255,255,0.06)",
+      border: active ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.1)",
       borderRadius: 8,
       fontSize: 12,
       fontWeight: 600,
@@ -43,12 +43,15 @@ const Chip = ({ icon, label, active, onClick }) => (
 
 const BottomBar = ({
   counts,
+  polityCount = 0,
+  clipboardCount = 0,
   basemap,
   hasCustomBackground,
   onOpenBasemaps,
   name,
   onNameChange,
   saveStatus,
+  scenarioDirty = false,
   openPanel,
   onOpenPanel,
   search,
@@ -73,7 +76,12 @@ const BottomBar = ({
     >
       {search}
       <Chip icon="list" label={`Regions: ${counts.regions}`} active={openPanel === "regions"} onClick={() => onOpenPanel("regions")} />
+      <Chip icon="list" label={`Countries: ${polityCount}`} active={openPanel === "polities"} onClick={() => onOpenPanel("polities")} />
+      <Chip icon="layers" label="Topology" active={openPanel === "topology"} onClick={() => onOpenPanel("topology")} />
+      <Chip icon="image" label="Import Map" active={openPanel === "province-import"} onClick={() => onOpenPanel("province-import")} />
       <Chip icon="pin" label={`Features: ${counts.features}`} active={openPanel === "features"} onClick={() => onOpenPanel("features")} />
+      <Chip icon="unit" label={`Units: ${counts.units ?? 0}`} active={openPanel === "units"} onClick={() => onOpenPanel("units")} />
+      <Chip icon="copy" label={`Clipboard: ${clipboardCount}`} active={openPanel === "clipboard"} onClick={() => onOpenPanel("clipboard")} />
       <Chip icon="types" label={`Types: ${counts.types}`} active={openPanel === "types"} onClick={() => onOpenPanel("types")} />
       <Chip icon="layers" label="Layers" active={openPanel === "layers"} onClick={() => onOpenPanel("layers")} />
       <Chip icon="image" label="Reference" active={openPanel === "reference"} onClick={() => onOpenPanel("reference")} />
@@ -109,6 +117,22 @@ const BottomBar = ({
         <span style={{ width: 9, height: 9, borderRadius: "50%", background: save.color, boxShadow: `0 0 8px ${save.color}` }} />
         {save.label}
       </span>
+      {scenarioDirty && (
+        <span
+          title="The editor document may be autosaved, but these changes have not yet been written into the scenario."
+          style={{
+            padding: "4px 8px",
+            borderRadius: 999,
+            border: "1px solid rgba(245,158,11,0.35)",
+            background: "rgba(245,158,11,0.12)",
+            color: "#fbbf24",
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          Scenario unsaved
+        </span>
+      )}
     </div>
   );
 };

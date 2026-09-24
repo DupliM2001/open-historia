@@ -3,17 +3,21 @@ import Map from "ol/Map";
 import View from "ol/View";
 import TileLayer from "ol/layer/Tile";
 import XYZ from "ol/source/XYZ";
+import ImageLayer from "ol/layer/Image";
+import ImageStatic from "ol/source/ImageStatic";
 import VectorImageLayer from "ol/layer/VectorImage";
 import VectorSource from "ol/source/Vector";
 import Style from "ol/style/Style";
 import Fill from "ol/style/Fill";
 import Stroke from "ol/style/Stroke";
 import GeoJSON from "ol/format/GeoJSON";
-import { fromLonLat } from "ol/proj";
+import { fromLonLat, transformExtent } from "ol/proj";
 import { defaults as defaultControls } from "ol/control/defaults";
 import { flagEmojiFromGid } from "../../runtime/countryFlags.js";
 import { loadRegionLabelGeometry } from "../../runtime/countryLabels.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
+import { APP_HEIGHT, isTouchPrimary, useTouchPrimary } from "../../runtime/mobileUi.js";
+import { useIsMobile } from "../../runtime/useIsMobile.js";
 
 const codeToColor = (code) => {
   let h = 0;
@@ -26,7 +30,7 @@ const codeToColor = (code) => {
 // string; region fills need it translucent so the dark basemap reads through.
 const withAlpha = (hex, alpha) => {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
-  if (!m) return `rgba(124,58,237,${alpha})`;
+  if (!m) return `#a1a1aa`;
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 };
@@ -76,6 +80,39 @@ const parseGeoJSONFeatures = (geojson, { stock = false } = {}) => {
   return features;
 };
 
+// The ESRI dark canvas the picker has always drawn on.
+const ESRI_DARK_GRAY_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+// The whole Web Mercator world - where World.jsx pins an uploaded image
+// (WORLD_IMAGE_COORDS_FLAT) - in this map's projection.
+const WORLD_IMAGE_EXTENT = transformExtent([-180, -85.0511, 180, 85.0511], "EPSG:4326", "EPSG:3857");
+// The sea under a custom map, the same as the game's (buildWorldStyle).
+const CUSTOM_SEA = "#0b1a2b";
+
+// What the regions are drawn over. A scenario with its own basemap gets that
+// basemap, placed and coloured as the game map places it (World.jsx
+// buildWorldStyle): an uploaded image stretched across the whole world, or the
+// vector biomes each carrying its own `fill`. Every other scenario keeps the
+// ESRI canvas, exactly as before.
+const buildBaseLayer = (customBackground) => {
+  if (customBackground?.kind === "image" && customBackground.imageUrl) {
+    return new ImageLayer({
+      source: new ImageStatic({ url: customBackground.imageUrl, imageExtent: WORLD_IMAGE_EXTENT, projection: "EPSG:3857" }),
+    });
+  }
+  if (customBackground?.kind === "vector" && customBackground.geojson) {
+    const features = new GeoJSON().readFeatures(customBackground.geojson, { featureProjection: "EPSG:3857" });
+    return new VectorImageLayer({
+      source: new VectorSource({ features, wrapX: false }),
+      imageRatio: 2,
+      style: (feature) => new Style({
+        fill: new Fill({ color: feature.get("fill") || "#33435c" }),
+        stroke: new Stroke({ color: "rgba(0,0,0,0.18)", width: 0.4 }),
+      }),
+    });
+  }
+  return new TileLayer({ source: new XYZ({ url: ESRI_DARK_GRAY_TILES, maxZoom: 16, wrapX: false }) });
+};
+
 const CountryPickerMap = ({
   countryOptions,
   onPickCountry,
@@ -93,15 +130,26 @@ const CountryPickerMap = ({
   selectionMode = "country",
   selectedRegionIds = null,
   onToggleRegion = null,
-  selectionColor = "#7c3aed",
+  selectionColor = "#a1a1aa",
+  // The scenario's own basemap, when it has one: { kind: "image", imageUrl } or
+  // { kind: "vector", geojson } - world.background plus the background.json
+  // payload, the same pair the game map reads through useCustomBackground.
+  // Null means the scenario draws on ESRI, and so does this map.
+  customBackground = null,
 }) => {
   const containerRef = useRef(null);
+  const mapObjectRef = useRef(null);
+  const baseLayerRef = useRef(null);
+  const customBackgroundRef = useRef(customBackground);
+  customBackgroundRef.current = customBackground;
   const layerRef = useRef(null);
   const sourceRef = useRef(null);
   const hoveredCodeRef = useRef(null);
   const hoveredRegionRef = useRef(null);
   const playableCodesRef = useRef(new Set());
   const [query, setQuery] = useState("");
+  const isMobile = useIsMobile();
+  const touch = useTouchPrimary();
 
   // Refs the once-created map's handlers read at click time — so switching mode or
   // toggling a region never rebuilds the map.
@@ -131,6 +179,19 @@ const CountryPickerMap = ({
       : countryOptions;
   }, [countryOptions, query]);
 
+  // The scenario's basemap arrives after the map does (it is fetched once the
+  // scenario's details are in), so the base layer is swapped in place rather
+  // than the map rebuilt: same view, same regions, same hover state.
+  useEffect(() => {
+    const olMap = mapObjectRef.current;
+    if (!olMap) return;
+    const next = buildBaseLayer(customBackground);
+    const layers = olMap.getLayers();
+    if (baseLayerRef.current) layers.remove(baseLayerRef.current);
+    layers.insertAt(0, next);
+    baseLayerRef.current = next;
+  }, [customBackground]);
+
   // One-time map + layer creation
   useEffect(() => {
     // wrapX:false, as the editor found the hard way (OlMap.jsx): the canvas
@@ -150,19 +211,18 @@ const CountryPickerMap = ({
     layerRef.current = layer;
     sourceRef.current = source;
 
+    const baseLayer = buildBaseLayer(customBackgroundRef.current);
+    baseLayerRef.current = baseLayer;
     const olMap = new Map({
       target: containerRef.current,
-      controls: defaultControls({ rotate: false, zoom: true }),
-      layers: [
-        new TileLayer({
-          source: new XYZ({
-            url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-            maxZoom: 16,
-            wrapX: false,
-          }),
-        }),
-        layer,
-      ],
+      // The zoom buttons are finger-sized on a touch screen (.oh-tap only
+      // applies there).
+      controls: defaultControls({
+        rotate: false,
+        zoom: true,
+        zoomOptions: { zoomInClassName: "ol-zoom-in oh-tap", zoomOutClassName: "ol-zoom-out oh-tap" },
+      }),
+      layers: [baseLayer, layer],
       view: new View({
         center: fromLonLat([0, 20]),
         zoom: 2,
@@ -170,6 +230,8 @@ const CountryPickerMap = ({
         maxZoom: 8,
       }),
     });
+
+    mapObjectRef.current = olMap;
 
     const regionIdOf = (feature) =>
       (feature.getId?.() ?? feature.get("id") ?? feature.get("GID_1") ?? null);
@@ -183,7 +245,7 @@ const CountryPickerMap = ({
           fill: new Fill({
             color: isSelected
               ? withAlpha(selectionColorRef.current, 0.6)
-              : isHovered ? "rgba(124,58,237,0.28)" : "rgba(66,66,70,0.3)",
+              : isHovered ? "rgba(255,255,255,0.28)" : "rgba(66,66,70,0.3)",
           }),
           stroke: new Stroke({
             color: isSelected ? withAlpha(selectionColorRef.current, 0.95) : "rgba(150,155,170,0.4)",
@@ -208,11 +270,11 @@ const CountryPickerMap = ({
 
       return new Style({
         fill: new Fill({
-          color: isHovered ? "rgba(124,58,237,0.55)" : codeToColor(code),
+          color: isHovered ? "rgba(255,255,255,0.35)" : codeToColor(code),
         }),
         stroke: new Stroke({
           color: isHovered
-            ? "rgba(124,58,237,0.9)"
+            ? "rgba(255,255,255,0.85)"
             : "rgba(255,255,255,0.3)",
           width: isHovered ? 2.5 : 1,
         }),
@@ -324,8 +386,11 @@ const CountryPickerMap = ({
           territory. Click again to release one.
         </div>
       ) : (
+        // Not focused on a touch screen: the keyboard would come up over the
+        // map and the list before the player had seen either.
         <input
-          autoFocus
+          autoFocus={!isTouchPrimary()}
+          className="oh-tap-row"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search countries…"
@@ -345,11 +410,14 @@ const CountryPickerMap = ({
         ref={containerRef}
         style={{
           width: "100%",
-          height: "320px",
+          // On a phone the map gives up height so the search, the list and the
+          // dialog's buttons fit on the screen with it: whatever the visible
+          // height leaves after them, between 150 and the usual 320 px.
+          height: isMobile ? `clamp(150px, calc(${APP_HEIGHT} - 28rem), 320px)` : "320px",
           borderRadius: 12,
           overflow: "hidden",
           border: "1px solid rgba(255,255,255,0.1)",
-          background: "#0f0f11",
+          background: customBackground ? CUSTOM_SEA : "#0f0f11",
         }}
       />
       <div
@@ -365,6 +433,7 @@ const CountryPickerMap = ({
           <button
             key={c.code}
             type="button"
+            className="oh-tap-row"
             onClick={() => onPickCountry(c.code)}
             style={{
               alignItems: "center",
@@ -378,7 +447,9 @@ const CountryPickerMap = ({
               fontWeight: 600,
               gap: "0.4rem",
               justifyContent: "flex-start",
-              minHeight: "1.9rem",
+              // Left to .oh-tap-row on a touch screen, which an inline
+              // min-height would override.
+              minHeight: touch ? undefined : "1.9rem",
               padding: "0 0.85rem",
               transition: "background 0.18s ease, border-color 0.18s ease",
             }}

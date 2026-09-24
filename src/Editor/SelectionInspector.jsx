@@ -7,9 +7,14 @@
 // owning country for one or many selected regions. Writes straight to the OL
 // features via the map API, which live-restyles the map.
 //
-// The Country field is free text holding the country's NAME. Typing a name that
-// doesn't exist yet is how a new country is created — there is no separate "add
-// country" step, because a country exists precisely when a region says it owns it.
+// Regions store a STABLE polity key. Display names and polity metadata live in
+// the polity registry. The Polity field is free text over that registry: an
+// existing polity is matched by key or display name (case-insensitively, so
+// "france" cannot fork a second France), and a name nobody has yet becomes a
+// new polity — but only on Enter or the Create button, never on blur or a
+// keystroke, so a half-typed name cannot mint a one-province country by
+// accident. Alt-history needs countries that do not exist yet, and the map is
+// where an author has the territory in front of them.
 
 import { useEffect, useMemo, useState } from "react";
 import Panel from "./Panel.jsx";
@@ -25,20 +30,31 @@ const commonOr = (arr, blank = "") => {
   return arr.every((v) => v === first) ? first ?? blank : blank;
 };
 
-const SelectionInspector = ({ api, selection, types, colors, colorOverrides, setColorOverride, flags, setFlag, onOpenFlagPicker, tags, setTags, setSelection }) => {
+const foldPolityName = (value) => String(value ?? "").trim().toLowerCase();
+
+const SelectionInspector = ({ api, selection, types, colors, colorOverrides, setColorOverride, flags, setFlag, onOpenFlagPicker, tags, setTags, setSelection, polities = {}, upsertPolity, regionEpoch = 0, onOpenPolities, onCopyToClipboard = null }) => {
   const summaries = useMemo(
     () => (api ? selection.map((id) => api.getRegionSummary(id)).filter(Boolean) : []),
-    [api, selection],
+    [api, selection, regionEpoch],
   );
   const [form, setForm] = useState({ name: "", typeId: "", owner: "", claimants: [] });
+  // What the Polity field shows while it is being typed in; null when it is
+  // not, so the field follows the owner (and a rename in the Polities panel).
+  const [ownerDraft, setOwnerDraft] = useState(null);
   // Recomputed per selection rather than memoised on the region set: the map has
   // no change event to key on, and a scan of 3,662 features to build ~230 strings
   // is cheap next to opening a panel.
   const countryNames = useMemo(
     () => (api?.listOwners ? api.listOwners() : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, selection.join(",")],
+    [api, selection.join(","), regionEpoch],
   );
+  const polityOptions = useMemo(() => {
+    const keys = new Set([...countryNames, ...Object.keys(polities || {})]);
+    return [...keys]
+      .map((key) => ({ key, name: String(polities?.[key]?.name || key) }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+  }, [countryNames, polities]);
 
   useEffect(() => {
     // Claimants are an array, so "common value" compares serialized lists.
@@ -49,8 +65,9 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
       owner: commonOr(summaries.map((s) => s.owner || "")),
       claimants: JSON.parse(commonOr(claimantKeys, "[]") || "[]"),
     });
+    setOwnerDraft(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection.join(",")]);
+  }, [selection.join(","), regionEpoch]);
 
   if (!selection.length) return null;
   const single = selection.length === 1;
@@ -61,6 +78,49 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
   const isCustomColor = Boolean(form.owner && colorOverrides?.[form.owner]);
   const ownerFlag = form.owner ? flags?.[form.owner] : null;
   const ownerTags = (form.owner && tags?.[form.owner]) || [];
+  const polityLabel = (key) => (key ? String(polities?.[key]?.name || key) : "");
+  const ownerShown = ownerDraft ?? polityLabel(form.owner);
+  // The polity a typed name means: its exact key, else a key or display name
+  // matched without regard to case. null means nobody has this name yet.
+  const resolvePolityKey = (text) => {
+    const exact = String(text ?? "").trim();
+    const wanted = foldPolityName(exact);
+    if (!wanted) return "";
+    if (polityOptions.some((row) => row.key === exact)) return exact;
+    const byKey = polityOptions.find((row) => foldPolityName(row.key) === wanted);
+    if (byKey) return byKey.key;
+    const byName = polityOptions.find((row) => foldPolityName(row.name) === wanted);
+    return byName ? byName.key : null;
+  };
+  const draftText = String(ownerShown ?? "").trim();
+  const draftResolved = ownerDraft === null ? form.owner : resolvePolityKey(draftText);
+  const draftIsNew = ownerDraft !== null && draftResolved === null;
+  const setOwner = (key) => {
+    setOwnerDraft(null);
+    if (key === form.owner) return;
+    setForm((f) => ({ ...f, owner: key }));
+    apply({ owner: key || null });
+  };
+  // Enter / Create: an existing polity is assigned, a new name is created in
+  // the registry (the same record the Polities panel makes) and assigned.
+  const commitOwner = () => {
+    if (ownerDraft === null) return;
+    const key = resolvePolityKey(draftText);
+    if (key === null) {
+      upsertPolity?.(draftText, { name: draftText, code: draftText, aliases: [draftText], status: "active", note: "" });
+      setOwner(draftText);
+      return;
+    }
+    setOwner(key);
+  };
+  // Leaving the field assigns only what already exists; a new name stays in
+  // the field with its Create button, so creation is always a deliberate act.
+  const settleOwner = () => {
+    if (ownerDraft === null) return;
+    const key = resolvePolityKey(draftText);
+    if (key === null) return;
+    setOwner(key);
+  };
 
   return (
     <Panel
@@ -101,34 +161,59 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
           width={160}
         />
       </Row>
-      <Row label="Country" title="The country that owns this region — type its full name. A name that doesn't exist yet becomes a new country.">
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {ownerRgb && (
-            <span style={{ width: 18, height: 18, borderRadius: 4, border: "1px solid rgba(255,255,255,0.3)", background: rgbToHex(ownerRgb) }} />
+      <Row label="Polity" title="The polity that owns these regions. Type an existing polity's name, or a name that does not exist yet and press Enter to create it — a country that has never existed is one keystroke away. Rename and manage polities in the Polities panel; changing a display name there keeps all territory attached.">
+        <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+            {ownerRgb && (
+              <span style={{ width: 18, height: 18, borderRadius: 4, border: "1px solid rgba(255,255,255,0.3)", background: rgbToHex(ownerRgb) }} />
+            )}
+            <input
+              value={ownerShown}
+              list="oh-polity-options"
+              placeholder={selection.length > 1 && !form.owner ? "mixed / unowned" : "Unowned — type a polity"}
+              onChange={(e) => setOwnerDraft(e.target.value)}
+              onBlur={settleOwner}
+              onKeyDown={(e) => {
+                // No Escape shortcut: the suggestion popup owns that key.
+                if (e.key === "Enter" || e.code === "Enter" || e.keyCode === 13) {
+                  e.preventDefault();
+                  commitOwner();
+                }
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: "0.45rem 0.5rem",
+                borderRadius: 8,
+                border: `1px solid ${draftIsNew ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.16)"}`,
+                background: "rgba(0,0,0,0.28)",
+                color: "white",
+              }}
+            />
+            <datalist id="oh-polity-options">
+              {polityOptions.map((row) => (
+                <option key={row.key} value={row.name} label={row.name !== row.key ? row.key : undefined} />
+              ))}
+            </datalist>
+            <button type="button" onClick={onOpenPolities} style={pillButton(false)} title="Create, rename and manage polities">
+              Polities…
+            </button>
+          </span>
+          {ownerDraft !== null && !draftText && form.owner && (
+            <button type="button" onClick={() => setOwner("")} style={pillButton(false)}>
+              Make unowned
+            </button>
           )}
-          {/* Every country already on the map, so an author picks "United Arab
-              Emirates" rather than retyping it and forking a near-miss. Free-text
-              still wins — typing a new name is how a new country is created. */}
-          <datalist id="oh-country-names">
-            {countryNames.map((name) => <option key={name} value={name} />)}
-          </datalist>
-          <TextField
-            list="oh-country-names"
-            value={form.owner}
-            onChange={(v) => {
-              // No case-folding: the owner IS the country's display name, so
-              // "Russia" must stay "Russia".
-              //
-              // The field keeps v RAW and only what's applied is trimmed. Trimming
-              // the state would make multi-word names untypeable: "United " trims
-              // back to "United", so the next keystroke yields "UnitedS". Trimming
-              // on apply still matters — a trailing space forks a second polity
-              // that looks identical to a human.
-              setForm((f) => ({ ...f, owner: v }));
-              apply({ owner: v.trim() || null });
-            }}
-            width={180}
-          />
+          {draftIsNew && (
+            <button
+              type="button"
+              onClick={commitOwner}
+              style={pillButton(true)}
+              title="No polity has this name yet. Create it and give it these regions (Enter does the same)."
+            >
+              Create “{draftText}”
+            </button>
+          )}
         </span>
       </Row>
       <Row
@@ -137,7 +222,7 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
       >
         <TagField
           value={form.claimants}
-          suggestions={countryNames}
+          suggestions={polityOptions.map((row) => row.key)}
           onChange={(next) => {
             const claimants = next.map((v) => String(v).trim()).filter(Boolean);
             setForm((f) => ({ ...f, claimants }));
@@ -208,9 +293,22 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
             <Icon name="merge" size={13} /> Merge
           </button>
         )}
-        <button onClick={() => api?.copyRegions(selection)} style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}>
-          <Icon name="copy" size={13} /> Copy
+        <button
+          onClick={() => api?.copyRegions(selection)}
+          style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}
+          title="Duplicate the selection beside itself, on this map"
+        >
+          <Icon name="copy" size={13} /> Duplicate
         </button>
+        {onCopyToClipboard && (
+          <button
+            onClick={() => onCopyToClipboard(selection)}
+            style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}
+            title="Copy the selection to the region clipboard, to paste into another map (Ctrl+C)"
+          >
+            <Icon name="copy" size={13} /> Copy to clipboard
+          </button>
+        )}
         <button onClick={() => api?.zoomToSelection(selection)} style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}>
           <Icon name="fit" size={13} /> Zoom
         </button>

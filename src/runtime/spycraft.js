@@ -26,6 +26,22 @@ const clamp01 = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
 export const intelligenceOf = (world, polity) =>
   clampPct(world?.intelligence?.[String(polity ?? "").trim()], DEFAULT_INTELLIGENCE);
 
+// Whether anything has ever put a number on this service. intelligenceOf()
+// answers "ordinary" for an unrated one — right for the maths, wrong for the
+// question "does this polity still need its first reading".
+export const isIntelligenceRated = (world, polity) =>
+  Number.isFinite(Number(world?.intelligence?.[String(polity ?? "").trim()]));
+
+// A rating as the model wrote it -> what goes in the world, or null for junk.
+export const normalizeIntelligenceRating = (value) => {
+  // Only a number or a numeric string counts: Number([]) is 0 and Number(null)
+  // is 0, and neither is a rating the model gave.
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null;
+};
+
 // FNV-1a over a string -> [0, 1). Stable, so a hidden word stays hidden between
 // renders, and a round's discoveries come out the same on every replay.
 export const draw = (key) => {
@@ -121,6 +137,67 @@ export const expelSpy = (world, id, { date = "" } = {}) => setStatus(world, id, 
 export const turnSpy = (world, id, { date = "", coverStory = "" } = {}) =>
   setStatus(world, id, { status: "turned", turnedAt: date, coverStory: String(coverStory ?? "").trim() });
 export const setCoverStory = (world, id, coverStory) => setStatus(world, id, { coverStory: String(coverStory ?? "").trim() });
+
+// ---- orders from the turn ----------------------------------------------------
+// The player's espionage orders as a jump carried them (an event's
+// impacts.spyOps): deploy an agent to a country, or recall the one already
+// there. The same rules as the Spy tab — deploySpy enforces them — but every
+// failure is reported instead of thrown, because one bad order must not cost
+// the whole turn. Returns the next spies list plus what was applied and what
+// was skipped, with the reason in the words the UI would have shown.
+export const SPY_OP_KINDS = ["deploy", "recall"];
+
+// One order as it is STORED on an event. It used to be read straight off the raw
+// event and never normalized, so it did not survive a save: the order applied
+// during the turn, and a campaign reloaded from events.json had no record that
+// the agent was ever ordered anywhere. The shape is what applySpyOps reads, so
+// a replay of the stored event does exactly what the live turn did.
+export const normalizeSpyOp = (entry) => {
+  if (!entry || typeof entry !== "object") return null;
+  const op = String(entry.op ?? "").trim().toLowerCase();
+  const target = String(entry.target ?? entry.country ?? entry.polity ?? "").trim();
+  if (!SPY_OP_KINDS.includes(op) || !target) return null;
+  const coverStory = String(entry.coverStory ?? "").trim();
+  const note = String(entry.note ?? "").trim();
+  return { op, target, ...(coverStory ? { coverStory } : {}), ...(note ? { note } : {}) };
+};
+
+export const applySpyOps = (world, ops, { date = "", playerPolity = "" } = {}) => {
+  const owner = String(playerPolity ?? "").trim();
+  const same = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+  let spies = normalizeSpies(world?.spies);
+  const applied = [];
+  const rejected = [];
+  for (const raw of Array.isArray(ops) ? ops : []) {
+    const op = String(raw?.op ?? "").trim().toLowerCase();
+    const target = String(raw?.target ?? raw?.country ?? raw?.polity ?? "").trim();
+    const coverStory = String(raw?.coverStory ?? "").trim();
+    if (!SPY_OP_KINDS.includes(op)) {
+      rejected.push({ op: raw, reason: `Unknown spy operation "${op || "?"}".` });
+      continue;
+    }
+    if (!owner) {
+      rejected.push({ op: raw, reason: "No player polity to run the service." });
+      continue;
+    }
+    try {
+      if (op === "deploy") {
+        spies = deploySpy({ spies }, target, { date, playerPolity: owner });
+        const placed = spies.find((spy) => spy.owner === owner && isLive(spy) && same(spy.target, target));
+        if (placed && coverStory) spies = setCoverStory({ spies }, placed.id, coverStory);
+        applied.push({ op, target: placed?.target || target });
+      } else {
+        const spy = spies.find((entry) => entry.owner === owner && isLive(entry) && same(entry.target, target));
+        if (!spy) throw new Error(`No agent of yours is in ${target || "that country"}.`);
+        spies = recallSpy({ spies }, spy.id);
+        applied.push({ op, target: spy.target });
+      }
+    } catch (error) {
+      rejected.push({ op: raw, reason: error?.message || String(error) });
+    }
+  }
+  return { spies, applied, rejected };
+};
 
 // ---- the odds ---------------------------------------------------------------
 
@@ -307,12 +384,16 @@ const normalizeExchange = (exchange, index, target) => {
   const counterpart = String(exchange?.counterpart ?? "").trim();
   const messages = (Array.isArray(exchange?.messages) ? exchange.messages : []).map(normalizeMessage).filter(Boolean);
   if (!counterpart || messages.length === 0) return null;
+  // A copy stolen in a turn carries the event it came with, and is shown when
+  // that event is revealed (runtime/unseenEvents.js).
+  const eventId = String(exchange?.eventId ?? "").trim();
   return {
     id: String(exchange?.id ?? "").trim() || `${target}:${index}:${counterpart}`.toLowerCase().replace(/\s+/g, "-"),
     counterpart,
     date: String(exchange?.date ?? "").trim(),
     subject: String(exchange?.subject ?? "").trim(),
     messages,
+    ...(eventId ? { eventId } : {}),
   };
 };
 
@@ -365,6 +446,20 @@ export const espionageBrief = (world, intercepts, { playerPolity = "" } = {}) =>
     }
   }
   for (const spy of finished) lines.push(`${spy.target} publicly expelled a ${spy.owner} agent on ${spy.exposedAt || "an earlier date"}.`);
+
+  // Targets we HAVE read and can no longer read. Without this the brief simply
+  // goes quiet about them, and silence is indistinguishable from "nothing
+  // happened" — so anything already recorded about that polity's own programmes
+  // drifts on looking current, and whoever is asked about it next has to invent
+  // why it went dark. Saying so lets it be marked unconfirmed instead.
+  const lost = [];
+  for (const [target, entry] of Object.entries(intercepts || {})) {
+    if (mine.some((s) => s.target === target)) continue;
+    lost.push(`${target} (last read ${entry.gatheredAt || "an earlier period"})`);
+  }
+  if (lost.length) {
+    lines.push(`${player} no longer has an agent inside: ${lost.join("; ")}. What is already known about those polities stands as of those dates and cannot be confirmed now.`);
+  }
 
   for (const [target, entry] of Object.entries(intercepts || {})) {
     if (!mine.some((s) => s.target === target)) continue;

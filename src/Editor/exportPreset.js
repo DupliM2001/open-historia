@@ -13,6 +13,7 @@
 // tells the game to render them from a GeoJSON layer (see src/Game/Map/Nations.jsx).
 
 import COUNTRY_NAMES from "../runtime/generated/countryNames.js";
+import { OWNER_SCHEMA } from "./documentMigration.js";
 
 // GADM ids contain a dot ("DEU.2_1", "Z01.14_1", "CHN.HKG"); regions drawn in the
 // editor use "reg_..." ids. Only the latter are custom geometry that tier-1 (stock
@@ -34,6 +35,23 @@ const codeToColor = (code) => {
   const [r, g, b] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x] : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
   return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 };
+
+const cssColorToRgb = (value) => {
+  const m = /^#?([a-f0-9]{6})$/i.exec(String(value || "").trim());
+  if (!m) return null;
+  const hex = m[1];
+  return [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16),
+  ];
+};
+
+const rgbToHex = (rgb) =>
+  `#${(Array.isArray(rgb) ? rgb : [128, 128, 128])
+    .slice(0, 3)
+    .map((n) => Math.max(0, Math.min(255, Math.round(Number(n) || 0))).toString(16).padStart(2, "0"))
+    .join("")}`;
 
 // OpenLayers' GeoJSON writer puts the feature id at the top level (feature.id),
 // not in properties, and MapLibre's ["get","id"] reads from properties. Rebuild a
@@ -95,14 +113,14 @@ const detectCustomGeometry = (regionsFC, kind) => {
   return false;
 };
 
-// Prominence tier driving when a city appears on the game map (4 = capital,
-// 3 = major, 2 = city, 1 = town) — see src/Game/Map/Cities.jsx.
+// The game has three city-size tiers: 1 = town, 2 = city, 3 = major city.
+// Capital is an independent flag, not a fourth size tier. Imported/authored tier
+// wins when present; legacy cities without tier still derive size from population.
 const cityTier = (f) => {
-  if ((f.tags || []).includes("capital")) return 4;
-  const pop = f.population || 0;
-  if (pop >= 1000000) return 3;
-  if (pop >= 100000) return 2;
-  return 1;
+  const authored = Number(f.tier);
+  if (Number.isFinite(authored) && authored >= 1 && authored <= 3) return Math.round(authored);
+  const pop = Number(f.population || 0);
+  return pop >= 1000000 ? 3 : pop >= 100000 ? 2 : 1;
 };
 
 // The document's point features (cities) as the game-ready cities.geojson.
@@ -153,9 +171,38 @@ const buildBackgroundForGame = (customBackground) => {
 // the model that it exists at all.
 const STOCK_COUNTRY_NAMES = new Set(Object.values(COUNTRY_NAMES));
 
+// The scenario's starting units, in the game's own unit shape: a unit the
+// author placed ships with source "scenario" and stands on the map at round
+// one; the game normalises it again on read (normalizeUnitEntry).
+const buildUnitsForGame = (units) => (Array.isArray(units) ? units : [])
+  .map((unit, index) => {
+    const lng = Number(unit?.lng);
+    const lat = Number(unit?.lat);
+    const ownerCode = String(unit?.ownerCode || "").trim();
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || !ownerCode) return null;
+    const strength = Number(unit?.strength);
+    return {
+      id: String(unit?.id || `scenario-unit-${index + 1}`),
+      name: String(unit?.name || "").trim() || "Unit",
+      type: String(unit?.type || "infantry").trim().toLowerCase() || "infantry",
+      ownerCode,
+      strength: Number.isFinite(strength) ? Math.max(1, Math.min(100, Math.round(strength))) : 100,
+      lng: Number(lng.toFixed(5)),
+      lat: Number(lat.toFixed(5)),
+      composition: String(unit?.composition || "").trim(),
+      note: String(unit?.note || "").trim(),
+      status: "idle",
+      source: "scenario",
+    };
+  })
+  .filter(Boolean);
+
 export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = {}) => {
   const regionOwnershipOverrides = {};
   const owners = new Set();
+  // Polities that are on the map only as claimants: a region is disputed in
+  // their name and renders striped in their colour, so the game must know them.
+  const claimants = new Set();
   let customCount = 0;
 
   for (const f of regionsFC?.features || []) {
@@ -168,58 +215,79 @@ export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = 
       regionOwnershipOverrides[id] = owner;
       owners.add(owner);
     }
+    for (const claimant of Array.isArray(props.claimants) ? props.claimants : []) {
+      const key = String(claimant || "").trim();
+      if (key) claimants.add(key);
+    }
   }
 
   const kind = doc.metadata?.kind || "import-world";
   const hasCustomGeometry = detectCustomGeometry(regionsFC, kind);
   const gameRegions = normalizeRegionsForGame(regionsFC);
 
-  // colors.json: country name -> [r,g,b]. A colour the map-maker picked wins over
-  // everything: it is the only one a human actually chose. Then the palette, then a
-  // stable hash. Without the override check first, every real country's edit was
-  // silently discarded here, so "change France to green" could never survive.
+  // Scenario Workshop / owner schema 4: region ownership is a stable
+  // polity KEY. The visible/current name belongs to the polity registry and may
+  // change without re-keying a single region.
   const overrides = doc.colorOverrides || {};
+  const declaredPolities = doc.polities && typeof doc.polities === "object"
+    ? doc.polities
+    : {};
   const colors = {};
   const polityOverrides = {};
-  for (const owner of owners) {
-    const rgb = overrides[owner] || palette[owner] || codeToColor(owner);
-    colors[owner] = rgb;
 
-    // A polity entry exists to tell the game and the model about a country the
-    // stock world has never heard of. The test is simply "does the stock world
-    // already know this NAME?": "Russia" is stock and needs no entry, while any
-    // name a map-maker invents does — including one shaped like a GADM code.
-    //
-    // A name that COLLIDES with a code ("USA", "RUS") is the subtle case. It used to
-    // be excluded here (`&& !COUNTRY_NAMES[owner]`) to stop a legacy document's "MNG"
-    // from self-naming a polity that pins it away from "Mongolia" forever. But that
-    // also meant a map-maker who deliberately named a country "USA" got NO entry and
-    // watched it silently canonicalised to "United States" on export. A legacy doc no
-    // longer reaches here still wearing a code — documentMigration turns "MNG" into
-    // "Mongolia" on open — so the only code-shaped owner left at export IS one a human
-    // typed. Emit it, and mark it `verbatim` so the owner resolvers keep it literally
-    // instead of resolving the code (see resolveOwnerName in server/ownerMigration.js).
-    if (!STOCK_COUNTRY_NAMES.has(owner)) {
-      polityOverrides[owner] = {
-        // No `code`: the key IS the identifier now. `name` mirrors the key because
-        // readers expect the field, not because they can differ.
-        name: owner,
-        aliases: [],
-        color: `#${rgb.map((n) => n.toString(16).padStart(2, "0")).join("")}`,
-        note: "",
-        // Only a real code-collision needs protecting; a plain invented name
-        // ("Freedonia") already resolves to itself with or without the flag.
-        ...(COUNTRY_NAMES[owner] ? { verbatim: true } : {}),
+  const emitPolity = (key, source = null) => {
+    const stableKey = String(key || "").trim();
+    if (!stableKey) return;
+    const record = source && typeof source === "object" ? source : {};
+    const displayName = String(record.name || stableKey).trim() || stableKey;
+    const rgb = overrides[stableKey]
+      || palette[stableKey]
+      || cssColorToRgb(record.color)
+      || codeToColor(stableKey);
+    colors[stableKey] = rgb;
+
+    // Explicit records are authoritative even for stock/base countries: that is
+    // how an author can keep the stable key "Austria" while presenting the polity
+    // as "Austria-Hungary". Unknown owner keys still receive a default record so
+    // the game/model know the polity exists.
+    const explicit = Object.prototype.hasOwnProperty.call(declaredPolities, stableKey);
+    if (explicit || !STOCK_COUNTRY_NAMES.has(stableKey)) {
+      const aliases = [...new Set([
+        ...(Array.isArray(record.aliases) ? record.aliases : []),
+        displayName,
+      ].map((v) => String(v || "").trim()).filter(Boolean))];
+      polityOverrides[stableKey] = {
+        ...record,
+        code: record.code || stableKey,
+        name: displayName,
+        aliases,
+        color: overrides[stableKey] ? rgbToHex(overrides[stableKey]) : (record.color || rgbToHex(rgb)),
+        note: String(record.note || ""),
+        status: record.status || "active",
+        ...(record.verbatim || COUNTRY_NAMES[stableKey] ? { verbatim: Boolean(record.verbatim || COUNTRY_NAMES[stableKey]) } : {}),
       };
     }
+  };
+
+  for (const owner of owners) emitPolity(owner, declaredPolities[owner]);
+  for (const key of claimants) if (!owners.has(key)) emitPolity(key, declaredPolities[key]);
+  // And every country the author registered without giving it a region yet: a
+  // registered country is a country to the game, land or no land — a government
+  // in exile, a nation waiting to be painted. Removing one is the Countries
+  // panel's explicit "Remove from the map", never a side effect of painting.
+  for (const key of Object.keys(declaredPolities)) {
+    if (!owners.has(key) && !claimants.has(key)) emitPolity(key, declaredPolities[key]);
   }
 
   const author = (doc.metadata?.author || "").trim();
   const gameCities = buildCitiesForGame(doc.features);
   const { background, backgroundData } = buildBackgroundForGame(doc.metadata?.customBackground);
   const world = {
+    ownerSchema: doc.ownerSchema ?? OWNER_SCHEMA,
     regionOwnershipOverrides,
     polityOverrides,
+    // The starting units the author placed (Units panel / Unit tool).
+    units: buildUnitsForGame(doc.units),
     // A custom background replaces Earth, so it must also hide the stock modern
     // political overlay (country fills, borders, "Russia"/"France" labels) — those
     // are gated on customRegions in the game, so force it on whenever there's a
@@ -236,7 +304,11 @@ export const buildGameSeed = (doc, regionsFC, palette = {}, { playerCountry } = 
     // Authored cities replace the modern city labels. A custom-geometry map with
     // no cities still sets the flag — modern names over invented land would be
     // wrong — while a pure re-ownership map without cities keeps the stock set.
-    customCities: gameCities.features.length > 0 || hasCustomGeometry,
+    // citiesAuthored separates "never had cities" from "deleted them all".
+    customCities:
+      gameCities.features.length > 0
+      || hasCustomGeometry
+      || Boolean(doc.metadata?.citiesAuthored),
     author,
     mapCredit: author ? `Made by ${author}` : "",
     simulationRules: doc.metadata?.simulationRules || "",

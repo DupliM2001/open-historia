@@ -1,9 +1,10 @@
 /*! Open Historia — portions (custom regions.geojson runtime endpoint) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 import mapLibreGl from "maplibre-gl";
-import { mergeCountryOverrides } from "./countryList.js";
 import { PMTiles, Protocol, SharedPromiseCache } from "pmtiles";
 import { resolveRegionName } from "./regionNameFixes.js";
-import { loadRegionSeed } from "./regionSeed.js";
+import { logDebugEvent } from "./debugLog.js";
+import { resolvePolityIdentity, resolveStockCountryCode } from "./polityIdentity.js";
+import { mergeStockAndDeclaredPolities } from "./countryList.js";
 
 const { addProtocol, setMaxParallelImageRequests, setWorkerCount } = mapLibreGl;
 
@@ -70,6 +71,7 @@ export const JSON_URLS = {
   colors: "",
   flags: "",
   tags: "",
+  stats: "",
   events: "",
   game: "",
   prompts: "",
@@ -84,6 +86,10 @@ export const JSON_URLS = {
 // path under .../rest/services/; `maxZoom` is that layer's deepest native level
 // (past it MapLibre overscales instead of requesting tiles that 404).
 export const ESRI_BASEMAPS = [
+  // Relief-first political canvas: World Ocean Base carries ocean bathymetry
+  // plus shaded land relief; World.jsx applies a darker dedicated grade.
+  { id: "atlas-relief", label: "Atlas Relief", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
+  { id: "atlas-relief-dark", label: "Atlas Relief - Dark", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
   { id: "imagery", label: "Satellite", service: "World_Imagery", maxZoom: 19 },
   { id: "streets", label: "Streets", service: "World_Street_Map", maxZoom: 19 },
   { id: "topo", label: "Topographic", service: "World_Topo_Map", maxZoom: 19 },
@@ -91,7 +97,14 @@ export const ESRI_BASEMAPS = [
   { id: "shaded", label: "Shaded Relief", service: "World_Shaded_Relief", maxZoom: 13 },
   { id: "physical", label: "Physical", service: "World_Physical_Map", maxZoom: 8 },
   { id: "natgeo", label: "National Geographic", service: "NatGeo_World_Map", maxZoom: 16 },
+  // Promotional/screenshot variant. Runtime World.jsx replaces this registry
+  // entry with the official NatGeo World_Basemap_v2 vector style, darkened and
+  // stripped of political/place labels while preserving physical/water labels.
+  // The raster service remains here as a semantic/fallback source and keeps the
+  // built-in basemap registry/editor contract simple.
+  { id: "natgeo-dark", label: "National Geographic - Dark", service: "NatGeo_World_Map", maxZoom: 16 },
   { id: "ocean", label: "Ocean", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
+  { id: "ocean-dark", label: "Ocean - Dark", service: "Ocean/World_Ocean_Base", maxZoom: 13 },
   { id: "light-gray", label: "Light Gray Canvas", service: "Canvas/World_Light_Gray_Base", maxZoom: 16 },
   { id: "dark-gray", label: "Dark Gray Canvas", service: "Canvas/World_Dark_Gray_Base", maxZoom: 16 },
 ];
@@ -99,7 +112,25 @@ export const DEFAULT_BASEMAP_ID = "ocean";
 // Mirrors mapSettings.js's MAP_SETTING_KEYS.basemapStyle key.
 const BASEMAP_STORAGE_KEY = "map_basemap_style";
 
-const basemapById = (id) => ESRI_BASEMAPS.find((b) => b.id === id) ?? ESRI_BASEMAPS[0];
+export const isBuiltinBasemapId = (id) => ESRI_BASEMAPS.some((basemap) => basemap.id === id);
+export const resolveBasemapId = ({ overrideId = "", scenarioId = "", fallbackId = DEFAULT_BASEMAP_ID } = {}) => {
+  if (isBuiltinBasemapId(overrideId)) return overrideId;
+  if (isBuiltinBasemapId(scenarioId)) return scenarioId;
+  return isBuiltinBasemapId(fallbackId) ? fallbackId : DEFAULT_BASEMAP_ID;
+};
+
+// react-map-gl can diff a style whose source id stays the same without
+// re-instantiating that raster source. Give the map shell a semantic key so a
+// runtime basemap change reliably creates fresh tile sources while preserving
+// the camera through World.jsx's viewStateRef.
+export const buildBasemapRenderKey = ({
+  projection = "mercator",
+  basemapId = DEFAULT_BASEMAP_ID,
+  backgroundKind = "builtin",
+} = {}) => `${projection}:${basemapId}:${backgroundKind}`;
+
+const basemapById = (id) => ESRI_BASEMAPS.find((b) => b.id === id)
+  ?? ESRI_BASEMAPS.find((b) => b.id === DEFAULT_BASEMAP_ID);
 const esriServiceTemplate = (service) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/${service}/MapServer/tile/{z}/{y}/{x}`;
 
@@ -115,7 +146,7 @@ export const basemapProtocolTemplate = (id) => `ohbase://${basemapById(id).id}/{
 // React mounts (mapSettings.js drives it reactively once mounted).
 export const selectedBasemapId = () => {
   try {
-    return localStorage.getItem(BASEMAP_STORAGE_KEY) || DEFAULT_BASEMAP_ID;
+    return resolveBasemapId({ overrideId: localStorage.getItem(BASEMAP_STORAGE_KEY) });
   } catch {
     return DEFAULT_BASEMAP_ID;
   }
@@ -149,6 +180,10 @@ const pmtilesCache = new SharedPromiseCache(256);
 // "did the custom geometry resolve?" stays answerable (see loadRegionCatalog).
 const jsonLoadedUrls = new Set();
 
+// Wire-text length of the last parsed payload per URL, for warmJson's
+// display-only size. Recording the text we already read beats re-serialising.
+const jsonByteLengths = new Map();
+
 // The scenario geometry is never worth retaining: its only long-lived reader
 // keeps it in React state (Nations.jsx / Cities.jsx, both force:true), so the
 // value-cache copy is a second parsed FeatureCollection — ~190 MB on a 55 MB
@@ -162,6 +197,30 @@ const jsonLoadedUrls = new Set();
 const isNoStoreJsonUrl = (url) =>
   url === JSON_URLS.regionsGeojson || url === JSON_URLS.citiesGeojson;
 
+// Runtime state is mutable under a stable URL for the lifetime of a game.
+// Cache Storage's old freshness test compared only Content-Length, which is
+// insufficient for records such as game.json: "1913-11-28", "1914-01-18",
+// and "1915-01-18" can all serialize to the same byte length.
+//
+// Keep persistent caching for the genuinely heavy scenario assets, but never
+// let mutable game state be satisfied from Cache Storage. In-memory caching
+// still works normally, and writeJson/primeJson still update that cache.
+const isMutableRuntimeJsonUrl = (url) =>
+  url === JSON_URLS.advisor ||
+  url === JSON_URLS.actions ||
+  url === JSON_URLS.chat ||
+  url === JSON_URLS.colors ||
+  url === JSON_URLS.flags ||
+  url === JSON_URLS.tags ||
+  url === JSON_URLS.stats ||
+  url === JSON_URLS.events ||
+  url === JSON_URLS.game ||
+  url === JSON_URLS.intercepts ||
+  url === JSON_URLS.prompts ||
+  url === JSON_URLS.snapshots ||
+  url === JSON_URLS.snapshotsIndex ||
+  url === JSON_URLS.world;
+
 const pmtilesProtocol = new Protocol();
 let pmtilesProtocolReady = false;
 let nationColorsPromise = null;
@@ -172,26 +231,119 @@ let countryNamesPromise = null;
 let countryNamesPromiseKey = "";
 let regionCatalogPromise = null;
 let regionCatalogPromiseKey = "";
+let regionTileIdSetPromise = null;
+let regionTileIdSetPromiseKey = "";
+let primedCustomRegionCatalog = null;
+let primedCustomRegionCatalogKey = "";
+
+// --- Worker-fetchable runtime URLs -----------------------------------------
+// The website has no server: /api/* is answered on the page by the web router,
+// a window.fetch patch (src/runtime/web/router.js). Workers never see that
+// patch — MapLibre's tile workers and the political-cartography worker fetch
+// with their own global — so a runtime URL handed to either 404s against the
+// static host, and the scenario's regions never render. For those consumers
+// the same bytes are re-served through a blob: URL, which both can reach: a
+// dedicated worker resolves a blob URL its page created, and MapLibre forwards
+// any non-http(s) URL from its workers to the main thread. The runtime URL
+// stays the identity everywhere else (geometry epochs, catalog keys, readiness);
+// only the fetch moves. The desktop keeps the plain URL: a real server answers.
+const workerFetchableUrls = new Map(); // runtime url → { blobUrl, failed, promise }
+const workerFetchableUrlListeners = new Set();
+// A retired copy is revoked after a grace period rather than at once: a worker
+// restarting on the same URL, or a source still loading, may be mid-fetch.
+const WORKER_URL_REVOKE_GRACE_MS = 60_000;
+
+const notifyWorkerFetchableUrls = () => {
+  for (const listener of workerFetchableUrlListeners) listener();
+};
+
+// The store contract for useWorkerFetchableUrl (useSyncExternalStore): the
+// consumer re-reads peekWorkerFetchableUrl whenever a copy lands, fails or is
+// released, so a copy landing between a render and its effects is never missed.
+export const subscribeWorkerFetchableUrls = (listener) => {
+  workerFetchableUrlListeners.add(listener);
+  return () => {
+    workerFetchableUrlListeners.delete(listener);
+  };
+};
+
+// What a worker should fetch for `url`: the URL itself off the web build, the
+// staged blob: copy once it exists, the runtime URL again when staging failed
+// (the worker's own failure handling then applies), null while it is staged.
+export const peekWorkerFetchableUrl = (url) => {
+  if (!import.meta.env.VITE_OH_WEB || !url) return url;
+  const entry = workerFetchableUrls.get(url);
+  if (!entry) return null;
+  if (entry.blobUrl) return entry.blobUrl;
+  return entry.failed ? url : null;
+};
+
+export const prepareWorkerFetchableUrl = async (url) => {
+  if (!import.meta.env.VITE_OH_WEB || !url) return url;
+  const existing = workerFetchableUrls.get(url);
+  if (existing) return existing.blobUrl || existing.promise;
+  const entry = { blobUrl: "", failed: false, promise: null };
+  entry.promise = (async () => {
+    // The page's fetch: the router serves the scenario's bytes from IndexedDB.
+    const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    // Superseded while in flight (the token rotated, or the asset was written):
+    // the store has already dropped this entry and its consumers are on the new
+    // URL, so there is nothing to report and nothing to keep.
+    if (workerFetchableUrls.get(url) !== entry) return null;
+    entry.blobUrl = URL.createObjectURL(blob);
+    notifyWorkerFetchableUrls();
+    return entry.blobUrl;
+  })();
+  entry.promise.catch(() => {
+    // A superseded entry is already gone. A failed one stays, answering with
+    // the runtime URL, rather than being staged again on every render.
+    if (workerFetchableUrls.get(url) !== entry) return;
+    entry.failed = true;
+    notifyWorkerFetchableUrls();
+  });
+  workerFetchableUrls.set(url, entry);
+  return entry.promise;
+};
+
+const releaseWorkerFetchableUrl = (url) => {
+  const entry = workerFetchableUrls.get(url);
+  if (!entry) return;
+  workerFetchableUrls.delete(url);
+  if (entry.blobUrl && typeof URL.revokeObjectURL === "function") {
+    setTimeout(() => URL.revokeObjectURL(entry.blobUrl), WORKER_URL_REVOKE_GRACE_MS);
+  }
+  notifyWorkerFetchableUrls();
+};
 
 // getNationColors and loadCountryNames memoize on the scenario token, which only
 // changes on a scenario/library switch — never on a runtime write. So after the
 // AI (or a cheat) writes new colors or creates a polity mid-game, those caches
 // keep serving the pre-write value for the rest of the session. A write to the
 // underlying asset must drop the derived cache so the next read recomputes.
-const invalidateDerivedCachesForWrite = (url) => {
+const invalidateDerivedCachesForWrite = (url, { emitEvents = true } = {}) => {
   if (url && url === JSON_URLS.colors) {
     nationColorsPromise = null;
     nationColorsPromiseKey = "";
     // Dropping the memo only helps the NEXT caller. The map reads the palette
     // once per mount, so without a nudge an owner coloured mid-session keeps
     // painting a procedural fallback until a reload. Consumers listen for this.
-    if (typeof window !== "undefined") {
+    if (emitEvents && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("oh:colors-updated"));
     }
   }
   if (url && url === JSON_URLS.flags) {
     nationFlagsPromise = null;
     nationFlagsPromiseKey = "";
+    // Flags are heavy/static enough that polling them would be wasteful. A write
+    // is rare and already passes through this choke point, so notify visible UI
+    // once and let each consumer refresh from the memoized asset on demand.
+    if (emitEvents && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("oh:flags-updated"));
+    }
   }
   if (url && url === JSON_URLS.tags) {
     nationTagsPromise = null;
@@ -200,6 +352,14 @@ const invalidateDerivedCachesForWrite = (url) => {
   if (url && url === JSON_URLS.world) {
     countryNamesPromise = null;
     countryNamesPromiseKey = "";
+  }
+  if (url && url === JSON_URLS.regionsGeojson) {
+    regionCatalogPromise = null;
+    regionCatalogPromiseKey = "";
+    primedCustomRegionCatalog = null;
+    primedCustomRegionCatalogKey = "";
+    // The staged copy the workers read (website) holds the pre-write bytes.
+    releaseWorkerFetchableUrl(url);
   }
 };
 let mapRuntimeConfigured = false;
@@ -227,6 +387,9 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
       // Must rotate with the URLs: a stale entry would claim the NEXT
       // generation's geometry had already resolved.
       jsonLoadedUrls.delete(url);
+      jsonByteLengths.delete(url);
+      // The workers' staged copy (website) belongs to the old generation too.
+      releaseWorkerFetchableUrl(url);
     }
 
     // PMTILES_ARCHIVES rotate too — buildAbsoluteUrl runs the path through
@@ -267,15 +430,17 @@ export const setRuntimeAssetEndpoints = ({ token = "" } = {}) => {
   JSON_URLS.colors = withRuntimeToken("/api/runtime/json/colors");
   JSON_URLS.flags = withRuntimeToken("/api/runtime/json/flags");
   JSON_URLS.tags = withRuntimeToken("/api/runtime/json/tags");
+  JSON_URLS.stats = withRuntimeToken("/api/runtime/json/stats");
   JSON_URLS.events = withRuntimeToken("/api/runtime/json/events");
   JSON_URLS.game = withRuntimeToken("/api/runtime/json/game");
   JSON_URLS.prompts = withRuntimeToken("/api/runtime/json/prompts");
   JSON_URLS.snapshots = withRuntimeToken("/api/runtime/json/snapshots");
-  JSON_URLS.intercepts = withRuntimeToken("/api/runtime/json/intercepts");
+  JSON_URLS.snapshotsIndex = withRuntimeToken("/api/runtime/json/snapshotsIndex");
   JSON_URLS.regionsGeojson = withRuntimeToken("/api/runtime/json/regionsGeojson");
   JSON_URLS.citiesGeojson = withRuntimeToken("/api/runtime/json/citiesGeojson");
   JSON_URLS.backgroundData = withRuntimeToken("/api/runtime/json/backgroundData");
   JSON_URLS.world = withRuntimeToken("/api/runtime/json/world");
+  JSON_URLS.intercepts = withRuntimeToken("/api/runtime/json/intercepts");
 
   PMTILES_ARCHIVES.cities = buildAbsoluteUrl("/api/runtime/pmtiles/cities");
   PMTILES_ARCHIVES.countries = buildAbsoluteUrl("/api/runtime/pmtiles/countries");
@@ -294,6 +459,138 @@ export const resolveCountryDisplayName = (name, code) => countryNameResolver(nam
 
 setRuntimeAssetEndpoints();
 
+const PERF_WARN_MS = 50;
+const PERF_STALL_MS = 120;
+
+// Performance telemetry stays active, but routine console noise is opt-in.
+// Temporary diagnostics can be re-enabled at runtime with:
+//   window.__OH_PERF_VERBOSE__ = true
+const isPerfConsoleVerbose = () =>
+  typeof window !== "undefined" && window.__OH_PERF_VERBOSE__ === true;
+
+const perfNow = () => (typeof performance !== "undefined" && performance?.now ? performance.now() : Date.now());
+const runtimeAssetLabel = (url = "") => {
+  const raw = String(url || "");
+  const match = /\/api\/runtime\/json\/([^?]+)/.exec(raw);
+  return match?.[1] || raw.split("/").pop()?.split("?")[0] || "json";
+};
+
+export const reportPerfOperation = (
+  operation,
+  elapsed,
+  { extra = "", warnAt = PERF_WARN_MS } = {},
+) => {
+  const numeric = Number(elapsed);
+  if (!Number.isFinite(numeric)) return numeric;
+  if (typeof window !== "undefined") {
+    window.__OH_LAST_PERF_OPERATION__ = {
+      operation: String(operation || "unknown"),
+      elapsed: numeric,
+      at: perfNow(),
+      wallTime: Date.now(),
+      extra: String(extra || ""),
+    };
+  }
+  if (numeric >= warnAt && isPerfConsoleVerbose()) {
+    console.warn(
+      `[OH PERF] ${operation} took ${numeric.toFixed(1)}ms${extra ? ` · ${extra}` : ""}`,
+    );
+  }
+  return numeric;
+};
+
+const warnSlowJson = (operation, url, startedAt, extra = "") =>
+  reportPerfOperation(
+    `${operation} ${runtimeAssetLabel(url)}`,
+    perfNow() - startedAt,
+    { extra },
+  );
+
+// Temporary stabilization watchdog. Named timers cannot see GC, browser layout,
+// React commits, MapLibre rendering, compositor stalls, etc. This catches any
+// visible frame gap and correlates it with recent input/map motion/named OH work.
+export const installPerformanceWatchdog = () => {
+  if (typeof window === "undefined" || typeof document === "undefined") return () => {};
+  if (window.__OH_PERF_WATCHDOG_INSTALLED__) return () => {};
+  window.__OH_PERF_WATCHDOG_INSTALLED__ = true;
+
+  let rafId = 0;
+  let lastFrame = perfNow();
+  let mapMoving = Boolean(window.__OH_MAP_MOVING__);
+  let lastInput = { type: "none", at: 0 };
+  let longTaskObserver = null;
+
+  const noteInput = (event) => {
+    lastInput = { type: event?.type || "input", at: perfNow() };
+  };
+  const onMapMotion = (event) => {
+    mapMoving = Boolean(event?.detail?.active);
+    window.__OH_MAP_MOVING__ = mapMoving;
+  };
+
+  const inputEvents = ["pointerdown", "pointermove", "wheel", "keydown", "click"];
+  for (const type of inputEvents) {
+    window.addEventListener(type, noteInput, { capture: true, passive: true });
+  }
+  window.addEventListener("oh:map-motion", onMapMotion);
+
+  try {
+    if (typeof PerformanceObserver !== "undefined") {
+      longTaskObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.duration < PERF_STALL_MS) continue;
+          const last = window.__OH_LAST_PERF_OPERATION__;
+          const recentNamed = last && Math.abs(perfNow() - Number(last.at || 0)) < 1800;
+          if (isPerfConsoleVerbose()) {
+            console.warn(
+              `[OH PERF LONG TASK] ${entry.duration.toFixed(1)}ms` +
+              `${mapMoving ? " · map moving" : ""}` +
+              `${recentNamed ? ` · last OH: ${last.operation} ${Number(last.elapsed || 0).toFixed(1)}ms` : " · no recent named OH operation"}`,
+            );
+          }
+        }
+      });
+      longTaskObserver.observe({ entryTypes: ["longtask"] });
+    }
+  } catch {
+    longTaskObserver = null;
+  }
+
+  const frame = (now) => {
+    const gap = now - lastFrame;
+    if (gap >= PERF_STALL_MS && document.visibilityState === "visible") {
+      const inputAge = now - Number(lastInput.at || 0);
+      const last = window.__OH_LAST_PERF_OPERATION__;
+      const opAge = last ? now - Number(last.at || 0) : Infinity;
+      if (isPerfConsoleVerbose()) {
+        console.warn(
+          `[OH PERF STALL] frame gap ${gap.toFixed(1)}ms` +
+          ` · map moving: ${mapMoving ? "yes" : "no"}` +
+          ` · recent input: ${inputAge < 2000 ? `${lastInput.type} ${Math.max(0, inputAge).toFixed(0)}ms ago` : "none"}` +
+          ` · last OH operation: ${opAge < 2000 ? `${last.operation} (${Number(last.elapsed || 0).toFixed(1)}ms, ${Math.max(0, opAge).toFixed(0)}ms ago)` : "none"}`,
+        );
+      }
+    }
+    lastFrame = now;
+    rafId = window.requestAnimationFrame(frame);
+  };
+
+  rafId = window.requestAnimationFrame((now) => {
+    lastFrame = now;
+    rafId = window.requestAnimationFrame(frame);
+  });
+
+  return () => {
+    if (rafId) window.cancelAnimationFrame(rafId);
+    longTaskObserver?.disconnect?.();
+    for (const type of inputEvents) {
+      window.removeEventListener(type, noteInput, true);
+    }
+    window.removeEventListener("oh:map-motion", onMapMotion);
+    window.__OH_PERF_WATCHDOG_INSTALLED__ = false;
+  };
+};
+
 const cloneJson = (value) => {
   if (value == null) return value;
   if (typeof structuredClone === "function") {
@@ -301,6 +598,13 @@ const cloneJson = (value) => {
   }
 
   return JSON.parse(JSON.stringify(value));
+};
+
+const cloneJsonFor = (url, value) => {
+  const startedAt = perfNow();
+  const cloned = cloneJson(value);
+  warnSlowJson("clone", url, startedAt);
+  return cloned;
 };
 
 const getPersistentCache = async () => {
@@ -338,31 +642,42 @@ const persistResponse = async (url, response) => {
 const buildRuntimeCacheUrl = (key) =>
   `${origin || "https://pax-historia.local"}/__runtime-cache/${encodeURIComponent(key)}.json`;
 
-const fetchWithPersistence = async (url, { signal } = {}) => {
-  const cached = await readPersistedResponse(url);
-  if (cached) {
-    // Updates replace assets on disk; a cached copy must not outlive them.
-    // Cheap freshness check: byte size against the server's copy. If the
-    // server can't answer (offline), the cached copy still serves.
-    try {
-      const head = await fetch(url, { method: "HEAD", signal });
-      const serverLength = head.ok ? head.headers.get("content-length") : null;
-      const cachedLength = cached.headers.get("content-length");
-      if (!serverLength || !cachedLength || serverLength === cachedLength) {
+const fetchWithPersistence = async (
+  url,
+  { bypassPersistentCache = false, signal } = {},
+) => {
+  if (!bypassPersistentCache) {
+    const cached = await readPersistedResponse(url);
+    if (cached) {
+      // Updates replace assets on disk; a cached copy must not outlive them.
+      // Cheap freshness check: byte size against the server's copy. This is
+      // acceptable for token-versioned static/heavy assets, but NOT for mutable
+      // runtime JSON (which bypasses this path entirely).
+      try {
+        const head = await fetch(url, { method: "HEAD", signal });
+        const serverLength = head.ok ? head.headers.get("content-length") : null;
+        const cachedLength = cached.headers.get("content-length");
+        if (!serverLength || !cachedLength || serverLength === cachedLength) {
+          return { response: cached, fromCache: true };
+        }
+        // Sizes differ: fall through and refetch the fresh copy.
+      } catch {
         return { response: cached, fromCache: true };
       }
-      // Sizes differ: fall through and refetch the fresh copy.
-    } catch {
-      return { response: cached, fromCache: true };
     }
   }
 
-  const response = await fetch(url, { cache: "force-cache", signal });
+  const response = await fetch(url, {
+    cache: bypassPersistentCache ? "no-store" : "force-cache",
+    signal,
+  });
   if (!response.ok) {
     throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
   }
 
-  persistResponse(url, response.clone());
+  if (!bypassPersistentCache) {
+    persistResponse(url, response.clone());
+  }
   return { response, fromCache: false };
 };
 
@@ -546,7 +861,7 @@ export const ensureBasemapProtocol = () => {
   }
 };
 
-export const readJson = async (url, { cache, clone = true, defaultValue, force = false, signal } = {}) => {
+export const readJson = async (url, { cache, defaultValue, force = false, signal, clone = true } = {}) => {
   // Snapshot the decision NOW, never inside the request closure — see
   // isNoStoreJsonUrl for why an post-await evaluation strands an entry.
   const store = cache === undefined ? !isNoStoreJsonUrl(url) : cache !== false;
@@ -556,27 +871,50 @@ export const readJson = async (url, { cache, clone = true, defaultValue, force =
   if (!store) jsonValueCache.delete(url);
 
   if (!force && jsonValueCache.has(url)) {
-    const val = jsonValueCache.get(url);
-    return clone ? cloneJson(val) : val;
+    const cached = jsonValueCache.get(url);
+    return clone ? cloneJsonFor(url, cached) : cached;
   }
 
   // Even with force: true, batch concurrent requests to the same URL so
   // multiple independent 5s pollers (Nations, Cities, background, units)
   // don't each fire their own network fetch.
   if (jsonRequestCache.has(url)) {
-    const val = await jsonRequestCache.get(url);
-    return clone ? cloneJson(val) : val;
+    const pending = await jsonRequestCache.get(url);
+    return clone ? cloneJsonFor(url, pending) : pending;
   }
 
   const request = (async () => {
-    const { response } = await fetchWithPersistence(url, { signal });
-    const data = await response.json();
+    const fetchStartedAt = perfNow();
+    const { response } = await fetchWithPersistence(url, {
+      bypassPersistentCache: isMutableRuntimeJsonUrl(url),
+      signal,
+    });
+    const fetchElapsed = perfNow() - fetchStartedAt;
+    if (fetchElapsed >= PERF_WARN_MS) {
+      reportPerfOperation(`fetch wait ${runtimeAssetLabel(url)}`, fetchElapsed);
+    }
+
+    const bodyStartedAt = perfNow();
+    const text = await response.text();
+    const bodyElapsed = perfNow() - bodyStartedAt;
+    if (bodyElapsed >= PERF_WARN_MS) {
+      reportPerfOperation(
+        `body read ${runtimeAssetLabel(url)}`,
+        bodyElapsed,
+        { extra: `${Math.round(text.length / 1024)} KiB` },
+      );
+    }
+
+    const parseStartedAt = perfNow();
+    const data = text ? JSON.parse(text) : null;
+    warnSlowJson("JSON.parse", url, parseStartedAt, `${Math.round(text.length / 1024)} KiB`);
     // Recorded INSIDE the try, before the catch below: a failed read must leave
     // this false so loadRegionCatalog retries instead of pinning a stock-only
     // catalog. "Did we get a value?" is not a usable substitute — an originator
     // carrying a defaultValue resolves the SHARED batched promise to that
     // default on failure, so every awaiter sees a value either way.
     jsonLoadedUrls.add(url);
+    jsonByteLengths.set(url, text.length);
     if (store) jsonValueCache.set(url, data);
     return data;
   })()
@@ -584,7 +922,7 @@ export const readJson = async (url, { cache, clone = true, defaultValue, force =
       if (defaultValue !== undefined) {
         // Serve the fallback but do NOT cache it — a transient failure must not
         // pin the default for the rest of the session; the next read retries.
-        return clone ? cloneJson(defaultValue) : defaultValue;
+        return clone ? cloneJsonFor(url, defaultValue) : defaultValue;
       }
 
       throw error;
@@ -594,22 +932,29 @@ export const readJson = async (url, { cache, clone = true, defaultValue, force =
     });
 
   jsonRequestCache.set(url, request);
-  const val = await request;
-  return clone ? cloneJson(val) : val;
+  const value = await request;
+  return clone ? cloneJsonFor(url, value) : value;
 };
 
+// Did the document come back, or is this a defaultValue served after a failed read?
+export const jsonReadSucceeded = (url) => jsonLoadedUrls.has(url);
+
+// clone: false is safe because the payload is discarded here, and size reads
+// the recorded wire text. A primed or defaulted URL has none and reports 0.
 export const warmJson = async (url, options = {}) => {
-  const data = await readJson(url, options);
+  await readJson(url, { ...options, clone: false });
   return {
     kind: "json",
-    size: JSON.stringify(data).length,
+    size: jsonByteLengths.get(url) ?? 0,
     url,
   };
 };
 
-export const primeJson = (url, data, { cache } = {}) => {
+export const primeJson = (url, data, { cache, clone = true } = {}) => {
   const store = cache === undefined ? !isNoStoreJsonUrl(url) : cache !== false;
   jsonLoadedUrls.add(url);
+  // The primed value came with no wire text, so drop the stale length.
+  jsonByteLengths.delete(url);
   jsonRequestCache.delete(url);
   if (!store) {
     // DELETE rather than merely skip: leaving an older entry behind would let
@@ -618,13 +963,31 @@ export const primeJson = (url, data, { cache } = {}) => {
     jsonValueCache.delete(url);
     return data;
   }
-  const snapshot = cloneJson(data);
+  // Mutable runtime PUT responses are fresh objects already owned by this asset
+  // store. Cloning a giant world twice merely to cache it caused invisible stalls.
+  const snapshot = clone ? cloneJson(data) : data;
   jsonValueCache.set(url, snapshot);
-  return cloneJson(snapshot);
+  return clone ? cloneJson(snapshot) : snapshot;
 };
 
-export const writeJson = async (url, data, { pretty = false } = {}) => {
+export const writeJson = async (
+  url,
+  data,
+  {
+    pretty = false,
+    cloneResult = true,
+    emitEvents = true,
+    emitDerivedEvents = emitEvents,
+    // Immutable maintenance payloads (notably the rolling rollback archive) can
+    // opt out of an otherwise-useful defensive cache clone. Default behavior is
+    // unchanged for every existing caller.
+    cacheClone = url !== JSON_URLS.world,
+  } = {},
+) => {
+  const stringifyStartedAt = perfNow();
   const payload = JSON.stringify(data, null, pretty ? 2 : 0);
+  warnSlowJson("stringify", url, stringifyStartedAt, `${Math.round(payload.length / 1024)} KiB`);
+  const startedAt = Date.now();
   const response = await fetch(url, {
     body: payload,
     headers: JSON_HEADERS,
@@ -632,8 +995,25 @@ export const writeJson = async (url, data, { pretty = false } = {}) => {
   });
 
   if (!response.ok) {
+    // This is THE save path: world.json, game.json, actions, events and chats
+    // all persist through here, so a failure here is the campaign not being
+    // written to disk. It threw a bare Error into whatever caller happened to
+    // be running, several of which only surface it as a toast — which is gone
+    // by the time anyone files a report. Logged at BOTH levels for that reason;
+    // everything else about this function is detail-only.
+    logDebugEvent("save", `FAILED to save ${url} — HTTP ${response.status}`, { bytes: payload.length });
     throw new Error(`Failed to save ${url}: HTTP ${response.status}`);
   }
+
+  // Detailed mode follows the saves that worked, with their size. Growth is the
+  // point: a world.json climbing past a megabyte is a real and reported problem
+  // (it makes every turn slower), and it is invisible in any single entry —
+  // you see it by reading the same line at three points in one session.
+  const elapsed = Date.now() - startedAt;
+  logDebugEvent("save", `Saved ${url}`, {
+    bytes: payload.length,
+    ...(elapsed >= 1000 ? { slowMs: elapsed } : {}),
+  }, { verbose: true });
 
   // Cache what the store SAYS IT STORED, not what we sent it. Both stores already
   // return the normalized record from their PUT and it used to be thrown away, so
@@ -648,27 +1028,45 @@ export const writeJson = async (url, data, { pretty = false } = {}) => {
   let saved = data;
   let savedPayload = payload;
   try {
+    const echoedStartedAt = perfNow();
     const echoed = await response.text();
     if (echoed) {
       saved = JSON.parse(echoed);
       savedPayload = echoed;
     }
+    warnSlowJson("echo parse", url, echoedStartedAt, echoed ? `${Math.round(echoed.length / 1024)} KiB` : "");
   } catch {
     /* no body, or not JSON — keep what we sent */
   }
 
-  primeJson(url, saved);
-  invalidateDerivedCachesForWrite(url);
-  persistResponse(
-    url,
-    new Response(savedPayload, {
-      headers: jsonHeadersFor(savedPayload),
-      status: 200,
-      statusText: "OK",
-    }),
-  );
+  primeJson(url, saved, { clone: cacheClone });
+  invalidateDerivedCachesForWrite(url, { emitEvents: emitDerivedEvents });
+  if (!isMutableRuntimeJsonUrl(url)) {
+    persistResponse(
+      url,
+      new Response(savedPayload, {
+        headers: jsonHeadersFor(savedPayload),
+        status: 200,
+        statusText: "OK",
+      }),
+    );
+  }
 
-  return cloneJson(saved);
+  // Local runtime writes are authoritative immediately. Map consumers can update
+  // from this in-memory object instead of waiting for another full world.json poll.
+  if (emitEvents && typeof window !== "undefined" && url === JSON_URLS.world) {
+    window.dispatchEvent(new CustomEvent("oh:world-updated", { detail: { world: saved } }));
+  }
+  if (emitEvents && typeof window !== "undefined" && url === JSON_URLS.game) {
+    window.dispatchEvent(new CustomEvent("oh:game-updated", { detail: { game: saved } }));
+  }
+  if (emitEvents && typeof window !== "undefined" && isMutableRuntimeJsonUrl(url)) {
+    window.dispatchEvent(new CustomEvent("oh:runtime-json-updated", {
+      detail: { key: runtimeAssetLabel(url), url, value: saved },
+    }));
+  }
+
+  return cloneResult ? cloneJsonFor(url, saved) : saved;
 };
 
 export const readRuntimeJson = async (
@@ -872,6 +1270,19 @@ export const warmPmtilesArchive = async (url, { signal } = {}) => {
     if (buffer == null) {
       const { response } = await fetchWithPersistence(url, { signal });
       buffer = await response.arrayBuffer();
+      // Bytes from a node were hash-checked above; bytes from the origin were
+      // not, which made the fallback the weakest link in a chain built to be
+      // strong. Hold it to the same signed manifest. A mismatch throws rather
+      // than degrading quietly: the caller already handles a failed archive by
+      // painting the procedural fallback, and a map that fails loudly beats a
+      // map someone else chose.
+      if (import.meta.env.VITE_OH_WEB) {
+        const { verifyOriginBuffer } = await import("./web/contentTrust.js");
+        const { checked, ok } = await verifyOriginBuffer(url, buffer);
+        if (checked && !ok) {
+          throw new Error(`${url} does not match the signed content manifest — refusing to use it.`);
+        }
+      }
     }
     primePmtilesArchive(url, buffer);
     return buffer;
@@ -903,6 +1314,47 @@ export const decodeVectorTile = async (data) => {
 
   const { Pbf, VectorTile } = await vectorTileModulesPromise;
   return new VectorTile(new Pbf(data));
+};
+
+// Exact id index for the region PMTiles archive currently exposed by the
+// runtime. A scenario is allowed to hand close-zoom political rendering and
+// hit-testing to that archive only when its stock-like region ids match this
+// vocabulary exactly. `loadRegionCatalog` below already treats the z0 region
+// tile as the compact catalog index, so this reuses the same authoritative
+// source rather than loading world geometry on the UI thread.
+export const loadRegionTileIdSet = async () => {
+  const cacheKey = PMTILES_ARCHIVES.regions;
+  if (regionTileIdSetPromise && regionTileIdSetPromiseKey === cacheKey) {
+    return regionTileIdSetPromise;
+  }
+
+  regionTileIdSetPromiseKey = cacheKey;
+  const promise = (async () => {
+    const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+    const tileData = await pmtiles.getZxy(0, 0, 0);
+    if (!tileData?.data) return new Set();
+
+    const tile = await decodeVectorTile(tileData.data);
+    const layer = tile.layers.regions;
+    if (!layer) return new Set();
+
+    const ids = new Set();
+    for (let index = 0; index < layer.length; index += 1) {
+      const props = layer.feature(index).properties;
+      const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
+      if (id != null && String(id)) ids.add(String(id));
+    }
+    return ids;
+  })().catch((error) => {
+    if (regionTileIdSetPromise === promise) {
+      regionTileIdSetPromise = null;
+      regionTileIdSetPromiseKey = "";
+    }
+    throw error;
+  });
+
+  regionTileIdSetPromise = promise;
+  return promise;
 };
 
 export const getNationColors = async () => {
@@ -954,12 +1406,12 @@ export const getNationTags = async () => {
   return nationTagsPromise;
 };
 
-export const getNationFlags = async () => {
+export const getNationFlags = async ({ force = false } = {}) => {
   const cacheKey = JSON_URLS.flags;
 
-  if (!nationFlagsPromise || nationFlagsPromiseKey !== cacheKey) {
+  if (force || !nationFlagsPromise || nationFlagsPromiseKey !== cacheKey) {
     nationFlagsPromiseKey = cacheKey;
-    const promise = readJson(JSON_URLS.flags, { defaultValue: {} }).catch((error) => {
+    const promise = readJson(JSON_URLS.flags, { defaultValue: {}, force }).catch((error) => {
       console.warn("Failed to load nation flags (will retry):", error);
       if (nationFlagsPromise === promise) nationFlagsPromise = null;
       return {};
@@ -980,25 +1432,34 @@ export const loadCountryNames = async ({ force = false } = {}) => {
   countryNamesPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.countries;
-      if (!layer) return [];
+      // The STOCK world's countries, from the tile archive — one of two sources,
+      // and the optional one. This used to return an empty catalog the moment the
+      // archive could not be read, before the world's own polities below had been
+      // looked at: a hand-drawn map, whose every country lives in polityOverrides,
+      // lost all of them to a missing tile file, and with them the country pickers,
+      // the map labels and every name a chat participant or a report holder is
+      // resolved against. (The same gap loadRegionCatalog had.) The archive is
+      // tried; the world's declared polities are always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.countries);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.countries ?? null;
+      } catch (error) {
+        console.warn("The stock country tiles could not be read; the catalog carries this world's own polities only.", error);
+      }
 
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const code = props?.GID_0 || props?.gid_0 || props?.ISO_A3 || props?.iso_a3 || "";
         const name = resolveCountryDisplayName(
           props?.Country || props?.NAME || props?.name || props?.COUNTRY,
           code,
         );
-        const nameKey = String(name ?? "").trim().toLowerCase();
-        if (nameKey && !seen.has(nameKey)) {
-          seen.set(nameKey, code);
+        if (name && !seen.has(name)) {
+          seen.set(name, code);
         }
       }
 
@@ -1008,11 +1469,15 @@ export const loadCountryNames = async ({ force = false } = {}) => {
 
       try {
         const world = await readJson(JSON_URLS.world, { defaultValue: {} });
-        // world.polityOverrides is keyed by country NAME, not by code, and its
-        // entries carry no code of their own — so treating the key as a code
-        // added a SECOND entry per override instead of updating the tile's.
-        // See countryList.js: duplicate names break the pickers outright.
-        return mergeCountryOverrides(countries, world?.polityOverrides);
+
+        // Stock PMTiles and runtime polityOverrides can describe the SAME actor
+        // with different identifiers (RUS / "Russia" / "Russian Federation").
+        // Merged through the save-aware identity resolvers, one entry per polity
+        // (see countryList.js for the folding rule).
+        return mergeStockAndDeclaredPolities(countries, world, {
+          resolvePolityIdentity,
+          resolveStockCountryCode,
+        });
       } catch {
         return countries;
       }
@@ -1029,6 +1494,192 @@ export const loadCountryNames = async ({ force = false } = {}) => {
   return promise;
 };
 
+// The map already pays the unavoidable parse cost of regions.geojson once.
+// Project a tiny metadata-only catalog while that geometry is in memory so
+// country panels/AI/cheats never reparse it just to learn province names.
+export const primeCustomRegionCatalogEntries = (
+  rawEntries,
+  {
+    url = JSON_URLS.regionsGeojson,
+    invalidateCatalog = true,
+  } = {},
+) => {
+  const startedAt = perfNow();
+  const entries = [];
+  for (const raw of rawEntries ?? []) {
+    const id = raw?.id != null ? String(raw.id) : "";
+    if (!id) continue;
+    const name = resolveRegionName(id, raw?.name);
+    const lng = Number(raw?.lng);
+    const lat = Number(raw?.lat);
+    entries.push({
+      // A drawn region's baked owner is its `owner` (see primeCustomRegionCatalog
+      // below, which reads the geojson itself and has always done this). The map
+      // worker's records carry it as `owner` beside an empty `country`, so without
+      // this every drawn region primed by the map lost its base owner — and with it
+      // who holds what, wherever this catalog is read.
+      country: raw?.country ? String(raw.country) : raw?.owner ? String(raw.owner) : "",
+      countryCode: raw?.countryCode ? String(raw.countryCode) : "",
+      id,
+      name: name || id,
+      lng: Number.isFinite(lng) ? lng : null,
+      lat: Number.isFinite(lat) ? lat : null,
+      tags: Array.isArray(raw?.tags) ? raw.tags.map((value) => String(value)) : [],
+      type: raw?.type ? String(raw.type) : "",
+      adjacencies: Array.isArray(raw?.adjacencies)
+        ? raw.adjacencies.map((value) => String(value)).filter(Boolean)
+        : [],
+      ...(isBox(raw?.bounds) ? { bounds: raw.bounds } : {}),
+    });
+  }
+  primedCustomRegionCatalog = entries;
+  primedCustomRegionCatalogKey = String(url || "");
+  if (invalidateCatalog) {
+    regionCatalogPromise = null;
+    regionCatalogPromiseKey = "";
+  }
+  // The map's worker primes this well after the panels have mounted. A panel
+  // that frames things with it (the event cards' links, time.jsx) listens for
+  // this and derives again, instead of keeping what it made without it.
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    try {
+      window.dispatchEvent(new CustomEvent("oh:region-catalog-primed"));
+    } catch { /* a listener's failure is not the catalog's */ }
+  }
+  reportPerfOperation(
+    "prime compact custom region catalog",
+    perfNow() - startedAt,
+    { extra: `${entries.length} regions`, warnAt: 25 },
+  );
+  return entries;
+};
+
+// A drawn region's bounding box, taken while its geometry is in memory anyway.
+// The stock outline tables are keyed by GADM id and know nothing of a drawn
+// map, so this is the only frame the event camera and an event card's links can
+// fly to there. A box wider than half the world has crossed the antimeridian
+// (Chukotka): it is measured again with the western longitudes wrapped east, so
+// `east` may exceed 180, which is what MapLibre's fitBounds expects.
+const geometryBounds = (geometry) => {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  const longitudes = [];
+  const visit = (coordinates) => {
+    if (!Array.isArray(coordinates)) return;
+    if (typeof coordinates[0] === "number") {
+      const [lng, lat] = coordinates;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      longitudes.push(lng);
+      if (lng < west) west = lng;
+      if (lng > east) east = lng;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+      return;
+    }
+    for (const part of coordinates) visit(part);
+  };
+  visit(geometry?.coordinates);
+  if (!longitudes.length) return null;
+  if (east - west > 180) {
+    let wrappedWest = Infinity;
+    let wrappedEast = -Infinity;
+    for (const lng of longitudes) {
+      const wrapped = lng < 0 ? lng + 360 : lng;
+      if (wrapped < wrappedWest) wrappedWest = wrapped;
+      if (wrapped > wrappedEast) wrappedEast = wrapped;
+    }
+    return [[wrappedWest, south], [wrappedEast, north]];
+  }
+  return [[west, south], [east, north]];
+};
+
+const isBox = (value) => Array.isArray(value) && value.length === 2
+  && [value[0]?.[0], value[0]?.[1], value[1]?.[0], value[1]?.[1]].every(Number.isFinite);
+
+export const primeCustomRegionCatalog = (
+  geojson,
+  options = {},
+) => {
+  const rawEntries = [];
+  for (const feature of geojson?.features ?? []) {
+    const props = feature?.properties ?? {};
+    // The same id vocabulary the AI's Preview resolver reads from these features
+    // (resolveRegionTransfers in gameplay.js), so an id Preview accepted is never
+    // "missing" from the compact catalog when Apply revalidates it.
+    const rawId = props.id ?? props.GID_1 ?? props.gid_1 ?? props.HASC_1 ?? feature?.id;
+    const id = rawId != null ? String(rawId) : "";
+    if (!id) continue;
+    const centroid = props?.centroid?.coordinates;
+    rawEntries.push({
+      // A drawn region's baked owner is its `owner` property; carrying it as the
+      // catalog's base country lets the prompt tell a real change from the seed.
+      country: props.country ? String(props.country) : props.owner ? String(props.owner) : "",
+      countryCode: props.gid0 ? String(props.gid0) : props.GID_0 ? String(props.GID_0) : "",
+      id,
+      name: props.name ?? props.NAME_1 ?? props.name_1 ?? id,
+      lng: Array.isArray(centroid) ? centroid[0] : props?.lng ?? props?.longitude,
+      lat: Array.isArray(centroid) ? centroid[1] : props?.lat ?? props?.latitude,
+      tags: Array.isArray(props?.tags) ? props.tags : [],
+      type: props?.type ?? "",
+      adjacencies: Array.isArray(props?.adjacencies) ? props.adjacencies : [],
+      bounds: geometryBounds(feature?.geometry),
+    });
+  }
+  return primeCustomRegionCatalogEntries(rawEntries, options);
+};
+
+export const getPrimedScenarioRegionCatalog = ({ url = JSON_URLS.regionsGeojson } = {}) => {
+  if (
+    primedCustomRegionCatalog
+    && primedCustomRegionCatalogKey === String(url || "")
+  ) {
+    return primedCustomRegionCatalog;
+  }
+  return null;
+};
+
+export const loadScenarioRegionCatalog = async ({ force = false } = {}) => {
+  if (
+    !force &&
+    primedCustomRegionCatalog &&
+    primedCustomRegionCatalogKey === JSON_URLS.regionsGeojson
+  ) {
+    return primedCustomRegionCatalog;
+  }
+
+  // Cold-start compatibility only. In normal gameplay Nations has already loaded
+  // and primed this projection before the player can inspect Stats.
+  const custom = await readJson(JSON_URLS.regionsGeojson, {
+    defaultValue: null,
+    force,
+    clone: false,
+  }).catch(() => null);
+
+  if (!custom || !Array.isArray(custom?.features) || custom.features.length === 0) {
+    return [];
+  }
+
+  return primeCustomRegionCatalog(custom, {
+    url: JSON_URLS.regionsGeojson,
+    invalidateCatalog: false,
+  });
+};
+
+// The server's derived projection of the restore points: id/round/dates only.
+// snapshots.json itself carries every prior world and hits 8+ MB late in a game.
+export const loadRollbackSnapshotIndex = async () => {
+  const data = await readJson(JSON_URLS.snapshotsIndex, {
+    defaultValue: { entries: [] },
+    force: true,
+    clone: false,
+  }).catch(() => null);
+  return Array.isArray(data?.entries) ? data.entries : [];
+};
+
+export const loadRollbackSnapshotCount = async () => (await loadRollbackSnapshotIndex()).length;
+
 export const loadRegionCatalog = async ({ force = false } = {}) => {
   // Keyed on BOTH sources: switching games/scenarios (new runtime token) must
   // refresh the custom-region names merged in below.
@@ -1041,16 +1692,26 @@ export const loadRegionCatalog = async ({ force = false } = {}) => {
   regionCatalogPromiseKey = cacheKey;
   const promise = (async () => {
     try {
-      const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
-      const tileData = await pmtiles.getZxy(0, 0, 0);
-      if (!tileData?.data) return [];
-
-      const tile = await decodeVectorTile(tileData.data);
-      const layer = tile.layers.regions;
-      if (!layer) return [];
-
       const seen = new Map();
-      for (let index = 0; index < layer.length; index += 1) {
+
+      // The stock world's regions, from the tile archive — ONE of two sources,
+      // and the optional one. This used to return an empty catalog the moment
+      // the archive could not be read, before the scenario's own regions below
+      // had been looked at: a hand-drawn map with every region named in its
+      // geojson lost all of them to a missing tile file, and with them every
+      // lookup, every place name the engine reads, and every prompt's region
+      // list. The archive is tried; the scenario's geometry is always merged.
+      let layer = null;
+      try {
+        const pmtiles = getPmtilesArchive(PMTILES_ARCHIVES.regions);
+        const tileData = await pmtiles.getZxy(0, 0, 0);
+        const tile = tileData?.data ? await decodeVectorTile(tileData.data) : null;
+        layer = tile?.layers?.regions ?? null;
+      } catch (error) {
+        console.warn("The stock region tiles could not be read; the catalog carries the scenario's own regions only.", error);
+      }
+
+      for (let index = 0; index < (layer ? layer.length : 0); index += 1) {
         const props = layer.feature(index).properties;
         const id = props?.GID_1 || props?.gid_1 || props?.HASC_1 || props?.fid;
         // A few GADM regions carry the literal placeholder "NA" as their name (England
@@ -1082,38 +1743,45 @@ export const loadRegionCatalog = async ({ force = false } = {}) => {
       // Regions the stock tiles don't know — shapes DRAWN in the map editor
       // (reg_* ids) and seed-only regions — get their names from the active
       // scenario's own geometry, so the AI can talk about them by name instead
-      // of raw ids. The seed comes from the worker-backed loader
-      // (regionSeed.js): the 55-220 MB document is parsed in the worker and
-      // only the compact index crosses to the main thread, so this no longer
-      // costs a second main-thread JSON.parse of the same file.
+      // of raw ids.
       let customRegionsResolved = true;
       try {
-        const seed = await loadRegionSeed(JSON_URLS.regionsGeojson);
-        customRegionsResolved = Boolean(seed);
-        if (seed) {
-          for (const [id, props] of seed.propsById) {
-            // Same placeholder correction as the stock pass above — and it must
-            // happen HERE too: a scenario's geometry is seeded from the same
-            // GADM export, so without this the scenario's own "NA" wins on the
-            // next line and puts the placeholder back over the corrected stock
-            // name.
-            const name = resolveRegionName(id, props.name);
-            const existing = seen.get(id);
-            if (existing) {
-              // The scenario's own name for a stock region WINS. A world that
-              // renamed "Warmińsko-Mazurskie" to "South Konisburg" talks about
-              // South Konisburg everywhere — the AI's region transfers can only
-              // resolve against the name the world actually uses.
-              if (name) existing.name = name;
-              continue;
-            }
-            seen.set(id, {
-              country: "",
-              countryCode: props.gid0 ? String(props.gid0) : "",
-              id,
-              name: name || id,
-            });
+        let customEntries = null;
+        if (
+          primedCustomRegionCatalog &&
+          primedCustomRegionCatalogKey === JSON_URLS.regionsGeojson
+        ) {
+          customEntries = primedCustomRegionCatalog;
+        } else {
+          // Cold-start fallback only. Once Nations loads the custom map, the
+          // compact primer makes this giant geometry read disappear thereafter.
+          const custom = await readJson(JSON_URLS.regionsGeojson, {
+            defaultValue: null,
+            clone: false,
+          });
+          customRegionsResolved = jsonLoadedUrls.has(JSON_URLS.regionsGeojson);
+          customEntries = primeCustomRegionCatalog(custom, {
+            url: JSON_URLS.regionsGeojson,
+            invalidateCatalog: false,
+          });
+        }
+
+        for (const entry of customEntries ?? []) {
+          const id = String(entry?.id ?? "");
+          if (!id) continue;
+          const existing = seen.get(id);
+          if (existing) {
+            if (entry.name) existing.name = String(entry.name);
+            if (entry.country) existing.country = String(entry.country);
+            if (entry.countryCode) existing.countryCode = String(entry.countryCode);
+            continue;
           }
+          seen.set(id, {
+            country: entry.country ? String(entry.country) : "",
+            countryCode: entry.countryCode ? String(entry.countryCode) : "",
+            id,
+            name: entry.name ? String(entry.name) : id,
+          });
         }
       } catch {
         customRegionsResolved = false;

@@ -29,7 +29,9 @@ const INTERACTION_GRACE_MS = 3000;
 // 60 times a second, forever, even with the phone just sitting on a table.
 const CELESTIAL_FRAME_MS_ACTIVE = 1000 / 25;
 const CELESTIAL_FRAME_MS_IDLE = 1000 / 15;
-const LIGHTING_FRAME_MS_ACTIVE = 1000 / 15;
+// Redraw lighting on every frame during camera movement to avoid visible lag. 
+// Uses the cheap immediate: true draw path during interaction, throttling only when idle.
+const LIGHTING_FRAME_MS_ACTIVE = 0;
 const LIGHTING_FRAME_MS_IDLE = 1000 / 15;
 // Idle auto-rotation itself doesn't need a fresh jumpTo() every animation
 // frame either — updating the camera 15x/sec still reads as smooth rotation
@@ -39,6 +41,18 @@ const IDLE_ROTATE_FRAME_MS = 1000 / 15;
 // cadence even when the map is fully idle (no render events fire then), so the
 // day/night line stays live without a per-frame cost.
 const LIVE_SUN_REFRESH_MS = 60 * 1000;
+
+// Terrain pushes each vertex out by elevation / earth radius.
+const EARTH_RADIUS_M = 6371008.8;
+const MAX_TERRAIN_ELEVATION_M = 8849;
+
+const terrainSurfaceRadii = (mapInstance) => {
+  const terrain = mapInstance.getTerrain?.();
+  if (!terrain) return 0;
+  const exaggeration = Number.isFinite(terrain.exaggeration) ? terrain.exaggeration : 1;
+  if (exaggeration <= 0) return 0;
+  return (exaggeration * MAX_TERRAIN_ELEVATION_M) / EARTH_RADIUS_M;
+};
 
 // The sun, stars, and surface lighting share one world frame: the REAL sun.
 // sunWorldPosition is the actual subsolar point for the current wall-clock
@@ -169,6 +183,7 @@ const GlobeEffects = ({ active }) => {
             width,
             height,
             opacity: projectionTransition,
+            terrainRadii: terrainSurfaceRadii(mapInstance),
             immediate: autoRotationActive || mapInstance.isMoving(),
           });
         } else if (!lightingTimer) {

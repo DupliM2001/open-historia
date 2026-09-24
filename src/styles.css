@@ -9,13 +9,55 @@ body,
 body {
   overflow: hidden;
   overscroll-behavior: none;
-  background: #02050a;
+  background: #131315;
   color: #f6f6f7;
   font-family: "Segoe UI", sans-serif;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* -------------------------------------------------------------------------
+   HUD glass surface tokens (ported from kernely's Continuum branch). Every
+   fixed HUD surface — the menu button and game menu, the bottom toolbar, the
+   date widget, the search field, the polity badge, the top session pill —
+   reads its finish from here, so they stay one material.
+
+   Glass is for the HUD ONLY: the things you look at with the map behind them.
+   Everything else — the Workshop, the library, the community browser, the
+   setup and loading screens — is flat dark grey, because a panel that fills
+   the screen has nothing to be translucent over.
+   ------------------------------------------------------------------------- */
+:root {
+  --oh-hud-bg: rgba(18, 18, 20, 0.52);
+  --oh-hud-bg-strong: rgba(17, 17, 19, 0.66);
+  --oh-hud-bg-soft: rgba(34, 34, 38, 0.46);
+  --oh-hud-border: rgba(236, 236, 238, 0.17);
+  --oh-hud-border-strong: rgba(240, 240, 242, 0.29);
+  --oh-hud-text: #f8f8f9;
+  --oh-hud-muted: rgba(233, 233, 236, 0.64);
+  --oh-hud-faint: rgba(233, 233, 236, 0.38);
+  --oh-hud-blue: #4b91ff;
+  --oh-hud-blue-soft: rgba(75, 145, 255, 0.16);
+  --oh-hud-amber: #f5bd4f;
+  --oh-hud-amber-hover: #ffd06d;
+  --oh-hud-red: #ef4444;
+  --oh-hud-radius: 16px;
+  /* The flat surfaces. Selected reads DARKER than its neighbours, not brighter:
+     nothing in this app glows to say it is chosen. */
+  --oh-grey-bg: #131315;
+  --oh-grey-surface: #1b1b1e;
+  --oh-grey-raised: #232327;
+  --oh-grey-selected: #0e0e10;
+  --oh-grey-border: rgba(255, 255, 255, 0.1);
+  --oh-grey-border-strong: rgba(255, 255, 255, 0.22);
+  --oh-grey-text: #e7e7ea;
+  --oh-grey-muted: rgba(231, 231, 234, 0.6);
+  --oh-grey-faint: rgba(231, 231, 234, 0.38);
+  --oh-hud-shadow: 0 20px 56px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(255,255,255,0.03);
+  --oh-hud-shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.1);
+  --oh-hud-blur: blur(14px) saturate(1.18);
 }
 
 .startup-shell {
@@ -26,43 +68,41 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(39, 119, 255, 0.14), transparent 30%),
-    radial-gradient(circle at 75% 22%, rgba(37, 196, 169, 0.12), transparent 26%),
-    linear-gradient(180deg, #08080a 0%, #111113 44%, #060607 100%);
+  background: #0f0f11;
 }
 
 .startup-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(155, 194, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(155, 194, 255, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
   background-size: 3.5rem 3.5rem;
-  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.95), transparent 90%);
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
+/* The two soft shapes behind the panel. Grey, and dim enough to read as a
+   lit wall rather than a light. */
 .startup-aurora {
   position: absolute;
   width: 32rem;
   height: 32rem;
   border-radius: 999px;
   filter: blur(48px);
-  opacity: 0.6;
+  opacity: 0.5;
   animation: startupFloat 8s ease-in-out infinite;
 }
 
 .startup-aurora-left {
   left: -8rem;
   top: -4rem;
-  background: rgba(54, 120, 255, 0.2);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .startup-aurora-right {
   right: -8rem;
   bottom: -6rem;
-  background: rgba(29, 211, 186, 0.18);
+  background: rgba(255, 255, 255, 0.025);
   animation-delay: -3s;
 }
 
@@ -70,15 +110,10 @@ body {
   position: relative;
   width: min(32rem, calc(100vw - 2rem));
   padding: 1.75rem;
-  border: 1px solid rgba(220, 220, 224, 0.12);
+  border: 1px solid var(--oh-grey-border);
   border-radius: 1.5rem;
-  background:
-    linear-gradient(180deg, rgba(18, 18, 20, 0.94), rgba(10, 10, 12, 0.92)),
-    rgba(9, 9, 10, 0.82);
-  box-shadow:
-    0 2rem 5rem rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(20px);
+  background: var(--oh-grey-surface);
+  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.5);
 }
 
 .startup-eyebrow {
@@ -86,8 +121,8 @@ body {
   align-items: center;
   padding: 0.35rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid rgba(138, 190, 255, 0.18);
-  background: rgba(76, 127, 195, 0.12);
+  border: 1px solid var(--oh-grey-border);
+  background: var(--oh-grey-raised);
   color: rgba(228, 228, 231, 0.85);
   font-size: 0.72rem;
   letter-spacing: 0.18em;
@@ -108,7 +143,7 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  border: 1px solid rgba(142, 193, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .startup-orbit-ring-large {
@@ -117,7 +152,7 @@ body {
 
 .startup-orbit-ring-small {
   inset: 0.9rem;
-  border-color: rgba(68, 213, 183, 0.18);
+  border-color: rgba(255, 255, 255, 0.08);
   animation: startupSpinReverse 10s linear infinite;
 }
 
@@ -129,15 +164,12 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background:
-    radial-gradient(circle at 35% 35%, rgba(113, 184, 255, 0.85), rgba(34, 70, 135, 0.95));
-  color: white;
+  background: var(--oh-grey-raised);
+  border: 1px solid var(--oh-grey-border);
+  color: var(--oh-grey-text);
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  box-shadow:
-    0 0 2rem rgba(59, 130, 246, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .startup-scanline {
@@ -168,8 +200,8 @@ body {
   margin-top: 1.4rem;
   padding: 0.95rem 1rem 1rem;
   border-radius: 1rem;
-  border: 1px solid rgba(144, 187, 255, 0.12);
-  background: rgba(20, 20, 23, 0.72);
+  border: 1px solid var(--oh-grey-border);
+  background: var(--oh-grey-bg);
 }
 
 .startup-progress-meta,
@@ -199,8 +231,7 @@ body {
   position: relative;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #33c9ff 0%, #57a4ff 45%, #77ffd6 100%);
-  box-shadow: 0 0 1.2rem rgba(87, 164, 255, 0.42);
+  background: rgba(231, 231, 234, 0.72);
   transition: width 280ms ease;
 }
 
@@ -208,7 +239,7 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.25), transparent);
   transform: translateX(-100%);
   animation: startupShimmer 1.4s linear infinite;
 }
@@ -230,8 +261,8 @@ body {
   gap: 0.75rem;
   padding: 0.72rem 0.85rem;
   border-radius: 0.9rem;
-  border: 1px solid rgba(138, 188, 255, 0.1);
-  background: rgba(17, 17, 19, 0.7);
+  border: 1px solid var(--oh-grey-border);
+  background: var(--oh-grey-bg);
   color: rgba(228, 228, 231, 0.58);
   font-size: 0.88rem;
   transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
@@ -241,28 +272,29 @@ body {
   width: 0.65rem;
   height: 0.65rem;
   border-radius: 999px;
-  background: rgba(137, 170, 214, 0.32);
+  background: rgba(255, 255, 255, 0.2);
   flex-shrink: 0;
 }
 
+/* The step being worked on reads darker than the ones around it, like every
+   other selected thing in the app. */
 .startup-step-active {
-  border-color: rgba(89, 168, 255, 0.28);
-  background: rgba(28, 28, 31, 0.9);
+  border-color: var(--oh-grey-border-strong);
+  background: var(--oh-grey-selected);
   color: rgba(240, 240, 242, 0.92);
 }
 
 .startup-step-active .startup-step-indicator {
-  background: #57a4ff;
-  box-shadow: 0 0 0.9rem rgba(87, 164, 255, 0.6);
+  background: rgba(255, 255, 255, 0.85);
 }
 
 .startup-step-done {
-  color: rgba(219, 241, 236, 0.8);
-  border-color: rgba(87, 214, 180, 0.18);
+  color: rgba(231, 231, 234, 0.8);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .startup-step-done .startup-step-indicator {
-  background: #4ad4a0;
+  background: rgba(255, 255, 255, 0.5);
 }
 
 @keyframes startupSpin {
@@ -387,5 +419,101 @@ button:active:not(:disabled) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* The game menu grows out of the menu button and shrinks back into it. The
+   card's top-left corner sits on the button, so a scale from the button's
+   size (the --oh-grow-* ratios, measured by settings.jsx) is the button
+   becoming the menu; the contents fade in once the card is most of the way. */
+@keyframes oh-menu-grow {
+  from { opacity: 0.35; transform: scale(var(--oh-grow-x, 0.14), var(--oh-grow-y, 0.17)); }
+  to { opacity: 1; transform: scale(1, 1); }
+}
+@keyframes oh-menu-shrink {
+  from { opacity: 1; transform: scale(1, 1); }
+  to { opacity: 0.2; transform: scale(var(--oh-grow-x, 0.14), var(--oh-grow-y, 0.17)); }
+}
+.oh-menu-card {
+  transform-origin: top left;
+}
+.oh-menu-grow {
+  animation: oh-menu-grow 240ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards !important;
+}
+.oh-menu-grow > * {
+  animation: oh-fade-in 180ms ease-out 120ms backwards;
+}
+[data-oh-presence="leaving"] > .oh-menu-card {
+  animation: oh-menu-shrink 220ms ease-in both !important;
+  pointer-events: none !important;
+}
+[data-oh-presence="leaving"] > .oh-menu-card > * {
+  animation: oh-fade-out 90ms ease-in both !important;
+}
+
+/* The small menu becomes the settings workspace: the card starts on the small
+   menu's rectangle wearing its tint, then eases to its own place as the tint
+   lifts and its contents fade in (settings.jsx useWorkspaceMorph sets the
+   transform). Back runs it in reverse before the workspace unmounts. */
+.oh-ws-card {
+  position: relative;
+}
+.oh-ws-tint {
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.oh-ws-morphing .oh-ws-tint {
+  opacity: 1;
+  transition: none;
+}
+.oh-ws-unmorph .oh-ws-tint {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+.oh-ws-card > :not(.oh-ws-tint) {
+  transition: opacity 200ms ease 80ms;
+}
+.oh-ws-morphing > :not(.oh-ws-tint) {
+  opacity: 0;
+  transition: none;
+}
+.oh-ws-unmorph > :not(.oh-ws-tint) {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.oh-fade-out-slow {
+  animation: oh-fade-out 240ms ease-in both !important;
+  pointer-events: none !important;
+}
+
+/* The screen a game opens under (GameUI/gameLoadingScreen.jsx): the logo
+   turns until the map is drawn, then the whole screen fades off. */
+@keyframes oh-logo-spin {
+  to { transform: rotate(360deg); }
+}
+.oh-loading-logo {
+  animation: oh-logo-spin 4s linear infinite;
+  filter: drop-shadow(0 6px 22px rgba(0, 0, 0, 0.5));
+}
+[data-oh-presence="leaving"] > .oh-loading-screen {
+  animation: oh-fade-out 450ms ease both !important;
+  pointer-events: none !important;
+}
+
+/* Touch screens (a finger is the main pointer): every control a thumb has to
+   hit is at least 44 px across. The classes sit on the controls a phone needs
+   to reach, above all the close buttons, which were 14-26 px; with a mouse the
+   query never matches and desktop keeps its compact sizes. .oh-tap is for icon
+   buttons (square), .oh-tap-row for text buttons, tabs and rows that set their
+   own width. */
+@media (pointer: coarse) {
+  .oh-tap {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    justify-content: center;
+    align-items: center;
+  }
+  .oh-tap-row {
+    min-height: 2.75rem;
   }
 }

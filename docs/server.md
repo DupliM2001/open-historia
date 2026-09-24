@@ -41,8 +41,8 @@ All routes are JSON in / JSON out unless noted. Errors are `{ error: message }` 
 | --- | --- | --- | --- |
 | GET | `/api/ui-settings` | Global shared UI settings (currently `language`) — every device sees the same choice | `server/server.js:171` |
 | PUT | `/api/ui-settings` | Set the shared UI language | `server/server.js:236` |
-| GET | `/api/lang/:code` | Merged language pack: shipped `dist|public/lang/<code>.json` **under** saved `data/lang/<code>.json` (saved wins) | `server/server.js:197` |
-| PUT | `/api/lang/:code` | Append runtime-generated translations into `data/lang/<code>.json` (bounded per entry: source ≤3000, translation ≤6000 chars) | `server/server.js:205` |
+| GET | `/api/lang/:code` | Merged language pack: saved `data/lang/<code>.json` **under** shipped `dist|public/lang/<code>.json` (shipped wins: a saved entry for a string the pack covers is an older AI translation; see [Languages & Translation](i18n.md)) | `server/server.js` |
+| PUT | `/api/lang/:code` | Append runtime-generated translations into `data/lang/<code>.json`, skipping strings the shipped pack has (bounded per entry: source ≤3000, translation ≤6000 chars) | `server/server.js` |
 
 `code` must match `/^[a-z]{2,3}$/` or the route 400s (`isLangCode`, `server/server.js:195`).
 
@@ -90,8 +90,8 @@ All routes are JSON in / JSON out unless noted. Errors are `{ error: message }` 
 ### AI relay, hub proxy, telemetry, shutdown
 | Method | Path | Purpose | Handler |
 | --- | --- | --- | --- |
-| POST | `/api/ai/relay` | Server-to-server relay to a player-configured OpenAI-compatible endpoint (defeats the endpoint's missing CORS). Streams status/body back; aborts upstream if the client disconnects | `server/server.js:523` |
-| POST | `/api/server/shutdown` | Stop the process from the UI's ⏻ button (acks first, then `process.exit(0)`) | `server/server.js:559` |
+| POST | `/api/ai/relay` | Server-to-server relay to a player-configured OpenAI-compatible endpoint (defeats the endpoint's missing CORS). Speaks `http`/`https` directly — **not** `fetch`, whose undici default gave up on any generation that took over 300s to answer — and pipes the upstream body straight back, so a streamed answer reaches the browser as it arrives. Aborts upstream if the client disconnects; `OH_RELAY_TIMEOUT_MS` (default 600000) is the only deadline, and it replies `504` rather than hanging | `server/server.js:844` |
+| POST | `/api/server/shutdown` | Stop the process (acks first, then `process.exit(0)`); the beta UI no longer has a button for it | `server/server.js:559` |
 | GET | `/api/hub/file?url=` | Proxy-download a community bundle from GitHub only; manual redirect-following with per-hop allowlist re-check; on-disk cache keyed by URL SHA-256 | `server/server.js:575` |
 | POST | `/api/hub/import-log` | Best-effort import telemetry; one ping per scenario per install (atomic `wx` marker), forwarded to the counter Worker | `server/server.js:657` |
 | GET | `/api/hub/import-counts` | Read import counts back from the counter Worker (60 s in-memory cache) | `server/server.js:691` |
@@ -161,6 +161,7 @@ server/data/
 Key path constants live at `server/libraryStore.js:19-35`: `SCENARIOS_DIR`, `GAMES_DIR`, `SCENARIO_MANIFEST_PATH`, `GAME_MANIFEST_PATH`, `DATA_ASSETS_DIR`, plus the read-only source roots `DIST_DIR`/`PUBLIC_DIR` and `PMTILES_ASSETS_DIR = public/assets`.
 
 ### Asset-file groupings (the vocabulary of `assetKey`)
+
 Defined at `server/libraryStore.js:240-324`. These maps drive every read/write/serve path:
 
 | Group | Keys → files | Notes |
@@ -169,12 +170,14 @@ Defined at `server/libraryStore.js:240-324`. These maps drive every read/write/s
 | `STORAGE_JSON_ASSET_FILES` | `actions`,`advisor`,`chat`,`events` → `storage/*.json` | Array-shaped |
 | `JSON_ASSET_FILES` | CORE ∪ STORAGE | Copied into every new scenario/game |
 | `OPTIONAL_JSON_ASSET_FILES` | `colors`,`flags`,`tags` → `*.json` | Static author data kept **out** of the 5 s `world.json` poll |
-| `RUNTIME_ONLY_JSON_ASSET_FILES` | `snapshots`→`storage/snapshots.json` | Roll-back points; never copied/exported |
+| `RUNTIME_ONLY_JSON_ASSET_FILES` | `snapshots`→`storage/snapshots.json` | Roll-back points (each a pre-turn `state` and, for a time skip, the `turn` journal Intervene re-applies from — `src/Game/AI/intervene.js`); never copied/exported |
 | `PMTILES_ASSET_FILES` | `cities`,`countries`,`regions` → `*.pmtiles` | Per-scenario binary map overrides |
 | `SCENARIO_GEOJSON_ASSET_FILES` | `regionsGeojson`→`regions.geojson`, `citiesGeojson`→`cities.geojson`, `backgroundData`→`background.json` | Custom map geometry; always embedded in bundles |
 | `*_IMAGE_ASSET_FILES` | `cover`→`cover-image.bin` | Content type recorded in meta |
 | `UPLOADABLE_SCENARIO_ASSET_FILES` | image ∪ optional-JSON ∪ PMTiles ∪ geojson | The valid `:assetKey` set for scenario upload/serve/delete |
 | `UPLOADABLE_GAME_ASSET_FILES` | just `cover` | Games only accept a cover upload |
+
+> `GET /api/scenarios/:id/assets/regionsGeojson?coarse=1` serves a coarse copy of the regions (`resolveScenarioCoarseRegionsAsset`, `server/coarseGeometry.js`): the far tier's Douglas-Peucker coarsening, built once per upload beside it as `regions.coarse.geojson` and invalidated by a size+mtime stamp. The country picker draws that (a few MB) instead of the full-resolution file (221 MB for the stock world); the web store computes the same on demand. Never exported or cloned.
 
 `flags`/`tags` are separate JSON assets (not fields on `world.json`) specifically because `world.json` is re-polled every 5 s and a few hundred flags would be megabytes on every poll (`server/libraryStore.js:258-270`). See [World state](world-state.md).
 
@@ -257,11 +260,13 @@ The mirror of this logic for the web build is `src/runtime/web/ownerMigration.js
 
 Bundles are the shareable unit strangers swap on the community hub. Schema string `pax-historia-scenario-bundle/2` is the **only** compatibility gate (`version` is written and read by nobody). `ACCEPTED_BUNDLE_SCHEMAS` also accepts the unversioned v1 string — old bundles import fine and get named by the migration on first read.
 
-- **Export** — `exportScenarioBundle(id, {mode})` (`server/libraryStore.js:2477`) returns `{ schema, scenario{meta}, data{7 core assets}, assets{...}, mode, exportedAt }`. `mode: "light"` embeds cover/colors/flags/tags/geojson/background but **not** PMTiles (they're huge and reconstructable); `mode: "full"` base64-embeds the PMTiles too. Custom geometry is always embedded even in light mode — a shared custom map is broken without it.
+- **Export** — `exportScenarioBundle(id)` (`server/libraryStore.js`) returns `{ schema, scenario{meta}, data{7 core assets}, assets{...}, mode: "full", exportedAt }`. Every export is full: cover, colors, flags, tags, geometry, background and any custom PMTiles archive travel whenever the scenario has them. The former light mode (which dropped custom PMTiles) is gone; `?mode=` on the route is accepted and ignored, and older `mode: "light"` bundles still import.
+  - **What is base64 and what is not.** Binaries (the cover, a custom PMTiles archive) are base64. JSON assets — the region and city geometry, a vector background — are the JSON itself (`encodeJsonFile`), because base64 made every shared map a third bigger for nothing: in a real hub bundle the region geometry was 17.1 MB of the 18.1 MB file, against 12.8 MB of actual geometry. Anything that does not parse as JSON still falls back to base64, byte-exact. The importer reads both shapes, so the bundles already on the hub import unchanged (`server/scenarioBundleWeight.test.js`).
+  - **Inside a .zip the heavy assets are real entries.** `src/runtime/bundleFiles.js` lifts every embedded asset over 64 KB out of `scenario.json` into `assets/<file>` — text DEFLATEd, binaries STOREd — leaving `{ mode: "file", file, format }` behind, and puts them back on import before the bundle reaches the importer, which never learns it happened. The same lift is used by the scenario export, the hub publish and a game export carrying its map. That hub map: 18.1 MB as one JSON document, 13.8 MB with the geometry as JSON, **4.2 MB** as a zip.
 - **Import** — `importScenarioBundle` (`server/libraryStore.js:2529`) creates a **new** scenario, writes its core data via `updateScenario`, lays down each embedded asset via `applyScenarioBundleAsset`, then stamps `hubOrigin` last (so the import's own meta writes don't clear it) and selects it.
 - **Update-in-place** — `updateScenarioFromBundle` (`server/libraryStore.js:2635`) is the hub card's "Update" button: it keeps the local `id` (games reference scenarios by id) and `createdAt`, replaces meta/world/assets from the new bundle, and visits **every** uploadable key so an asset the new version dropped doesn't linger. `hubOrigin` is re-stamped last so the card reverts to "New Game" after refresh.
 
-`hubOrigin` (`{ postId, bundleUrl, syncedAt }`, normalized at `server/libraryStore.js:575-585`) is provenance for hub imports. **Any meta write that doesn't explicitly carry `hubOrigin` clears it** (`writeScenarioMeta`, `server/libraryStore.js:639-641`) — a local edit forks the copy and stops offering overwrites. GitHub mints a new immutable attachment URL per re-upload, so `bundleUrl` inequality is itself the update signal (and the reason `/api/hub/file`'s disk cache can never go stale). See [Scenario hub](scenario-hub.md).
+`hubOrigin` (`{ postId, bundleUrl, syncedAt }`, normalized at `server/libraryStore.js:575-585`) is provenance for hub imports. **Any meta write that doesn't explicitly carry `hubOrigin` clears it** (`writeScenarioMeta`, `server/libraryStore.js:639-641`) — a local edit forks the copy and stops offering overwrites. GitHub mints a new immutable attachment URL per re-upload, so `bundleUrl` inequality is itself the update signal (and the reason `/api/hub/file`'s disk cache can never go stale). See [Scenario hub](runtime-services.md).
 
 ---
 
@@ -291,7 +296,7 @@ export const DATA_DIR = process.env.OH_DATA_DIR
   : path.join(__dirname, "data");   // server/data
 ```
 
-Every store imports this one constant, so a single env var relocates **all** writable state. Desktop and Termux leave it unset and use `server/data` (byte-identical to how they've always worked). The **embedded Android server** runs `server.js` in-process via `nodejs-mobile`, where the `server/data` shipped inside the APK is **read-only**; the app sets `OH_DATA_DIR` to a writable sandbox path, seeds first-run defaults there, and downloads PMTiles into `OH_DATA_DIR/assets` (which `resolveRuntimeBinaryAsset` prefers over the read-only shipped copies). Shipped-but-updatable content (`dist|public/lang/*.json`) stays under the app root and is *merged under* the writable `DATA_DIR/lang/*.json`, so runtime translations survive app updates that overwrite the app root.
+Every store imports this one constant, so a single env var relocates **all** writable state. Desktop and Termux leave it unset and use `server/data` (byte-identical to how they've always worked). The **embedded Android server** runs `server.js` in-process via `nodejs-mobile`, where the `server/data` shipped inside the APK is **read-only**; the app sets `OH_DATA_DIR` to a writable sandbox path, seeds first-run defaults there, and downloads PMTiles into `OH_DATA_DIR/assets` (which `resolveRuntimeBinaryAsset` prefers over the read-only shipped copies). Shipped-but-updatable content (`dist|public/lang/*.json`) stays under the app root and is *merged over* the writable `DATA_DIR/lang/*.json`, so runtime translations survive app updates that overwrite the app root, and an updated pack replaces the older AI translations of the strings it covers.
 
 ### Environment variables
 | Var | Default | Effect |
@@ -301,4 +306,4 @@ Every store imports this one constant, so a single env var relocates **all** wri
 | `OH_ALLOW_CROSS_ORIGIN` | unset | `=1` disables the cross-origin-write guard (`server/server.js:111`) |
 | `OH_IMPORT_COUNTER_URL` | `https://oh-import-counter.…workers.dev` | Import-telemetry counter Worker; empty string disables pings (`server/server.js:653`) |
 
-Related sibling pages: [World state](world-state.md) · [Map editor](map-editor.md) · [Scenario hub](scenario-hub.md).
+Related sibling pages: [World state](world-state.md) · [Map editor](map-editor.md) · [Scenario hub](runtime-services.md).

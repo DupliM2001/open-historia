@@ -1,54 +1,43 @@
 /*! Open Historia — portions (mobile search layout) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-import React, { memo, useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
+import { APP_HEIGHT, SAFE_BOTTOM, SAFE_LEFT, SAFE_RIGHT, useTouchPrimary } from "../../runtime/mobileUi.js";
+import { useBackToClose } from "../../runtime/backToClose.js";
+import { useWorldState } from "../Map/useWorldState.js";
+import { focusFeature } from "../Selection/Features.jsx";
+import {
+  buildLocalPlaceEntries,
+  dedupeGeocodedPlaces,
+  formatGeocodedPlace,
+  geocodedPlaceFraming,
+  geocodedPlaceKind,
+  getWorldPlaceIndex,
+  rankGeocodedPlaces,
+  searchLocalPlaces,
+  subscribeWorldPlaceIndex,
+} from "../../runtime/placeSearch.js";
+import { BESIDE_DOCK_LEFT, DOCK_BOTTOM_REM, DOCK_BUTTON_BOTTOM, DOCK_HEIGHT_REM, DOCK_LEFT_REM } from "./hudDock.js";
 
-const SEARCH_HEADERS = { "Accept-Language": "en, *;q=0.5" };
+// A small magnifier beside the launcher dock, not a fifth launcher: smaller
+// than the dock's buttons and sitting on the same baseline as their bottoms.
+// Open on a phone it becomes a full-width bar, and a finger needs the extra
+// height there. On any touch screen the magnifier itself is finger-sized too,
+// still smaller than the launchers.
+const COMPACT_SIZE = "2.4rem";
+const TOUCH_SIZE = "2.75rem";
+const PHONE_BAR_SIZE = "3rem";
+
+// Photon, not Nominatim: the OSM foundation's Nominatim policy forbids client-side autocomplete outright, and it shows, since it answers "berl" with an office block in Brussels. Photon is the same data, indexed for search as you type.
+const SEARCH_ENDPOINT = "https://photon.komoot.io/api/";
 const SEARCH_RESULT_CACHE = new Map();
-
-const formatSuggestion = (suggestion) => {
-  const address = suggestion.address || {};
-
-  const primary =
-    suggestion.namedetails?.["name:en"] ||
-    address.amenity ||
-    address.tourism ||
-    address.leisure ||
-    address.suburb ||
-    address.neighbourhood ||
-    address.city ||
-    address.town ||
-    address.village ||
-    address.municipality ||
-    address.county ||
-    suggestion.display_name.split(",")[0].trim();
-
-  const region = [address.state || address.region, address.country]
-    .filter(Boolean)
-    .join(", ");
-
-  return { primary, region };
-};
-
-const dedup = (results) => {
-  const seen = new Set();
-  return results.filter((suggestion) => {
-    const { primary, region } = formatSuggestion(suggestion);
-    const key = `${primary}|${region}`.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
+const SEARCH_DEBOUNCE_MS = 300;
+const REMOTE_FETCH_LIMIT = 10;
 
 const buildSearchParams = (query, limit) =>
   new URLSearchParams({
     q: query,
-    format: "json",
     limit: String(limit),
-    addressdetails: "1",
-    namedetails: "1",
-    "accept-language": "en",
-    accept_language: "en",
+    lang: "en",
   });
 
 const fetchPlaces = async (query, limit, { signal } = {}) => {
@@ -58,15 +47,12 @@ const fetchPlaces = async (query, limit, { signal } = {}) => {
     return SEARCH_RESULT_CACHE.get(cacheKey);
   }
 
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?${buildSearchParams(trimmedQuery, limit)}`,
-    { headers: SEARCH_HEADERS, signal },
-  );
+  const response = await fetch(`${SEARCH_ENDPOINT}?${buildSearchParams(trimmedQuery, limit)}`, { signal });
   if (!response.ok) {
     throw new Error(`Search failed: HTTP ${response.status}`);
   }
   const data = await response.json();
-  const results = dedup(data).slice(0, limit);
+  const results = rankGeocodedPlaces(dedupeGeocodedPlaces(data?.features)).slice(0, limit);
   SEARCH_RESULT_CACHE.set(cacheKey, results);
   return results;
 };
@@ -131,23 +117,58 @@ const ICON_REGION = (
   </svg>
 );
 
-const getIcon = (suggestion) => {
-  const type = suggestion.type || suggestion.addresstype || "";
-  const kind = suggestion.class || "";
-  if (type === "country" || suggestion.addresstype === "country") return ICON_GLOBE;
-  if (["state", "region", "province"].includes(type)) return ICON_REGION;
-  if (["city", "town", "village", "municipality", "borough"].includes(type)) return ICON_CITY;
-  if (kind === "place") return ICON_CITY;
-  return ICON_PIN;
+const KIND_ICON = {
+  country: ICON_GLOBE,
+  region: ICON_REGION,
+  settlement: ICON_CITY,
 };
+
+// The world's own places outrank the geocoder's and are worth a closer camera.
+const FAMILY_ICON = { settlement: ICON_CITY, polity: ICON_GLOBE };
+const LOCAL_RESULT_LIMIT = 4;
+const SUGGESTION_LIMIT = 7;
+const LOCAL_ZOOM = 7;
+const POLITY_ZOOM = 4;
+const NO_LOCAL_PLACES = [];
+const NO_REMOTE_RESULTS = { query: "", results: [] };
+
+const remoteEntry = (feature) => {
+  const { primary, region } = formatGeocodedPlace(feature);
+  const framing = geocodedPlaceFraming(feature);
+  const properties = feature.properties ?? {};
+  return {
+    key: `osm:${properties.osm_type}${properties.osm_id}:${framing.lng},${framing.lat}`,
+    local: false,
+    icon: KIND_ICON[geocodedPlaceKind(feature)] ?? ICON_PIN,
+    primary,
+    region,
+    ...framing,
+  };
+};
+
+const localEntry = (place) => ({
+  key: place.key,
+  local: true,
+  icon: FAMILY_ICON[place.family] ?? ICON_PIN,
+  primary: place.name,
+  region: place.detail,
+  lng: place.lng,
+  lat: place.lat,
+  zoom: place.source === "polity" ? POLITY_ZOOM : LOCAL_ZOOM,
+  payload: place.payload,
+  lookup: place.lookup,
+});
 
 const Search = memo(({ mapRef }) => {
   const isMobile = useIsMobile();
+  const isTouch = useTouchPrimary();
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState(null);
-  const [suggestions, setSuggestions] = useState([]);
+  const [remote, setRemote] = useState(NO_REMOTE_RESULTS);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const { markers, cityRenames, polityOverrides } = useWorldState();
+  const placeIndex = useSyncExternalStore(subscribeWorldPlaceIndex, getWorldPlaceIndex, getWorldPlaceIndex);
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
   const searchAbortRef = useRef(null);
@@ -162,7 +183,7 @@ const Search = memo(({ mapRef }) => {
     if (!query.trim() || query.length < 2) {
       clearTimeout(debounceRef.current);
       searchAbortRef.current?.abort();
-      setSuggestions([]);
+      setRemote(NO_REMOTE_RESULTS);
       setSelectedIndex(-1);
       return undefined;
     }
@@ -175,15 +196,15 @@ const Search = memo(({ mapRef }) => {
       searchAbortRef.current = controller;
 
       try {
-        const results = await fetchPlaces(query, 5, { signal: controller.signal });
+        const results = await fetchPlaces(query, REMOTE_FETCH_LIMIT, { signal: controller.signal });
         if (searchAbortRef.current !== controller) return;
-        setSuggestions(results);
+        setRemote({ query: query.trim(), results });
         setSelectedIndex(-1);
       } catch (error) {
         if (controller.signal.aborted) return;
-        setSuggestions([]);
+        setRemote({ query: query.trim(), results: [] });
       }
-    }, 200);
+    }, SEARCH_DEBOUNCE_MS);
 
     return () => {
       clearTimeout(debounceRef.current);
@@ -191,42 +212,94 @@ const Search = memo(({ mapRef }) => {
     };
   }, [query]);
 
+  // All in memory already, so no network and no debounce, and only while the bar is open.
+  const localPlaces = useMemo(
+    () => (expanded
+      ? buildLocalPlaceEntries({
+        cities: placeIndex.cities,
+        polities: placeIndex.polities,
+        markers,
+        cityRenames,
+        polityOverrides,
+      })
+      : NO_LOCAL_PLACES),
+    [expanded, placeIndex, markers, cityRenames, polityOverrides],
+  );
+
+  const suggestions = useMemo(() => {
+    const typed = query.trim();
+    // Same two-character floor the geocoder gets: one letter matches half a world.
+    const local = typed.length < 2
+      ? []
+      : searchLocalPlaces(localPlaces, query, LOCAL_RESULT_LIMIT).map(localEntry);
+    const named = new Set(local.map((entry) => entry.primary.toLowerCase()));
+
+    // A geocoder round trip lands well after the keystroke that asked for it. Results for a prefix of what is typed are on their way to being right and stay, dimmed; anything else answers a search that is no longer on screen.
+    const answered = remote.query.toLowerCase();
+    const stale = answered !== typed.toLowerCase();
+    const usable = answered && (!stale || typed.toLowerCase().startsWith(answered));
+
+    const geocoded = usable
+      ? remote.results
+        .map((suggestion) => ({ ...remoteEntry(suggestion), stale }))
+        .filter((entry) => !named.has(entry.primary.toLowerCase()))
+      : [];
+
+    return [...local, ...geocoded].slice(0, SUGGESTION_LIMIT);
+  }, [localPlaces, query, remote]);
+
   const close = () => {
     clearTimeout(debounceRef.current);
     searchAbortRef.current?.abort();
     setExpanded(false);
     setQuery("");
     setStatus(null);
-    setSuggestions([]);
+    setRemote(NO_REMOTE_RESULTS);
     setSelectedIndex(-1);
   };
 
-  const flyToResult = (result) => {
+  // On a phone, Back closes the open search rather than leaving the game.
+  useBackToClose(expanded, close);
+
+  const flyToEntry = async (entry) => {
+    if (!entry) return;
+
+    // A renamed stock place carries only its new name; the geocoder knows the old one.
+    if (!Number.isFinite(entry.lng) || !Number.isFinite(entry.lat)) {
+      await flyToQuery(entry.lookup || entry.primary);
+      return;
+    }
+
     const map = mapRef?.current;
-    if (map) {
+    if (map && entry.bounds) {
+      map.fitBounds(entry.bounds, { padding: 80, duration: 1800, essential: true });
+    } else if (map) {
       map.flyTo({
-        center: [Number.parseFloat(result.lon), Number.parseFloat(result.lat)],
-        zoom: 5,
+        center: [entry.lng, entry.lat],
+        zoom: entry.zoom,
         duration: 1800,
         essential: true,
       });
     }
 
+    // The popup tracks the camera, so it can open before the flight lands.
+    if (entry.payload) focusFeature(entry.payload);
+
     close();
   };
 
-  const flyTo = async (place) => {
+  const flyToQuery = async (place) => {
     setStatus("loading");
-    setSuggestions([]);
+    setRemote(NO_REMOTE_RESULTS);
 
     try {
-      const [result] = await fetchPlaces(place, 1);
+      const [result] = await fetchPlaces(place, REMOTE_FETCH_LIMIT);
       if (!result) {
         setStatus("error");
         return;
       }
 
-      flyToResult(result);
+      await flyToEntry(remoteEntry(result));
     } catch {
       setStatus("error");
     }
@@ -251,69 +324,81 @@ const Search = memo(({ mapRef }) => {
     }
 
     if (event.key === "Enter") {
-      if (selectedIndex >= 0 && suggestions[selectedIndex]) {
-        flyToResult(suggestions[selectedIndex]);
-      } else if (query.trim()) {
-        flyTo(query.trim());
-      }
+      commit();
     }
   };
 
+  // Enter takes the highlighted row, else the top one, but never a row still answering an older query.
   const commit = () => {
-    if (selectedIndex >= 0 && suggestions[selectedIndex]) {
-      flyToResult(suggestions[selectedIndex]);
+    const highlighted = selectedIndex >= 0 ? suggestions[selectedIndex] : null;
+    const target = highlighted ?? (suggestions[0]?.stale ? null : suggestions[0]);
+    if (target) {
+      void flyToEntry(target);
     } else if (query.trim()) {
-      flyTo(query.trim());
+      void flyToQuery(query.trim());
     }
   };
 
   const hasSuggestions = expanded && suggestions.length > 0;
+  const phoneBar = expanded && isMobile;
+  const size = phoneBar ? PHONE_BAR_SIZE : isTouch ? TOUCH_SIZE : COMPACT_SIZE;
+  // Up from the home indicator and in from a notch, with the dock (0 elsewhere).
+  const bottom = `calc(${phoneBar ? `${DOCK_BOTTOM_REM + DOCK_HEIGHT_REM + 0.5}rem` : DOCK_BUTTON_BOTTOM} + ${SAFE_BOTTOM})`;
 
   return (
     <div
       style={{
         position: "fixed",
-        // Desktop: sits right of the bottom toolbar and expands rightward.
-        // Phones: the expanded box wouldn't fit there, so it opens as a
-        // full-width bar just above the toolbar instead.
-        bottom: expanded && isMobile ? "5rem" : "1rem",
-        // Clear of the bottom toolbar (0.5rem + 8.75rem wide).
-        left: expanded && isMobile ? "0.5rem" : "9.75rem",
-        height: "3rem",
-        width: expanded ? (isMobile ? "calc(100vw - 1rem)" : "17rem") : "3rem",
+        // Desktop: sits right of the launcher dock, level with the bottoms of
+        // its buttons, and expands rightward. Phones: the expanded box wouldn't
+        // fit there, so it opens as a full-width bar just above the dock.
+        bottom,
+        // hudDock.js derives this from the dock's launcher count, so a new
+        // launcher can't end up underneath it.
+        left: `calc(${phoneBar ? `${DOCK_LEFT_REM}rem` : BESIDE_DOCK_LEFT} + ${SAFE_LEFT})`,
+        height: size,
+        width: expanded ? (isMobile ? `calc(100vw - 1rem - ${SAFE_LEFT} - ${SAFE_RIGHT})` : "17rem") : size,
         overflow: "visible",
         transition: "width 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
         cursor: expanded ? "default" : "pointer",
         display: "flex",
         alignItems: "center",
         zIndex: 9999,
-        borderRadius: hasSuggestions ? "0 0 12px 12px" : "12px",
-        backgroundColor: "rgba(24, 24, 27, 0.9)",
-        backdropFilter: "blur(4px)",
-        border: "1px solid rgba(255,255,255,0.1)",
-        boxShadow: "0 4px 6px -1px rgba(0,0,0,0.2)",
+        borderRadius: hasSuggestions ? "0 0 10px 10px" : "10px",
+        backgroundColor: "var(--oh-hud-bg)",
+        backdropFilter: "var(--oh-hud-blur)",
+        border: "1px solid var(--oh-hud-border)",
+        boxShadow: "var(--oh-hud-shadow-soft)",
         color: "white",
         fontFamily: "sans-serif",
       }}
-      onClick={!expanded ? () => setExpanded(true) : undefined}
+      onClick={!expanded ? () => {
+        setExpanded(true);
+        // iOS raises the keyboard only for a focus made while the tap is being
+        // handled, so on a touch screen the tap focuses the input itself
+        // rather than leaving it to the effect above.
+        if (isTouch) inputRef.current?.focus();
+      } : undefined}
     >
       <div
         style={{
           display: "flex",
           alignItems: "center",
           width: "100%",
-          height: "3rem",
+          height: size,
           overflow: "hidden",
         }}
       >
         <button
+          className="oh-tap"
           onClick={expanded ? close : undefined}
+          aria-label={expanded ? "Close search" : "Search place"}
           style={{
             background: "none",
             border: "none",
             cursor: "pointer",
-            width: "3rem",
-            height: "3rem",
+            width: size,
+            height: size,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -325,7 +410,7 @@ const Search = memo(({ mapRef }) => {
           title={expanded ? "Close" : "Search place"}
         >
           {status === "loading" ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
               <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round">
                 <animateTransform
@@ -339,12 +424,12 @@ const Search = memo(({ mapRef }) => {
               </path>
             </svg>
           ) : expanded ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <circle cx="11" cy="11" r="7" />
               <line x1="16.5" y1="16.5" x2="22" y2="22" />
             </svg>
@@ -353,10 +438,12 @@ const Search = memo(({ mapRef }) => {
 
         <input
           ref={inputRef}
+          className="oh-tap-row"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
             setStatus(null);
+            setSelectedIndex(-1);
           }}
           onKeyDown={handleKeyDown}
           placeholder={status === "error" ? "Place not found..." : "Search place..."}
@@ -376,13 +463,15 @@ const Search = memo(({ mapRef }) => {
 
         {expanded && (
           <button
+            className="oh-tap"
             onClick={commit}
+            aria-label="Go"
             style={{
               background: "none",
               border: "none",
               cursor: "pointer",
               padding: "0 0.6rem",
-              height: "3rem",
+              height: size,
               color: query.trim() ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.2)",
               display: "flex",
               alignItems: "center",
@@ -403,79 +492,101 @@ const Search = memo(({ mapRef }) => {
         <div
           style={{
             position: "absolute",
-            bottom: "calc(3rem - 1px)",
+            bottom: `calc(${size} - 1px)`,
             left: "-1px",
             right: "-1px",
-            backgroundColor: "rgba(24, 24, 27, 0.97)",
-            backdropFilter: "blur(4px)",
-            borderRadius: "12px 12px 0 0",
-            border: "1px solid rgba(255,255,255,0.1)",
+            backgroundColor: "var(--oh-hud-bg-strong)",
+            backdropFilter: "var(--oh-hud-blur)",
+            borderRadius: "10px 10px 0 0",
+            border: "1px solid var(--oh-hud-border)",
             borderBottom: "none",
             boxShadow: "0 -6px 16px rgba(0,0,0,0.3)",
             overflow: "hidden",
+            // On a phone the keyboard takes half the screen, and seven rows
+            // ran off the top of what was left. Capped to the room above the
+            // bar, the list scrolls instead.
+            ...(isMobile || isTouch
+              ? { maxHeight: `calc(${APP_HEIGHT} - ${bottom} - ${size} - 0.5rem)`, overflowY: "auto" }
+              : null),
           }}
         >
-          {suggestions.map((suggestion, index) => {
-            const { primary, region } = formatSuggestion(suggestion);
+          {suggestions.map((suggestion, index) => (
+            <div
+              key={suggestion.key}
+              className="oh-tap-row"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                void flyToEntry(suggestion);
+              }}
+              onMouseEnter={() => setSelectedIndex(index)}
+              style={{
+                padding: "0.45rem 0.75rem",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.55rem",
+                backgroundColor:
+                  index === selectedIndex ? "rgba(255,255,255,0.08)" : "transparent",
+                opacity: suggestion.stale ? 0.5 : 1,
+                borderBottom:
+                  index < suggestions.length - 1
+                    ? "1px solid rgba(255,255,255,0.05)"
+                    : "none",
+                transition: "background-color 0.1s",
+              }}
+            >
+              <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+                {suggestion.icon}
+              </div>
 
-            return (
-              <div
-                key={suggestion.place_id}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  flyToResult(suggestion);
-                }}
-                onMouseEnter={() => setSelectedIndex(index)}
-                style={{
-                  padding: "0.45rem 0.75rem",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.55rem",
-                  backgroundColor:
-                    index === selectedIndex ? "rgba(255,255,255,0.08)" : "transparent",
-                  borderBottom:
-                    index < suggestions.length - 1
-                      ? "1px solid rgba(255,255,255,0.05)"
-                      : "none",
-                  transition: "background-color 0.1s",
-                }}
-              >
-                <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
-                  {getIcon(suggestion)}
+              <div style={{ overflow: "hidden", flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: "0.82rem",
+                    color: "rgba(255,255,255,0.9)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {suggestion.primary}
                 </div>
-
-                <div style={{ overflow: "hidden" }}>
+                {suggestion.region && (
                   <div
                     style={{
-                      fontSize: "0.82rem",
-                      color: "rgba(255,255,255,0.9)",
+                      fontSize: "0.72rem",
+                      color: "rgba(255,255,255,0.4)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       lineHeight: 1.3,
                     }}
                   >
-                    {primary}
+                    {suggestion.region}
                   </div>
-                  {region && (
-                    <div
-                      style={{
-                        fontSize: "0.72rem",
-                        color: "rgba(255,255,255,0.4)",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      {region}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
-            );
-          })}
+
+              {suggestion.local && (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontSize: "0.56rem",
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "rgba(255,255,255,0.45)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    borderRadius: "999px",
+                    padding: "1px 5px",
+                  }}
+                >
+                  In world
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

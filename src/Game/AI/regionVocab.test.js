@@ -322,3 +322,11 @@ test("F12 non-array focusCodes is treated as empty (no throw)", () => {
   const text = buildRegionOwnershipText(CATALOG, {}, { focusCodes: "France" });
   assert.ok(!text.includes(FOCUS_INTRO));
 });
+
+test("with the region lists behind lookups, the vocabulary is powers and counts only", () => {
+  const text = buildRegionOwnershipText(CATALOG, {}, { focusCodes: ["france"], focusTotalCap: 0 });
+  assert.equal(text.includes(FOCUS_INTRO), false, "no region list at all");
+  assert.equal(text.includes(ROSTER_INTRO), true);
+  assert.match(text, /- France — \d+ regions?/);
+  assert.equal(/Bourgogne/.test(text), false, "no region names");
+});

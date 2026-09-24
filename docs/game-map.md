@@ -23,12 +23,12 @@ Everything below is in `src/Game/Map/` unless noted.
 
 | Hook | File | What it provides |
 |---|---|---|
-| `useWorldState()` | `useWorldState.js` | Singleton 5s poll of `world.json`; one poll shared by all consumers |
+| `useWorldState()` | `useWorldState.js` | Singleton store of `world.json`, shared by all consumers, fed by canonical write events |
 | `useCustomBackground()` | `useCustomBackground.js` | Resolves a scenario's uploaded image/vector basemap from `world.background` |
 | `useMapSetting(key)` | `../../runtime/mapSettings.js` | Reactive localStorage map toggles (`hideCountryLabels`, `disableIdleRotation`) |
-| `unitsController` | `unitsController.js` | Separate 5s poll of `world.units` + player order mutations |
+| `unitsController` | `unitsController.js` | Separate store of `world.units` + player order mutations |
 
-`useWorldState` is a module-level singleton: `startPolling()` fires one `setInterval(poll, 5000)` reading `JSON_URLS.world`, and all mounted consumers subscribe. It returns a **stable object identity** across polls when nothing it exposes changed (deep/shallow compares each field — arrays like `markers`/`regionClaimants` are `JSON.stringify`-compared) so React children don't re-render on every 5s tick. See [World state](world-state.md) for the `world.json` schema.
+`useWorldState` is a module-level singleton: it bootstraps `JSON_URLS.world` once and thereafter updates from the `oh:world-updated` event that every canonical write dispatches, so there is no poll. It returns a **stable object identity** when nothing it exposes changed (each field is compared by content, not reference) so React children don't re-render on an unrelated world write. See [World state §9](world-state.md#9-state-distribution-three-stores-no-panel-polls).
 
 Fields `useWorldState` derives from `world.json`:
 
@@ -122,7 +122,7 @@ Every branch sets `sky: { "atmosphere-blend": 0 }` — MapLibre's uniform atmosp
 | `terrain-source` | raster-dem | `TERRAIN_TILE_TEMPLATE` (AWS terrarium) | `encoding:"terrarium"`, `maxzoom:5` |
 | `hillshade-source` | raster-dem | same terrarium tiles | for the `hills` layer |
 
-Layers: `satellite-lowres-layer`, `satellite-layer` (both with `SATELLITE_PAINT` grading — brightness cap, slight desaturation/contrast so it sits against the dark UI), and `hills` (hillshade, exaggeration 0.1). The default basemap is `DEFAULT_BASEMAP_ID = "ocean"`; the in-game basemap picker was removed, so stock worlds are fixed to that preset. `ensureBasemapProtocol()` (called at module load) registers the `ohbase://` protocol handler. Basemap helpers live in `src/runtime/assets.js` (`ESRI_BASEMAPS`, `esriTileTemplate`, `basemapProtocolTemplate`, `basemapMaxZoom`).
+Layers: `satellite-lowres-layer`, `satellite-layer` (both with `SATELLITE_PAINT` grading — brightness cap, slight desaturation/contrast so it sits against the dark UI), and `hills` (hillshade, exaggeration 0.1). The default basemap is `DEFAULT_BASEMAP_ID = "ocean"`; Settings → Map has a basemap picker (Continuum's), stored in this browser as `map_basemap_style`; empty (the default) keeps the scenario author's background and basemap, and a built-in id replaces both for this player only. `ensureBasemapProtocol()` (called at module load) registers the `ohbase://` protocol handler. Basemap helpers live in `src/runtime/assets.js` (`ESRI_BASEMAPS`, `esriTileTemplate`, `basemapProtocolTemplate`, `basemapMaxZoom`).
 
 ### World-image corner coordinates
 
@@ -145,7 +145,7 @@ Two constants (`World.jsx:44`) give the image-source corners:
 |---|---|---|---|---|
 | `countries-source` | vector | `PMTILES_PROTOCOL_URLS.countries`, `maxzoom 8` | `!customFlag` | `countries-fill`, `countries-outline` |
 | `regions-source` | vector | `PMTILES_PROTOCOL_URLS.regions`, `maxzoom 8` | **never gated** | `regions-fill`, `regions-disputed`, `regions-outline` |
-| `custom-regions-source` | geojson | `enrichedCustomRegionData`, `tolerance 0` | inert unless `customActive` | `custom-regions-fill-far`, `custom-regions-hairline-far`, `custom-regions-disputed-far`, `custom-regions-fill`, `custom-regions-disputed`, `custom-regions-outline` |
+| `custom-regions-source` | geojson | the authored regions URL itself (`regionsGeojsonUrl`, `promoteId: id`, `tolerance 0.6`); live ownership reaches it through feature-state | mounted whenever `customFlag` | `custom-regions-fill-far`, `custom-regions-fill`, `custom-regions-local-outline` |
 | `country-curved-label-source` | geojson | `activeCurvedLabelData` | — | `country-curved-labels` |
 | `country-point-label-source` | geojson | `activePointLabelData` | — | `country-labels` |
 
@@ -171,13 +171,12 @@ The crossfade band is z5.5–6.5 because the seed geometry was extracted at tile
 | Layer | Paint driver | Behaviour |
 |---|---|---|
 | `regions-fill` | `stockRegionsFillPaint` | `match GID_1 → ownerColorCss(owner)` for every non-drawn, non-edited region; opacity `TILE_FILL_FADE` (0 unless `customActive`) |
-| `regions-outline` | `regionsOutlinePaint` | black hairline; width `interp 3→0.2, 8→0.6, 12→1.0`; opacity fades in `5.5→0, 6.5→0.6, 8→0.7` (only when the tile fills do — below that the seed hairlines carry it); excludes `editedStockIds` |
+| `regions-outline` | `buildProvinceOutlinePaint` | Stock-world province hairlines only (`worldKnown && !customActive`); hidden through z6.5, then fade in; excludes `editedStockIds`. Shares the scenario-grid style below. |
 | `custom-regions-fill-far` | `["get","_fillColor"]` | seed-GeoJSON fill for GADM regions, `maxzoom 7`, opacity `FAR_FILL_FADE` |
-| `custom-regions-hairline-far` | — | seed hairlines that sit exactly on the far fills, hand off at z6.5 |
 | `custom-regions-fill` | `["get","_fillColor"]` | author-drawn/edited geometry, opacity constant `0.72` at all zooms |
-| `custom-regions-outline` | — | black outline for authored geometry, opacity `3→0, 4→0.35, 8→0.6` |
+| `custom-regions-local-outline` | `buildProvinceOutlinePaint` | Scenario province grid (`customActive && worldKnown`): hidden through z6.5; opacity `6.5→0, 7.5→0.25, 10→0.38, 12→0.45`; width `6.5→0.25, 8→0.4, 12→0.5` CSS px, capped above z12. Country/frontier strokes stay visible, and fill-based province selection is unchanged. |
 
-`_fillColor` is **pre-baked into each GeoJSON feature** by `enrichedCustomRegionData` (`Nations.jsx:852`) so the GL paint expression is the constant `["get","_fillColor"]` — a match expression that never recompiles when ownership changes. The colour per feature is: override colour (`regionOwnershipOverrides[id]`) → owner colour (`ownerColorCss(props.owner)`) → `NEUTRAL_LAND_COLOR = rgb(88,98,110)`.
+`_fillColor` is carried by the dissolved polity surfaces (`enrichedPolitySurfaceData`). The authored regions source is the URL itself — nothing on the UI thread parses or clones the regions file — and live ownership reaches it through `setFeatureState` (`fillColor`), so an ownership change is a tiny state diff rather than a GeoJSON replacement.
 
 ---
 
@@ -213,10 +212,9 @@ A region whose `claimants` list names contesting countries renders **diagonally 
 
 Because the image id **encodes its own colours**, the `styleimagemissing` handler can rebuild *any* combination — including after a globe↔mercator remount wipes all GL images. This is why stripes are reactive rather than pre-registered.
 
-Claimants come from `world.regionClaimants[id]` first (how the modern-world scenario declares disputes, since its geometry is an immutable seed), else the region feature's own `claimants` prop (editor maps). `enrichedCustomRegionData` bakes a `_stripes` property (the image id) onto disputed features; layers select on `["has","_stripes"]` and paint with `fill-pattern` instead of the solid fill:
+Claimants come from `world.regionClaimants[id]` first (how the modern-world scenario declares disputes, since its geometry is an immutable seed), else the region feature's own `claimants` prop (editor maps). A region the world has a say on uses the world's list even when it is empty: `useWorldState.js` `withSettledClaims` puts every `world.settledRegionClaims` region into the map's view with no claimants, and the worker's `deriveDisputedData`, the stock-tile stripes and the region click test the key's presence, so a dispute the world ended does not come back from the feature. `enrichedCustomRegionData` bakes a `_stripes` property (the image id) onto disputed features; layers select on `["has","_stripes"]` and paint with `fill-pattern` instead of the solid fill:
 
-- `custom-regions-disputed-far` — seed geometry, `FAR_FILL_FADE`.
-- `custom-regions-disputed` — authored geometry, constant `0.72`.
+- `custom-regions-disputed-vnext` — the worker's `disputedData` (every claimant-carrying region with its live owner and claimants), striped at `0.90` whenever `customActive && worldKnown`.
 - `regions-disputed` — the tile twin for GADM disputed regions (uses `disputedTileStops`, opacity `TILE_FILL_FADE`), excluding `editedStockIds`.
 
 `DISPUTED_TERRITORY_CLAIMANT` (`Nations.jsx:338`) maps GADM's `Z01`–`Z09` disputed codes (Kashmir, Aksai Chin, Arunachal Pradesh…) to a claimant country so the map shows `"Disputed (India)"` instead of a bare `"Z01"` label.
@@ -254,10 +252,10 @@ Both label sources feed `type:"symbol"` layers (`country-labels`, `country-curve
 
 | Property | Value |
 |---|---|
-| `text-font` | `labelFontStack` = `[world.labelFont || "Impact", "Arial Black", "sans-serif"]` (drawn locally as a CSS font-family — MapLibre v5 has no glyphs endpoint here) |
-| `text-size` | `buildCountryTextSize(1, isGlobe)` — exponential-in-zoom, scaled by each feature's baked `areaScale`, capped at 254 |
+| `text-font` | `labelFontStack` = `[world.labelFont || "Georgia", "Georgia", "Times New Roman", "Palatino Linotype", "serif"]` (drawn locally as a CSS font-family — MapLibre v5 has no glyphs endpoint here) |
+| `text-size` | `buildCountryTextSize(mult, isGlobe, prop)` — exponential-in-zoom with a stop at every integer zoom, each the uncapped size, so the two sizes MapLibre mixes per tile are exactly 2× apart and a label doubles with the map. MapLibre itself clamps glyphs at 255 px, so `buildCountryTextOpacity` keys each layer's `text-opacity` to the same size expression and fades a label out between 140 and 230 px, on top of the layer's zoom ramp (z5.8–z7.1) |
 | `text-color` / `text-halo-color` | `world.labelTextColor || "#FFFFFF"` / `world.labelHaloColor || "rgba(0,0,0,0.5)"` |
-| `text-opacity` | interp zoom `5→0.75, 8→0` (labels fade out as you zoom in and cities take over) |
+| `text-opacity` | the layer's ramp (`STOCK_LABEL_RAMP`, `LIVE_LABEL_RAMP`…) fading to 0 at `LABEL_MAX_ZOOM` z7.5, times the pixel-size fade (labels fade out as you zoom in and cities take over) |
 | `visibility` | `none` when `hideCountryLabels` map setting is on |
 | `text-pitch/rotation-alignment` | `"map"`, `text-keep-upright:false` |
 
@@ -303,22 +301,19 @@ Status drives styling — **pending** (player-requested, not yet AI-confirmed) u
 
 ### Controller — `unitsController.js`
 
-A module-level store, separate from `useWorldState` but with the same 5s cadence (`startUnitsSync`). It holds `units`, `playerCode`, `round`, `gameDate`, `allowedUnitTypes`, and an `interactionMode` (`idle | deploy | move | attack`), plus a `subscribeUnits` pub/sub the map/popups/Forces panel listen to.
+A module-level store, separate from `useWorldState` but with the same 5s cadence (`startUnitsSync`). It holds `units`, `playerCode`, `round`, `gameDate`, `allowedUnitTypes`, and an `interactionMode` (`idle | deploy | admin-place`), plus a `subscribeUnits` pub/sub the map/popups/Forces panel listen to.
 
 | Function | Effect | Instant feedback | AI hand-off |
 |---|---|---|---|
 | `deployUnit` | Add a `pending` unit (translucent) | placed locally | queues a "Deploy request" order; revert = remove |
-| `moveUnitTo` | Within era/type leash → move + `moving`; beyond `moveLeashKm` → stay put, `moving` | snaps or holds | queues Move / Long-range order |
-| `attackWith` | In `engagementRangeKm` → `resolveClash` (seeded, instant); out of range → approach order | strength/positions update, losers filtered out | queues Attack order (`regionTransfer` hint) |
-| `attackFeature` | Attack a city/marker; no local clash — positional only | closes on objective, reads `engaged` | queues assault order (`markerOps`/`regionTransfer` hints) |
 
-Player deploy is purely local; move/attack write to `world.units` immediately **and** queue a machine-readable `action` (via `queueOrder`) so the AI honours/contests them on the next time-jump. `queueOrder` records a `unitRevert` so deleting the queued action before the jump undoes the on-map change (#368). Combat maths (`resolveClash`, `distanceKm`, `engagementRangeKm`, `moveLeashKm`) live in `unitCombat.js`. `busy` suppresses the poll from clobbering an in-flight commit.
+Player deploy is purely local **and** queues a machine-readable `action` (via `queueOrder`) so the AI confirms, repositions or rejects it on the next jump. The player never moves or fights a formation by hand: they state intent (`requestUnitOrders`, also an `action`), and the engine (`runtime/unitMotion.js`) and the AI carry it out.
 
 ### Interaction dispatch — `Nations.jsx` `handleRegionClick`
 
 The map's single `click` handler (`Nations.jsx:564`) routes by `getInteractionMode()`:
 
-- **deploy/move/attack modes** intercept the click as a *target* (`deployUnit` / `moveUnitTo` / `attackWith` or `attackFeature`), then `clearInteractionMode()`.
+- **deploy mode** intercepts the click as a *target* (`deployUnit`), then `clearInteractionMode()`; the admin placement tool (`placeUnitAdmin`) rides the same dispatcher.
 - **normal click** priority: unit (`units-fill`) → feature (`markers-shapes` > `cities-shapes`/`cities-labels`) → region. Region query uses `["custom-regions-fill","custom-regions-fill-far"]` on drawn-geometry maps but `["custom-regions-fill","regions-fill"]` on re-ownership maps (so a click on fantasy ocean resolves to nothing, not the leftover real country underneath — `hasDrawnGeometry`). The resolved region is handed to `onRegionSelected` with the **owner name** resolved (via `ownerLookupRef`), the underlying GADM `gid0` kept as a flag fallback.
 
 The staged-reveal system (`setUnitsOverride` / `setWorldStateOverride`) lets the map show units/world as of the last revealed event during a turn's event playback, snapping back to live state when cleared (see [World state](world-state.md) and the turn/time system).
@@ -348,6 +343,7 @@ Sun/star/lighting math is in `globeSunMath.js`, `globeCanvasLighting.js`, `globe
 | `maxBounds` lat `-80…85` | `<Map>` | Keep the camera in the usable latitude band |
 | PMTiles `maxzoom 8` | `countries-source`, `regions-source` | **Not the archive's z10.** `extract-regions.mjs` can't stitch a z10 seed (dies in `JSON.stringify` past V8's 512 MB max string); z9's 4.1 M vertices OOM'd the editor renderer; z8's 2.6 M is stable — and rendering finer than the editor can author only draws detail no map can be built against. MapLibre overzooms past z8. |
 | `custom-regions-fill-far maxzoom 7` | seed-GeoJSON far layer | Stops just past the z5.5–6.5 crossfade; the stock tiles own the crisp zoom |
+| Polity names end at z7.5 | `LABEL_MAX_ZOOM` (every label layer's `maxzoom` and ramp, `Nations.jsx`), `POLITY_TEXT_MAX_ZOOM` (`labels/polityTextLayout.js`) | Names fade over the last half zoom and stop at 7.5; past that the map is provinces and cities |
 | Crossfade band z5.5–6.5 | `FAR_FILL_FADE`/`TILE_FILL_FADE` | Seed extracted at tile-zoom 5; hand off just past it |
 | Pixel-ratio switch z4.5 / z5 | `applyDynamicPixelRatio` | Soften the whole-world view; hysteresis prevents flapping |
 | Cities `minzoom 3.4`, city thresholds step by zoom | `Cities.jsx` | Thin out symbols as you zoom out |
@@ -363,13 +359,13 @@ world.json ──(useWorldState, 5s)──► customRegions, regionOwnershipOver
    │                                 regionClaimants, polityOverrides, markers,
    │                                 labelFont/Color, basemap, background, units
    │
-   ├─► Nations.jsx ──► enrichedCustomRegionData (_fillColor/_stripes baked in)
-   │                   ownerLabelData (per-owner, follows conquests)
+   ├─► Nations.jsx ──► polity boundary worker (dissolved surfaces, frontiers, disputed data)
+   │                   live polity labels (buildPolityLabelCollections; follow conquests)
    │                   stockRegionsFillPaint (GID_1 → owner colour)
    │
    ├─► useCustomBackground ──► buildWorldStyle (image/vector/placeholder/ESRI)
    ├─► MarkersLayer ──► markers-source
-   └─► unitsController (own 5s poll of world.units) ──► Units.jsx / popups
+   └─► unitsController (own store of world.units) ──► Units.jsx / popups
 
 colors.json ──(getNationColors, oh:colors-updated event)──► colorMap
    └─► resolveOwnerRgb ──► every fill / stripe / label / marker / unit colour
@@ -379,10 +375,14 @@ countries.pmtiles / regions.pmtiles / cities.pmtiles ──► stock tile geomet
    └─► countryLabels.js (z0 countries tile) ──► point + curved stock labels
 ```
 
-Every owner recolour, label rebuild, and unit/marker update is a consequence of a `world.json` (or `colors.json`) change surfacing through the 5s polls — there is no push channel; the map is a pure function of that polled state plus the static per-scenario geometry.
+Every owner recolour, label rebuild, and unit/marker update is a consequence of a `world.json` (or `colors.json`) change surfacing through the store's write events. The map is a pure function of that state plus the static per-scenario geometry.
 
 ### Cross-references
 
 - [World state](world-state.md) — the `world.json` schema, `regionOwnershipOverrides`, `polityOverrides`, `regionClaimants`, `markers`, `units`, staged-reveal overrides.
 - Runtime asset layer (`src/runtime/assets.js`) — `JSON_URLS`, `PMTILES_PROTOCOL_URLS`, the `ohbase://` protocol, `getNationColors`, `resolveCountryDisplayName`, scenario-token cache sweeping.
 - Selection popups (`src/Game/Selection/*`) — consumers of `onRegionSelected` / `onFeatureSelected` / `onUnitSelected`.
+
+## Readiness signals
+
+`src/runtime/mapReadiness.js` records two things on `window.__OH_MAP_READINESS__` and dispatches them as events: `oh:map-polities-ready` (Nations.jsx, with the regions asset URL the polity layers were built for — after the boundary worker answers or fails, or at once on a stock map) and `oh:map-idle` (World.jsx, every idle). The loading screen a game opens under (`GameUI/gameLoadingScreen.jsx`) waits for the first, then for the next idle.

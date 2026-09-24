@@ -103,6 +103,13 @@ export default defineConfig(({ mode }) => ({
     // a plain truthiness check.
     'import.meta.env.VITE_OH_WEB': JSON.stringify(mode === 'web'),
   },
+  // PTR placement runs in a module worker whose dependency graph can be
+  // split into multiple chunks. Vite's default worker output is IIFE, which
+  // Rollup cannot use for code-splitting builds; emit workers as native ES
+  // modules so production builds match the module-worker runtime contract.
+  worker: {
+    format: 'es',
+  },
   plugins: [
     react({
       babel: {
@@ -122,11 +129,27 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       output: {
+        // Explicit entries so the split is stable across builds rather than
+        // incidental. The AI stack reaches the graph only through
+        // Game/AI/gameplayLazy.js, so naming it here keeps it one chunk instead
+        // of letting Rollup fold it back into whatever imports it first.
         manualChunks: {
           'vendor-react': ['react', 'react-dom'],
           'vendor-maplibre': ['maplibre-gl'],
           'vendor-chartjs': ['chart.js'],
           'vendor-ol': ['ol'],
+          'vendor-geo': [
+            '@turf/area',
+            '@turf/boolean-point-in-polygon',
+            '@turf/centroid',
+            '@turf/helpers',
+            '@turf/line-intersect',
+            '@turf/line-split',
+            '@turf/polygon-to-line',
+            '@turf/simplify',
+            'd3-geo',
+            'polygon-clipping',
+          ],
         },
       },
     },

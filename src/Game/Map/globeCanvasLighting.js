@@ -121,6 +121,7 @@ export const drawGlobeLighting = ({
   width,
   height,
   opacity,
+  terrainRadii = 0,
   immediate = false,
 }) => {
   if (!canvas || !matrix || !cameraPosition || !sunDirection || opacity <= 0 || width <= 0 || height <= 0) {
@@ -133,13 +134,34 @@ export const drawGlobeLighting = ({
     state = createState(canvas);
     CANVAS_STATES.set(canvas, state);
   }
-  const requestId = ++state.latestRequestId;
-  const synchronous = state.failed;
   const { pixelWidth, pixelHeight } = getRenderSize(
     width,
     height,
     immediate ? INTERACTIVE_RENDER_PIXELS : REFINED_RENDER_PIXELS,
   );
+
+// Worker round-trip latency causes lag during camera movement. 
+// Run interactive frames inline on the main thread for same-frame renders, 
+// and reserve the worker for the settled/idle state (REFINED_RENDER_PIXELS).
+  if (immediate) {
+    state.latestRequestId += 1;
+    state.pending = null;
+    state.interactivePixels = renderGlobeLightingPixels({
+      matrix: Array.from(matrix),
+      cameraPosition: Array.from(cameraPosition),
+      sunDirection: Array.from(sunDirection),
+      pixelWidth,
+      pixelHeight,
+      opacity,
+      terrainRadii,
+      outputPixels: state.interactivePixels,
+    });
+    paintPixels(canvas, state.interactivePixels, pixelWidth, pixelHeight);
+    return;
+  }
+
+  const requestId = ++state.latestRequestId;
+  const synchronous = state.failed;
   const payload = {
     matrix: Array.from(matrix),
     cameraPosition: Array.from(cameraPosition),
@@ -147,6 +169,7 @@ export const drawGlobeLighting = ({
     pixelWidth,
     pixelHeight,
     opacity,
+    terrainRadii,
     requestId,
   };
 

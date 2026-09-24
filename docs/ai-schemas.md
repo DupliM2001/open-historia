@@ -2,7 +2,7 @@
 
 Every AI gameplay task in Open Historia hands the model a JSON Schema (as a provider "tool") and gets back a JSON object it must trust before mutating the world. This page documents the schemas the model must return (`src/Game/AI/gameplaySchemas.js`), the hand-rolled two-layer validator that gates every response, and the strict-vs-salvage retry discipline in `runJsonTask` (`src/Game/AI/gameplay.js`) that decides whether a bad answer earns a corrective retry or gets repaired in place. If you are adding a field the model should emit, read the [`additionalProperties: false` trap](#the-additionalpropertiesfalse-trap) first — it is the single most common way a new feature silently does nothing.
 
-Related pages: [World state](world-state.md) (what these payloads mutate), [AI providers](ai-providers.md) (how the schema becomes a tool call in `main.jsx`), [Gameplay orchestration](ai-gameplay.md) (the task callers), [Gameplay prompts](gameplay-prompts.md) (the templates rendered alongside each schema).
+Related pages: [World state](world-state.md) (what these payloads mutate), [AI providers](ai-overview.md) (how the schema becomes a tool call in `main.jsx`), [Gameplay orchestration](ai-overview.md) (the task callers), [Gameplay prompts](ai-prompts.md) (the templates rendered alongside each schema).
 
 ---
 
@@ -35,11 +35,13 @@ Each task is identified by a **task key**. `GAMEPLAY_SCHEMAS` maps the key to it
 | `descriptionToAction` | `DESCRIPTION_TO_ACTION_SCHEMA` | `submit_description_to_action` | freeform-intent → command |
 | `nextSpeaker` | `NEXT_SPEAKER_SCHEMA` | `submit_next_speaker` | diplomatic chat turn order |
 | `eventConsolidator` | `EVENT_CONSOLIDATOR_SCHEMA` | `submit_event_consolidation` | `consolidateHistoryBatch` |
-| `catalystCreation` | `CATALYST_CREATION_SCHEMA` (**= `catalystSchema`**, `:517`) | `submit_catalyst_creation` | catalyst scene creation |
-| `catalystExecutor` | `CATALYST_EXECUTOR_SCHEMA` | `submit_catalyst_execution` | advance a catalyst |
-| `catalystSummary` | `CATALYST_SUMMARY_SCHEMA` | `submit_catalyst_summary` | resolved catalyst → event |
+| `interactiveCreation` | `INTERACTIVE_CREATION_SCHEMA` (**= `interactiveSchema`**, `:517`) | `submit_interactive_creation` | opening an interactive event's scene |
+| `interactiveExecutor` | `INTERACTIVE_EXECUTOR_SCHEMA` | `submit_interactive_execution` | advance an interactive event |
+| `interactiveSummary` | `INTERACTIVE_SUMMARY_SCHEMA` | `submit_interactive_summary` | finished interactive event → event |
 | `gameMaster` | `GAME_MASTER_SCHEMA` | `submit_game_master` | `applyGameMasterCommand` |
 | `countryStatSheet` | `COUNTRY_STAT_SHEET_SCHEMA` | `submit_country_stat_sheet` | national stat sheet |
+| `timelineCurator` | `TIMELINE_CURATOR_SCHEMA` | `submit_timeline_curator` | one judgment per fresh event; native gates in `nativeTimelineCurator.js` decide what a judgment may remove |
+| `unitDirector` | `UNIT_DIRECTOR_SCHEMA` | `submit_unit_director` | unit operations for the turn's military events (sanitized by `nativeUnitDirector.js`) |
 | `idleDiplomacy` | `IDLE_DIPLOMACY_SCHEMA` | `submit_idle_diplomacy` | idle inbox drip |
 | `pregameHistory` | `PREGAME_HISTORY_SCHEMA` | `submit_pregame_history` | pre-game backstory |
 
@@ -86,8 +88,10 @@ The heart of the map-mutating pipeline. Attached to events (`eventSchema.impacts
 | `createdChats` | `createdChatSchema[]` | Diplomatic chats the event opens toward the player | no |
 | `polityChanges` | `polityChangeSchema[]` | Polity metadata changes (name/color/reputation/tags…) | no |
 | `regionTransfers` | `regionTransferSchema[]` | **Map ownership changes.** Required by prompt whenever narration says territory changed hands — one entry per region | no |
+| `regionClaims` | `regionClaimSchema[]` | **Territory claimed but not held.** Marks a region disputed (striped) *without* moving the border — an irredentist declaration, a proclaimed union, a contested frontier. `drop: true` withdraws a claim | no |
 | `unitOps` | `unitOpSchema[]` | Military unit mutations | no |
 | `markerOps` | `markerOpSchema[]` | Structures built/destroyed on the map | no |
+| `reports` | `reportOpSchema[]` | **Documents only some governments hold** — `create` (title, body, `visibleTo` of full polity names, optional `reportId`/`from`/`dateline`) or `share` (`reportId`, `visibleTo`, optional `from` — the holder who passed it on). `from` decides the thread and the speaker when a document reaches the player through diplomacy. Never carries impacts: what moved the map stays in the public event. See [reports](ai-overview.md#reports-what-only-some-governments-know) | no |
 
 ### 4.2 `regionTransferSchema` (`:90`)
 
@@ -98,6 +102,11 @@ The heart of the map-mutating pipeline. Attached to events (`eventSchema.impacts
 | `fromCode` | string | Previous owner polity code — lets the resolver locate the region | no |
 | `toCode` | string | New owner polity code | **yes** |
 | `note` | string | Brief reason | no |
+| `basis` | enum | **Why the land moves** — `treaty` · `annexation` · `unification` · `independence` · `occupation` move the map; `claim` · `threat` · `raid` do not. The vocabulary, its synonyms and the screen live in `runtime/territoryBasis.js`. | no |
+
+`basis` also rides on the **`control`** variant of `regionControlOpSchema` (not on `contest`, which is already the middle state, nor on `clear_contest`, which moves nothing toward anyone). It is **optional on purpose**: an older payload, the Game Master console and a lenient local backend all answer without it, and an entry with no basis is applied exactly as before. A value outside the enum fails schema validation, so the in‑turn retry can name a real one. What the engine does with a `claim` — it becomes a `regionClaims` entry — is in [AI overview](ai-overview.md#strict--salvage-validation-discipline).
+
+> **The schema has a size budget.** `projectOpSchema.test.js` holds the serialized jump tool schema under 32,000 characters, because it rides on every request. That is why the definition of `basis` is stated once (on `regionTransfers`) and the control operation only points at it, and why the long explanation is a call‑time directive (`TERRITORY_BASIS_DIRECTIVE`) rather than a field description. At 31,372 characters there are about 600 to spare: a new impact family should follow the board's example and take its own call rather than join this contract.
 
 ### 4.3 `polityChangeSchema` (`:107`)
 
@@ -122,39 +131,86 @@ Not a single object: an `anyOf` of four shapes discriminated by `op`. Each branc
 | `op` | Required fields | Payload |
 |---|---|---|
 | `spawn` | `op`, `unit` | full `unitSchema` object |
-| `move` | `op`, `unitId`, `toLng`, `toLat` | + optional `regionId`, `note` |
-| `strength` | `op`, `unitId`, `strength` | `strength` integer 0–1000 |
+| `move` | `op`, `unitId` | `at` **or** `toLng`+`toLat`; + optional `regionId`, `posture`, `note` |
+| `strength` | `op`, `unitId`, `strength` | `strength` integer 0–100 |
 | `remove` | `op`, `unitId` | + optional `note` |
 
-`unitSchema` (`:136`) fields: `id`, `name`* (nonempty), `type`* (enum: `infantry|armor|air|naval|artillery|garrison`), `ownerCode`* (nonempty), `strength`* (integer 1–1000), `lng`* (−180..180), `lat`* (−90..90), `regionId`, `status` (enum `idle|moving|engaged|pending`), `note`. (\* = required.)
+`unitSchema` fields: `id`, `name`* (nonempty), `type`* (enum: `infantry|armor|air|naval|artillery|garrison`), `ownerCode`* (nonempty), `strength`* (integer 1–100, a percentage of established strength), `composition`* (nonempty), `at` (where, in words), `lng` (−180..180), `lat` (−90..90), `regionId`, `status` (enum `idle|moving|engaged|pending`), `posture`, `note`. (\* = required.)
+
+**`at` — where, in words** (`atSchema`, shared by a spawn, a move, a build and an update). A phrase naming places the map knows — "near Kharkiv", "eastern Ukraine", "off Sevastopol", "Donetsk Oblast facing Russia" — resolved to a point at validation by `src/Game/AI/placement.js` (see [placing things by name](ai-overview.md#placing-things-by-name-and-keeping-them-apart)). It is why `lng`/`lat` are no longer required on a spawn or a build: a model that guesses a longitude puts an army in the sea, and a model that names a place does not. When both are given, `at` wins; an operation left with neither is dropped by the normalizer exactly as one that never had coordinates. The phrase is described once, in the schema's one-line field description, and explained once, in the `[Placing Things]` directive — the jump's schema has a size budget (`projectOpSchema.test.js`), and five copies of a grammar would spend it.
 
 ### 4.5 `markerOpSchema` — `anyOf` on `op` (`:256`)
 
 | `op` | Required | Payload |
 |---|---|---|
 | `build` | `op`, `marker` | full `markerSchema` |
+| `build` (flat) | `op`, `name` | the structure's fields beside `op` — the shape models write most, accepted rather than failing the turn |
+| `update` | `op` | `markerId` (preferred) or `name`; `kind`, `ownerCode`, `status`, `note`; `at` or `lng`+`lat` only when it genuinely relocates |
 | `remove` | `op`, `name` | + optional `markerId`, `note` |
 
-`markerSchema` (`:227`) fields: `id`, `name`* (nonempty), `kind`* (nonempty free-form lowercase noun — city/base/silo/embassy…), `ownerCode`, `lng`* (−180..180), `lat`* (−90..90), `note`, `foundedAt`.
+`markerSchema` fields: `id`, `name`* (nonempty), `kind`* (nonempty free-form lowercase noun — city/base/silo/embassy…), `ownerCode`, `status`, `at` (where, in words — see §4.4), `lng` (−180..180), `lat` (−90..90), `note`, `foundedAt`. `normalizeMarkerOperationShape` carries `at` (also read from `place`/`where`/`location`) through to validation and omits `lng`/`lat` it was not given, so a build placed by name is not refused for the coordinates it does not have yet.
 
 > **Note:** `validateGeneratedWorldChanges` (Layer 2) also accepts `op: "found"` as an alias of `build` and `op: "destroy"` as an alias of `remove` (`gameplay.js:1095`, `:1105`), and for a build reads coordinates from `operation.marker ?? operation`. The **schema itself only declares `build`/`remove`** — the aliases pass Layer 1 only because `unitOp`/`markerOp` schemas validate loosely (see the caveat in §6).
 
-### 4.6 `createdChatSchema` (`:57`)
+### 4.5-bis `projectOpSchema` — ONE object, discriminated by `op` (`:805`)
+
+Unlike `unitOpSchema` and `markerOpSchema`, this is a single object with an `op` enum and all-optional fields, not an `anyOf`.
+
+| `op` | Meaning |
+|---|---|
+| `create` | open a new effort (give it a `summary` too) |
+| `update` | progress moved, or the status changed; `newName` renames |
+| `milestone` | a checkpoint reached or missed (`projectMilestoneSchema`, `:607`) |
+| `complete` / `cancel` / `fail` | it ended; all three keep it on the board under Closed |
+| `remove` | erase an entry that should never have been opened — NOT how a project ends |
+
+Required: `op` and `name`. `eventIndex` says which of the events this op follows from.
+
+> **Why it is not an `anyOf`.** It used to be, with six branches — and three of them (nested `create`, flat `create`, `update`) each restated `projectSchema`'s twenty properties in full. Serialized, that was **41,538 characters of a 63,161-character jump schema**: two thirds of the entire output contract for one impact branch, more than three times every other branch combined, sent on every jump and once per segment.
+>
+> It was also duplication rather than information. `normalizeProjectOp` (`runtime/gameState.js`) already accepts a create written flat *or* nested (`operation.project ?? operation`), already resolves every op alias, and already merges a create naming an existing project into an update of only the fields it carried. The schema was spending 13 KB describing tolerance the reducer had all along.
+>
+> Collapsing it was also a **reliability** win, not only a size one: a six-branch `anyOf` is one of the worst constructs for Gemini's OpenAPI subset (see `geminiSchema.js`) and for small local models, which routinely pick the wrong branch or blend two. `onComplete` was thinned the same way — it re-embedded `polityChangeSchema`, `regionTransferSchema` and `regionClaimSchema` in full, all three of which appear elsewhere in the very same payload.
+>
+> The nested `create` spelling survives as a permissive `project: { type: "object" }` key. The model is no longer told to nest, but `additionalProperties: false` means one that does anyway would fail validation and cost the whole turn — the exact failure the flat variant was added to prevent. ~150 characters instead of 13,000.
+>
+> `src/Game/AI/projectOpSchema.test.js` is the safety net: every op shape the six-variant schema accepted must still validate.
+
+### 4.5-ter `PROJECTS_SCHEMA` — the board's own task (`:2082`)
+
+`projectOps` no longer appears on a jump at all. `jumpImpactsSchema` is `impactsSchema` minus that branch, and the board is moved by a separate `projects` call (`submit_project_ops`) that runs once per jump, after the segments merge and before anything is written.
+
+```
+{ "projectOps": [ { "op": "update", "id": "...", "name": "...", "eventIndex": 0, "progress": 58, ... } ] }
+```
+
+`{"projectOps": []}` is a valid and expected answer — the prompt says so explicitly, because a schema that rejected it would push the model into inventing progress, which is the one thing the board must never contain.
+
+The **game master keeps the full `impactsSchema`**, board included: it is a single call with no second pass to hand the work to.
+
+Jump schema size across the two changes, measured when they landed: **63,161 → 31,678 → 21,609 characters.** It grew again with what beta added to the jump (31,720 once `at` joined), and the **description audit** brought it to **24,915**: every field description says what the field *is* in a line, because the levers are explained at length in the actions reference and the call-time directives the jump is always given — a paragraph in a field description was the same paragraph a third time. The guard in `projectOpSchema.test.js` is now **28,000**, raised on purpose when `impacts.reports` landed (26,363 chars; ~1,450 for the family). It is a prompt-size guard, not a provider limit: an impact family that saves a *request* may raise it — reports inside the jump cost ~1,450 characters instead of a whole request a turn, which is the trade the budget asks for.
+
+### 4.5-ter `CHAT_ACTIONS_SCHEMA` — one turn of a conversation
+
+`{ actions: chatActionSchema[], memorySummary? }`, the answer to one request that acts for every AI participant in a thread (`submit_chat_actions`; see [group diplomacy](ai-overview.md#group-diplomacy-one-request-for-the-whole-table)).
+
+`chatActionSchema` is ONE object with a `type` enum — send_message, add_reaction, rename_chat, add_member, remove_member, create_poll, add_poll_option, poll_vote — and all-optional fields, like `projectOpSchema` and for a harder reason: **Gemini refuses a function declaration whose `anyOf` has more than six branches** (bisected live: six passed, seven did not) and this vocabulary has eight. Nothing is lost, because `normalizeChatAction` (`chatActions.js`) enforces what each type needs before anything is applied, and a malformed action costs only itself.
+
+`pollRef`/`optionRef` are the batch's own labels for a poll it invents, so it can be created and voted in the same answer; the engine mints the real ids. A label is accepted where a ref is expected — the model writes them that way.
+
+### 4.6 `createdChatSchema`
 
 The initiating polity always speaks first — a blank untitled chat tells the player nothing.
 
 | Field | Type | Meaning | Req? |
 |---|---|---|---|
-| `id` | string | Stable chat id | no |
 | `title` | string (nonempty) | Purpose (e.g. "French mediation offer") | **yes** |
-| `countries` | array (`minItems: 1`) of `chatCountrySchema` | Participants | **yes** |
-| `messages` | `chatMessageSchema[]` | Messages the chat begins with | no |
+| `countries` | array (`minItems: 1`) of polity **names** | The other side; never the player | **yes** |
 | `openingMessage` | string (nonempty) | Initiator's first message, in leader's voice; never the player | **yes** |
 | `speaker` | string (nonempty) | Name of the polity sending the opener; never the player | **yes** |
 | `linkedEventId` | string | Optional cause link | no |
-| `source`, `status` | string | Optional labels | no |
 
-`chatCountrySchema` (`:32`): `code`, `name`* (nonempty). `chatMessageSchema` (`:43`): `code`, `role`, `speaker`, `text`* (nonempty? — only `text` required), `time`.
+`countries` are plain names — what the actions reference has always shown (`{"countries":["..."]}`) and what `resolveInvitees` (gameplay.js) has always read. The schema used to demand `{code, name}` objects, so a model that followed the prose failed the schema; `normalizeChatShape` (gameplaySchemas.js) still folds an object to its name for a campaign whose frozen prompt shows the old shape, on the jump, the idle pulse and the GM transport alike. At validation the resolved `{code, name}` list replaces the names on the kept event, so everything that reads a *stored* chat's participants sees the shape it always did. The message list, `source` and `status` the schema once carried were never taught and are the engine's to fill (`buildGeneratedChat`).
 
 ### 4.7 Jump payload — `JUMP_FORWARD_SCHEMA` (`:399`)
 
@@ -166,20 +222,35 @@ Also used for `autoJumpForward`. This is the largest task.
 | `stopDate` | string | Date the simulation stops | **yes** |
 | `summary` | string | Concise period summary | **yes** |
 | `clearActions` | boolean | Were queued player actions resolved | **yes** |
-| `catalyst` | `catalystSchema \| null` | Optional interactive scene | no |
 | `diplomaticOutreach` | `createdChatSchema[]` | Polities reaching out on their own initiative, not tied to any event | no |
 
 `eventSchema` (`:322`): `id`, `date`* , `title`* , `description`* , `importance`, `kind`, `notable` (bool), `playerRelated` (bool), `impacts` (`impactsSchema`).
 
-### 4.8 `catalystSchema` (`:346`) and executor/summary
+There is **no scene** in the answer: a scene begins only when the player takes up an interactive event, an event of the skip that the engine offers for it now and then at no cost (`runtime/interactiveOffer.js`; `interactiveCreation`). The schema used to carry a `catalyst` on every skip, into a save no panel showed it from; an answer that still carries one has it dropped by `normalizeGameplayPayload` before validation, never refused.
 
-`CATALYST_CREATION_SCHEMA` is `catalystSchema` directly.
+#### Ledger transports (`warUpdates`, `relationUpdates`, `agreementUpdates`)
+
+Three optional strings, one record per line, fields separated by `~`. They deliberately stay text: the nested object form is what Gemini function calling and strict tool modes choke on, and the formats are taught in the live prompt (`buildWarLedgerDirective` / `buildDiplomaticLedgerDirective` in gameplay.js), so every campaign carries them whatever guidance it edited (ai-prompts.md §2).
+
+| Transport | Line | Ops |
+|---|---|---|
+| `warUpdates` | `warId~op~actorsCSV~opponentsCSV~eventNumbersCSV~note` | start, join-a, join-b, leave, ceasefire, resume, end |
+| `relationUpdates` | `A~B~score~status~eventNumbersCSV~summary` | absolute score; a blank status is derived from it |
+| `agreementUpdates` | `agreementId~op~type~partiesCSV~eventNumbersCSV~title~terms` | start, update, suspend, resume, end, expire |
+
+`eventNumbersCSV` (1-based) is a hint first: the engine rebinds war records from `event.warId` and the transition's wording (`normalizeWorldWarEventLinks`, in `nativeWarLedger.js`) whenever an event carries the record's warId, and the diplomatic director binds relation and agreement records to the one event that matches. When no event carries the warId the model's own numbers are kept rather than blanked, so the validator reports the real defect (the event is missing its `warId`) instead of asking for a number the model already gave. Validation runs per segment against the world as the earlier segments left it (`validateSegmentLedgers`): strict while a retry remains, repaired on the final attempt (`repairWarLedgerPayload`): a record's own event numbers are stamped onto their events as the warId they declare, a record that still cannot bind is dropped with the war bindings of its events (events of wars that already exist keep theirs), and the segment is kept — the events stand as narrative, and only the canonical war change is lost, logged to the diagnostics log. Accepted records are bound to the segment's event ids, concatenated by `mergeSegmentPayloads`, remapped to the canonical round-scoped ids minted in `applySimulationResult` (`src/runtime/eventIdentity.js`), and applied by `applyWarUpdates` / `applyDiplomaticUpdates`. `eventSchema` carries `warId` and `combatants[]` for the combat rule (docs/world-state.md §2b-bis).
+
+`PREGAME_HISTORY_SCHEMA` takes the same facts for round zero as one flat `canonicalUpdates` array (`canonicalUpdateSchema`: `kind` = relation | war:<op> | agreement:start, plus id / polities / opponents / score / category / title / detail), which `expandCanonicalUpdateEnvelope` turns into the three transports before `validatePregameCanonicalBootstrap` runs.
+
+### 4.8 `interactiveSchema` (`:346`) and executor/summary
+
+`INTERACTIVE_CREATION_SCHEMA` is `interactiveSchema` directly.
 
 | Schema | Fields (required*) |
 |---|---|
-| `catalystSchema` | `title`*, `premise`*, `opening`*, `choices`* (array, `minItems: 2`, `maxItems: 5`, nonempty items) |
-| `CATALYST_EXECUTOR_SCHEMA` (`:519`) | `summary`*, `resolved`* (bool), `nextChoices`* (array `maxItems: 5`, nonempty items) |
-| `CATALYST_SUMMARY_SCHEMA` (`:539`) | `title`*, `description`*, `importance`* |
+| `interactiveSchema` | `title`*, `premise`*, `opening`*, `choices`* (array, `minItems: 2`, `maxItems: 5`, nonempty items) |
+| `INTERACTIVE_EXECUTOR_SCHEMA` (`:519`) | `summary`*, `resolved`* (bool), `nextChoices`* (array `maxItems: 5`, nonempty items) |
+| `INTERACTIVE_SUMMARY_SCHEMA` (`:539`) | `title`*, `description`*, `importance`* |
 
 ### 4.9 Small single-purpose schemas
 
@@ -240,17 +311,16 @@ After the schema walk passes, `validateGameplayPayload` runs task-specific check
 
 | Task | Extra rule | Line |
 |---|---|---|
-| `jumpForward` / `autoJumpForward` | `stopDate` non-blank; every event's `date`/`title`/`description` non-blank after trim; **at least one of** events, non-empty summary, or a *meaningful* catalyst; if a catalyst is present its `choices` must be distinct | `:866` |
+| `jumpForward` / `autoJumpForward` | `stopDate` non-blank; every event's `date`/`title`/`description` non-blank after trim; **at least one of** events or a non-empty summary | `:866` |
 | `pregameHistory` | every event's `date`/`title`/`description` non-blank; `summary` non-blank | `:892` |
-| `descriptionToAction`, `nextSpeaker`, `eventConsolidator`, `catalystCreation`, `catalystExecutor`, `catalystSummary`, `gameMaster` | a per-task list of top-level fields must be non-blank after trim (`requiredTextByTask`, `:906`) | `:915` |
-| `catalystCreation` | `choices` distinct (`validateDistinctChoices`) | `:921` |
-| `catalystExecutor` | `nextChoices` **must be empty when `resolved`**; must have **≥2** when unresolved; must be distinct | `:926` |
+| `descriptionToAction`, `nextSpeaker`, `eventConsolidator`, `interactiveCreation`, `interactiveExecutor`, `interactiveSummary`, `gameMaster` | a per-task list of top-level fields must be non-blank after trim (`requiredTextByTask`, `:906`) | `:915` |
+| `interactiveCreation` | `choices` distinct (`validateDistinctChoices`) | `:921` |
+| `interactiveExecutor` | `nextChoices` **must be empty when `resolved`**; must have **≥2** when unresolved; must be distinct | `:926` |
 | `countryStatSheet` | deep no-blank-strings (`findBlankString`); **gdpBreakdown sum = 100** | `:937` |
 | `actions` | each topic `title` non-blank; each action `title` AND `text` non-blank | `:946` |
 
 Helpers backing these:
 
-- **`hasMeaningfulCatalyst`** (`:819`) — a catalyst counts only if `title`/`premise`/`opening` has real text **or** `choices` is non-empty. Prevents an empty `{}` catalyst from satisfying the "at least one of" jump rule.
 - **`validateDistinctChoices`** (`:828`) — trims + lowercases each choice, flags the first blank, then rejects if the `Set` size differs from the array length (duplicate detection).
 - **`findBlankString`** (`:836`) — recurses the entire value (objects and arrays) and returns the JSONPath of the first whitespace-only string. Used by `countryStatSheet` so no field in the sheet ships blank. Note this is stricter than the schema's `nonEmptyTextSchema` (which only checks `minLength`, so `"   "` would pass the walker but fail here).
 
@@ -335,10 +405,10 @@ Every AI gameplay call goes through this one function. It owns prompt assembly, 
 
 ### 8.2 Prompt assembly (before the loop)
 
-1. `loadPromptCatalog` + `renderTemplate` build the system prompt from the campaign's frozen prompt pack (`:390`).
+1. `loadPromptCatalog` + `renderTemplate` build the system prompt from the current templates plus the campaign's guidance edits (ai-prompts.md §2).
 2. Append the **difficulty directive** from `readGameData().difficulty` (`:400`).
-3. For `jumpForward`/`autoJumpForward`: append **[Player Agency]** and **[Map Truth]** blocks at call time (`:411-421`) — done here, not in `defaultPrompts.json`, because existing campaigns carry frozen prompt copies, so a call-time append is the only way the rule reaches them.
-4. For `actions`/jumps/catalysts: append **[International Reputation]** context (`:425`).
+3. For `jumpForward`/`autoJumpForward`: append **[Player Agency]** and **[Map Truth]** blocks at call time (`:411-421`) — a leftover of the frozen-prompt era; the templates now reach every campaign (ai-prompts.md §2), and `promptDedupe.js` skips a directive the template already carries.
+4. For `actions`/jumps/interactive events: append **[International Reputation]** context (`:425`).
 
 ### 8.3 The two-attempt loop (`:447-502`)
 
@@ -414,4 +484,4 @@ This ladder is what lets local/self-hosted models without tool support still pla
 | Change map/world-aware validation | `validateGeneratedWorldChanges` (`gameplay.js:1002`) |
 | Tune retry feedback wording | The corrective strings returned by the validators (they are shown to the model verbatim) |
 | Debug "the AI turn silently became a fallback" | `runJsonTask` `failureReason`, and check whether a strict error leaked (see `finalAttempt`, §8.4) |
-| Debug provider tool wiring | `callAI` in `main.jsx` ([AI providers](ai-providers.md)) |
+| Debug provider tool wiring | `callAI` in `main.jsx` ([AI providers](ai-overview.md)) |

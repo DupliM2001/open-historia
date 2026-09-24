@@ -17,7 +17,7 @@ New to the codebase? Read **[Architecture Overview](architecture.md)** first —
 ### Game
 - [Game Map & Rendering](game-map.md) — In-game MapLibre rendering: region/country layers, owner colouring, disputed stripes, labels, cities/markers/units, the decorative globe, and `world.json` data flow.
 - [In-Game UI (HUD, Panels & Buttons)](game-ui.md) — Complete HUD/panels/buttons reference: shell, z-index ladder, main menu, and every panel with its state/props and map/AI/server data flow.
-- [World State & Turn Model](world-state.md) — The `world.json`/`game.json` schema, normalizers, AI impact application, the 5s poll, units peer-poll, country tags, and games-vs-scenarios storage.
+- [World State & Turn Model](world-state.md) — The `world.json`/`game.json` schema, normalizers, AI impact application, state distribution, country tags, and games-vs-scenarios storage.
 
 ### AI & Prompts
 - [AI System Overview](ai-overview.md) — Transport/provider dispatch, key/relay security, streaming vs buffered, token caps, and the `runJsonTask` strict/salvage task pipeline.
@@ -31,6 +31,7 @@ New to the codebase? Read **[Architecture Overview](architecture.md)** first —
 - [Server & API](server.md) — The Node/Express game server: routes, data-dir layout, asset serving, owner migration, and portability.
 - [Map Data & Assets](assets-and-data.md) — Map-data & asset handling from GitHub-Release download through server override resolution to the browser caching/warming model.
 - [Runtime Services](runtime-services.md) — Library/scenario/game stores, the country-name resolver, i18n/translator, and tags/labels/community-flags/map-settings services.
+- [Languages & Translation](i18n.md) — Shipped language packs for the interface and the prompts' guidance, AI translation of content only, the pattern and run lookup, writing UI code that translates, regenerating the packs.
 
 ### Web & Mobile
 - [Web Build (openhistoria.com)](web-build.md) — The browser-only `VITE_OH_WEB` build: fetch-interceptor fake backend, IndexedDB stores, PMTiles Worker-proxy/content-node trust chain, magic-link/Google accounts + E2E sync.

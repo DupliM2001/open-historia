@@ -10,10 +10,12 @@ Every runtime asset the map depends on, with its physical filename, MIME, and ho
 
 | Asset | Key | File on disk | Source of truth | Served to client via | Notes |
 |---|---|---|---|---|---|
-| Regions vector tiles | `regions` | `regions.pmtiles` (~105.8 MB) | `map-data` Release | `GET /api/runtime/pmtiles/regions` | GADM level-1 borders; the z0 tile is the region catalog; paints owners above z6.5 |
-| Countries vector tiles | `countries` | `countries.pmtiles` (~62.7 MB) | `map-data` Release | `GET /api/runtime/pmtiles/countries` | z0 tile is the country index + label source; warmed on **every** map |
+| Regions vector tiles | `regions` | `regions.pmtiles` (~105.8 MB) | `map-data` Release | `GET /api/runtime/pmtiles/regions` | GADM level-1 borders; the z0 tile is the region catalog; paints owners above z6.5. Carries z9/z10, which the style never asks for — see `scripts/trim-pmtiles.mjs` |
+| Countries vector tiles | `countries` | `countries.pmtiles` (~62.7 MB) | `map-data` Release | `GET /api/runtime/pmtiles/countries` | z0 tile is the country index + label source; warmed on **every** map; same unused z9/z10 |
 | Cities vector tiles | `cities` | `cities.pmtiles` (~1.5 MB) | `map-data` Release | `GET /api/runtime/pmtiles/cities` | Modern-day city labels layer |
-| Custom regions geometry | `regionsGeojson` | `regions.geojson` (per-scenario) | Scenario dir / `default` scenario | `GET /api/runtime/json/regionsGeojson` | Editor-drawn shapes; `EMPTY_FEATURE_COLLECTION` when absent; **never cached client-side** |
+| Custom regions geometry | `regionsGeojson` | `regions.geojson` (per-scenario) | Scenario dir, else the stock world below | `GET /api/runtime/json/regionsGeojson` | The scenario's own map (the built-in Modern Day has one, a hand-drawn world); a scenario without one renders on the stock world; **never cached client-side** |
+| Stock world geometry | — | `server/data/stock/regions.geojson` (~55.4 MB) | `map-data` Release (`default-regions-names.geojson`) | via `regionsGeojson` for scenarios without a map | GADM level-1 regions with owner names — what the hub's re-ownership presets (keyed by GADM ids) and "Modern Day (classic map)" render on |
+| Built-in scenario seed | — | `server/seed/default/` (`regions.geojson` ~5.6 MB, `cities.geojson`, `world.json`, `colors.json`, cover…) | the app bundle (committed) | copied into `server/data/scenarios/default` by the server | Modern Day's own map; `world.builtInMap` names the map generation (§3) |
 | Custom cities geometry | `citiesGeojson` | `cities.geojson` (per-scenario) | Scenario dir | `GET /api/runtime/json/citiesGeojson` | Era-accurate city points; rendered when `world.customCities`; **never cached client-side** |
 | Region seed | — | `regions-seed.geojson` (~55.3 MB) | `map-data` Release → `public/assets/` | `GET /assets/regions-seed.geojson` | Offline-produced seed the **map editor** imports; not a runtime map layer |
 | City seed | — | `cities-seed.json` (~7.9 MB) | `map-data` Release → `public/assets/` | `GET /assets/cities-seed.json` | Consumed by the editor (`citiesImport.js`) and AI prompt context (`promptContext.js`) |
@@ -87,11 +89,25 @@ The manifest that `fetch-map-assets.mjs` reads. Note the **name/namespace split*
 | `public/assets/cities.pmtiles` | `cities.pmtiles` | 1 547 924 | same |
 | `public/assets/cities-seed.json` | `cities-seed.json` | 7 857 627 | same |
 | `public/assets/regions-seed.geojson` | **`regions-seed-z8.geojson`** | 55 350 393 | client name is stable; release name is versioned to a zoom generation (z8) |
-| `server/data/scenarios/default/regions.geojson` | **`default-regions-names.geojson`** | 55 401 660 | the `default` scenario's named custom-region geometry |
+| `server/data/stock/regions.geojson` | **`default-regions-names.geojson`** | 55 401 660 | the stock GADM world with owner names — every scenario without a map of its own renders on it (it WAS the built-in scenario's file until Modern Day was redrawn; the release name kept its history) |
 
 Root keys: `owner: "Open-Historia"`, `repo: "open-historia"`, `release: "map-data"`. Download URL is `https://github.com/<owner>/<repo>/releases/download/<release>/<asset>`.
 
 **Namespacing gotcha:** the client always requests the *stable* path (e.g. `regions-seed.geojson`), while the release stores a *versioned* name (`regions-seed-z8.geojson`). The manifest is the only bridge. If a new zoom generation is uploaded under a new release name but the manifest's `sha256`/`bytes` aren't bumped, clients keep the old bytes; conversely a stable client name can silently point at a stale release generation. **When a map file changes: upload the new asset AND update its `sha256` + `bytes` in the manifest.**
+
+### The built-in scenario seed (`server/seed/default`)
+
+The built-in Modern Day scenario is **not** on the release and not under `server/data` in Git. It is a committed seed directory — `scenario.json`, `world.json`, `game.json`, `colors.json`, `cover-image.bin`, `storage/*.json`, and its own map: `regions.geojson` (a hand-drawn world of ~4,850 regions, ~5.6 MB) and `cities.geojson` (~2,500 authored cities). The app bundle ships it (`server/**`), and `server/libraryStore.js` (`syncBuiltInScenarioFromSeed`) copies it into the data directory:
+
+- **First run:** the whole seed is copied into `server/data/scenarios/default` (a packaged install used to get only a meta file and the fetched map; now it gets the world, colours and cover too). `prompts.json` is deliberately not copied — a game starts on the code's current prompt defaults.
+- **A newer map in the seed** (`world.json` `builtInMap` differs from the install's): the campaigns started on the previous map — and a built-in the player had edited — keep it in a forked scenario, `modern-day-classic` ("Modern Day (classic map)"), and those games are re-pointed at the fork; then the built-in is reset to the seed. The fork carries no `regions.geojson`: the previous built-in map was the stock world, so the fork renders on it like any other scenario without a map. An install whose built-in still holds the stock file as its `regions.geojson` has that file **moved** to `server/data/stock/` (the size matches the manifest entry) rather than downloaded again; a file of another size is a map the player uploaded and travels with the fork. `electron/main.cjs` does the same move before the manifest check so the setup screen never re-downloads it.
+- **Newer content on the same map** (`world.json` `builtInRevision` above the install's; 1 when unstamped — revision 2 renamed the countries to their common names): the built-in is refreshed **in place** (`refreshBuiltInContent`). Every campaign keeps its own world, colours, flags and tags and reads only the geometry from the built-in, which a revision never changes, so its campaigns stay on it; one old enough to still read the scenario's colours, flags, tags or stats sheet is first given copies of them. A built-in the player changed (its `updatedAt` moved: the Workshop, the scenario settings, the cheats panel's city tool) is instead kept as `modern-day-edited` ("Modern Day (your edited copy)") with its map and the campaigns started on it, then the built-in is reseeded. No stamp change, so no scenario loses the bundled map.
+- **A deliberately deleted built-in** stays deleted (the guard in `ensureDefaultScenario`).
+- **A scenario created from scratch** copies the built-in's map, cities and colours (`createScenario`), so it starts on the same world the game shows — and the Workshop opens on that map rather than the stock seed.
+
+To ship a new built-in map: open Modern Day's Workshop, import the map, Save, copy the resulting `regions.geojson`, `cities.geojson`, `world.json` and `colors.json` from the data directory into `server/seed/default/`, and change `world.builtInMap` to a new value. To ship new content on the same map (names, colours, claims — the region ids and geometry unchanged), raise `world.builtInRevision` instead: a new stamp would fork every campaign and, on the web, send every scenario carrying the old stamp back to the stock world. `server/builtInScenarioSeed.test.js` checks the seed's world matches its map and exercises every branch above.
+
+The web build bundles the same map: `scripts/seed-web-defaults.mjs` copies it beside the generated seed module and `src/runtime/web/generated/defaultScenarioMeta.js` exports its URL and stamp; `src/runtime/web/libraryStore.js` serves it for any scenario whose world carries the stamp (`usesBuiltInMap`) and keeps fetching the stock world from the content origin for every other scenario without a map. Its `ensureSeeded` runs the same fork-and-reset for a stored library that predates the redraw, and the same in-place refresh for one a revision behind (`defaultScenarioMeta.js` exports `builtInRevision` too).
 
 ### `scripts/fetch-map-assets.mjs`
 
@@ -103,6 +119,26 @@ Makes the local tree match the manifest. Called by the launcher and updater **in
 | Ensure | `node scripts/fetch-map-assets.mjs --ensure` | Faster: trusts size, only fetches missing / wrong-size files |
 
 Downloads to `<dst>.download`, verifies the SHA-256 **before** renaming into place, and is **best-effort**: it never exits non-zero (`process.exit(0)` on every path, `fetch-map-assets.mjs:92`) so a network failure can never block a launch or update. Requires Node 18+ for global `fetch`.
+
+### `scripts/trim-pmtiles.mjs` — the zoom levels nothing draws
+
+`regions.pmtiles` and `countries.pmtiles` were cut at `-z10`, but the map mounts both as vector sources capped at `maxzoom: 8` (`src/Game/Map/Nations.jsx`), and past z8 MapLibre overzooms the z8 tile rather than asking for a z9 one. Those two levels are **80% of both archives** and have never been drawn.
+
+```
+node scripts/trim-pmtiles.mjs <input.pmtiles> <output.pmtiles> <maxzoom> [--verify]
+```
+
+A pure repack: tile bodies are copied across still compressed, byte for byte, so nothing is re-encoded and nothing about how the map looks can change. Tile type, compressions, bounds, center, minZoom and the metadata blob are preserved; `maxZoom`, the counts, the directories and every offset are rewritten. `--verify` reads both archives back and compares tiles.
+
+| Archive | Now | At z8 | Saved |
+|---|---|---|---|
+| `regions.pmtiles` | 105,827,424 | 21,106,005 | 84.7 MB |
+| `countries.pmtiles` | 62,739,546 | 12,580,027 | 50.2 MB |
+| `cities.pmtiles` | 1,547,924 | — | nothing; `-zg` already stopped it at z3 |
+
+That is **134.9 MB off the 288.7 MB** a player pulls on first launch. Shipping it is the ordinary release dance and is NOT done by running the script: upload the trimmed archives to the `map-data` release, put their new `bytes`/`sha256` in `scripts/map-assets.json`, regenerate `public/content-manifest.json` (`scripts/build-content-manifest.mjs`) and re-sign it, then re-populate the content nodes. Installs that already have the big archives keep them until `fetch-map-assets.mjs` runs in verify mode.
+
+Two things a trimmed archive still says about itself: the metadata blob is preserved verbatim, so `vector_layers[0].maxzoom` and `tilestats` still describe z10 (MapLibre reads the header, not these, so rendering is unaffected — `tippecanoe-decode` and friends would be misled), and `centerZoom` is carried across as it was.
 
 ### Embedded (Android) variant
 
@@ -218,8 +254,10 @@ Under `import.meta.env.VITE_OH_WEB` there is no node server:
 
 - **Route interception:** `src/runtime/web/router.js:31` installs a `fetch` interceptor for same-origin `/api/*`. `/api/runtime/pmtiles/:key` (`router.js:51`) checks a scenario override in IndexedDB (`getScenarioPmtilesOverride`), else fetches `${VITE_OH_PMTILES_URL || "/assets"}/<key>.pmtiles`. The hosted site sets `VITE_OH_PMTILES_URL` to the **registry Worker's CORS+range proxy**, because Cloudflare Pages can't host the 60–100 MB archives directly (same-origin would 404 to the SPA fallback).
 - **Verified content swarm:** `warmPmtilesArchive` (`assets.js:855`) dynamically imports `src/runtime/web/contentTrust.js` and calls `fetchVerifiedBuffer(url)`. It maps the URL to a manifest asset id (`assetIdFromUrl`, `contentTrust.js:72`), fetches `<node>/oh/v1/content/<sha256>` from the vetted node swarm, and verifies **every byte** against the signed `content-manifest.json` (`:140`). A bad/broken node can at worst force a retry — it can never deliver tampered bytes — and any failure falls through to the canonical origin, so a node outage is invisible. The signed node **directory** (`VITE_OH_DIRECTORY_URL`) is a deny-list/control doc; live addresses come from `nodes-live.json`. This whole block is stripped from the local download.
+- **Worker fetches:** the `window.fetch` patch is invisible to workers — MapLibre's tile workers and the political-cartography worker (`src/Game/Map/vnext/polityBoundariesWorker.js`) fetch with their own global — so the scenario's regions GeoJSON is re-served to the `custom-regions-source` and the worker through a `blob:` URL: `prepareWorkerFetchableUrl(url)` (`assets.js`) fetches the runtime URL on the page and stages the bytes as a blob; `useWorkerFetchableUrl` (`src/Game/Map/useWorkerFetchableUrl.js`) hands that URL to `Nations.jsx`, which keeps the runtime URL as the identity for geometry epochs, catalog keys and readiness. MapLibre forwards a non-http(s) URL from its workers to the main thread, and a dedicated worker resolves a blob URL its page created. Copies are released (revoked after a grace period) when the token rotates or the asset is written. The desktop keeps the plain URL.
+- **Origin check:** the origin fallback in `warmPmtilesArchive` is held to the same signed manifest through `verifyOriginBuffer(url, buffer)` (`contentTrust.js`): `checked` is false — the bytes trusted as before — when the manifest is unsigned or missing, does not list the asset, or the active scenario serves its own archive under the runtime URL (`hasScenarioPmtilesOverride`, `libraryStore.js`); a scenario's own archive is never fetched from the swarm either. Only a signed hash that contradicts the bytes fails the archive.
 
-See the [Node network](node-network.md) notes for the swarm/registry architecture.
+See the [Node network](delivery-and-deploy.md) notes for the swarm/registry architecture.
 
 ---
 
@@ -237,7 +275,7 @@ See the [Node network](node-network.md) notes for the swarm/registry architectur
 | 6 | `cities` | Caching city layer | 10 | `cities.pmtiles` (~1.5 MB) | no |
 | 7 | `regions` | Caching regional borders | 24 | `regions.pmtiles` (~105.8 MB) | **no** — paints owners above z6.5 even on custom maps |
 
-**The ~162 MB prime:** warming tasks 3+6+7 pulls all three archives fully into `binaryValueCache` as in-memory `ArrayBuffer`s — the code cites regions ≈101 MB + countries ≈60 MB + cities ≈1.5 MB ≈ **162 MB** resident (`assets.js:231`; on-disk manifest sizes total ~170 MB). This is a deliberate memory-for-latency trade: a fully-warmed `MemorySource` archive answers tile requests without further network I/O. The cost is that this ~162 MB must be **freed on scenario switch** — which is exactly what the PMTiles cache rotation in `setRuntimeAssetEndpoints` (§5) does. See the [RAM & paint audit](performance.md) notes for the broader memory backlog (the geojson double-store, pinned PMTiles).
+**The ~162 MB prime:** warming tasks 3+6+7 pulls all three archives fully into `binaryValueCache` as in-memory `ArrayBuffer`s — the code cites regions ≈101 MB + countries ≈60 MB + cities ≈1.5 MB ≈ **162 MB** resident (`assets.js:231`; on-disk manifest sizes total ~170 MB). This is a deliberate memory-for-latency trade: a fully-warmed `MemorySource` archive answers tile requests without further network I/O. The cost is that this ~162 MB must be **freed on scenario switch** — which is exactly what the PMTiles cache rotation in `setRuntimeAssetEndpoints` (§5) does. See the [RAM & paint audit](architecture.md) notes for the broader memory backlog (the geojson double-store, pinned PMTiles).
 
 Task results feed a weighted progress bar: `normalizeTaskResult` (`preload.js:165`) sums the `.size` of each warmed asset into `loadedBytes`, and `progress = completedWeight / TOTAL_WEIGHT`.
 
@@ -258,7 +296,7 @@ These read the z0 PMTiles tile (or a JSON doc) once per scenario and cache the d
 Common invariants: each drops its promise on failure so the next call **retries** instead of pinning an empty catalog for the session; each is invalidated by `invalidateDerivedCachesForWrite` when its underlying asset is written.
 
 - **`loadCountryNames`** decodes the `countries` vector-tile layer, dedupes by resolved display name (`resolveCountryDisplayName`), then merges `world.polityOverrides` — a nameless override never degrades a real name to a bare code (`:1008`).
-- **`loadRegionCatalog`** decodes the stock `regions` layer, then **overlays the scenario's own `regions.geojson`**: the world's own name for a region wins (a world that renamed "Warmińsko-Mazurskie" to "South Konisburg" talks about South Konisburg everywhere, `:1109`), and editor-drawn `reg_*` shapes the stock tiles don't know get named from the custom geometry. It uses `jsonLoadedUrls.has(regionsGeojson)` (`:1101`) — not a truthiness test on the payload — to distinguish "no custom regions" (stock names correct) from "fetch failed" (retry), because the server answers a geometry-less scenario with a 200 empty FeatureCollection.
+- **`loadRegionCatalog`** decodes the stock `regions` layer, then **overlays the scenario's own `regions.geojson`**: the world's own name for a region wins (a world that renamed "Warmińsko-Mazurskie" to "South Konisburg" talks about South Konisburg everywhere, `:1109`), and editor-drawn `reg_*` shapes the stock tiles don't know get named from the custom geometry. It uses `jsonLoadedUrls.has(regionsGeojson)` (`:1101`) — not a truthiness test on the payload — to distinguish "no custom regions" (stock names correct) from "fetch failed" (retry), because the server answers a geometry-less scenario with a 200 empty FeatureCollection. The stock tile read is in its own `try`: when the archive cannot be read at all (a 404, a corrupt download, a test sandbox without it) the catalog carries the scenario's own regions rather than nothing — it used to return `[]`, which emptied every lookup, geography resolver and placement gazetteer on a hand-drawn world whose regions were all sitting in its own geojson.
 
 `decodeVectorTile(data)` (`assets.js:885`) lazily imports `@mapbox/vector-tile` + `pbf` and is the shared decoder for both catalogs.
 
@@ -295,4 +333,4 @@ Raster tiles are warmed via `warmRemoteResources` / `warmRemoteResource` (`asset
 | `server/libraryStore.js` | Server-side asset resolution (scenario override → data-dir → bundle) |
 | `server/dataDir.js` | `DATA_DIR` / `OH_DATA_DIR` resolver |
 
-Related pages: [World state](world-state.md) · [Node network](node-network.md) · [Performance / RAM](performance.md)
+Related pages: [World state](world-state.md) · [Node network](delivery-and-deploy.md) · [Performance / RAM](architecture.md)

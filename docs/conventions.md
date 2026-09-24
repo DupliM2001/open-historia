@@ -236,7 +236,7 @@ The gitignored / release-hosted files:
 | `public/assets/cities.pmtiles` | `cities.pmtiles` |
 | `public/assets/cities-seed.json` | `cities-seed.json` |
 | `public/assets/regions-seed.geojson` | `regions-seed-z8.geojson` |
-| `server/data/scenarios/default/regions.geojson` | `default-regions-names.geojson` |
+| `server/data/stock/regions.geojson` | `default-regions-names.geojson` |
 
 Rules of thumb:
 - **Never `git add`** any `*.pmtiles`, the seed geojson/json, or the default scenario's `regions.geojson`. They're gitignored; don't `-f` them in.

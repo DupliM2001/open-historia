@@ -9,18 +9,81 @@
 // would be ESM, and Electron's main process is most predictable as CJS. The
 // server is ESM and is pulled in with a dynamic import().
 
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, Menu, MenuItem } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const net = require("node:net");
 const { spawn } = require("node:child_process");
 
+// Which build this is. scripts/stamp-channel.mjs writes electron/channel.json for
+// the beta build (`npm run dist:win:beta` and the beta release workflow); the
+// stable build ships no such file, reads "stable", and every branch below is the
+// behaviour it has always had. OH_CHANNEL overrides it for `npm run electron`,
+// which is the only way to exercise the beta paths unpackaged.
+const CHANNEL = (() => {
+  if (process.env.OH_CHANNEL) return String(process.env.OH_CHANNEL);
+  try {
+    const stamp = fs.readFileSync(path.join(__dirname, "channel.json"), "utf8");
+    return String(JSON.parse(stamp).channel || "stable");
+  } catch {
+    return "stable"; // no stamp: the stable build, or a dev run
+  }
+})();
+const IS_BETA = CHANNEL === "beta";
+// One name for the beta: its Chromium profile, its save library, its window title
+// and the Start Menu shortcut the installer creates. It has to match `productName`
+// in electron-builder.beta.yml, because that is the name the player sees, and
+// nothing derives one from the other.
+const BETA_APP_NAME = "Open Historia Beta";
+
+// Electron derives userData — the Chromium profile, and with it the single-instance
+// lock — from the app name, which for both builds would otherwise be package.json's
+// "name" (%APPDATA%/open-historia). Two builds sharing that profile cannot run
+// independently: whichever starts second sees the first's lock and quits without a
+// window, which reads as "the beta is broken". Renaming the beta is the fix, and it
+// has to happen HERE, before anything reads a path: the installer's productName
+// does NOT reach Electron (it only names the exe, the install folder and the
+// shortcut).
+if (IS_BETA) app.setName(BETA_APP_NAME);
+
+// Where a beta build looks for ITS updates. server.js defaults the desktop track to
+// .../desktop-stable/latest.json, so without this override a tester would be offered
+// the official installer as an "update" and quietly leave the build they signed up
+// to test.
+//
+// This is HALF of the beta's update story, and the halves must not drift apart. This
+// URL is what makes the banner APPEAR: server.js fetches it and the page compares
+// its build id against OH_DESKTOP_BUILD. What then INSTALLS the update is
+// electron-updater, which ignores this entirely and reads the app-update.yml packed
+// into the build from `publish` in electron-builder.beta.yml. That block names the
+// same tag as this line, and has to: point them at different tags and a tester is
+// told an update exists by one feed while the other cannot find it.
+// server/betaPackaging.test.js is what keeps the two honest.
+const BETA_UPDATE_MANIFEST =
+  "https://github.com/Open-Historia/open-historia/releases/download/desktop-beta/latest.json";
+
 // Everything the app writes lives under Electron's per-user data directory.
 // Program Files is read-only for a normal user and the app bundle is read-only
 // full stop, so nothing may be written next to the code (see server/dataDir.js).
+//
+// The beta was renamed above, so this resolves to a DIFFERENT folder for it: its
+// saves, scenarios and settings are its own. That is deliberate. This branch is a
+// long way ahead of the released game — ledgers, units, projects, country stats —
+// and a save the beta has written, opened again in the stable app, comes back with
+// every field that app does not know about dropped. Sharing one library would make
+// testing the beta a way to quietly damage a real campaign.
 const USER_ROOT = app.getPath("userData");
 const DATA_DIR = path.join(USER_ROOT, "server", "data");
-const ASSETS_DIR = path.join(USER_ROOT, "public", "assets");
+// The world map is the exception, and it is the safe one to share: ~170MB of
+// pmtiles that scripts/map-assets.json pins by sha256, identical on both branches,
+// and written through a temp file and a rename. Pointing the beta at the stable
+// app's copy saves a tester that download; with no stable install the fetcher just
+// creates the folder, and a later stable install finds the map already there.
+// Unpackaged runs keep their own, so a dev build cannot scribble on an install.
+const STABLE_LIBRARY_NAME = "open-historia";
+const ASSETS_DIR = IS_BETA && app.isPackaged
+  ? path.join(app.getPath("appData"), STABLE_LIBRARY_NAME, "public", "assets")
+  : path.join(USER_ROOT, "public", "assets");
 
 // The map manifest lists paths relative to a project root ("public/assets/...",
 // "server/data/scenarios/..."), so pointing the fetcher's cwd at USER_ROOT lands
@@ -29,13 +92,42 @@ const ASSETS_DIR = path.join(USER_ROOT, "public", "assets");
 process.env.OH_DATA_DIR = DATA_DIR;
 process.env.OH_ASSETS_DIR = ASSETS_DIR;
 
+// Read by server.js, which startServer() imports into THIS process, so setting it
+// here is enough — there is no second process to pass it to. A stable build sets
+// neither and server.js keeps its own defaults.
+process.env.OH_CHANNEL = CHANNEL;
+if (IS_BETA) process.env.OH_DESKTOP_UPDATE_URL = BETA_UPDATE_MANIFEST;
+
 // Main-process crashes are the ones that reach the player as a bare "A
 // JavaScript error occurred in the main process" dialog with nothing to act on —
 // the EADDRINUSE port clash was exactly that. They also happen BEFORE the server
-// exists, so this writes the same JSONL directly rather than POSTing to /api/log
-// like the page does. Same file, same shape; logStore.js owns rotation and
-// redaction for everything written later.
+// exists, so this writes the Desktop log's JSONL directly rather than through the
+// server. Same file, same shape; logStore.js owns rotation, and the page merges
+// these entries into the Logging file a player sends (Settings → Diagnostics).
 const LOG_FILE = path.join(DATA_DIR, "logs", "app.log");
+// The same redaction rules as the page and the server (server/logRedaction.js),
+// with this machine's home folder, which names the player. That module is ESM,
+// and an older Electron's Node cannot require() one; there the home folder is
+// still replaced here, and everything is redacted in full again as it is read
+// back into a Logging file.
+const HOME_DIR = (() => {
+  try {
+    return require("node:os").homedir();
+  } catch {
+    return "";
+  }
+})();
+const redactForLog = (() => {
+  try {
+    const { redactLogText } = require(path.join(__dirname, "..", "server", "logRedaction.js"));
+    return (text) => redactLogText(text, { homeDir: HOME_DIR });
+  } catch {
+    const home = HOME_DIR.replace(/[\\/]+$/, "");
+    if (home.length < 3) return (text) => text;
+    const spellings = [...new Set([home, home.replace(/\\/g, "\\\\"), home.replace(/\\/g, "/")])];
+    return (text) => spellings.reduce((out, spelling) => out.split(spelling).join("~"), text);
+  }
+})();
 const logMain = (level, event, message, data) => {
   try {
     fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
@@ -44,8 +136,8 @@ const logMain = (level, event, message, data) => {
       level,
       source: "main",
       event,
-      message: String(message ?? "").slice(0, 8000),
-      ...(data === undefined ? {} : { data }),
+      message: redactForLog(String(message ?? "")).slice(0, 8000),
+      ...(data === undefined ? {} : { data: redactForLog(JSON.stringify(data)) }),
     }) + "\n", "utf8");
   } catch {
     // Diagnostics must never become the failure they were meant to explain.
@@ -99,7 +191,12 @@ const AUTO_UPDATE_SUPPORTED = process.platform !== "darwin";
 // What the banner polls. One object, replaced rather than mutated, so a read is
 // always internally consistent.
 let updateState = { state: "idle", percent: 0, version: "", error: "" };
-const setUpdateState = (patch) => { updateState = { ...updateState, ...patch }; };
+const setUpdateState = (patch) => {
+  updateState = { ...updateState, ...patch };
+  // A failed update used to be visible only as the banner's button coming back;
+  // the reason lives here and nowhere else, so it goes to the Desktop log as well.
+  if (patch.state === "error") logMain("warn", "updater.failed", updateState.error);
+};
 
 const setupAutoUpdater = () => {
   // A dev run has no app-update.yml inside it, so electron-updater would only
@@ -111,6 +208,17 @@ const setupAutoUpdater = () => {
   } catch {
     return null; // not packaged with the app: fall back to the download link
   }
+  // electron-updater is silent unless given a logger, and its messages are the
+  // whole story of a failed update — which feed it read, the version it
+  // compared against, why a differential download fell back, the HTTP status
+  // that ended it. Into the Desktop log with everything else, so "the update didn't
+  // take" comes with a reason attached.
+  autoUpdater.logger = {
+    debug: () => {},
+    info: (message) => logMain("info", "updater", message),
+    warn: (message) => logMain("warn", "updater", message),
+    error: (message) => logMain("error", "updater", message),
+  };
   // The banner decides when to download — a player on a metered connection
   // should not have ~100MB pulled out from under them by opening the game.
   autoUpdater.autoDownload = false;
@@ -140,10 +248,34 @@ const installAutoUpdater = () => {
     download: () => {
       // checkForUpdates has to have run first — downloadUpdate with nothing found
       // rejects. Chaining them here means the page needs one call, not two.
+      //
+      // isUpdateAvailable, NOT updateInfo: electron-updater fills updateInfo in
+      // either case — it is the parsed feed, not a verdict — so testing it treats
+      // "the feed says you are already on the newest version" as something to
+      // download. And checkForUpdates resolves NULL, quietly and with no error
+      // event, whenever the updater declines to run at all; the case that reaches
+      // real players is a Linux AppImage started outside its own bundle (no
+      // APPIMAGE env, e.g. after --appimage-extract), which is exactly the build
+      // that cannot replace itself.
+      //
+      // Both of those have to land somewhere, or nothing ever moves the state off
+      // "checking" and the banner sits on "Fetching the update…" for ever with no
+      // way out. "error" is that somewhere: it is what the banner already reads as
+      // "offer the installer download instead", and it is a settled state, so the
+      // page stops polling for a download that is never coming.
       setUpdateState({ state: "checking", error: "" });
       autoUpdater
         .checkForUpdates()
-        .then((result) => (result?.updateInfo ? autoUpdater.downloadUpdate() : null))
+        .then((result) =>
+          result?.isUpdateAvailable
+            ? autoUpdater.downloadUpdate()
+            : setUpdateState({
+                state: "error",
+                error: result
+                  ? "No newer version in the update feed."
+                  : "This build cannot replace itself in place.",
+              }),
+        )
         .catch((error) => setUpdateState({ state: "error", error: String(error?.message || error) }));
     },
     // isSilent: the whole point is that the player does not meet an installer.
@@ -171,6 +303,35 @@ let setupWindow = null;
 // Which manifest entries are still missing or the wrong size. Cheap (a stat per
 // file) and it is what decides whether the setup screen is shown at all, so a
 // second launch goes straight into the game.
+//
+// Size is NOT an integrity check — it only answers "is the download finished".
+// A file of the right length whose contents are not the map we published passes
+// this and would then be used forever, because nothing downstream looked again.
+// verifyMapData() below closes that: it runs the fetcher's --ensure pass after
+// the window is up, which checks the SHA-256 of anything it has not already
+// verified and quietly re-downloads what doesn't match.
+// Until this build the stock world lived as the built-in scenario's own
+// regions.geojson; the manifest now keeps it under server/data/stock. An
+// install that already has the file needs no 55 MB download, so it is moved
+// into place BEFORE the manifest is checked. server/libraryStore.js does the
+// same for the installs that never pass through this screen (source, Termux).
+const relocateLegacyStockMap = () => {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8"));
+    const stock = (manifest.assets ?? []).find((asset) => asset.path === "server/data/stock/regions.geojson");
+    if (!stock) return;
+    const target = path.join(USER_ROOT, stock.path);
+    const legacy = path.join(USER_ROOT, "server", "data", "scenarios", "default", "regions.geojson");
+    if (fs.existsSync(target) || !fs.existsSync(legacy)) return;
+    // A file of another size is a map the player put there, not ours to move.
+    if (fs.statSync(legacy).size !== stock.bytes) return;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.renameSync(legacy, target);
+  } catch {
+    // Best effort: the fetcher downloads the file if this could not move it.
+  }
+};
+
 const missingAssets = () => {
   let manifest;
   try {
@@ -217,6 +378,22 @@ const downloadMapData = (onProgress) =>
     child.on("error", () => resolve());
   });
 
+// Verify the map data against the manifest's checksums in the background, after
+// the game is already on screen. The fetcher remembers what it has verified, so
+// this is a handful of stats on a normal launch and a re-hash only when a file
+// changed underneath us. Deliberately silent and non-blocking: the player never
+// waits on it, and a repair looks like the same best-effort download the setup
+// screen does.
+const verifyMapData = () => {
+  const child = spawn(process.execPath, [FETCH_SCRIPT, "--ensure"], {
+    cwd: USER_ROOT,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderr.on("data", (chunk) => console.warn(`[map-verify] ${String(chunk).trim()}`));
+  child.on("error", () => {});
+};
+
 // --- windows ----------------------------------------------------------------
 
 const createSetupWindow = () =>
@@ -226,10 +403,92 @@ const createSetupWindow = () =>
     resizable: false,
     // No menu bar, no dev chrome — this is a setup dialog, not a browser.
     autoHideMenuBar: true,
-    backgroundColor: "#0d1122",
+    backgroundColor: "#131315",
     show: false,
     webPreferences: { preload: path.join(__dirname, "preload.cjs") },
   });
+
+// Electron builds NO context menu on its own — a right-click just does
+// nothing, in an editable field or not. Chrome's spellchecker (spellcheck:
+// true, the default, made explicit below) still runs and underlines
+// misspellings, but with no menu there is nowhere to pick a suggested
+// correction, let alone cut/copy/paste. This is the standard fix: build one
+// from `params` on every "context-menu" event. Suggestions/dictionary first
+// (only when the click actually landed on a misspelled word), then the usual
+// edit actions — each one only offered when `editFlags` says it applies, so
+// e.g. a right-click on plain, non-editable text doesn't offer "Paste".
+const attachEditingContextMenu = (win) => {
+  win.webContents.on("context-menu", (_event, params) => {
+    const menu = new Menu();
+    const { editFlags, dictionarySuggestions, misspelledWord } = params;
+
+    if (misspelledWord) {
+      if (dictionarySuggestions.length === 0) {
+        menu.append(new MenuItem({ label: "No spelling suggestions", enabled: false }));
+      } else {
+        for (const suggestion of dictionarySuggestions) {
+          menu.append(new MenuItem({
+            label: suggestion,
+            click: () => win.webContents.replaceMisspelling(suggestion),
+          }));
+        }
+      }
+      menu.append(new MenuItem({
+        label: "Add to dictionary",
+        click: () => win.webContents.session.addWordToSpellCheckerDictionary(misspelledWord),
+      }));
+      menu.append(new MenuItem({ type: "separator" }));
+    }
+
+    if (editFlags.canUndo) menu.append(new MenuItem({ label: "Undo", role: "undo" }));
+    if (editFlags.canRedo) menu.append(new MenuItem({ label: "Redo", role: "redo" }));
+    if (editFlags.canUndo || editFlags.canRedo) menu.append(new MenuItem({ type: "separator" }));
+
+    if (editFlags.canCut) menu.append(new MenuItem({ label: "Cut", role: "cut" }));
+    if (editFlags.canCopy) menu.append(new MenuItem({ label: "Copy", role: "copy" }));
+    if (editFlags.canPaste) menu.append(new MenuItem({ label: "Paste", role: "paste" }));
+    if (editFlags.canSelectAll) menu.append(new MenuItem({ label: "Select All", role: "selectAll" }));
+
+    // Right-clicking blank space with nothing selected/editable earns none of
+    // the above — popping up an empty menu would just be a dead flash. Pinned
+    // to `win` explicitly rather than relying on popup()'s "focused window"
+    // default, which is one assumption fewer to hold if a second window is
+    // ever added.
+    if (menu.items.length > 0) menu.popup({ window: win });
+  });
+};
+
+// --- a page that stops -------------------------------------------------------
+
+// The page under the window can die: out of memory, most often. Nothing used to
+// answer that, and the window stayed on its own background colour, dark grey
+// with no logo and no words, until the player closed the app. That is what a
+// Workshop save that ran the page out of memory looked like. Now the reason goes
+// to the diagnostics log, the player is told, and Reload brings the game back.
+let quitting = false;
+
+const pageGoneWording = (reason, name) => ({
+  message: reason === "oom" ? `${name} ran out of memory.` : `${name}'s page stopped unexpectedly.`,
+  detail: `The game's page closed (${reason}). Reload to go back to the game; everything saved before this is kept.`,
+});
+
+const handlePageGone = (win, details, { quitting: isQuitting = false } = {}) => {
+  const reason = String(details?.reason || "unknown");
+  if (reason === "clean-exit" || isQuitting || !win || win.isDestroyed()) return false;
+  logMain("error", "window.pageGone", `The game's page stopped (${reason}).`, { reason, exitCode: details?.exitCode });
+  const name = IS_BETA ? BETA_APP_NAME : "Open Historia";
+  const { message, detail } = pageGoneWording(reason, name);
+  dialog
+    .showMessageBox(win, { type: "error", title: name, message, detail, buttons: ["Reload", "Quit"], defaultId: 0, cancelId: 1, noLink: true })
+    .then(({ response }) => {
+      if (win.isDestroyed()) return;
+      if (response === 0) win.webContents.reload();
+      else app.quit();
+    })
+    .catch(() => {});
+  return true;
+};
+// --- end of a page that stops
 
 const createMainWindow = () => {
   const win = new BrowserWindow({
@@ -238,16 +497,50 @@ const createMainWindow = () => {
     minWidth: 1024,
     minHeight: 640,
     autoHideMenuBar: true,
-    backgroundColor: "#0d1122",
+    backgroundColor: "#131315",
     show: false,
-    title: "Open Historia",
+    title: IS_BETA ? BETA_APP_NAME : "Open Historia",
+    // Explicit even though it's already Electron's default — the whole reason
+    // this window needs a context menu at all is to surface what this enables.
+    webPreferences: { spellcheck: true },
   });
   // Links to GitHub/Discord open in the real browser rather than replacing the
   // game with a page the player cannot navigate back from.
+  //
+  // Only http(s) and mailto get out. shell.openExternal hands whatever it is
+  // given to the OS, which will happily act on schemes that are not "a link":
+  // file: opens a local file in its registered application, smb:/\\host leaks a
+  // Windows credential hash to a remote server, and any app-registered handler
+  // is fair game. The page renders AI output and community text, so what reaches
+  // here is not always something the player wrote.
+  const openableExternally = (target) => {
+    try {
+      return ["https:", "http:", "mailto:"].includes(new URL(target).protocol);
+    } catch {
+      return false;
+    }
+  };
+
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (openableExternally(url)) shell.openExternal(url);
+    else console.warn(`[shell] refused to open ${url} externally`);
     return { action: "deny" };
   });
+
+  // Keep the game IN the game window. This window has no address bar, no back
+  // button and an auto-hidden menu, so a link that navigates it away strands the
+  // player on a page they cannot leave — and hands anything that can render a
+  // link a full-window canvas to imitate the app on. Same-origin navigation (the
+  // local server the app itself serves) is the app working normally; anything
+  // else is a link, and links open in the real browser.
+  win.webContents.on("will-navigate", (event, targetUrl) => {
+    const appOrigin = `http://localhost:${process.env.PORT || 3000}`;
+    if (targetUrl.startsWith(`${appOrigin}/`) || targetUrl === appOrigin) return;
+    event.preventDefault();
+    if (openableExternally(targetUrl)) shell.openExternal(targetUrl);
+  });
+  attachEditingContextMenu(win);
+  win.webContents.on("render-process-gone", (_event, details) => handlePageGone(win, details, { quitting }));
   win.once("ready-to-show", () => win.show());
   return win;
 };
@@ -264,21 +557,60 @@ const createMainWindow = () => {
 // listen(), which is too late if listen() throws synchronously rather than
 // emitting. Probing first sidesteps the whole question: by the time server.js
 // runs, the port it is about to take is known free.
-const findFreePort = (start, attempts = 20) =>
-  new Promise((resolve, reject) => {
-    if (attempts <= 0) {
-      reject(new Error(`No free port found in ${start - 20}-${start}.`));
-      return;
-    }
+// Every address the server might end up bound to. A port counts as free only if
+// it is free on ALL of them, because a bind that succeeds on one says nothing
+// about another.
+//
+// This used to probe the wildcard alone, reasoning that a loopback-only probe
+// would miss a 0.0.0.0 publisher. True, but the reverse is what actually reaches
+// players, and it is worse: on Windows a wildcard bind SUCCEEDS beside a listener
+// on a specific interface (the same SO_REUSEADDR behaviour server/network.test.js
+// skips its rebind-rollback assertion for on win32 and darwin). Docker Desktop
+// publishes on 127.0.0.1, so it holds 127.0.0.1:3000 while 0.0.0.0:3000 still
+// binds cleanly — the probe called 3000 free, server.js bound loopback, and the
+// app died on EADDRINUSE with an empty window. Reported from a laptop running
+// Docker, 2026-09-04.
+//
+// Loopback first: it is what the server binds by default, so the common conflict
+// is settled without a wildcard bind at all.
+const probeHosts = () => {
+  const hosts = ["127.0.0.1", null]; // null = the wildcard, i.e. listen(port)
+  // A player who has pointed OH_HOST at one interface has the server binding
+  // exactly that, and on Windows neither probe above can see a conflict on it.
+  const forced = String(process.env.OH_HOST || "").trim();
+  if (forced && forced !== "0.0.0.0" && !hosts.includes(forced)) hosts.push(forced);
+  return hosts;
+};
+
+const canBind = (port, host) =>
+  new Promise((resolve) => {
     const probe = net.createServer();
     probe.unref();
-    probe.once("error", () => resolve(findFreePort(start + 1, attempts - 1)));
-    probe.once("listening", () => probe.close(() => resolve(start)));
-    // Bind the wildcard, not 127.0.0.1: server.js listens on every interface, so
-    // a loopback-only probe would call a port free that a 0.0.0.0 publisher
-    // (Docker's default) already owns — exactly the case this exists for.
-    probe.listen(start);
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => probe.close(() => resolve(true)));
+    // An address we cannot even parse is not a reason to reject the port.
+    try {
+      if (host) probe.listen(port, host);
+      else probe.listen(port);
+    } catch {
+      resolve(true);
+    }
   });
+
+const findFreePort = async (start, attempts = 20) => {
+  const hosts = probeHosts();
+  for (let port = start; port < start + attempts; port += 1) {
+    let free = true;
+    for (const host of hosts) {
+      // Sequential on purpose: probing one port on two addresses at once has the
+      // two racing each other, and the first refusal is already the answer.
+      free = await canBind(port, host);
+      if (!free) break;
+    }
+    if (free) return port;
+  }
+  throw new Error(`No free port found in ${start}-${start + attempts - 1}.`);
+};
 
 // Starting the server is importing it: server.js calls app.listen() at module
 // scope. It reads OH_DATA_DIR / OH_ASSETS_DIR / PORT, all set before the import.
@@ -298,6 +630,7 @@ const startServer = async () => {
 
 const boot = async () => {
   installAutoUpdater();
+  relocateLegacyStockMap();
   const pending = missingAssets();
   if (pending.length) {
     setupWindow = createSetupWindow();
@@ -327,6 +660,30 @@ const boot = async () => {
   await mainWindow.loadURL(`http://localhost:${port}`);
   setupWindow?.close();
   setupWindow = null;
+  // The game is up; now confirm the map on disk is still the map we shipped.
+  verifyMapData();
+};
+
+// A boot failure used to be an unhandled rejection: it reached the Desktop log and
+// nothing else, leaving an empty window on screen and the player with nothing to
+// act on. "It does not launch" is what that looks like from outside. Whatever
+// went wrong, say it and stop.
+const reportFatalBootError = (error) => {
+  const message = String((error && error.message) || error || "Unknown error");
+  logMain("error", "main.bootFailed", message, { code: error && error.code });
+  const name = IS_BETA ? BETA_APP_NAME : "Open Historia";
+  const portClash = (error && error.code === "EADDRINUSE") || message.includes("EADDRINUSE") || message.startsWith("No free port");
+  dialog.showErrorBox(
+    `${name} could not start`,
+    portClash
+      ? `${name} runs its own local server, and every port it tried is already taken `
+        + `by another program.\n\n`
+        + `Docker Desktop is the usual culprit — it holds 3000 and 3001 on many `
+        + `machines. Close it, or set PORT to a free port before launching, then `
+        + `start ${name} again.\n\n${message}`
+      : `${message}\n\nThe full error is in the diagnostics log under Settings.`,
+  );
+  app.quit();
 };
 
 // One instance only: a second launch would hit EADDRINUSE on the server port and
@@ -340,7 +697,10 @@ if (!app.requestSingleInstanceLock()) {
       mainWindow.focus();
     }
   });
-  app.whenReady().then(boot);
+  app.whenReady().then(boot).catch(reportFatalBootError);
   app.on("window-all-closed", () => app.quit());
+  app.on("before-quit", () => {
+    quitting = true;
+  });
   ipcMain.handle("setup:cancel", () => app.quit());
 }
