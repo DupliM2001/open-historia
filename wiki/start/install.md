@@ -7,7 +7,7 @@ account.
 |---|---|---|
 | **Desktop app** | Almost everyone | The full game. Installs like any other program; the world map downloads itself on first launch. |
 | **Browser** | Trying it out right now | Nothing to install. Slower, and the map is streamed rather than stored. |
-| **Android app** | Playing on a phone | Self-contained — nothing to run alongside it. Downloads the map on first launch. |
+| **Android app** | Playing on a phone | Nothing to run alongside it. Your games live on the phone; the map streams like the browser build's. |
 | **From source** | Contributors | Node.js and a terminal. See [hosting a server](/wiki/self-hosting/). |
 
 The desktop app is the recommended one. The browser build is genuinely playable but it is the
@@ -20,7 +20,7 @@ Downloads live on the
 
 ### Windows
 
-Download **`Open-Historia-Setup.exe`** (~124 MB) and run it. Open Historia lands in your Start
+Download **`Open-Historia-Setup.exe`** and run it. Open Historia lands in your Start
 Menu like any other application — there is no Node.js to install, no setup script and no
 terminal window.
 
@@ -70,6 +70,19 @@ The desktop app checks for updates on its own and shows a banner when one is rea
 when to download it, and it installs when you next quit. You can also just download the newest
 build and run it over the top — your saves and scenarios are kept.
 
+### The beta build
+
+Newer features reach the
+[`desktop-beta` pre-release](https://github.com/Open-Historia/open-historia/releases/tag/desktop-beta)
+first. It installs **alongside** the official app as *Open Historia Beta* — its own Start Menu
+entry, a BETA-badged icon, its own saves and settings — and updates itself from that page, never
+onto the official build. It shares the downloaded world map with the official app, so there is
+no second map download. The files are named `Open-Historia-Beta-Setup.exe`,
+`Open-Historia-Beta-mac-arm64.zip` / `-x64.zip`, `Open-Historia-Beta-amd64.deb` and
+`Open-Historia-Beta-x86_64.AppImage`.
+
+Pages and sections marked <em>beta</em> in this wiki describe that build.
+
 ## Browser
 
 Go to **[openhistoria.com/play/](/play/)**. The game loads and you can start immediately.
@@ -92,14 +105,14 @@ desktop app, and add it to your Home Screen for a fullscreen window.
 
 ## Android
 
-Download **`open-historia.apk`** (~6 MB) from the
+Download **`open-historia.apk`** (~21 MB) from the
 [`android` release](https://github.com/Open-Historia/open-historia/releases/tag/android) and
 install it. Android will ask you to allow installing from your browser — this is normal for an
 app distributed outside the Play Store.
 
-The app is a thin client with a server embedded inside it. It plays on its own: there is
-nothing to run on a PC alongside it, and no Termux setup. On first launch it downloads the
-world map (~200 MB), so use Wi-Fi. Your games are saved on the phone.
+The app is the browser build packaged as an app. There is nothing to run on a PC alongside it
+and no Termux setup: your games are saved on the phone, and the world map streams from the same
+community content nodes that [openhistoria.com/play/](/play/) uses, so it needs a connection.
 
 It updates itself — it checks the release for a newer build and offers it in a banner.
 

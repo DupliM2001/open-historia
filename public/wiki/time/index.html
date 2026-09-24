@@ -16,13 +16,13 @@
   <link rel="icon" type="image/jpeg" href="/logo.png" />
   <title>Time and Turns — Open Historia Wiki</title>
   <link rel="canonical" href="https://openhistoria.com/wiki/time/" />
-  <meta name="description" content="Nothing happens until you skip time. Jump lengths, auto-jump, cancelling a stuck turn, and undoing one that went badly." />
+  <meta name="description" content="Nothing happens until you skip time. Jump lengths, what a skip costs, Intervene, and undoing a turn that went badly." />
 
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="Open Historia" />
   <meta property="og:url" content="https://openhistoria.com/wiki/time/" />
   <meta property="og:title" content="Time and Turns — Open Historia Wiki" />
-  <meta property="og:description" content="Nothing happens until you skip time. Jump lengths, auto-jump, cancelling a stuck turn, and undoing one that went badly." />
+  <meta property="og:description" content="Nothing happens until you skip time. Jump lengths, what a skip costs, Intervene, and undoing a turn that went badly." />
   <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
   <meta property="og:image:type" content="image/jpeg" />
   <meta property="og:image:width" content="1280" />
@@ -30,7 +30,7 @@
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Time and Turns — Open Historia Wiki" />
-  <meta name="twitter:description" content="Nothing happens until you skip time. Jump lengths, auto-jump, cancelling a stuck turn, and undoing one that went badly." />
+  <meta name="twitter:description" content="Nothing happens until you skip time. Jump lengths, what a skip costs, Intervene, and undoing a turn that went badly." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -119,16 +119,16 @@
       <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> Time and Turns
     </nav>
     <h1>Time and Turns</h1>
-    <p class="tagline">Nothing happens until you skip time. Jump lengths, auto-jump, cancelling a stuck turn, and undoing one that went badly.</p>
+    <p class="tagline">Nothing happens until you skip time. Jump lengths, what a skip costs, Intervene, and undoing a turn that went badly.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#fixed-jumps">Fixed jumps</a></li><li class="d2"><a href="#custom-jumps">Custom jumps</a></li><li class="d2"><a href="#auto-jump">Auto-jump</a></li><li class="d2"><a href="#how-far-should-i-skip">How far should I skip?</a></li><li class="d2"><a href="#while-it-runs">While it runs</a></li><li class="d2"><a href="#long-skips-in-segments">Long skips in segments</a></li><li class="d2"><a href="#undo">Undo</a></li><li class="d2"><a href="#rounds-and-dates">Rounds and dates</a></li><li class="d2"><a href="#the-first-turn-is-special">The first turn is special</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#fixed-jumps">Fixed jumps</a></li><li class="d2"><a href="#custom-jumps">Custom jumps</a></li><li class="d2"><a href="#auto-jump">Auto-jump</a></li><li class="d2"><a href="#how-far-should-i-skip">How far should I skip?</a></li><li class="d2"><a href="#what-a-skip-costs">What a skip costs</a></li><li class="d2"><a href="#while-it-runs">While it runs</a></li><li class="d2"><a href="#long-skips-in-segments">Long skips in segments</a></li><li class="d2"><a href="#intervene">Intervene</a></li><li class="d2"><a href="#interactive-events">Interactive events</a></li><li class="d2"><a href="#undo">Undo</a></li><li class="d2"><a href="#rounds-and-dates">Rounds and dates</a></li><li class="d2"><a href="#player-focus">Player focus</a></li><li class="d2"><a href="#the-first-turn-is-special">The first turn is special</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Open Historia has no tick. There is no clock running in the background, nothing accumulates
 while you think, and no timer forces your hand. The world advances <strong>only</strong> when you press the
 button, and only as far as you tell it to.</p>
 <p>Open the time panel with <strong>»</strong> on the date pill, top right.</p>
 <h2 id="fixed-jumps">Fixed jumps</h2>
 <p><img src="/wiki/img/time-skip-panel.jpg" alt="The time skip panel">
-<em>Each preset shows the date you will land on.</em></p>
+<em>Each preset shows the date you will land on; the custom row and today&#39;s AI request count sit underneath.</em></p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -199,20 +199,30 @@ twelve months get compressed into a handful of paragraphs; skip a week and you g
 </ul>
 <p>A common early mistake is skipping a year on turn one and wondering why the campaign feels
 thin. Start with months.</p>
+<h2 id="what-a-skip-costs">What a skip costs</h2>
+<p>Under the presets the panel shows today&#39;s count — <em>&quot;0 of 500 AI requests used today · a skip uses
+1, at most 3&quot;</em>. With <strong>Save AI requests</strong> on (the default), a skip is one request, a second when
+there is something to check afterwards — units to move, fronts to redraw, the Projects board, your
+agents&#39; reports, all in one — and never more than three. Turn it off in Settings → AI for the most
+thorough turns on a key with no daily limit. See <a href="/wiki/settings/#ai-requests">settings</a>.</p>
 <h2 id="while-it-runs">While it runs</h2>
-<p>A time skip takes a while — the model is simulating the world. The panel shows it working, and
+<p>A time skip takes a while — the model is simulating the world. The time panel says what it is
+doing as it goes (<em>&quot;Writing 1 month of events…&quot;</em>, <em>&quot;Moving the armies, redrawing the fronts…&quot;</em>), and
 there is a <strong>Cancel</strong> button. Cancelling aborts the request cleanly and leaves the world exactly
 as it was.</p>
+<p>The <strong>Events panel</strong> opens as soon as the skip starts and fills as the model writes, so you can
+start reading before it finishes (Gemini delivers the whole answer at once, so there it all arrives
+together). Turn this off with <strong>Show time skip events as they are written</strong> in Settings → AI.</p>
 <p>If jumps routinely hang, turn on <strong>Limit AI generation</strong> in Settings → AI. It gives up on a
 stalled generation and falls back to a canned event rather than waiting indefinitely. It watches
 for <em>silence</em> rather than total elapsed time, so a slow-but-working model is not cut off
 mid-answer.</p>
 <h2 id="long-skips-in-segments">Long skips in segments</h2>
-<p class="beta-note"><b>Beta channel only.</b> On stable, every skip is a single request and
-there is no setting.</p><p><strong>Settings → AI → &quot;Generate long time skips in segments&quot;</strong>, off by default.</p>
-<p>Off, the whole skip is generated in one request. On, a skip of more than a few months is
-generated as <strong>several shorter requests, merged into one round</strong>. The result still arrives as a
-single turn with one set of events — you are not asked anything in between.</p>
+<p><strong>Settings → AI → &quot;Generate long time skips in segments&quot;</strong>, off by default.</p>
+<p>Off, the whole skip is generated in one request. On, a skip of <strong>120 days or more</strong> is generated
+as <strong>several requests of about three months each, merged into one round</strong> — a year is four.
+The result still arrives as a single turn with one set of events; you are not asked anything in
+between.</p>
 <p>The trade:</p>
 <div class="table-scroll"><table>
 <thead>
@@ -225,7 +235,7 @@ single turn with one set of events — you are not asked anything in between.</p
 <tbody><tr>
 <td>Requests per skip</td>
 <td>One</td>
-<td>Several</td>
+<td>One per segment</td>
 </tr>
 <tr>
 <td>Token cost</td>
@@ -246,9 +256,32 @@ single turn with one set of events — you are not asked anything in between.</p
 <p><strong>Turn it on if long skips keep failing or timing out</strong>, which is the usual symptom on a hosted
 provider that drops long requests. Leave it off otherwise: it costs more tokens, and a year
 generated in one pass hangs together better than one generated in pieces.</p>
-<p>It only affects long skips. A week or a month is a single request either way.</p>
+<p>It only affects long skips — a week or a month is a single request either way — and never
+auto-jump, which has no span to divide up front. Each segment adds one request to the skip&#39;s cap.</p>
 <p>Each segment is validated against the world as the previous segments left it, so the pieces
-cannot contradict each other — a war started in the first segment is real by the second.</p>
+cannot contradict each other — a war started in the first segment is real by the second. If one
+segment fails, the turn is <strong>held</strong> rather than lost: <strong>Retry</strong> re-runs only that segment, and
+<strong>Discard</strong> drops the turn. See <a href="/wiki/troubleshooting/#a-held-time-skip">troubleshooting</a>.</p>
+<h2 id="intervene">Intervene</h2>
+<p>Events are revealed one at a time, and three events in you may see the thing you would have acted
+on — an ultimatum, a border crossing — while the events after it assume you did nothing.
+<strong>✋ Intervene here</strong>, under <em>Next event</em> and <em>Skip to end</em> in the Events panel, stops the round at
+the event you are looking at. It asks once, then:</p>
+<ul>
+<li>the events you have seen are kept;</li>
+<li>the rest are discarded — they never happen;</li>
+<li>the date becomes the last kept event&#39;s;</li>
+<li>the next skip is told where you stopped, so it does not write the discarded events again.</li>
+</ul>
+<p>It costs no request, and the shortened turn can still be undone. It is offered only while events
+remain unrevealed.</p>
+<h2 id="interactive-events">Interactive events</h2>
+<p>Now and then a skip offers one of its own weightier events about you to <strong>play out</strong> — a one in
+three chance when it has such an event, and never within three turns of the last offer: its card carries a yellow ⚡ strip,
+and the time panel mentions the offer until the next skip replaces it. See
+<a href="/wiki/events/#interactive-events">interactive events</a>.</p>
+<p><strong>Time stands still while one is in progress.</strong> The skip controls are replaced by a note that
+leads back to the scene; end it or set it aside to carry on.</p>
 <h2 id="undo">Undo</h2>
 <p><strong>↩ Undo last turn</strong> is in the time panel, and it tells you how many turns can be undone.</p>
 <p>Undo restores the world, the game state, the events, your action queue, the chat history and the
@@ -263,13 +296,44 @@ after it.</p>
 <p>Every jump increments the <strong>round</strong> counter, which starts at 1. The round is what the game uses
 internally to seed deterministic outcomes such as espionage rolls and combat, which is why the
 same save always replays the same way.</p>
-<p>The date is stored as plain text, so scenarios can use non-Gregorian dates such as &quot;1200 BCE&quot;
-without the clock breaking. Loosely formatted dates get repaired rather than rejected.</p>
-<p class="beta-note"><b>On beta, BC dates are real dates.</b> A year before AD 1 is written with a
-leading minus and counts backwards with no year zero: <code>-0218-03-01</code> is 1 March 218 BC.
-Jumps, the timeline, the war and treaty records and the stat history all do proper arithmetic
-across the boundary, and the date is shown as "3/1/218 BC". Prose dates such as "Third Age 3019"
-still pass through untouched.</p><h2 id="the-first-turn-is-special">The first turn is special</h2>
+<p>The date is stored as plain text, so scenarios can use non-Gregorian dates such as &quot;Third Age
+3019&quot; without the clock breaking. Loosely formatted dates get repaired rather than rejected.</p>
+<p><strong>BC dates are real dates.</strong> A year before AD 1 is written with a leading minus and counts
+backwards with no year zero: <code>-0218-03-01</code> is 1 March 218 BC. Jumps, the timeline, the war and
+treaty records and the stat history all do proper arithmetic across the boundary, and the date is
+shown as &quot;3/1/218 BC&quot;. Prose dates still pass through untouched.</p>
+<h2 id="player-focus">Player focus</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>How much of each skip is about <strong>your</strong> country is a choice, made per game in
+<strong>Settings → AI → Player focus — for this game</strong>. A scenario sets where new games start; the
+default is Balanced.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>At least this much of each skip is about you</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>World first</strong></td>
+<td>A quarter, when you have something going on; the rest of the world gets the room.</td>
+</tr>
+<tr>
+<td><strong>Balanced</strong></td>
+<td>40%, when you have orders, Projects or open threads.</td>
+</tr>
+<tr>
+<td><strong>Focused</strong></td>
+<td>60%, and other powers&#39; plans take up less of what the AI is shown.</td>
+</tr>
+<tr>
+<td><strong>Spotlight</strong></td>
+<td>Three quarters, with the wider world kept to what matters most.</td>
+</tr>
+</tbody></table></div>
+<p>It never invents events for you: in a quiet stretch the world fills the skip as usual, and what you
+have going on — orders, milestones due, wars, open threads — is what the share is measured
+against.</p>
+<h2 id="the-first-turn-is-special">The first turn is special</h2>
 <p>On round 1, a scenario that has a <em>World Before Round One</em> briefing generates its own backstory
 before play begins — the recent history that led to the situation you have inherited. It happens
 once, and it gives the world something to refer back to.</p>
@@ -285,7 +349,7 @@ once, and it gives the world something to refer back to.</p>
         <a class="next" href="/wiki/orders/"><span>Next →</span><b>Giving orders</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

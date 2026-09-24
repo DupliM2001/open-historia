@@ -33,10 +33,10 @@ cannot. See [connecting an AI provider](/wiki/ai-setup/).
 
 | Provider | Default |
 |---|---|
-| Gemini | `gemini-3.5-flash-lite` |
+| Gemini | `gemini-3.5-flash-lite`, with `gemini-3.1-flash-lite` as its backup |
 | Anthropic | `claude-haiku-4-5` |
-| OpenAI | none — you must set one |
-| OpenAI Compatible | endpoint `http://localhost:11434/v1`, no model set |
+| OpenAI | `gpt-5.6-luna` |
+| OpenAI Compatible | no model set — the game picks a chat model from the server's own list |
 
 The defaults are the cheap, fast tier of each family. They are a genuinely reasonable place to
 start, not placeholders.
@@ -53,25 +53,31 @@ Moving from a fast model to a strong one changes the game noticeably. Where you 
 Where you will not see much: short jumps in a quiet period, and anything mechanical.
 
 A reasonable pattern is to play on a cheap model and switch to a stronger one when something
-important is happening. On beta, **Per-task models** does this for you: the time skip on a strong
+important is happening. **Per-task models** does this for you: the time skip on a strong
 model, small jobs on a cheap one.
 
 ## Costs
 
-Open Historia makes several model calls per turn — the jump itself, plus separate calls for
-things like history consolidation and stat sheets. Diplomacy and the advisor cost extra on top.
+A time skip is **one request** where it can be, two when there is something to check afterwards,
+and never more than three — that is what **Save AI requests** (on by default) guarantees. Turn it
+off and every check after a skip makes its own request, the model may look things up, and a busy
+skip can use twenty or more. Diplomacy, the advisor and **Background AI** (countries writing to
+you unprompted, forces repositioning, extra agent reports — capped at 30 a day by default) cost
+extra on top. Settings → AI → **AI requests** shows today's count and what your last skip used.
 
 Rough guidance rather than a price list:
 
 - **Gemini free tier** genuinely covers solo play. Watch the rate limits on the larger models —
-  hitting one mid-jump stalls the turn. On beta, a
+  hitting one mid-jump stalls the turn. A
   [backup model](/wiki/ai-setup/#backup-models) takes over when one runs out.
 - **Cheap tiers** (Haiku, Flash, DeepSeek) run a campaign for small change.
 - **Frontier models** are noticeably better and noticeably more expensive per turn. Long jumps
   cost more than short ones because there is more to write.
 - **Local models** cost nothing and run offline.
 
-If you are watching spend, take shorter jumps and use the advisor less.
+If you are watching spend, leave Save AI requests on, turn Background AI off or lower its cap,
+and use the advisor less. Task prompts open with a fixed prefix that providers cache, so a large
+share of each time-skip prompt is billed at the cheaper cached rate where the provider offers one.
 
 ## Local models
 
@@ -104,26 +110,29 @@ rather than breaking the game.
 **Limit AI generation** abandons a stalled generation and falls back to a canned event. It
 measures silence rather than elapsed time. Recommended with local models.
 
-<p class="beta-note"><b>On beta these live on connections and entries</b> in the Models list,
-with one more per-model setting, <b>How the AI answers</b>. See
-<a href="/wiki/ai-setup/#adding-backups">adding backups</a>.</p>
+Custom parameters and Strict tool schema are set on a **connection**; an entry in the Models list
+can have custom parameters of its own and **How the AI answers**, which picks the structured-output
+method to try first. See [adding backups](/wiki/ai-setup/#adding-backups).
 
-## What the beta adds
-![The beta AI debug console](/wiki/img/beta-debug-console.jpg)
-*Beta's debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.*
+<p class="beta-note"><b>On beta the game sets a temperature per task.</b> Tasks that match or
+classify — placing a name on a region, choosing the next speaker — are asked at 0.1; the ones that
+reconcile or summarise at 0.2; stat sheets and intelligence readings at 0.3. Anything written to be
+read in character (time skips, diplomacy, the advisor) is left at the provider's default. A
+temperature in your own custom parameters still wins, and a model that refuses one (an OpenAI
+reasoning model, say) is remembered and asked without it.</p>
 
+## Seeing what the AI did
 
-<p class="beta-note"><b>Beta channel only.</b></p>
+![The AI debug console](/wiki/img/debug-console.jpg)
+*The debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.*
 
-[Backup models](/wiki/ai-setup/#backup-models): when one runs out, the next one in your list
-takes over. Your keys are saved as connections, shared by as many models as you like.
-
-Per-task models, picked from that list: a cheap model for background work and a strong one for
-the jump itself. Prompt caching. Background tasks batched at roughly half price on Anthropic. And
-an AI debug console showing every call with its full prompt, answer and cost.
+The **AI debug console** (☰ → Tools) shows every call with its full prompt, answer, model, token
+counts, latency and validation verdict, with analytics per task and model and a JSON or CSV
+export. It keeps the last 200 calls across sessions while **Record AI telemetry** is on.
 
 If you care about cost control, about a game that keeps going when a free allowance runs out, or
-about seeing what the game actually sends, that is where to look.
+about seeing what the game actually sends, that — with backup models and per-task models — is
+where to look.
 
 ## Next
 

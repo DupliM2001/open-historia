@@ -16,13 +16,13 @@
   <link rel="icon" type="image/jpeg" href="/logo.png" />
   <title>Playing on Your Phone — Open Historia Wiki</title>
   <link rel="canonical" href="https://openhistoria.com/wiki/mobile/" />
-  <meta name="description" content="The Android app, what it downloads on first launch, and how it connects." />
+  <meta name="description" content="The Android app: what it is, where your games and the map live, and how it updates." />
 
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="Open Historia" />
   <meta property="og:url" content="https://openhistoria.com/wiki/mobile/" />
   <meta property="og:title" content="Playing on Your Phone — Open Historia Wiki" />
-  <meta property="og:description" content="The Android app, what it downloads on first launch, and how it connects." />
+  <meta property="og:description" content="The Android app: what it is, where your games and the map live, and how it updates." />
   <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
   <meta property="og:image:type" content="image/jpeg" />
   <meta property="og:image:width" content="1280" />
@@ -30,7 +30,7 @@
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Playing on Your Phone — Open Historia Wiki" />
-  <meta name="twitter:description" content="The Android app, what it downloads on first launch, and how it connects." />
+  <meta name="twitter:description" content="The Android app: what it is, where your games and the map live, and how it updates." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -119,30 +119,36 @@
       <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> Playing on Your Phone
     </nav>
     <h1>Playing on Your Phone</h1>
-    <p class="tagline">The Android app, what it downloads on first launch, and how it connects.</p>
+    <p class="tagline">The Android app: what it is, where your games and the map live, and how it updates.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#installing">Installing</a></li><li class="d2"><a href="#first-launch">First launch</a></li><li class="d2"><a href="#what-it-is">What it is</a></li><li class="d2"><a href="#setting-up-ai">Setting up AI</a></li><li class="d2"><a href="#updating">Updating</a></li><li class="d2"><a href="#playing-on-a-small-screen">Playing on a small screen</a></li><li class="d2"><a href="#iphone-and-ipad">iPhone and iPad</a></li><li class="d2"><a href="#connecting-to-a-machine-instead">Connecting to a machine instead</a></li><li class="d2"><a href="#the-beta-apk">The beta APK</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#installing">Installing</a></li><li class="d2"><a href="#what-it-is">What it is</a></li><li class="d2"><a href="#setting-up-ai">Setting up AI</a></li><li class="d2"><a href="#updating">Updating</a></li><li class="d2"><a href="#playing-on-a-small-screen">Playing on a small screen</a></li><li class="d2"><a href="#iphone-and-ipad">iPhone and iPad</a></li><li class="d2"><a href="#connecting-to-a-machine-instead">Connecting to a machine instead</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>There is an Android app. It plays on its own — no PC to run alongside it, no server to set up,
 no Termux.</p>
 <h2 id="installing">Installing</h2>
-<p>Download <strong><code>open-historia.apk</code></strong> (~6 MB) from the
+<p>Download <strong><code>open-historia.apk</code></strong> (~21 MB) from the
 <a href="https://github.com/Open-Historia/open-historia/releases/tag/android"><code>android</code> release</a>.</p>
 <p>Android will warn you about installing from your browser rather than the Play Store. That is
 expected for an app distributed this way; allow it for your browser and continue.</p>
-<h2 id="first-launch">First launch</h2>
-<p>The app itself is tiny because the world map is not in it. On first launch it downloads about
-<strong>200 MB</strong> of map data and stores it on the phone.</p>
-<p>Use Wi-Fi, and let it finish. After that the map is local and the app starts quickly.</p>
 <h2 id="what-it-is">What it is</h2>
-<p>A thin client with a small server embedded inside it. Everything runs on the phone: your games
-are saved there, the map is stored there, and the game logic runs there.</p>
-<p>The only thing that leaves the phone is your AI provider request — the same as any other build.</p>
-<h2 id="setting-up-ai">Setting up AI</h2>
-<p>Same as everywhere else: settings, pick a provider, paste a key. See
+<p>The app is the same game <a href="/play/">openhistoria.com/play/</a> serves, packaged as an Android app.
+Your games and scenarios are saved on the phone, and the game logic runs there. The world map is
+<strong>not</strong> in the app: it streams from the community content nodes the website uses, so the app
+needs a connection to draw the map, and a blank map usually means no node was reachable — see
+<a href="/wiki/troubleshooting/">troubleshooting</a>.</p>
+<p>Your AI provider requests go straight from the phone to the provider, the same as any other
+build.</p>
+<p class="beta-note"><b>The beta app carries the whole world.</b> The beta channel's Android
+build, which has not yet replaced the APK on the release page, ships the world map inside it, trimmed to the zoom the map actually draws, so it plays in
+airplane mode from the first launch — only the Community Hub and your AI provider use the
+network. It can also export games and save the diagnostics log through Android's share sheet, and
+reach a model running on a PC on your own network (Ollama, LM Studio) without that model needing
+browser permissions.</p><h2 id="setting-up-ai">Setting up AI</h2>
+<p>Same as everywhere else: the game menu, pick a provider, paste a key. See
 <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
 <p>A cloud provider is the practical choice on a phone. Running a local model on the handset is not
-realistic; if you have one on a PC on the same network you can point the app at it, but you will
-need that machine reachable and its endpoint entered by IP rather than <code>localhost</code>.</p>
+realistic. A model on a PC on the same network has to be entered by that PC&#39;s IP address rather
+than <code>localhost</code>, and on the stable app it must also accept requests from a browser page — the
+same restriction as <a href="/wiki/ai-providers/">the browser build</a>.</p>
 <h2 id="updating">Updating</h2>
 <p>The app checks the release for a newer build and offers it in a banner. Accepting downloads and
 installs it; your games are kept.</p>
@@ -168,9 +174,6 @@ the server on the PC and open its address on the phone. See
 password.</p>
 <p>Note that this is not two people playing together. It is one campaign, viewed from a different
 screen.</p>
-<h2 id="the-beta-apk">The beta APK</h2>
-<p>There is a separate <code>android-beta</code> release carrying the beta channel&#39;s features. It installs
-alongside the stable app rather than replacing it, and keeps its own saves.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/install/">Install</a> — the other platforms.</li>
@@ -183,7 +186,7 @@ alongside the stable app rather than replacing it, and keeps its own saves.</p>
         <a class="next" href="/wiki/ai-providers/"><span>Next →</span><b>AI providers &amp; models</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,7 +121,7 @@
     <h1>Installing Open Historia</h1>
     <p class="tagline">Download and install on Windows, macOS, Linux and Android, or play straight away in your browser.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#which-one-do-i-want">Which one do I want?</a></li><li class="d2"><a href="#desktop">Desktop</a></li><li class="d3"><a href="#windows">Windows</a></li><li class="d3"><a href="#macos">macOS</a></li><li class="d3"><a href="#linux">Linux</a></li><li class="d3"><a href="#first-launch">First launch</a></li><li class="d3"><a href="#updating">Updating</a></li><li class="d2"><a href="#browser">Browser</a></li><li class="d2"><a href="#android">Android</a></li><li class="d2"><a href="#from-source">From source</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#which-one-do-i-want">Which one do I want?</a></li><li class="d2"><a href="#desktop">Desktop</a></li><li class="d3"><a href="#windows">Windows</a></li><li class="d3"><a href="#macos">macOS</a></li><li class="d3"><a href="#linux">Linux</a></li><li class="d3"><a href="#first-launch">First launch</a></li><li class="d3"><a href="#updating">Updating</a></li><li class="d3"><a href="#the-beta-build">The beta build</a></li><li class="d2"><a href="#browser">Browser</a></li><li class="d2"><a href="#android">Android</a></li><li class="d2"><a href="#from-source">From source</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>There are four ways to run Open Historia. All of them are free, and none of them need an
 account.</p>
 <h2 id="which-one-do-i-want">Which one do I want?</h2>
@@ -146,7 +146,7 @@ account.</p>
 <tr>
 <td><strong>Android app</strong></td>
 <td>Playing on a phone</td>
-<td>Self-contained — nothing to run alongside it. Downloads the map on first launch.</td>
+<td>Nothing to run alongside it. Your games live on the phone; the map streams like the browser build&#39;s.</td>
 </tr>
 <tr>
 <td><strong>From source</strong></td>
@@ -160,7 +160,7 @@ lightest of the four, and on iPhone and iPad it is the only option.</p>
 <p>Downloads live on the
 <a href="https://github.com/Open-Historia/open-historia/releases/tag/desktop-stable"><code>desktop-stable</code> release</a>.</p>
 <h3 id="windows">Windows</h3>
-<p>Download <strong><code>Open-Historia-Setup.exe</code></strong> (~124 MB) and run it. Open Historia lands in your Start
+<p>Download <strong><code>Open-Historia-Setup.exe</code></strong> and run it. Open Historia lands in your Start
 Menu like any other application — there is no Node.js to install, no setup script and no
 terminal window.</p>
 <p>The installer is not code-signed yet, so Windows SmartScreen will warn you the first time.
@@ -192,6 +192,16 @@ readout while it works. After that the game starts offline.</p>
 <p>The desktop app checks for updates on its own and shows a banner when one is ready. You choose
 when to download it, and it installs when you next quit. You can also just download the newest
 build and run it over the top — your saves and scenarios are kept.</p>
+<h3 id="the-beta-build">The beta build</h3>
+<p>Newer features reach the
+<a href="https://github.com/Open-Historia/open-historia/releases/tag/desktop-beta"><code>desktop-beta</code> pre-release</a>
+first. It installs <strong>alongside</strong> the official app as <em>Open Historia Beta</em> — its own Start Menu
+entry, a BETA-badged icon, its own saves and settings — and updates itself from that page, never
+onto the official build. It shares the downloaded world map with the official app, so there is
+no second map download. The files are named <code>Open-Historia-Beta-Setup.exe</code>,
+<code>Open-Historia-Beta-mac-arm64.zip</code> / <code>-x64.zip</code>, <code>Open-Historia-Beta-amd64.deb</code> and
+<code>Open-Historia-Beta-x86_64.AppImage</code>.</p>
+<p>Pages and sections marked <em>beta</em> in this wiki describe that build.</p>
 <h2 id="browser">Browser</h2>
 <p>Go to <strong><a href="/play/">openhistoria.com/play/</a></strong>. The game loads and you can start immediately.</p>
 <p>What is different in the browser:</p>
@@ -210,13 +220,13 @@ have. Gemini and Anthropic work directly; see <a href="/wiki/ai-providers/">AI p
 <p>It works on phones and tablets, including iPhone and iPad. Expect it to be slower than the
 desktop app, and add it to your Home Screen for a fullscreen window.</p>
 <h2 id="android">Android</h2>
-<p>Download <strong><code>open-historia.apk</code></strong> (~6 MB) from the
+<p>Download <strong><code>open-historia.apk</code></strong> (~21 MB) from the
 <a href="https://github.com/Open-Historia/open-historia/releases/tag/android"><code>android</code> release</a> and
 install it. Android will ask you to allow installing from your browser — this is normal for an
 app distributed outside the Play Store.</p>
-<p>The app is a thin client with a server embedded inside it. It plays on its own: there is
-nothing to run on a PC alongside it, and no Termux setup. On first launch it downloads the
-world map (~200 MB), so use Wi-Fi. Your games are saved on the phone.</p>
+<p>The app is the browser build packaged as an app. There is nothing to run on a PC alongside it
+and no Termux setup: your games are saved on the phone, and the world map streams from the same
+community content nodes that <a href="/play/">openhistoria.com/play/</a> uses, so it needs a connection.</p>
 <p>It updates itself — it checks the release for a newer build and offers it in a banner.</p>
 <p>See <a href="/wiki/mobile/">playing on your phone</a> for more.</p>
 <h2 id="from-source">From source</h2>
@@ -241,7 +251,7 @@ Go to <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
         <a class="next" href="/wiki/ai-setup/"><span>Next →</span><b>Connect an AI</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

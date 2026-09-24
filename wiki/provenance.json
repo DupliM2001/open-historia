@@ -17,10 +17,10 @@
     "every file it touches — the goal is 'this page probably needs a look', not a build graph."
   ],
   "verifiedAgainst": {
-    "main": "5ee1ab55ad87332024644389f64fe8733632a602",
-    "beta": "0b6db0ac3529eed82f6c57cf4f565bd138b34016",
-    "date": "2026-09-11",
-    "note": "Written from source and from driving both builds. Beta was verified by reading source and exercising its menus, not by playing a campaign through turns. The 2026-09-11 pass read every commit since the previous record (main c3efe87, beta e8c6632) and the non-licence diff of every cited file; most of the flagged churn was the AGPL relicense's file banners. No screenshots were re-taken in that pass."
+    "main": "e62a1c5529634e53622386dc86d546187b368eb5",
+    "beta": "2f48a6c22be815e81ee6f2c49001728dd76e0c2c",
+    "date": "2026-09-24",
+    "note": "Main absorbed nearly all of beta between 5ee1ab5 and e62a1c5 (the game menu and settings workspace, the Fallback list, Map vNext as the only renderer, the war/relation/agreement/storyline ledgers, sovereignty, Projects & Operations, the engine-driven unit system as the only one, tracked stats, loopback-only networking), so the stable/beta split was rewritten page by page: former beta notes became plain text, and what is beta-only now (puppets and demands, player focus, per-task temperature, structures from events, filed events, the Android app carrying its map) was re-marked. New on both builds and documented: the request budget, Intervene, interactive events, the standing goal, documents, group turns in one request with polls, simulation reminders, the history document, game export/import, scenario features and scenario stat sheets, the 22 shipped language packs. Written from source and from driving the main build's UI in headless Chromium; no campaign was played through turns (no API key in the capture environment)."
   },
   "pages": {
     "index.md": [
@@ -31,7 +31,9 @@
       "package.json",
       ".github/workflows/desktop-installer.yml",
       "scripts/fetch-map-assets.mjs",
-      "src/runtime/web/account.js"
+      "src/runtime/web/account.js",
+      ".github/workflows/desktop-beta.yml",
+      ".github/workflows/android-apk.yml"
     ],
     "start/ai-setup.md": [
       "src/Game/AI/providerConfig.js",
@@ -41,17 +43,24 @@
       "src/Game/AI/providerErrors.js",
       "src/Game/GameUI/apiSetupPrompt.jsx",
       "src/Game/GameUI/settings.jsx",
-      "src/Game/GameUI/fallbackSwitchNotice.jsx"
+      "src/Game/GameUI/fallbackSwitchNotice.jsx",
+      "src/Game/AI/requestBudget.js"
     ],
     "start/how-to-play.md": [
       "src/Game/GameUI/main.jsx",
       "src/Game/GameUI/time.jsx",
-      "src/Game/GameUI/actions.jsx"
+      "src/Game/GameUI/actions.jsx",
+      "src/runtime/playerGoal.js",
+      "src/Game/AI/intervene.js",
+      "src/runtime/interactiveOffer.js"
     ],
     "start/first-campaign.md": [
       "src/Game/GameUI/libraryBar.jsx",
       "src/Game/GameUI/time.jsx",
-      "src/runtime/difficulty.js"
+      "src/runtime/difficulty.js",
+      "src/Game/GameUI/actions.jsx",
+      "src/Game/GameUI/apiSetupPrompt.jsx",
+      "src/Game/Selection/Regions.jsx"
     ],
     "play/new-game.md": [
       "src/Game/GameUI/libraryBar.jsx",
@@ -59,101 +68,150 @@
       "src/Game/GameUI/CountryPickerMap.jsx",
       "src/runtime/difficulty.js",
       "server/seed/default",
-      "server/data/scenarios/default"
+      "server/gameFeatures.js"
     ],
     "play/interface.md": [
       "src/Game/GameUI/main.jsx",
       "src/Game/GameUI/chat.jsx",
       "src/Game/GameUI/settings.jsx",
-      "src/Game/Selection"
+      "src/Game/Selection",
+      "src/Game/GameUI/search.jsx",
+      "src/Game/GameUI/cheats.jsx",
+      "src/Game/GameUI/projects.jsx"
     ],
     "play/world-map.md": [
       "src/Game/Map/World.jsx",
       "src/Game/Map/Nations.jsx",
       "src/Game/Map/GlobeEffects.jsx",
       "src/runtime/assets.js",
-      "src/runtime/mapSettings.js"
+      "src/runtime/mapSettings.js",
+      "src/Game/Map/labels",
+      "src/Game/GameUI/gameLoadingScreen.jsx"
     ],
     "play/time.md": [
       "src/Game/GameUI/time.jsx",
       "src/Game/AI/gameplay.js",
       "src/runtime/jumpDates.js",
       "src/runtime/gameDates.js",
-      "src/runtime/mapSettings.js"
+      "src/runtime/mapSettings.js",
+      "src/Game/AI/jumpSegments.js",
+      "src/Game/AI/requestBudget.js",
+      "src/Game/AI/intervene.js",
+      "src/runtime/interactiveOffer.js",
+      "src/Game/AI/playerFocus.js"
     ],
     "play/orders.md": [
       "src/Game/GameUI/actions.jsx",
-      "src/Game/AI/gameplay.js"
+      "src/Game/AI/gameplay.js",
+      "src/runtime/playerGoal.js",
+      "src/runtime/spycraft.js",
+      "src/Game/AI/actionOutcomeAssociations.js"
     ],
     "play/events.md": [
       "src/Game/GameUI/time.jsx",
       "src/Game/AI/gameplay.js",
       "src/runtime/eventTags.js",
-      "src/Game/Selection/CountryPanel.jsx"
+      "src/Game/Selection/CountryPanel.jsx",
+      "src/Game/GameUI/interactive.jsx",
+      "src/runtime/interactiveOffer.js",
+      "src/Game/AI/intervene.js",
+      "src/Game/AI/historyConsolidation.js",
+      "src/runtime/unseenEvents.js",
+      "src/Game/GameUI/eventFocus.js",
+      "src/runtime/filedEvents.js"
     ],
     "systems/diplomacy.md": [
       "src/Game/GameUI/chat.jsx",
       "src/Game/AI/main.jsx",
       "src/Game/AI/gameplay.js",
-      "src/Game/AI/nativeDiplomaticDirector.js"
+      "src/Game/AI/nativeDiplomaticDirector.js",
+      "src/Game/AI/chatActions.js",
+      "src/runtime/chatThreads.js",
+      "src/Game/AI/conversationCatchUp.js",
+      "server/gameFeatures.js",
+      "src/runtime/reportDelivery.js",
+      "src/runtime/demandCheck.js"
     ],
     "systems/war.md": [
       "src/Game/AI/nativeWarLedger.js",
       "src/Game/AI/nativeDiplomaticDirector.js",
-      "src/Game/AI/nativeWorldDirector.js"
+      "src/Game/AI/nativeWorldDirector.js",
+      "src/runtime/gameState.js",
+      "src/runtime/puppets.js"
     ],
     "systems/territory.md": [
       "src/runtime/gameState.js",
       "src/Game/Selection/Regions.jsx",
-      "src/Game/AI/nativeTerritoryDirector.js"
+      "src/Game/AI/nativeTerritoryDirector.js",
+      "server/gameFeatures.js",
+      "src/runtime/puppets.js"
     ],
     "systems/military.md": [
       "src/Game/Map/unitCombat.js",
       "src/Game/GameUI/forces.jsx",
       "src/runtime/unitMotion.js",
-      "src/Game/Map/unitsController.js"
+      "src/Game/Map/unitsController.js",
+      "src/runtime/gameState.js",
+      "src/Game/AI/placement.js"
     ],
     "systems/espionage.md": [
       "src/runtime/spycraft.js",
       "src/runtime/spySeal.js",
-      "src/Game/GameUI/chat.jsx"
+      "src/Game/GameUI/chat.jsx",
+      "src/runtime/reportDelivery.js",
+      "server/gameFeatures.js",
+      "src/runtime/puppets.js"
     ],
     "systems/projects.md": [
       "src/runtime/projects.js",
       "src/Game/GameUI/projects.jsx",
-      "src/runtime/gameState.js"
+      "src/runtime/gameState.js",
+      "src/Game/AI/requestBudget.js"
     ],
     "systems/statistics.md": [
       "src/Game/GameUI/stats.jsx",
       "src/runtime/countryStats.js",
-      "src/Game/AI/countryStatsWorkerKernel.js"
+      "src/Game/AI/countryStatsWorkerKernel.js",
+      "src/Game/GameUI/StatsSheetEditor.jsx",
+      "src/runtime/statIndexDefinitions.js"
     ],
     "systems/countries.md": [
       "src/runtime/gameState.js",
       "src/runtime/countryTags.js",
       "src/runtime/polityIdentity.js",
-      "src/runtime/countryFlags.js"
+      "src/runtime/countryFlags.js",
+      "server/polityRename.js",
+      "src/Editor/PolitiesPanel.jsx"
     ],
     "systems/cities.md": [
       "src/Game/Map/Cities.jsx",
       "src/Game/Map/MarkersLayer.jsx",
       "src/runtime/cityFeatures.js",
-      "server/seed/default/cities.geojson"
+      "server/seed/default/cities.geojson",
+      "src/Game/AI/nativeStructureDirector.js"
     ],
     "systems/advisor.md": [
       "src/Game/GameUI/advisor.jsx",
       "src/Game/GameUI/advisorBlocks.js",
-      "src/Game/GameUI/advisorDrafts.js"
+      "src/Game/GameUI/advisorDrafts.js",
+      "src/runtime/reportDelivery.js",
+      "src/runtime/playerGoal.js",
+      "src/Game/AI/conversationCatchUp.js"
     ],
     "tools/settings.md": [
       "src/Game/GameUI/settings.jsx",
       "src/runtime/mapSettings.js",
       "src/runtime/debugLog.js",
-      "src/Game/AI/providerConfig.js"
+      "src/Game/AI/providerConfig.js",
+      "src/Game/AI/requestBudget.js",
+      "src/Game/AI/telemetry.js",
+      "public/lang"
     ],
     "tools/cheats.md": [
       "src/Game/GameUI/cheats.jsx",
-      "src/Game/GameUI/forces.jsx"
+      "src/Game/GameUI/forces.jsx",
+      "src/runtime/gmChanges.js",
+      "src/Game/AI/historyConsolidation.js"
     ],
     "tools/saves.md": [
       "src/runtime/gameState.js",
@@ -162,10 +220,14 @@
       "server/libraryStore.js",
       "src/runtime/web/account.js",
       "src/runtime/web/sync.js",
-      "src/runtime/web/accountWidget.js"
+      "src/runtime/web/accountWidget.js",
+      "src/runtime/gameZip.js"
     ],
     "tools/editor.md": [
-      "src/Editor"
+      "src/Editor",
+      "src/Game/GameUI/FeaturesSectionEditor.jsx",
+      "server/gameFeatures.js",
+      "src/Game/GameUI/StatsSheetEditor.jsx"
     ],
     "hosting/community-hub.md": [
       "src/Game/GameUI/communityHub.jsx",
@@ -180,12 +242,17 @@
     ],
     "hosting/mobile.md": [
       "mobile",
-      "src/runtime/appUpdate.js"
+      "src/runtime/appUpdate.js",
+      ".github/workflows/android-apk.yml"
     ],
     "reference/ai-providers.md": [
       "src/Game/AI/providerConfig.js",
       "src/Game/AI/main.jsx",
-      "src/Game/GameUI/settings.jsx"
+      "src/Game/GameUI/settings.jsx",
+      "src/Game/AI/requestBudget.js",
+      "src/Game/GameUI/debugConsole.jsx",
+      "src/Game/AI/telemetry.js",
+      "src/Game/AI/sampling.js"
     ],
     "reference/troubleshooting.md": [
       "src/Game/GameUI/advisor.jsx",
@@ -198,171 +265,193 @@
       "src/Game/GameUI/settings.jsx",
       "src/Game/GameUI/fallbackSwitchNotice.jsx",
       "src/runtime/debugLog.js",
-      "src/runtime/saveDebugLog.js"
+      "src/runtime/saveDebugLog.js",
+      "src/Game/AI/contextWindow.js",
+      "src/Game/AI/requestBudget.js"
     ]
   },
   "images": {
     "_comment": "build: which channel the shot came from. staged: the state was authored into a scratch save rather than played into, so re-take it from a real campaign if one is available.",
     "new-game-scenarios.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "new-game-country-picker.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "new-game-difficulty.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "interface-hud.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "world-map-globe.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
-    "world-map-search.jpg": {
+    "territory-dispute.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "time-skip-panel.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "orders-actions.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "events-history.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "diplomacy-threads.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "diplomacy-thread.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "diplomacy-group-picker.jpg": {
       "build": "beta",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "advisor-reply.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "statistics-sheet.jpg": {
       "build": "main",
-      "staged": false
-    },
-    "settings-menu.jpg": {
-      "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "saves-library.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "cheats-tools.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "community-hub.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass: the purple title on official posts is gone (a ✓ Official badge now marks them). The hub could not be reached from the capture environment to retake it."
     },
     "map-editor.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
     },
     "espionage-spy-tab.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "espionage-deploy.jpg": {
       "build": "main",
-      "staged": false
+      "staged": false,
+      "note": "Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "espionage-states.jpg": {
       "build": "main",
       "staged": true,
-      "note": "spy records authored into the scratch save: real rolls would need a very long campaign"
+      "note": "spy records authored into the scratch save: real rolls would need a very long campaign. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "espionage-intercept.jpg": {
       "build": "main",
       "staged": true,
-      "note": "intercepts authored in plain text; clarity 39% is genuinely computed from the two ratings"
-    },
-    "beta-quick-tools.jpg": {
-      "build": "beta",
-      "staged": false
-    },
-    "beta-quick-settings.jpg": {
-      "build": "beta",
-      "staged": false
-    },
-    "beta-renderer-setting.jpg": {
-      "build": "beta",
-      "staged": false
-    },
-    "beta-debug-console.jpg": {
-      "build": "beta",
-      "staged": false
-    },
-    "beta-projects.jpg": {
-      "build": "beta",
-      "staged": true,
-      "note": "board authored into the scratch save; a real board needs a dozen turns of events"
+      "note": "intercepts authored in plain text; clarity 39% is genuinely computed from the two ratings. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "retry-advisor.jpg": {
       "build": "beta",
       "staged": true,
-      "note": "failure forced with a rejected API key"
+      "note": "failure forced with a rejected API key. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "retry-diplomacy.jpg": {
       "build": "beta",
       "staged": true,
-      "note": "failure forced with a rejected API key"
+      "note": "failure forced with a rejected API key. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "advisor-actions-projects.jpg": {
       "build": "beta",
       "staged": true,
-      "note": "advisor reply with actionsSummary/projectsSummary authored into a scratch save; the cards are the real components rendering real field shapes"
+      "note": "advisor reply with actionsSummary/projectsSummary authored into a scratch save; the cards are the real components rendering real field shapes. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "stats-diplomacy.jpg": {
       "build": "beta",
       "staged": true,
-      "note": "world.relations authored into a scratch save; the scores, badges and meters are all derived by the game from them"
+      "note": "world.relations authored into a scratch save; the scores, badges and meters are all derived by the game from them. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "stats-agreements.jpg": {
       "build": "beta",
       "staged": true,
-      "note": "world.agreements authored into a scratch save"
+      "note": "world.agreements authored into a scratch save. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
     },
     "stats-advanced.jpg": {
       "build": "beta",
       "staged": true,
-      "note": "countryStatsHistory authored into a scratch save; the sheet itself passes the game's own countryStatSheet validator"
+      "note": "countryStatsHistory authored into a scratch save; the sheet itself passes the game's own countryStatSheet validator. Taken before the 2026-09-24 pass, in the older UI palette; the panel it shows is still current."
+    },
+    "projects-board.jpg": {
+      "build": "beta",
+      "staged": true,
+      "note": "board authored into the scratch save; a real board needs a dozen turns of events. Was beta-projects.jpg; the board is on main now. Older UI palette."
+    },
+    "debug-console.jpg": {
+      "build": "beta",
+      "staged": false,
+      "note": "Was beta-debug-console.jpg; the console is on main now. Older UI palette."
+    },
+    "game-menu-settings.jpg": {
+      "build": "main",
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
+    },
+    "game-menu-tools.jpg": {
+      "build": "main",
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 in headless Chromium. The ArcGIS basemap host was unreachable from the capture environment, so map areas show the political layer on the dark ground with no basemap imagery; retake with the basemap when possible."
+    },
+    "ai-setup-prompt.jpg": {
+      "build": "main",
+      "staged": false,
+      "note": "Retaken 2026-09-24 on main e62a1c5 with the tutorial video hidden (YouTube was unreachable from the capture environment)."
+    },
+    "settings-ai-models.jpg": {
+      "build": "main",
+      "staged": true,
+      "note": "A placeholder Gemini key was pasted into the setup prompt to populate the list; no call was made with it, so both entries read Ready."
     }
   },
   "knownGaps": [
-    "No screenshot of Map vNext for a side-by-side against the legacy renderer.",
+    "Map screenshots taken on 2026-09-24 have no basemap imagery: the ArcGIS host was unreachable from the capture environment.",
     "No screenshot of a held time-skip segment or a held Projects board: both live in in-memory pending state and cannot be authored into a save.",
-    "Beta was verified from source and by driving its menus, not by playing a campaign through turns.",
-    "No screenshot of beta's Settings → AI Models list (the Fallback list) or its Connections; the backup-models section is written from source and the Fallback list spec's checks."
+    "No screenshot of Intervene, an interactive event, a group turn with a poll, a document notice, or any beta-only surface (puppet card, demand card, Player focus): each needs AI output or beta, and the 2026-09-24 pass had neither a key nor a beta build running.",
+    "Content screenshots (events, diplomacy, advisor, stats, espionage, retry) predate the 2026-09-24 pass and use the older palette.",
+    "Neither build was verified by playing a campaign through turns; the 2026-09-24 pass read source and drove main's menus and panels."
   ],
   "pageVerified": {
     "_comment": "Pages re-verified against a commit NEWER than verifiedAgainst. wiki:check skips a page for a channel whose recorded commit here is at or past the current tip. Only add a page you actually re-read. Emptied on 2026-09-11, when the global record moved past every entry that was here.",
-    "_note": "2026-09-14: the two AI pages below were re-read against beta after the Fallback list merged (#757). tools/settings.md and reference/troubleshooting.md got their Fallback list text in the same pass but are NOT listed: beta also moved the Diagnostics log out of Cheats into Settings → Diagnostics, and those pages still describe the old place.",
-    "start/ai-setup.md": {
-      "beta": "e23b56471abc8468c17b0be438614f5f20308117"
-    },
-    "reference/ai-providers.md": {
-      "beta": "e23b56471abc8468c17b0be438614f5f20308117"
-    }
+    "_note": "Emptied on 2026-09-24, when the global record moved past every entry that was here."
   }
 }

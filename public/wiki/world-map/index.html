@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,38 +121,46 @@
     <h1>The World Map</h1>
     <p class="tagline">Reading the map: political fills, striped disputes, labels, the 3D globe, terrain and basemaps.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#political-fills">Political fills</a></li><li class="d2"><a href="#striped-regions-mean-a-dispute">Striped regions mean a dispute</a></li><li class="d2"><a href="#labels">Labels</a></li><li class="d2"><a href="#zoom-and-bounds">Zoom and bounds</a></li><li class="d2"><a href="#basemaps">Basemaps</a></li><li class="d2"><a href="#the-3d-globe">The 3D globe</a></li><li class="d2"><a href="#3d-terrain">3D terrain</a></li><li class="d2"><a href="#custom-backgrounds">Custom backgrounds</a></li><li class="d2"><a href="#clicking-things">Clicking things</a></li><li class="d2"><a href="#two-renderers">Two renderers</a></li><li class="d2"><a href="#performance">Performance</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#political-fills">Political fills</a></li><li class="d2"><a href="#striped-regions-mean-a-dispute">Striped regions mean a dispute</a></li><li class="d2"><a href="#labels">Labels</a></li><li class="d2"><a href="#zoom-and-bounds">Zoom and bounds</a></li><li class="d2"><a href="#basemaps">Basemaps</a></li><li class="d2"><a href="#the-3d-globe">The 3D globe</a></li><li class="d2"><a href="#3d-terrain">3D terrain</a></li><li class="d2"><a href="#custom-backgrounds">Custom backgrounds</a></li><li class="d2"><a href="#clicking-things">Clicking things</a></li><li class="d2"><a href="#performance">Performance</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>The map is the game&#39;s main display and its main control. Everything on it is clickable, and the
 way it is coloured tells you who holds what.</p>
 <h2 id="political-fills">Political fills</h2>
-<p>Every region is painted in the colour of whoever administers it, at a constant 72% opacity over
-the basemap, so you can still read the terrain underneath.</p>
-<p class="beta-note"><b>On beta the fill strengthens as you zoom in</b> — about 46% with the whole
-world in view, 72% at regional zoom and 84% close in — so relief and seas read from far out and
-ownership reads clearly up close. Disputed-region stripes are drawn lighter, too.</p><p>Colours are resolved in a fixed order: the scenario&#39;s own palette first, then any colour set on
+<p>Each country is drawn as <strong>one surface</strong> in the colour of whoever administers it, with its
+frontiers stitched between neighbours, rather than as a patchwork of separately filled regions.
+The fill strengthens as you zoom in — about 46% with the whole world in view, 72% at regional zoom
+and 84% close in — so relief and seas read from far out and ownership reads clearly up close.</p>
+<p>A campaign opens under a loading screen, the logo turning over a dark ground, while the map works
+out every country&#39;s surface. That pause is normal, not a hang; the map is revealed once it is
+drawn. Switching the 3D globe on or off shows the same screen while the map redraws.</p>
+<p>Colours are resolved in a fixed order: the scenario&#39;s own palette first, then any colour set on
 the country, then a match against known aliases, and finally a colour derived from the country&#39;s
 name. That last fallback is why an invented faction always gets <em>a</em> colour even if you never
 picked one — and why two countries occasionally land on similar shades.</p>
 <p><img src="/wiki/img/world-map-globe.jpg" alt="The 3D globe">
-<em>The globe, with the real day/night terminator falling across Africa and the starfield behind it. Western Sahara is striped even at this angle.</em></p>
+<em>The globe, with the real day/night terminator falling across the Atlantic and the starfield behind it.</em></p>
 <h2 id="striped-regions-mean-a-dispute">Striped regions mean a dispute</h2>
 <p>A region rendered in <strong>stripes</strong> is claimed by more than one country. The stripes combine the
 colour of whoever actually administers it with the colours of the claimants.</p>
 <p>This is a real mechanic, not decoration — see <a href="/wiki/territory/">territory</a> for the difference
 between holding ground and being acknowledged as its owner.</p>
 <h2 id="labels">Labels</h2>
-<p>Country names scale with the map and fade out as you zoom in, on the assumption that once you
-are looking at one country closely you no longer need it named. Cities appear from about zoom
-3.4 and get more numerous as you go in.</p>
+<p>Each country gets <strong>one label</strong>: curved along its territory where it fits, a straight one where
+it does not, placed so compact countries read horizontally and long ones follow their length.
+Detached land of consequence — Alaska, Kalimantan, Greenland — carries its owner&#39;s name as well.
+Labels use the name the scenario gives the country, so a renamed country is labelled by its new
+name. They scale with the map and fade out by zoom 7.5, once the provinces read on their own.
+Cities appear from about zoom 3.4 and get more numerous as you go in.</p>
 <p>Scenario authors can set the label font, letter colour and border colour for their world, so a
 custom map may look quite different from Modern Day.</p>
-<p>You can turn country labels off entirely in <strong>Settings → Map</strong>.</p>
+<p>You can turn country labels off, or override the label font, in <strong>Settings → Map</strong>.</p>
 <h2 id="zoom-and-bounds">Zoom and bounds</h2>
 <p>The camera runs from zoom <strong>2.25</strong> (the whole world) to <strong>16</strong> (street level, where the basemap
 supports it). Vertical panning is bounded at roughly 80°S to 85°N — there is no reason to fly off
 the top of the map.</p>
 <h2 id="basemaps">Basemaps</h2>
-<p>The imagery under the political fills. <strong>Settings → Map → Basemap</strong> offers ten:</p>
+<p>The imagery under the political fills. <strong>Settings → Map → Basemap</strong> starts on <strong>Scenario
+default</strong> — whatever the scenario&#39;s author chose, which for Modern Day is Ocean — and offers
+fourteen others:</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -161,6 +169,14 @@ the top of the map.</p>
 </tr>
 </thead>
 <tbody><tr>
+<td>Atlas Relief</td>
+<td>Bathymetry and shaded land relief, graded as a political canvas</td>
+</tr>
+<tr>
+<td>Atlas Relief - Dark</td>
+<td>The same, darker</td>
+</tr>
+<tr>
 <td>Satellite</td>
 <td>Photographic imagery</td>
 </tr>
@@ -189,8 +205,16 @@ the top of the map.</p>
 <td>Atlas styling</td>
 </tr>
 <tr>
-<td><strong>Ocean</strong></td>
-<td>The default — bathymetry and a muted land base</td>
+<td>National Geographic - Dark</td>
+<td>Atlas styling, darkened, without political or place labels</td>
+</tr>
+<tr>
+<td>Ocean</td>
+<td>Bathymetry and a muted land base</td>
+</tr>
+<tr>
+<td>Ocean - Dark</td>
+<td>The same, darker</td>
 </tr>
 <tr>
 <td>Light Gray Canvas</td>
@@ -201,8 +225,8 @@ the top of the map.</p>
 <td>Minimal, dark</td>
 </tr>
 </tbody></table></div>
-<p>Your choice is stored per browser and overrides whatever the scenario author picked. Clearing it
-hands control back to the scenario.</p>
+<p>Your choice is stored per browser and overrides the scenario&#39;s; it applies immediately. Setting
+it back to Scenario default hands control back to the scenario.</p>
 <p>Not every basemap has imagery at every zoom — Physical stops at zoom 8, Terrain and Shaded Relief
 at 13. Past that the game upscales the last available tiles rather than showing nothing.</p>
 <h2 id="the-3d-globe">The 3D globe</h2>
@@ -214,11 +238,10 @@ minutes.</p>
 <p>Both the idle rotation and the general motion can be switched off — <strong>Disable idle globe
 rotation</strong>, or <strong>Reduce motion</strong> as an umbrella setting.</p>
 <h2 id="3d-terrain">3D terrain</h2>
-<p><strong>Settings → Map → 3D Terrain</strong>, labelled &quot;Very Experimental&quot; and honestly so. It raises real
-elevation with a heavy 15× exaggeration so that mountain ranges actually read at world scale,
-plus light hillshading.</p>
-<p>It only applies on the flat map — terrain and the globe are mutually exclusive, and a scenario
-with a custom background image disables it too.</p>
+<p><strong>Settings → Map → 3D Terrain</strong>, marked experimental and honestly so. It raises real elevation
+with a heavy 15× exaggeration so that mountain ranges actually read at world scale, plus light
+hillshading. A scenario with a custom background has no elevation data to raise, so it stays off
+there.</p>
 <h2 id="custom-backgrounds">Custom backgrounds</h2>
 <p>A scenario can replace Earth entirely, either with an image pinned to a geographic extent or
 with its own vector artwork. This is how fantasy maps work: the political layer sits on top of a
@@ -233,11 +256,11 @@ world that has nothing to do with this planet.</p>
 </thead>
 <tbody><tr>
 <td><strong>A region</strong></td>
-<td>Who administers it, an intelligence briefing, a shortcut to open a chat, and a link to the owner&#39;s dossier.</td>
+<td>A card naming the country and the region, with <strong>💬</strong> to open a chat, <strong>⧉</strong> to copy the name and <strong>ⓘ</strong> to open the country&#39;s panel.</td>
 </tr>
 <tr>
-<td><strong>A country</strong></td>
-<td>Its dossier: flag, tags, recent events filtered by importance, and an AI briefing on request.</td>
+<td><strong>A country&#39;s panel</strong></td>
+<td>Flag, details, alternative names, related events filtered by importance, and an AI report on request.</td>
 </tr>
 <tr>
 <td><strong>A unit</strong></td>
@@ -248,16 +271,6 @@ world that has nothing to do with this planet.</p>
 <td>Name, population, whether it is a capital, and what kind of thing it is.</td>
 </tr>
 </tbody></table></div>
-<h2 id="two-renderers">Two renderers</h2>
-<p class="beta-note"><b>Beta channel only.</b></p><p>The beta build is developing a new renderer, <b>Map vNext</b>, which is the default there. It
-dissolves each polity into a single surface with stitched frontiers and curved labels, instead of
-filling every region separately. It is a work in progress, and it takes noticeably longer to draw
-when a campaign opens.</p>
-<p>You can switch back to the older look at <strong>Settings → Map → Renderer → &quot;Legacy map renderer&quot;</strong> —
-and you should <strong>restart the app afterwards</strong>, because the change does not fully take effect
-until you do. Nothing about your save changes either way; it is purely how the map is drawn. See
-<a href="/wiki/settings/">the settings reference</a>.</p>
-<p>The stable build has one renderer and no setting for it, which is what this page describes.</p>
 <h2 id="performance">Performance</h2>
 <p>If the map is slow:</p>
 <ul>
@@ -280,7 +293,7 @@ memory on a long campaign.</p>
         <a class="next" href="/wiki/time/"><span>Next →</span><b>Time &amp; turns</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

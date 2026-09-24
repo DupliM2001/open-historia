@@ -34,10 +34,20 @@ browser.
 
 ## Connecting from another device
 
-Find the server machine's local IP (`ipconfig` on Windows, `ip addr` on Linux, `ifconfig` on
-macOS) and open `http://192.168.x.x:3000` from the other device.
+**The server answers only the machine it runs on** until you say otherwise. There are two ways to
+open it up:
 
-Writes from a different origin are blocked by default. To allow them:
+- **In the game:** ☰ → Settings → Advanced → Network → **Let other devices connect**. It takes
+  effect immediately, without a restart, is remembered, and shows the address to type on the
+  other device.
+- **From the environment,** for a headless box: `OH_HOST=0.0.0.0 node server/server.js` for every
+  interface, or `OH_HOST=192.168.1.9` for one. When `OH_HOST` is set it wins, and the in-game
+  switch says the environment owns the decision.
+
+Then open the address it gives you — `http://192.168.x.x:3000` — from the other device.
+
+Writes from a page served by a *different* origin are blocked either way, which is what stops a
+web page you visit from editing your saves. To allow them:
 
 ```
 OH_ALLOW_CROSS_ORIGIN=1 node server/server.js
@@ -47,10 +57,16 @@ OH_ALLOW_CROSS_ORIGIN=1 node server/server.js
 
 **The game's API has no password.** There is no login, no token and no permission model.
 
-The server binds to all network interfaces, so **anyone who can reach port 3000 can read,
-change and delete your games and scenarios.** On a home network behind a router that is
-generally fine. It is not fine on a shared, public or untrusted network, and it is emphatically
-not fine exposed directly to the internet.
+Once it is open, **anyone who can reach port 3000 can read, change and delete your games and
+scenarios.** On a home network behind a router that is generally fine. It is not fine on a
+shared, public or untrusted network, and it is emphatically not fine exposed directly to the
+internet. Turn the switch off again when you are done.
+
+Two things soften it: requests from other devices are rate-limited (1,200 a minute by default),
+and the **AI relay** — which forwards requests to providers that refuse browser calls — still
+answers only this machine, so your computer cannot be used as an open proxy by anything on the
+network. Set `OH_ALLOW_REMOTE_RELAY=1` if you do want a device on your network to relay its AI
+calls through this server.
 
 If you want to reach your game from outside your home, use a private network overlay —
 **Tailscale**, **ZeroTier** or a WireGuard tunnel — rather than forwarding port 3000. Those give
@@ -64,8 +80,12 @@ in front.
 | Variable | |
 |---|---|
 | `PORT` | Port to listen on. Default `3000`. |
+| `OH_HOST` | Address to bind. Unset: this machine only, unless the in-game switch says otherwise. `0.0.0.0` for every interface. Overrides the switch. |
 | `OH_DATA_DIR` | Where writable state lives — saves, scenarios, uploads. Relocate the whole library with this. |
-| `OH_ALLOW_CROSS_ORIGIN` | Set to `1` to accept writes from another origin. Needed for another device. |
+| `OH_ALLOW_CROSS_ORIGIN` | Set to `1` to accept writes from a page on another origin. |
+| `OH_ALLOW_REMOTE_RELAY` | Set to `1` to let other devices relay AI calls through this server. |
+| `OH_RATE_LIMIT` | Requests a minute allowed from each other device. Default `1200`. This machine is exempt. |
+| `OH_RELAY_TIMEOUT_MS` | How long the AI relay waits for a generation to finish. Default ten minutes. |
 | `OH_ASSETS_DIR` | Where the map binaries are read from. |
 
 ## Running as a service
@@ -84,12 +104,14 @@ WorkingDirectory=/path/to/open-historia
 ExecStart=/usr/bin/node server/server.js
 Restart=on-failure
 Environment=PORT=3000
+Environment=OH_HOST=0.0.0.0
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Then `sudo systemctl enable --now open-historia`.
+Then `sudo systemctl enable --now open-historia`. Drop the `OH_HOST` line if only that machine
+should reach it — and read the warning above if you keep it.
 
 **macOS** — a `launchd` plist in `~/Library/LaunchAgents/`.
 
@@ -124,19 +146,6 @@ sent only to the provider you configured.
 Two things do reach the network by default: the browser build's analytics on the website itself,
 and an anonymous counter that pings when a Community Hub scenario is imported (set
 `OH_IMPORT_COUNTER_URL` to an empty value to disable it). Neither carries game data.
-
-## What the beta adds
-
-<p class="beta-note"><b>Beta channel only.</b></p>
-
-The beta channel hardens all of this considerably: the server binds to **loopback only** by
-default, with an explicit **Settings → Network** toggle to let other devices in that takes effect
-immediately and tells you the address to type. The AI relay is fenced so your machine cannot be
-used as an open proxy, there is a configurable request rate limit, and `OH_HOST` lets a headless
-install pin the bind address.
-
-If you intend to expose the server on a network you do not fully control, the beta build is the
-better choice.
 
 ## Next
 

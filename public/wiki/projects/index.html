@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/" class="on" aria-current="page">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/" class="on" aria-current="page">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -120,17 +120,18 @@
     </nav>
     <h1>Projects and Operations</h1>
     <p class="tagline">Long-running efforts that span turns: research programmes, construction, covert operations and campaigns.</p>
-    <p class="beta-note"><b>Beta channel only.</b> This system is not in the stable release yet. To try it, install the
-      <a href="https://github.com/Open-Historia/open-historia/releases/tag/desktop-beta">beta build</a>, which installs alongside
-      the stable app and keeps its own saves.</p>
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#projects-and-operations">Projects and operations</a></li><li class="d2"><a href="#secrecy">Secrecy</a></li><li class="d2"><a href="#milestones">Milestones</a></li><li class="d2"><a href="#what-you-actually-control">What you actually control</a></li><li class="d2"><a href="#completion-has-consequences">Completion has consequences</a></li><li class="d2"><a href="#foreign-projects-and-whether-to-believe-them">Foreign projects, and whether to believe them</a></li><li class="d2"><a href="#limits">Limits</a></li><li class="d2"><a href="#filtering">Filtering</a></li><li class="d2"><a href="#on-the-stable-release">On the stable release</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#projects-and-operations">Projects and operations</a></li><li class="d2"><a href="#secrecy">Secrecy</a></li><li class="d2"><a href="#milestones">Milestones</a></li><li class="d2"><a href="#what-you-actually-control">What you actually control</a></li><li class="d2"><a href="#completion-has-consequences">Completion has consequences</a></li><li class="d2"><a href="#foreign-projects-and-whether-to-believe-them">Foreign projects, and whether to believe them</a></li><li class="d2"><a href="#limits">Limits</a></li><li class="d2"><a href="#filtering">Filtering</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Some things a country does cannot happen in one turn. A nuclear programme, a canal, a rearmament
 plan, a decade-long insurgency, a covert operation to destabilise a neighbour — these are
-<em>efforts</em>, not actions, and the beta channel gives them their own board.</p>
-<p>Open it from the toolbar alongside Chat and Actions.</p>
+<em>efforts</em>, not actions, and they get their own board.</p>
+<p>Open it with the <strong>Projects &amp; Operations</strong> button in the toolbar, alongside Chat and Actions. A
+new campaign&#39;s board is empty — <em>&quot;Nothing on the board yet&quot;</em> — until events and your advisor
+start writing to it; <strong>🧭 Ask your advisor to populate this</strong> gets it to file the efforts you
+already have under way.</p>
 <p>This is also where research and technology live. There is no tech tree; there is a research
 programme with milestones that either progresses or stalls.</p>
-<p><img src="/wiki/img/beta-projects.jpg" alt="The Projects and Operations board">
+<p><img src="/wiki/img/projects-board.jpg" alt="The Projects and Operations board">
 *A board on a campaign that has been running a while. Note the counts — <strong>Mine (4)</strong>,
 <strong>Foreign (2)</strong> — the tag chips, the priority control on each card, and that an <strong>ongoing</strong> effort
 carries no target date and so can never run late.*</p>
@@ -222,7 +223,14 @@ simulation is told to keep it moving. Low means it is allowed to drift.</p>
 <p>You do <strong>not</strong> author a project&#39;s content. Projects are written <em>by</em> the world — by events, by
 your intelligence service, and by the advisor — in response to what your country is doing. You
 steer them; you do not type them into existence.</p>
-<p>Closing keeps the record. Completing marks pending milestones done and forces progress to 100%;
+<p>After each time skip the board is brought into step with what happened — progress, stalls and new
+long-term efforts — reading every event of the turn, including ones taken off the timeline as
+filler. With <strong>Save AI requests</strong> on, this shares the one after-skip request; it can be turned
+off in Settings → AI. If that update fails, the turn is held rather than lost — see
+<a href="/wiki/troubleshooting/#a-held-projects-board">troubleshooting</a>. The time skip itself is shown
+the board, so an effort you push is narrated as what it actually is.</p>
+<p class="beta-note"><b>On beta a project's activity lists only the events that moved it</b>,
+rather than every event that mentioned it in passing.</p><p>Closing keeps the record. Completing marks pending milestones done and forces progress to 100%;
 failing or cancelling marks them missed and preserves the real progress reached. Only an explicit
 delete erases a project entirely.</p>
 <h2 id="completion-has-consequences">Completion has consequences</h2>
@@ -290,17 +298,11 @@ evicted first</strong>, oldest by last update — your active programmes are nev
 <p>The board filters by owner (yours or foreign), free text, and tag chips, with several sort
 orders and a separate <strong>Closed</strong> view. On a long campaign with a busy intelligence service you
 will need them.</p>
-<h2 id="on-the-stable-release">On the stable release</h2>
-<p>None of this exists. Long-running efforts happen, but they live in the narrative and in your
-own head — an event refers back to the programme you started six turns ago because the
-<a href="/wiki/events/">event history</a> remembers it, not because anything is tracking milestones.</p>
-<p>If you want the board, install the beta build. It sits alongside the stable app and keeps its own
-saves.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/espionage/">Espionage</a> — where the foreign entries and the doubt come from.</li>
 <li><a href="/wiki/orders/">Giving orders</a> — how efforts get started.</li>
-<li><a href="/wiki/war/">Relations, treaties and war</a> — the other half of the beta model.</li>
+<li><a href="/wiki/war/">Relations, treaties and war</a> — the ledgers the board sits beside.</li>
 </ul>
 
     <nav class="wiki-pager" aria-label="Pagination">
@@ -308,7 +310,7 @@ saves.</p>
         <a class="next" href="/wiki/statistics/"><span>Next →</span><b>National statistics</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

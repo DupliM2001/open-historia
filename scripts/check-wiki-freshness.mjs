@@ -7,7 +7,7 @@
 // the pages to review — plus the commit subjects behind them, so you can judge which changes
 // actually matter rather than re-reading everything.
 //
-// Run: npm run wiki:check        (add --fetch to update the remote refs first)
+// Run: npm run wiki:check        (npm run wiki:check -- --fetch to update the remote refs first)
 //
 // The runbook this belongs to is docs/wiki.md.
 //

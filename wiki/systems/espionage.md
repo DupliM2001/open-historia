@@ -2,7 +2,8 @@ Espionage runs in both directions. You plant agents in other countries and read 
 diplomacy; other countries plant agents in you and read yours. It is the most mechanically
 explicit system in the game — the rolls are real numbers, and they are deterministic.
 
-Find it in the **💬 Chat** panel, **Spy** tab.
+Find it in the **Chat** panel, **Spy** tab. (A scenario can switch espionage off with its
+**Espionage** feature; then the Spy tab is hidden and no service acts.)
 
 ![The Spy tab](/wiki/img/espionage-spy-tab.jpg)
 *The Spy tab before anything is deployed — your service rating, and the three slots you have to spend.*
@@ -35,8 +36,9 @@ Three is not many. Choosing where those three go is most of the strategy.
 ## Sending an agent
 
 From the **Spy** tab, deploy to a target country. You can also just write it as an order —
-*"deploy a spy in Germany"* — and the next time skip executes it through exactly the same rules
-and caps.
+*"deploy a spy in Germany"* — and the next time skip places a real agent through exactly the same
+rules and caps, quietly on the turn it happens. Either way the agent's operation opens on your
+[Projects board](/wiki/projects/) the same turn, and recalling or losing it closes it.
 
 An active agent reports: it feeds you the target's private diplomatic traffic, subject to how
 much of it you can actually read.
@@ -137,10 +139,10 @@ When you catch one, it appears in the Spy tab and **waits for your decision**:
 Turning is the more interesting option and the more useful one, but it requires you to keep
 feeding it plausible material.
 
-<p class="beta-note"><b>On beta</b>, typing a story before you turn the agent changes the button to
-<b>Turn &amp; plant story</b>, so the first report home is yours from the start. A turned agent's
-<b>Save</b> is greyed out while the field matches what it already reports and reads "Saved" for a
-moment after you save; Enter in the field saves too.</p>
+Typing a story before you turn the agent changes the button to **Turn & plant story**, so the
+first report home is yours from the start. A turned agent's **Save** is greyed out while the field
+matches what it already reports and reads "Saved" for a moment after you save; Enter in the field
+saves too.
 
 ## Reading intercepts
 
@@ -167,13 +169,29 @@ only ever reveals *more* of a message you have already seen — it never re-hide
 | 20 | 80 | 6% (the floor — essentially nothing) |
 
 Intercepts are stored separately from the rest of your save and **encrypted at rest** with a key
-unique to your campaign. They are decrypted only to show you and to inform the simulation.
+unique to your campaign. They are decrypted only to show you and to inform the simulation. An
+undone turn, or an Intervene, takes the turn's reports back with it.
+
+## Stolen documents
+
+Some things governments know are not on the public record at all — a secret protocol, a private
+letter between heads of state, the full articles of a treaty. When such a document is held by a
+government where you have an **active** agent, your agent brings you a copy: it is filed in the
+Spy tab with the agent's intercepts, sealed like them, and readable only as far as your service
+can read theirs. A turned agent brings nothing real. The country you stole it from is never told.
+
+<p class="beta-note"><b>On beta, agents can uncover covert puppets.</b> An active agent inside
+either party to a covert <a href="/wiki/war/#puppets-and-overlords">puppet arrangement</a> reveals
+it at the end of the turn, and keeps what you know of it current for as long as it stays in
+place.</p>
 
 ## Agents report in real time
 
-Agents do not only report at a time skip. While the game is open and the tab is visible, each
-deployed agent is rolled roughly once a minute, working out to about **one report every twenty
-minutes per agent**. They also report after every jump.
+Agents report after time skips — with **Save AI requests** on, collecting their reports is one of
+the after-skip checks, and each agent files at least every third skip. They also report between
+skips: while the game is open and on screen, each deployed agent is rolled roughly once a minute,
+working out to about **one report every twenty minutes per agent**. Those in-between reports are
+background AI, so they only happen while **Background AI** is on, and stop at its daily cap.
 
 This is deliberate and it is why there is no "gather intelligence" button: an agent is a trickle
 of information you receive over time, not a resource to farm on demand. Leaving the game open
@@ -192,4 +210,4 @@ during a tense period genuinely gets you more.
 
 - [Diplomacy](/wiki/diplomacy/) — the conversations your agents are reading.
 - [National statistics](/wiki/statistics/) — where the intelligence rating lives.
-- [Projects and operations](/wiki/projects/) — running covert work as a long programme (beta).
+- [Projects and operations](/wiki/projects/) — running covert work as a long programme.

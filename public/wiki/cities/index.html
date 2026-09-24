@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/" class="on" aria-current="page">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/" class="on" aria-current="page">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -125,10 +125,11 @@
     <p>Two kinds of thing are drawn on top of the political map: <strong>cities</strong>, which come with the world,
 and <strong>structures</strong>, which get built during a campaign.</p>
 <h2 id="cities">Cities</h2>
-<p>Cities come from the scenario. Modern Day uses a stock set of roughly seventy thousand; a custom
-scenario can ship its own, or import from the same database.</p>
-<p class="beta-note"><b>On beta</b>, Modern Day's <a href="/wiki/new-game/">redrawn map</a> carries
-its own list instead: about 2,500 cities, with their 2014 populations.</p><p>They appear from about zoom 3.4 and get denser as you zoom in. Click one for its name,
+<p>Cities come from the scenario. Modern Day&#39;s <a href="/wiki/new-game/">hand-drawn map</a> carries its own list
+of about 2,500 cities, with their 2014 populations. A scenario on the stock world map uses a stock
+set of roughly seventy thousand; a custom scenario can ship its own, or import from the same
+database. A scenario with no cities shows none.</p>
+<p>They appear from about zoom 3.4 and get denser as you zoom in. Click one for its name,
 population, whether it is a capital, and its tier.</p>
 <h3 id="cities-change">Cities change</h3>
 <p>The world can rename a city and change its population, and it does both for real reasons:</p>
@@ -143,7 +144,9 @@ quieter pleasures of playing one.</p>
 <h2 id="structures">Structures</h2>
 <p>Structures are markers placed during play: military bases, ports, embassies, airfields,
 research facilities, landmarks — the kind is free-form, so the world names whatever it needs.</p>
-<p>Each has a name, a kind, an owner, a position, and optionally a note and a founding date.</p>
+<p>Each has a name, a kind, an owner, a position, a status — planned, under construction or
+active — and optionally a note and a founding date. The game places a new structure by the place
+its event names and keeps it off other markers.</p>
 <h3 id="structures-never-move-borders">Structures never move borders</h3>
 <p>This is the rule worth knowing. A structure&#39;s owner is <strong>whoever runs the facility</strong>, not who
 owns the ground it stands on.</p>
@@ -158,7 +161,11 @@ a second one on the same spot.</p>
 <p>You get structures by ordering them — <em>&quot;begin construction of a naval base at Gdynia&quot;</em> — and by
 the world building its own. Watching foreign bases appear near your borders is a genuinely
 useful early-warning system.</p>
-<h2 id="placing-them-yourself">Placing them yourself</h2>
+<p class="beta-note"><b>On beta, what an event builds is put on the map.</b> After each skip a
+check — <b>Put new structures on the map</b> in Settings → AI — places the bases, shipyards, data
+centres and ground stations the events said were built; a structure it could not place says where
+it was sent instead. One credited to a country with no land goes to whoever holds the ground.
+Structures are also drawn half again as large.</p><h2 id="placing-them-yourself">Placing them yourself</h2>
 <p>The <a href="/wiki/cheats/">cheats panel</a> has map-feature tools: edit an existing city or structure, add
 a new one, or clear out ones that have accumulated and stopped mattering.</p>
 <p>Adding your first custom city to a scenario flips it into custom-cities mode, after which the
@@ -177,7 +184,7 @@ the full city database or place them by hand.</p>
         <a class="next" href="/wiki/advisor/"><span>Next →</span><b>The advisor</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

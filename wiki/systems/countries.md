@@ -2,19 +2,22 @@ A country in Open Historia is not a row in a table of stats. It is a name, a set
 known for, a reputation, a flag, a colour, and whatever territory it holds — and the world reads
 all of that when deciding how to treat it.
 
-## Names are identity
+## Identity and names
 
-Countries are identified by their **display name, verbatim** — not by an ISO code or a database
-id. "France" is the identity. This runs all the way through the game: region ownership, the
-colour palette, flags, diplomacy and the map editor all key off the name.
+Every country has **one stable identity**, and its name is how that identity is presented. A
+scenario keeps a registry of its countries — independently of the regions they hold, so a
+country can exist with no land at all — and region ownership, the colour palette, flags, tags,
+diplomacy, the war records and your standing goal all hang off that identity.
 
 Two practical consequences:
 
 - **In the map editor, typing a new country name creates that country.** There is no separate
-  "add nation" step; painting a region with a name that does not exist brings it into being.
-- **Renaming is a real event.** A country renamed after a revolution is, as far as the game's
-  identity system is concerned, being re-labelled — which is why the world only does it on an
-  actual regime change, never for a mere change of leader.
+  "add nation" step; giving a region an owner that does not exist yet brings it into being, and
+  the owner is picked from the registry, so a typo cannot quietly mint a one-province country.
+- **Renaming changes the label, not the country.** A country renamed after a revolution keeps
+  every region, flag, tag, colour, conversation and war record, and the map labels it by its new
+  name. The world only renames on an actual regime change, never for a mere change of leader.
+  Territory handed to a country that does not exist yet founds it.
 
 Countries also carry **aliases**: alternative names the game will recognise as the same country.
 This is what lets a scenario use a historical name while still matching modern data.
@@ -31,7 +34,7 @@ exporter".
 - When a country's alignment shifts, the world rewrites the **complete** tag list rather than
   adding one — tags are a full replacement, not a running log.
 
-You can see a country's tags in its dossier, and edit your own (or anyone's) in the
+You can see a country's tags in its panel, and edit your own (or anyone's) in the
 [cheats panel](/wiki/cheats/).
 
 ## Reputation
@@ -78,7 +81,9 @@ land on similar shades — the derivation does not know about the rest of the ma
 Countries can carry a flag from the built-in set, from a scenario's own flag pack, or from a
 community flag pack. Invented factions can pick one or go without.
 
-One deliberate rule: **a country that holds no land never borrows a real country's flag**. A
+The diplomacy and spy pickers show the scenario's own flags, and a flag changed mid-campaign
+updates live. One deliberate rule: **a country that holds no land never borrows a real country's
+flag**. A
 government in exile that happens to share a name with a modern state does not get that state's
 flag, because it is not that state.
 
@@ -93,7 +98,7 @@ territorially, and everything resting on what you can talk other people into.
 
 ## Inventing a country
 
-The **Faction** tab of the new-game picker creates one. You choose the name, colour, flag,
+The **Create a faction** tab of the new-game picker creates one. You choose the name, colour, flag,
 starting regions (or none), and — the part that matters most — the **lore**.
 
 The lore is read by the world. A faction with a paragraph explaining who you are, what you want
@@ -105,8 +110,8 @@ opinions.
 
 ## Editing countries mid-campaign
 
-The [cheats panel](/wiki/cheats/) has a country editor — identity, colour, tags, reputation, the
-stat sheet — and an add-country tool. Useful for repairing a country the simulation has drifted
+The [cheats panel](/wiki/cheats/) has a **Country Editor** — identity, colour, tags,
+reputation, the persistent stat sheet — and an **Add Country** tool. Useful for repairing a country the simulation has drifted
 on, or for authoring the world by hand.
 
 ## Next

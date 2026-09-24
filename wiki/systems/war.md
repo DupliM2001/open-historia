@@ -1,6 +1,5 @@
-On the stable release, who is at war with whom is a matter of what the events say. The beta
-channel makes it a matter of record: four **ledgers** that the engine owns, validates and
-enforces.
+Who is at war with whom is not just a matter of what the events say. It is a matter of record:
+four **ledgers** that the engine owns, validates and enforces.
 
 The model does not write these directly. It emits compact updates, the engine checks them
 against the rules, and folds the valid ones in once per turn. That is what stops the world
@@ -64,7 +63,13 @@ countries have no tracked relationship yet, not that they are indifferent to eac
 Relations move for concrete reasons rather than drifting. A ring of yours exposed publicly in
 someone else's country sours that pair; so does breaking an agreement, and so does backing their
 rival. The size of each move is the simulation's to decide — there is no fixed tariff per
-offence.
+offence. A score that contradicts a pair's declared status — "friendly" while at war — is
+reconciled rather than left standing.
+
+**The world is allowed to move against you.** Nothing spares the player: a foreign power may
+start something with you, and when there is a fight both sides fight. What the simulation is
+told not to do is **invent** a rivalry the record does not support — neighbours are not enemies
+for sharing a border — and that applies to every pair of countries on the map, you included.
 
 ## Agreements
 
@@ -105,7 +110,7 @@ Each carries a status (`active`, `dormant`, `resolved`), a **pressure** and **mo
 from 0 to 100, and a date at which it is next due attention. Every live war gets a mirrored
 storyline. At most **96** are kept.
 
-Storylines are why a beta campaign has continuity between turns that nothing in the event log
+Storylines are why a campaign has continuity between turns that nothing in the event log
 explains: something has been building for six turns and is now due.
 
 **They are not allowed to stall.** An active war, or any storyline at pressure **55** or above,
@@ -126,12 +131,48 @@ where it was and overdue for the next turn. It never costs you the turn itself.
 - **Old saves are migrated.** A campaign started before the ledgers existed has them seeded from
   its existing treaty events and conversations on the next jump.
 
-## On the stable release
+## Puppets and overlords
 
-None of this is modelled. Wars, relations and treaties exist because events and conversations
-say they do, and the world's memory of them comes from the
-[event history](/wiki/events/) and each country's own
-[diplomatic memory](/wiki/diplomacy/). In practice it works, and it drifts more.
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+On beta a fifth ledger records who **directs** whom. A **puppet** is a country whose will is
+directed by an **overlord** while it stays a separate country: it keeps its own territory, its own
+sovereignty and its own colour. One puppet has one overlord; an overlord may hold many; and there
+are no chains — making a country that holds puppets into a puppet hands its puppets to the new
+overlord, permanently.
+
+| Kind | What the overlord holds |
+|---|---|
+| **Protectorate** | Its foreign policy and defence; it governs itself at home. |
+| **Puppet state** | Its government. It keeps the flag and the name; the decisions are the overlord's. |
+| **Client state** | Its lead: it depends on the overlord's backing but makes most of its own decisions. |
+
+An arrangement is either **open** — a published protectorate, a satellite every government knows
+about — or **covert**. A covert puppet knows it is one and behaves accordingly with whoever in the
+room has not found out. Other governments learn of a covert arrangement through an **active agent**
+inside either party, and go on believing what they last learned until fresh reporting corrects
+them. The country panel and the map card show what *you* know: the kind, one sentence on what it
+means from your side, and chips for mood, since when, and open or covert.
+
+**Loyalty** is how far a puppet accepts direction, 0–100. It is always hidden — even for an open
+arrangement — and shown to the overlord only as a band: **Loyal** (75+), **Content**, **Restless**
+or **Seething** (below 25). A puppet whose loyalty falls below 35 is given a hidden storyline
+toward revolt; whether anything comes of it is the simulation's call, and a rising can be
+suppressed as well as won — at a cost in standing. Annexing a puppet costs the overlord standing
+too: 8 points of international reputation (out of 100) for a covert arrangement, 16 for one
+the world could see.
+
+**Demands.** In the one-on-one thread between an overlord and its puppet, a message can be a
+**demand**. It appears as a card hanging off the message that made it. The puppet can
+**Accept**, **Refuse**, or offer an **alternative** in its own words, which the overlord either
+accepts or answers by demanding again. Only a refusal costs loyalty, charged once per turn; a
+refusal can still be thought better of ("Accept after all"), and what has been agreed is final.
+When you are the overlord, a toggle in the composer makes your message a demand. The cards are
+choices, so answering one costs no request.
+
+The [GM console](/wiki/cheats/) can make, reclassify or release a puppet directly. A scenario can
+switch the whole system off with its **Puppet states** feature, and then nothing mentions
+subordination at all.
 
 ## Next
 

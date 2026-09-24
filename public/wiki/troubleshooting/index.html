@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,11 +121,11 @@
     <h1>Troubleshooting</h1>
     <p class="tagline">Blank maps, greyed-out AI, slow turns, CORS errors and the other things that go wrong.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-map-is-blank">The map is blank</a></li><li class="d2"><a href="#the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</a></li><li class="d2"><a href="#turns-fail-or-always-fall-back-to-canned-events">Turns fail, or always fall back to canned events</a></li><li class="d2"><a href="#turns-hang-forever">Turns hang forever</a></li><li class="d2"><a href="#when-a-request-fails">When a request fails</a></li><li class="d3"><a href="#the-advisor">The advisor</a></li><li class="d3"><a href="#diplomatic-messages">Diplomatic messages</a></li><li class="d3"><a href="#a-held-time-skip">A held time skip</a></li><li class="d3"><a href="#a-held-projects-board">A held Projects board</a></li><li class="d3"><a href="#if-retrying-does-not-help">If retrying does not help</a></li><li class="d2"><a href="#every-model-has-used-its-allowance">Every model has used its allowance</a></li><li class="d2"><a href="#the-writing-suddenly-changed">The writing suddenly changed</a></li><li class="d2"><a href="#rate-limits">Rate limits</a></li><li class="d2"><a href="#cors-errors-with-a-local-model">CORS errors with a local model</a></li><li class="d2"><a href="#everything-is-slow">Everything is slow</a></li><li class="d2"><a href="#i-lost-my-games">I lost my games</a></li><li class="d2"><a href="#a-country-is-behaving-incoherently">A country is behaving incoherently</a></li><li class="d2"><a href="#quotserver-stoppedquot">&quot;Server stopped&quot;</a></li><li class="d2"><a href="#windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</a></li><li class="d2"><a href="#macos-will-not-open-the-app">macOS will not open the app</a></li><li class="d2"><a href="#reporting-a-bug">Reporting a bug</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-map-is-blank">The map is blank</a></li><li class="d2"><a href="#the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</a></li><li class="d2"><a href="#turns-fail-or-always-fall-back-to-canned-events">Turns fail, or always fall back to canned events</a></li><li class="d2"><a href="#turns-hang-forever">Turns hang forever</a></li><li class="d2"><a href="#when-a-request-fails">When a request fails</a></li><li class="d3"><a href="#the-advisor">The advisor</a></li><li class="d3"><a href="#diplomatic-messages">Diplomatic messages</a></li><li class="d3"><a href="#a-held-time-skip">A held time skip</a></li><li class="d3"><a href="#a-held-projects-board">A held Projects board</a></li><li class="d3"><a href="#if-retrying-does-not-help">If retrying does not help</a></li><li class="d2"><a href="#every-model-has-used-its-allowance">Every model has used its allowance</a></li><li class="d2"><a href="#the-writing-suddenly-changed">The writing suddenly changed</a></li><li class="d2"><a href="#rate-limits">Rate limits</a></li><li class="d2"><a href="#cors-errors-with-a-local-model">CORS errors with a local model</a></li><li class="d2"><a href="#everything-is-slow">Everything is slow</a></li><li class="d2"><a href="#i-lost-my-games">I lost my games</a></li><li class="d2"><a href="#a-country-is-behaving-incoherently">A country is behaving incoherently</a></li><li class="d2"><a href="#windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</a></li><li class="d2"><a href="#macos-will-not-open-the-app">macOS will not open the app</a></li><li class="d2"><a href="#reporting-a-bug">Reporting a bug</a></li></ul></nav>
     <p>The common failures, and what actually fixes them.</p>
-<p>Before anything else: the <a href="/wiki/cheats/">cheats panel</a> has a <strong>Diagnostics Log</strong> showing errors,
-API failures and the exact context the model was given. It usually explains the problem
-immediately, and it is what to paste into a bug report.</p>
+<p>Before anything else: <strong>☰ → Settings → Advanced → Diagnostics</strong> holds the game&#39;s log — what you
+did, and every error and API failure along the way. <strong>🔎 View log</strong> reads it in place. It usually
+explains the problem immediately, and it is what to attach to a bug report.</p>
 <h2 id="the-map-is-blank">The map is blank</h2>
 <p><strong>In the browser.</strong> The web build streams its map from community-run content nodes. If none is
 reachable you get no map. Reload; if it persists, the node network is having a bad day — try
@@ -139,16 +139,16 @@ remote desktop, WebGL is often unavailable.</p>
 <h2 id="the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</h2>
 <p>Work through these in order:</p>
 <ol>
-<li><strong>Is a provider configured?</strong> Settings → the provider section. No key, no world. On beta,
-look at Settings → AI → <strong>Models</strong>: an entry reading <strong>Unusable</strong> says what is wrong with it,
-such as <code>key rejected (401)</code> or <code>model not found (404)</code>. Fix it and the mark clears.</li>
+<li><strong>Is a provider configured?</strong> ☰ → Settings → AI. No key, no world. Look at the <strong>Models</strong>
+list: an entry reading <strong>Unusable</strong> says what is wrong with it, such as <code>key rejected (401)</code> or
+<code>model not found (404)</code>. Fix it and the mark clears.</li>
 <li><strong>Is the key right?</strong> Paste it fresh; keys often pick up whitespace.</li>
-<li><strong>Is the model name right?</strong> OpenAI and OpenAI Compatible have no default model — you must
-type one, and it must exist on that provider.</li>
+<li><strong>Is the model name right?</strong> A model you type must exist on that provider. Left blank, OpenAI
+uses <code>gpt-5.6-luna</code> and OpenAI Compatible picks one from the server&#39;s list.</li>
 <li><strong>Is the endpoint right?</strong> Compatible providers need the base URL, usually ending <code>/v1</code>.
 An address that points at the service&#39;s website rather than its API gets a web page back
-instead of an answer. On beta the error quotes a line of that page and tells you to check the
-address, which should start with <code>https://</code> and usually end in <code>/v1</code>.</li>
+instead of an answer. The error quotes a line of that page and tells you to check the address,
+which should start with <code>https://</code> and usually end in <code>/v1</code>.</li>
 <li><strong>Are you in the browser build with a provider that needs a relay?</strong> The hosted website
 cannot relay. Gemini and Anthropic work there; OpenAI and most compatible endpoints do not.
 Use the desktop app. See <a href="/wiki/ai-setup/">connecting an AI provider</a>.</li>
@@ -159,25 +159,26 @@ Use the desktop app. See <a href="/wiki/ai-setup/">connecting an AI provider</a>
 <li><strong>Your model is too small.</strong> Below about 7B this is common. See
 <a href="/wiki/ai-providers/">AI providers and models</a>.</li>
 <li><strong>Its context window is too small.</strong> A turn&#39;s prompt is large, and a model limited to a few
-thousand tokens cannot take it. A turn needs <strong>32k tokens or more</strong>. On beta the error says the
-context window was exceeded and how big the request was; on stable it usually shows up as
-<em>&quot;Response did not contain parseable JSON or tool arguments.&quot;</em></li>
-<li><strong>Toggle Strict tool schema</strong> (Settings). Some gateways and local servers handle the strict
+thousand tokens cannot take it. A turn needs <strong>32k tokens or more</strong>, and 128k is comfortable.
+The error says the context window was exceeded and how big the request was. Once a model has
+said how big its window is, the game remembers and does not send it a request that cannot fit:
+the call goes to the next model in the list instead, or, if none can take it, is not sent at
+all and says so.</li>
+<li><strong>Toggle Strict tool schema</strong> (on the connection, in Settings → AI). Some gateways and local servers handle the strict
 form of structured output badly, and flipping this fixes it outright.</li>
 <li><strong>Try a different model on the same provider.</strong> Some are far better at this than others.</li>
-<li><strong>Check the Diagnostics Log</strong> — it will show you what came back.</li>
+<li><strong>Check the diagnostics log</strong> — it will show you what came back.</li>
 </ul>
 <h2 id="turns-hang-forever">Turns hang forever</h2>
-<p><strong>Turn on Limit AI generation</strong> (Settings). It abandons a generation that has gone silent and
+<p><strong>Turn on Limit AI generation</strong> (Settings → AI). It abandons a generation that has gone silent and
 falls back rather than waiting indefinitely. It watches for silence rather than total time, so it
 will not cut off a slow-but-working model.</p>
 <p>Then: <strong>Cancel</strong> in the time panel always works and leaves the world untouched.</p>
 <p>If it is a local model, it may genuinely be that slow — check whether it is producing tokens at
 all. If it is a cloud model, you may be rate limited.</p>
 <h2 id="when-a-request-fails">When a request fails</h2>
-<p class="beta-note"><b>Beta channel only.</b> The stable build has no retry controls — a failed
-request there means redoing the action, or undoing the turn.</p><p>Model calls fail: a provider is overloaded, a rate limit bites, a response comes back empty.
-Beta&#39;s answer is that <strong>a failure should cost you the thing that failed, and nothing else</strong>.</p>
+<p>Model calls fail: a provider is overloaded, a rate limit bites, a response comes back empty.
+The game&#39;s answer is that <strong>a failure should cost you the thing that failed, and nothing else</strong>.</p>
 <h3 id="the-advisor">The advisor</h3>
 <p>A failed answer appears as an error in the thread with a <strong>Retry</strong> button. Press it and the same
 question is asked again — you do not retype anything, and if it succeeds the thread reads as
@@ -211,7 +212,8 @@ failing. See <a href="/wiki/time/">time and turns</a>.</p>
 <h3 id="a-held-projects-board">A held Projects board</h3>
 <p>The turn&#39;s events can succeed while the <strong>Projects &amp; Operations</strong> update fails. When that happens
 the turn is held the same way: <em>&quot;Your events are ready, but the Projects &amp; Operations board did
-not update, so nothing has been saved yet.&quot;</em></p>
+not update, so nothing has been saved yet.&quot;</em> (With <strong>Save AI requests</strong> on, the board is one of
+the checks that share the after-skip request.)</p>
 <p><strong>Retry the board</strong> and it finishes the turn, keeping the events that already came back. You do
 not re-run the whole simulation to fix a board that was the only thing to fail. Discard it and
 the turn runs again from the start.</p>
@@ -220,7 +222,7 @@ held again if the <strong>board</strong> fails a second time.</p>
 <h3 id="if-retrying-does-not-help">If retrying does not help</h3>
 <p>Undo the turn from the time panel and try a shorter skip, or a different model.</p>
 <h2 id="every-model-has-used-its-allowance">Every model has used its allowance</h2>
-<p class="beta-note"><b>Beta channel only.</b></p><p><em>&quot;Every model in your Fallback list has used its allowance for now. The first back is …, at …&quot;</em></p>
+<p><em>&quot;Every model in your Fallback list has used its allowance for now. The first back is …, at …&quot;</em></p>
 <p>No entry in Settings → AI → <strong>Models</strong> can answer: each one is <strong>Spent</strong> or <strong>Unusable</strong>, and
 at least one is Spent. The time skip did not start, rather than fall back to canned events.
 Either wait until the time shown, or add a backup — a paid key or a local model — and play on
@@ -230,22 +232,25 @@ now. If you know a model is back sooner, for example because you just topped up 
 own: an entry is <strong>Unusable</strong>, and the message names it and what is wrong. See
 <a href="/wiki/ai-setup/#backup-models">backup models</a>.</p>
 <h2 id="the-writing-suddenly-changed">The writing suddenly changed</h2>
-<p class="beta-note"><b>Beta channel only.</b></p><p>A notice near the top of the screen says when the game moves to a backup model, and why:
+<p>A notice near the top of the screen says when the game moves to a backup model, and why:
 <em>&quot;… has used today&#39;s allowance. Now using …&quot;</em>. A different model writes differently. Settings →
 AI shows which entries are Spent and when each comes back.</p>
 <h2 id="rate-limits">Rate limits</h2>
 <p>Symptoms: turns fail intermittently, or stall on long jumps while short ones work.</p>
-<p>Free tiers have per-minute limits that a long jump can exceed. Options: use the smaller/faster
-model in the family (limits are usually more generous), take shorter jumps, or move to a paid
-tier.</p>
-<p>On beta, a rate limit is not the same as a Spent allowance: the game waits it out and tries the
-same model again, which keeps your backups&#39; allowance for later. Settings → AI → <strong>When a model is
-rate limited</strong> → <strong>Try the next one straight away</strong> moves to the next entry instead: faster, but
-it spends your backups.</p>
-<p class="beta-note"><b>On beta, a busy provider is named as busy.</b> When a provider refuses
-partway through an answer because it is overloaded, beta says so in the log, waits 15 seconds,
-and asks once more — rather than treating it as a model that answered with nothing and re-sending
-straight away.</p><h2 id="cors-errors-with-a-local-model">CORS errors with a local model</h2>
+<p>Free tiers have per-minute limits that a long jump can exceed, and a daily allowance that a busy
+session can. Options: leave <strong>Save AI requests</strong> on (a skip then costs one to three requests),
+use the smaller/faster model in the family (limits are usually more generous), add a
+<a href="/wiki/ai-setup/#backup-models">backup model</a>, or move to a paid tier.</p>
+<p>A rate limit is not the same as a Spent allowance. By default the game hands the call straight to
+the next model in your list, and the next call starts at the top again, since a per-minute limit
+is usually over by then. Settings → AI → <strong>When a model is rate limited</strong> → <strong>Wait, then try it
+again</strong> waits it out on the same model instead: slower, but it keeps your backups&#39; allowance.</p>
+<p><strong>A busy provider is named as busy.</strong> When a provider refuses because it is overloaded — even
+partway through an answer — the game says so rather than treating it as a model that answered
+with nothing: <em>&quot;… is overloaded right now. Nothing is wrong with your game, your model or your
+message.&quot;</em> It retries once after five seconds; still busy, that model sits out for ten minutes
+and the next one in your list takes over.</p>
+<h2 id="cors-errors-with-a-local-model">CORS errors with a local model</h2>
 <p>The error will name a blocked cross-origin request.</p>
 <ul>
 <li><strong>Ollama</strong> — usually works as-is at <code>http://localhost:11434/v1</code>.</li>
@@ -277,37 +282,37 @@ and they are there.</p>
 <ul>
 <li><strong>Undo the turn</strong> in the time panel and try different orders.</li>
 <li><strong>Roll Back Turn</strong> in cheats, to go back further.</li>
-<li><strong>Master AI</strong> in cheats — describe what should be true and let it apply the change properly.</li>
-<li><strong>Edit Country</strong> or the <strong>Events</strong> editor, to correct a specific fact.</li>
+<li><strong>GM Console</strong> in cheats — describe what should be true, preview exactly what it will change,
+and apply it.</li>
+<li><strong>Simulation Reminders</strong> in cheats — a standing fact every AI is told until you withdraw it.</li>
+<li><strong>Country Editor</strong> or the <strong>Event Editor</strong>, to correct a specific fact.</li>
 </ul>
 <p>See <a href="/wiki/cheats/">cheats and the GM console</a>. Using these is normal; an AI-driven world
 occasionally produces nonsense, and repairing it is part of running a long campaign.</p>
-<h2 id="quotserver-stoppedquot">&quot;Server stopped&quot;</h2>
-<p>A full-screen <strong>Server stopped</strong> overlay means the local server the desktop app runs alongside
-itself is no longer answering. Restart the app. If it happens repeatedly, the diagnostics log in
-the cheats panel will usually name the cause — most often a port already in use, or the server
-being shut down by something else.</p>
-<p>The browser build never shows this: it has no server to lose.</p>
 <h2 id="windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</h2>
 <p>The installer is not code-signed yet. Choose <strong>More info → Run anyway</strong> in SmartScreen.</p>
 <h2 id="macos-will-not-open-the-app">macOS will not open the app</h2>
 <p>Also not code-signed. Right-click the app and choose <strong>Open</strong>, then confirm. Once only.</p>
 <h2 id="reporting-a-bug">Reporting a bug</h2>
-<p><strong>Turn on detailed logging first</strong> — Settings → Advanced — then reproduce the problem. It records
+<p><strong>Turn on detailed logging first</strong> — ☰ → Settings → Advanced → Diagnostics — then reproduce the
+problem. It records
 far more than the normal log, including the full text of the exchange that went wrong, and it is
 usually the difference between a report someone can act on and one that cannot be diagnosed. See
 <a href="/wiki/settings/#detailed-logging">the settings reference</a>.</p>
-<p>Then copy the <strong>Diagnostics Log</strong> from the cheats panel and open an issue at
+<p>Then <strong>💾 Save log file</strong> (or <strong>💾 Save log file + game</strong>, which attaches the campaign it happened
+in) and open an issue at
 <a href="https://github.com/Open-Historia/open-historia/issues">GitHub</a>. The
 <a href="https://discord.gg/QaqAK7fQAg">Discord</a> is faster for &quot;is this just me?&quot;.</p>
-<p class="beta-note"><b>On beta, the failure itself hands you the file.</b> A turn that fell back
+<p><strong>The failure itself hands you the file, too.</strong> A turn that fell back
 to canned events, a failed advisor reply and a board update the advisor could not apply each have
 a <b>💾 Save logging file</b> button. It saves the whole diagnostics log as a file, with that
-failure's details — for a turn, the model's raw response in full — in a <i>Reported problem</i>
+failure&#39;s details — for a turn, the model&#39;s raw response in full — in a <i>Reported problem</i>
 block at the top. Attach the file. With the diagnostics log turned off there is no log to save, so
 the button copies the one failure instead, under its old label (<b>Copy debugging message</b> or
 <b>Copy for a bug report</b>). The Android app cannot save files, so there it copies the whole log
-and says so.</p><p>Include your platform, your build (stable or beta), your provider and model, and what you were
+and says so.</p>
+<p class="beta-note"><b>On beta the Android app saves files too</b>, through Android's share
+sheet, so the log and the game can be attached there as well.</p><p>Include your platform, your build (stable or beta), your provider and model, and what you were
 doing.</p>
 
     <nav class="wiki-pager" aria-label="Pagination">
@@ -315,7 +320,7 @@ doing.</p>
         <span></span>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

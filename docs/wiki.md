@@ -100,8 +100,12 @@ preview — both publish to the live site.
 ## 4. Answering "does the wiki need updating?"
 
 ```
-npm run wiki:check --fetch
+npm run wiki:check -- --fetch
 ```
+
+(The `--` matters: without it npm keeps `--fetch` for itself and the script never sees it.) The
+check reads a remote called `upstream`; in a clone of your fork, add it once with
+`git remote add upstream https://github.com/Open-Historia/open-historia.git`.
 
 `wiki/provenance.json` records the two commits the wiki was last verified against and, per page,
 the source paths whose behaviour that page describes. The check diffs those commits against the
@@ -122,10 +126,14 @@ wrong page.
 
 ## 5. Editing rules
 
-**Two builds, kept distinct.** `main` and `beta` differ substantially — `gameplay.js` is 2,800
-lines on main and 12,000 on beta. Anything that exists only on beta must be marked, either with a
-page-level `"beta": true` in `nav.json` (which renders a banner and a sidebar chip) or with an
-inline `<p class="beta-note">` for a section. Never state a beta feature as though everyone has it.
+**Two builds, kept distinct.** `main` is the stable build and `beta` runs ahead of it. The gap
+moves: in September 2026 main absorbed almost all of beta in one stretch, and the wiki's
+stable/beta split had to be rewritten page by page. Anything that exists only on beta must be
+marked, either with a page-level `"beta": true` in `nav.json` (which renders a banner and a sidebar
+chip) or with an inline `<p class="beta-note">` for a section. Never state a beta feature as though
+everyone has it — and when a beta feature lands on main, take its marking off, rather than leaving
+players to think they still need the beta for it. `git log --no-merges upstream/main..upstream/beta`
+is the quickest list of what is beta-only right now.
 
 **Verify against source, not against `docs/`.** These developer docs have drifted in places. Where
 they disagree with the code, the code wins, and the wiki should follow the code.
@@ -143,7 +151,10 @@ describe it in prose. Code blocks are for commands and formulas.
 
 ## 6. Screenshots
 
-Captured by driving the real app with Electron, which is already a dependency.
+Captured by driving the real app — with Electron, which is already a dependency, or with
+Playwright's Chromium against `node server/server.js` and a `npm run build` in `dist/`. Headless
+Chromium needs `--use-angle=swiftshader --enable-unsafe-swiftshader` to give MapLibre a WebGL
+context.
 
 **Never against the real data directory.** Copy `server/data/` somewhere scratch and launch with
 `OH_DATA_DIR` pointed at the copy. A capture run against a live library can destroy save data.
@@ -153,7 +164,7 @@ The shape that works:
 
 1. `node server/server.js` with `OH_DATA_DIR` set, on a spare port.
 2. An Electron `BrowserWindow` with **GPU enabled and `show: true`** — MapLibre renders blank
-   offscreen with acceleration disabled.
+   offscreen with acceleration disabled — or headless Chromium with SwiftShader, as above.
 3. Inject provider config into `localStorage` rather than typing it into the UI, so no key ever
    appears in a frame.
 4. Drive by clicking buttons matched on their **exact label**, preferring `button` elements. A
@@ -165,19 +176,27 @@ The shape that works:
    installer, so weight here is weight in every download.
 
 **Wait on the right signal.** Do not wait on text that is already on screen. `Exit Game` appears
-long before the map is drawn, and beta's loading-screen caption is not in `innerText` at all. Beta
-broadcasts `oh:map-idle` from `mapReadiness.js` — use that. Every page evaluation should have a
+long before the map is drawn, and the loading screen's caption is not in `innerText` at all. The
+game broadcasts `oh:map-idle` from `mapReadiness.js` — use that, or a generous fixed wait (about
+45 seconds for Modern Day under SwiftShader). Every page evaluation should have a
 timeout; a hung call once left an orphaned Electron window fighting the next run for the same
 server.
 
-**Beta's loading screen** covers the map until vNext finishes dissolving polity surfaces, which
-can outlast any reasonable wait. Temporarily setting `<Presence open={false}>` in
+**The loading screen** covers the map until the renderer finishes dissolving polity surfaces,
+which can outlast a short wait. Temporarily setting `<Presence open={false}>` in
 `src/Game/GameUI/main.jsx` in a throwaway worktree gets past it — **revert it afterwards and
 verify with `git status`**, and be aware that with it removed you can photograph a half-drawn map,
 which is precisely what that screen exists to prevent. Use it for panel crops, not map shots.
+There is one renderer now; the legacy one and its `map_legacy_renderer` key are gone.
 
-**Map screenshots should use the legacy renderer** (`localStorage` key `map_legacy_renderer`)
-unless the subject *is* vNext, which is a work in progress and would date the wiki.
+**A new game with no key shows the setup prompt** over everything; **Not now** dismisses it for
+the session. Pasting an obviously fake key into it fills the Models list without a request being
+made — record that as staged.
+
+**The capture machine's network shows up in the pictures.** The basemap is ESRI imagery from
+`server.arcgisonline.com`, flags come from a CDN, and the Community tab reads GitHub. Where those
+are unreachable the shot silently loses them — note it in `provenance.json` so the next pass knows
+to retake.
 
 **Staging is fine, and should be recorded.** Some states are impractical to reach honestly —
 espionage detection is a per-jump roll of a few percent, and a populated Projects board needs a
@@ -218,7 +237,8 @@ makes Cloudflare discard **the entire file**. Keep paths exact.
 ## 9. Known gaps
 
 Kept current in `wiki/provenance.json` and printed by `npm run wiki:check`. At the time of
-writing: no Map vNext screenshot for a side-by-side against the legacy renderer; no screenshot of
-a held time-skip segment or a held Projects board (both are in-memory pending state that cannot be
-authored into a save); and beta was verified from source and by driving its menus rather than by
-playing a campaign through turns.
+writing: the September 2026 map screenshots have no basemap imagery; there are no screenshots of
+Intervene, interactive events, group polls, document notices or any beta-only surface; the content
+screenshots predate the current palette; no screenshot of a held time-skip segment or a held
+Projects board (both are in-memory pending state that cannot be authored into a save); and neither
+build was verified by playing a campaign through turns.

@@ -55,7 +55,7 @@ advisor are all model output. A larger model gives you a world that remembers wh
 turn and reacts in character; a very small local model will give you a thinner one. See
 [AI providers and models](/wiki/ai-providers/) for what to pick.
 
-**Some features are beta-only.** Pages marked <em>beta</em> in the sidebar describe systems that
+**Some features are beta-only.** Pages and sections marked <em>beta</em> describe systems that
 have not reached the stable release. The beta build installs alongside the stable app and keeps
 its own saves, so trying it costs you nothing.
 

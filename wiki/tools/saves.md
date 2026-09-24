@@ -2,7 +2,7 @@ Open Historia saves continuously. There is no save button, and there is no way t
 of play to a crash.
 
 ![The games library](/wiki/img/saves-library.jpg)
-*Each campaign card carries its country, date and round, with Clone and Archive alongside.*
+*The Games tab. Each card carries its country, date and round; **Current** opens it, and its **⋮** holds Edit, Clone and Export.*
 
 ## Games and scenarios
 
@@ -26,21 +26,23 @@ orders you had typed but not queued.
 
 ## Undo and rollback
 
-**Undo last turn**, in the time panel, restores everything to how it was before the last jump.
+**↩ Undo last turn**, in the time panel, restores everything to how it was before the last jump.
 The game keeps **12** turns of snapshots, so you can step back repeatedly. The panel tells you
 how many are available.
 
 **Roll Back Turn**, in the [cheats panel](/wiki/cheats/), jumps straight to the start of any
 earlier turn in the stack and discards everything after it.
 
-Both restore the full campaign, not just the map — the events, the conversations and your queued
-orders all come back as they were.
+Both restore the full campaign, not just the map — the events, the conversations, your queued
+orders, your agents' reports and any papers that reached you all come back as they were. Your
+standing goal is yours rather than the turn's, so it stays as it is now.
 
 Use undo freely. See [time and turns](/wiki/time/).
 
 ## Cloning
 
-Both games and scenarios have a **Clone** button on their card in the library.
+Both games and scenarios can be cloned from their card in the library — a game from its **⋮**,
+a scenario with **Clone Scenario**.
 
 Cloning a **game** is the closest thing to a manual save slot: fork the campaign before doing
 something reckless, and you keep both branches. Cloning a **scenario** gives you an editable copy
@@ -62,16 +64,29 @@ the beta cannot touch your stable campaigns, and vice versa.
 
 ## Moving a campaign between machines
 
-Scenarios export and import cleanly — as a `.zip` bundle carrying the map, cities, colours,
-flags and any custom basemap, or as plain `.json`.
+**Games export as one zip.** On a game's card, **⋮ → Export** saves `<name>-game.zip`: the world,
+the clock, events, chats, actions, the advisor's conversation, prompts, colours, flags, tags,
+intercepts — and every rollback snapshot, so the campaign can be continued and undone on the other
+side, not just looked at. The card says so while the zip is being built. **Import game**, in the
+Games tab's header, brings one back; it lands right beside your current game, marked
+**(Imported)** if its name collides with one you already have.
 
-Use **Import JSON** in the library header, or the **Download** buttons in a scenario's editor
-drawer. **Create Scenario** in the Scenarios tab starts a blank one from the base template and
-drops you straight into its editor. This is also how you [publish to the Community Hub](/wiki/community-hub/).
+The scenario travels only when it has to. A built-in scenario is not included (everyone has it),
+nor one that came from the Community Hub (it can be fetched again). A map too large to carry — over
+32 MB — is left out rather than crashing the export; the game still exports, and the receiver ends
+up in the same position as a game whose scenario is missing. A game whose scenario is gone is still
+listed, opens in the editor, and can still be exported.
 
-Games are less portable by design: a game is a running playthrough, tied to the scenario it
-started from. To carry a *situation* to another machine, the practical route is to export the
-scenario and start there.
+**Scenarios** export and import as a `.zip` bundle carrying the map, cities, colours, flags and
+any custom basemap, or as plain `.json`. Use **Import JSON** in the Scenarios tab's header, or the
+**Download** buttons in a scenario's editor drawer. **Create Scenario** starts a blank one from the
+base template and drops you straight into its editor. This is also how you
+[publish to the Community Hub](/wiki/community-hub/).
+
+On the stable Android app a file cannot be saved, so export is not offered there.
+
+<p class="beta-note"><b>On beta the Android app exports too</b>, through Android's share
+sheet.</p>
 
 ## Syncing between devices
 
@@ -108,7 +123,7 @@ Your API key is never synced. Provider settings are per device.
 
 ## Archiving
 
-**Archive** takes a game out of the main library view without throwing it away, and the same
+**Archive**, on a game's card, takes it out of the main library view without throwing it away, and the same
 button becomes **Unarchive** to bring it back. Useful once you have accumulated a dozen
 half-finished campaigns.
 

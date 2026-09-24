@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,13 +121,11 @@
     <h1>The Interface</h1>
     <p class="tagline">Every panel, button and badge on screen, and what each one is for.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-edges-at-a-glance">The edges at a glance</a></li><li class="d2"><a href="#the-map-itself">The map itself</a></li><li class="d2"><a href="#the-date-pill-and-time">The date pill and time</a></li><li class="d2"><a href="#the-toolbar">The toolbar</a></li><li class="d3"><a href="#chat">💬 Chat</a></li><li class="d3"><a href="#actions">✦ Actions</a></li><li class="d2"><a href="#the-advisor-drawer">The advisor drawer</a></li><li class="d2"><a href="#settings">Settings</a></li><li class="d2"><a href="#search">Search</a></li><li class="d2"><a href="#cheats">Cheats</a></li><li class="d2"><a href="#the-main-menu">The main menu</a></li><li class="d2"><a href="#if-the-screen-is-blank">If the screen is blank</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-edges-at-a-glance">The edges at a glance</a></li><li class="d2"><a href="#the-map-itself">The map itself</a></li><li class="d2"><a href="#the-date-pill-and-time">The date pill and time</a></li><li class="d2"><a href="#the-toolbar">The toolbar</a></li><li class="d3"><a href="#chat">Chat</a></li><li class="d3"><a href="#actions">✦ Actions</a></li><li class="d3"><a href="#projects-amp-operations">Projects &amp; Operations</a></li><li class="d2"><a href="#the-advisor-drawer">The advisor drawer</a></li><li class="d2"><a href="#the-game-menu">The game menu</a></li><li class="d2"><a href="#search">Search</a></li><li class="d2"><a href="#cheats">Cheats</a></li><li class="d2"><a href="#the-main-menu">The main menu</a></li><li class="d2"><a href="#if-the-screen-is-blank">If the screen is blank</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Almost the entire screen is map. Everything else sits around the edges and gets out of the way
 when you are not using it.</p>
-<p class="beta-note"><b>This page describes the stable build.</b> The beta channel reorganises the
-menus considerably and adds a Projects button to the toolbar — see
-<a href="/wiki/settings/">the settings reference</a> for a side-by-side of the two menu systems.</p><p><img src="/wiki/img/interface-hud.jpg" alt="The in-game HUD">
-<em>The session pill and date pill top, the toolbar bottom left, the advisor on the right edge. Everything else is map.</em></p>
+<p><img src="/wiki/img/interface-hud.jpg" alt="The in-game HUD">
+<em>The game menu, session pill and date pill along the top; the toolbar bottom left; your flag and the advisor bottom right. Everything else is map.</em></p>
 <h2 id="the-edges-at-a-glance">The edges at a glance</h2>
 <div class="table-scroll"><table>
 <thead>
@@ -138,34 +136,33 @@ menus considerably and adds a Projects button to the toolbar — see
 </thead>
 <tbody><tr>
 <td><strong>Top left</strong></td>
-<td>Session pill — scenario, country, date — and <strong>⌂ Exit Game</strong>.</td>
+<td><strong>☰</strong> the game menu, the session pill — scenario, country, date — and <strong>⌂ Exit Game</strong>.</td>
 </tr>
 <tr>
 <td><strong>Top right</strong></td>
-<td>The date pill, with <strong>«</strong> history and <strong>»</strong> time skip.</td>
+<td>The date pill, with <strong>«</strong> events and <strong>»</strong> time skip.</td>
 </tr>
 <tr>
 <td><strong>Bottom left</strong></td>
-<td>The toolbar: <strong>💬 Chat</strong> and <strong>✦ Actions</strong>.</td>
+<td>The toolbar: <strong>Chat</strong>, <strong>✦ Actions</strong> and <strong>Projects &amp; Operations</strong>, with search beside it.</td>
 </tr>
 <tr>
-<td><strong>Right edge</strong></td>
-<td><strong>🧭 Advisor</strong> — opens a drawer with Advisor and Stats.</td>
-</tr>
-<tr>
-<td><strong>Corner</strong></td>
-<td>Settings (<strong>⋮</strong>) and search (<strong>🔍</strong>).</td>
+<td><strong>Bottom right</strong></td>
+<td>Your flag, and the <strong>Advisor</strong> button, which opens a drawer with Advisor and Stats.</td>
 </tr>
 </tbody></table></div>
 <p>Panels overlap in a fixed order, so opening the advisor never buries the thing you were reading,
-and the main menu always comes out on top.</p>
+and the main menu always comes out on top. On a phone the whole interface fits the screen and the
+advisor drawer can be closed again like any other panel.</p>
 <h2 id="the-map-itself">The map itself</h2>
 <p>Clicking things is the primary way you interact with the world.</p>
 <ul>
-<li><strong>Click a region</strong> → a popup with the region, who administers it, and buttons to open an
-intelligence briefing, start a chat, or open the owning country&#39;s panel.</li>
-<li><strong>Click a country</strong> → the country dossier: flag, tags, recent events filtered by importance,
-and an AI intelligence briefing on request.</li>
+<li><strong>Click the map</strong> → a card for the country and the region under your cursor. The country row
+has <strong>💬</strong> to open a diplomatic chat, <strong>⧉</strong> to copy its name and <strong>ⓘ</strong> to open its panel; the
+region row names the region.</li>
+<li><strong>The country panel</strong> → flag, details, alternative names, related events filtered by
+importance (All, Major, Minor), and an <strong>Advisor Report</strong> — an AI intelligence reading — on
+request.</li>
 <li><strong>Click a unit</strong> → an intelligence card describing the formation — what it is, whose it is,
 how strong, and what it appears to be doing.</li>
 <li><strong>Click a city or structure</strong> → its name, population, and what it is.</li>
@@ -176,15 +173,15 @@ stripes and labels mean.</p>
 <p>Top right, always visible: your country and the current in-game date.</p>
 <ul>
 <li><strong>»</strong> opens the <strong>time skip</strong> panel — fixed jumps from six hours to a year, a custom amount,
-auto-jump, and <strong>Undo turn</strong>.</li>
-<li><strong>«</strong> opens the <strong>event history</strong> — the events from the last jump, replayed one at a time,
-with the map animating as each lands.</li>
+auto-jump, <strong>↩ Undo last turn</strong>, and today&#39;s AI request count.</li>
+<li><strong>«</strong> opens the <strong>Events</strong> panel — the events from the last jump, replayed one at a time,
+with the map animating as each lands, and <strong>✋ Intervene here</strong> to stop the round where you
+want to act.</li>
 </ul>
 <p>Full detail in <a href="/wiki/time/">time and turns</a>.</p>
 <h2 id="the-toolbar">The toolbar</h2>
-<p>Two buttons, bottom left. (Beta adds a third, <strong>Projects</strong> — see
-<a href="/wiki/projects/">projects and operations</a>.)</p>
-<h3 id="chat">💬 Chat</h3>
+<p>Three buttons, bottom left.</p>
+<h3 id="chat">Chat</h3>
 <p>Diplomacy. Two tabs:</p>
 <ul>
 <li><strong>Diplomacy</strong> — every conversation you are part of. One-to-one threads with a country, or
@@ -195,42 +192,51 @@ This is also where you deploy, recall, expel and turn agents.</li>
 </ul>
 <p>See <a href="/wiki/diplomacy/">diplomacy</a> and <a href="/wiki/espionage/">espionage</a>.</p>
 <h3 id="actions">✦ Actions</h3>
-<p>Your order queue for the coming turn. Write orders in plain English, get AI suggestions, refine
-a rough draft into a proper order, and delete anything you change your mind about. Only planned
-orders show; they clear as the turn resolves them. See <a href="/wiki/orders/">giving orders</a>.</p>
+<p>Your order queue for the coming turn, under your <strong>standing goal</strong>. Write orders in plain
+English, get AI suggestions, refine a rough draft into a proper order, and delete anything you
+change your mind about. Only planned orders show; they clear as the turn resolves them. See
+<a href="/wiki/orders/">giving orders</a>.</p>
+<h3 id="projects-amp-operations">Projects &amp; Operations</h3>
+<p>The board of long-running efforts — research programmes, construction, military and covert
+operations, campaigns — that span many turns. You do not add to it by hand: events, your agents
+and your advisor write it. See <a href="/wiki/projects/">projects and operations</a>.</p>
 <h2 id="the-advisor-drawer">The advisor drawer</h2>
-<p>The <strong>🧭</strong> button on the right edge opens a drawer you can resize by dragging its left edge. It
+<p>The <strong>Advisor</strong> button, bottom right, opens a drawer you can resize by dragging its left edge. It
 has two tabs.</p>
 <p><strong>Advisor</strong> — a chat with your own analyst. It reads the real game state and answers about it,
 in markdown, sometimes with charts. Ask it anything about your position.</p>
-<p><strong>Stats</strong> — the national stat sheet. Two sub-tabs, <strong>Diplomacy</strong> and <strong>Economy</strong>, covering your
-intelligence rating, strategic indices, stability, population and economic figures. It retargets
-to <strong>whatever country you last clicked</strong>, so it doubles as a way to read anyone.</p>
+<p><strong>Stats</strong> — the national stat sheet. Two sub-tabs, <strong>Diplomacy</strong> and <strong>Economy</strong>: relations,
+agreements and conflicts on one, the economy, strategic indices, stability, population and your
+intelligence rating on the other. It retargets to <strong>whatever country you last clicked</strong>, so it
+doubles as a way to read anyone.</p>
 <p>See <a href="/wiki/advisor/">the advisor</a> and <a href="/wiki/statistics/">national statistics</a>.</p>
-<h2 id="settings">Settings</h2>
-<p>On stable, the <strong>⋮</strong> button opens <strong>one flat menu</strong> with everything in it: your AI provider and
-its key and model, UI and chat language, fullscreen, the 3D globe and terrain, a <strong>Map</strong> group
-holding country labels, reduced motion and the camera options, plus <strong>🧪 Cheats</strong>, a <strong>📖 Wiki</strong>
-link and the community links. No tabs, no sections — scroll to what you want.</p>
-<p>On beta the equivalent button is <strong>☰</strong>, and it opens a <strong>quick menu</strong> with Game / Tools / Settings / Help tabs, and
-settings themselves live in a separate four-section workspace.</p>
-<p>Both are laid out side by side in <a href="/wiki/settings/">the settings reference</a>.</p>
+<h2 id="the-game-menu">The game menu</h2>
+<p><strong>☰</strong>, top left, opens the game menu, with four tabs:</p>
+<ul>
+<li><strong>Game</strong> — the current campaign and <strong>Game Management</strong>: switch, duplicate, import or manage
+campaigns.</li>
+<li><strong>Tools</strong> — <strong>Cheats</strong>, <strong>Events / Timeline</strong> and the <strong>AI debug console</strong>, one click away.</li>
+<li><strong>Settings</strong> — four tiles, <strong>General</strong>, <strong>Map</strong>, <strong>AI</strong> and <strong>Advanced</strong>, each opening the
+full-screen settings workspace at that section.</li>
+<li><strong>Help</strong> — the wiki, bug reporting and the community links.</li>
+</ul>
+<p>See <a href="/wiki/settings/">the settings reference</a>.</p>
 <h2 id="search">Search</h2>
-<p>The <strong>🔍</strong> button finds real-world places by name and flies the camera to them. It only moves the
-camera — it does not select or change anything.</p>
+<p>The <strong>🔍</strong> button beside the toolbar finds places by name as you type and flies the camera to
+them. The game&#39;s own countries and cities come first, under the names they have in your
+campaign, then real-world places from an OpenStreetMap search. It only moves the camera — it does
+not select or change anything.</p>
 <h2 id="cheats">Cheats</h2>
-<p>The <strong>🧪</strong> cheats panel is the game master&#39;s toolbox: annex territory, edit or create countries,
-author events, roll back turns, switch which country you play, inspect regions, and place map
-features.</p>
-<p>It is also where <strong>manual troop control</strong> lives. On the stable build, deploying and moving units
-by hand is deliberately filed as a cheat — the intended way to move forces is to order it and
-let the world carry it out. See <a href="/wiki/cheats/">cheats and the GM console</a> and
-<a href="/wiki/military/">military and combat</a>.</p>
+<p>☰ → <strong>Tools</strong> → <strong>Cheats</strong> is the game master&#39;s toolbox: the GM console, standing reminders every
+AI is told, the event editor, interactive events, the history document, rolling back turns,
+annexing territory, editing or creating countries, inspecting regions, the Force Manager,
+difficulty, switching which country you play, and map features. See
+<a href="/wiki/cheats/">cheats and the GM console</a>.</p>
 <h2 id="the-main-menu">The main menu</h2>
 <p>The session pill&#39;s <strong>⌂ Exit Game</strong> returns you to the library, which has three tabs:</p>
 <ul>
 <li><strong>Games</strong> — your campaigns, by last played and most played.</li>
-<li><strong>Scenarios</strong> — the worlds you can start new games on, plus <strong>Create</strong>.</li>
+<li><strong>Scenarios</strong> — the worlds you can start new games on, plus <strong>Create Scenario</strong>.</li>
 <li><strong>Community</strong> — the <a href="/wiki/community-hub/">Community Hub</a>.</li>
 </ul>
 <h2 id="if-the-screen-is-blank">If the screen is blank</h2>
@@ -248,7 +254,7 @@ desktop this usually means graphics drivers or a browser flag. See
         <a class="next" href="/wiki/world-map/"><span>Next →</span><b>The world map</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

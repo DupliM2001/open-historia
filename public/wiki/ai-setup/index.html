@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -148,8 +148,8 @@ key and paste it in.</strong></p>
 <td>Answers questions about your own position, with charts.</td>
 </tr>
 <tr>
-<td><strong>Intelligence briefings</strong></td>
-<td>Summaries of any country you click.</td>
+<td><strong>Intelligence reports</strong></td>
+<td>An advisor report on any country you click.</td>
 </tr>
 <tr>
 <td><strong>Combat adjudication</strong></td>
@@ -157,17 +157,20 @@ key and paste it in.</strong></p>
 </tr>
 </tbody></table></div>
 <p>Without a provider the game still runs — the map, the editor, saved games and the interface all
-work — but time skips fall back to a small set of canned events and the advisor cannot answer.
-On beta you get an explicit <strong>Set up your AI provider</strong> prompt the first time you open a
-campaign without one. Stable has no such prompt — it simply falls back quietly, so if turns feel
-lifeless on stable, check here first.</p>
+work — but time skips fall back to a small set of canned events and the advisor cannot answer.</p>
 <h2 id="where-to-put-the-key">Where to put the key</h2>
-<p><strong>Settings → AI → Provider.</strong> (The settings button is <strong>⋮</strong> on the stable build and <strong>☰</strong> on beta.) Pick a provider, paste your key, optionally set a model, and
-close the panel. That is the whole setup.</p>
-<p class="beta-note"><b>On beta</b>, Settings → AI opens a list headed <b>Models</b>. With one
-model in it, it reads like the form above: provider, a connection name, the key and the model.
-The rest of the screen is for <a href="#backup-models">backup models</a>, and you can ignore it
-until you want one.</p><p>Your key is stored in your browser&#39;s local storage, or in the desktop app&#39;s own profile. It is
+<p><strong>The first time you open a campaign without a working model, the game asks.</strong> The
+<strong>Set up your AI provider</strong> prompt <em>is</em> the setup: pick a provider, paste your key (or, for a
+self-hosted model, its endpoint), optionally name a model, and press <strong>Save and play</strong>. Above the
+form is a short tutorial video on getting a free Gemini key — hide it if you do not need it — and
+a <strong>Get a key at Google AI Studio</strong> button. <strong>Open full settings</strong> takes you to the AI settings
+instead, and <strong>Not now</strong> puts it away for this session.</p>
+<p><img src="/wiki/img/ai-setup-prompt.jpg" alt="The Set up your AI provider prompt">
+<em>The prompt a new campaign shows when no model can answer. Saving it is the whole setup.</em></p>
+<p>To change it later: <strong>☰ → Settings → AI.</strong> That opens a list headed <strong>Models</strong>. With one model in
+it, it reads like the prompt: provider, a connection name, the key and the model. The rest of the
+screen is for <a href="#backup-models">backup models</a>, and you can ignore it until you want one.</p>
+<p>Your key is stored in your browser&#39;s local storage, or in the desktop app&#39;s own profile. It is
 never sent to an Open Historia server, never written to your save files, and never included in a
 scenario you export.</p>
 <h2 id="the-five-provider-types">The five provider types</h2>
@@ -212,14 +215,17 @@ and work everywhere.</p>
 <ol>
 <li>Go to <a href="https://aistudio.google.com/app/apikey">Google AI Studio</a>, sign in, and click
 <strong>Create API key</strong>. It is free and needs no billing details.</li>
-<li>In Open Historia: <strong>Settings → AI</strong>, provider <strong>Gemini</strong>, paste the key.</li>
-<li>Leave the model alone. The default is <code>gemini-3.5-flash-lite</code>, which is fast and has generous
-free-tier limits.</li>
+<li>In Open Historia: the setup prompt, or <strong>☰ → Settings → AI</strong>, provider <strong>Gemini</strong>, paste the
+key.</li>
+<li>Leave the model alone. A new Gemini key gets Google&#39;s default list: <code>gemini-3.5-flash-lite</code>,
+with <code>gemini-3.1-flash-lite</code> behind it as its <a href="#backup-models">backup</a>. Both are fast and
+have generous free-tier limits.</li>
 </ol>
-<p>If turns feel shallow, move up to a larger Gemini model — but check the free tier&#39;s rate limits
-first, because hitting them mid-turn will stall a time skip. On beta you can put the larger model
-at the top of the list and keep <code>gemini-3.5-flash-lite</code> below it as a
-<a href="#backup-models">backup</a>.</p>
+<p>No Flash model is in the default list: they are the ones most often busy, and a busy model costs
+a turn its wait before the call moves on. Players who already had Gemini set up were switched to
+this list once, when it changed.</p>
+<p>If turns feel shallow, you can put a larger Gemini model at the top of the list and keep the
+Flash-Lite models below it — but check the free tier&#39;s rate limits first.</p>
 <h2 id="anthropic-claude">Anthropic Claude</h2>
 <ol>
 <li>Create a key at <a href="https://console.anthropic.com">console.anthropic.com</a>.</li>
@@ -232,8 +238,8 @@ pay-per-token — there is no free tier.</p>
 <h2 id="openai">OpenAI</h2>
 <ol>
 <li>Create a key at <a href="https://platform.openai.com">platform.openai.com</a> and load some credit.</li>
-<li>Provider <strong>OpenAI</strong>, paste the key, and set a model — this one has no default, so you must
-type a model name.</li>
+<li>Provider <strong>OpenAI</strong>, paste the key. With the model left blank it runs <code>gpt-5.6-luna</code>, the
+model the game is built around; type another name to use that instead.</li>
 </ol>
 <p>Requires the desktop or a self-hosted build, because of the browser restriction above.</p>
 <h2 id="a-local-model-free-private-offline">A local model — free, private, offline</h2>
@@ -244,9 +250,10 @@ Use the <strong>OpenAI Compatible</strong> provider for all of these.</p>
 <li>Install from <a href="https://ollama.com">ollama.com</a>.</li>
 <li>Pull a model: <code>ollama pull llama3.2</code></li>
 <li>Provider <strong>OpenAI Compatible</strong>, endpoint <code>http://localhost:11434/v1</code> — this is already the
-default, so you may not have to type anything. Leave the API key blank. Set the model to
-whatever you pulled. On beta a new connection starts with no endpoint: press
-<strong>+ Local Ollama</strong> under <strong>Connections</strong> and it is filled in for you.</li>
+endpoint the setup prompt suggests. Leave the API key blank. Set the model to whatever you
+pulled, or leave it blank and the game picks a chat model from the server&#39;s own list. In
+Settings a new connection starts with no endpoint: press <strong>+ Local Ollama</strong> under
+<strong>Connections</strong> and it is filled in for you.</li>
 </ol>
 <h3 id="lm-studio">LM Studio</h3>
 <ol>
@@ -306,15 +313,17 @@ name.</p>
 </tr>
 </tbody></table></div>
 <h2 id="backup-models">Backup models</h2>
-<p class="beta-note"><b>Beta channel only.</b> The stable build uses one provider and one model
-at a time.</p><p>Free tiers give each model a daily allowance, and a time skip uses several requests. When your
+<p>Free tiers give each model a daily allowance, and a time skip uses several requests. When your
 model&#39;s allowance runs out, every AI call fails until it resets — even if another model, a paid
-key or a local model would have answered. On beta you can list backups, and the game carries on
+key or a local model would have answered. So you can list backups, and the game carries on
 without you.</p>
+<p><img src="/wiki/img/settings-ai-models.jpg" alt="The Models list and Connections">
+<em>Settings → AI after pasting a Gemini key: Google&#39;s default list of two models on one connection, both Ready.</em></p>
 <p>This is your <strong>Fallback list</strong>: the <strong>Models</strong> section of Settings → AI, and the name error
 messages use for it. Each entry in it is one model on one connection. Every AI call starts at the
-top and uses the first entry that can answer. It moves down only when one can&#39;t: its allowance
-has run out, its key or name is wrong, or it is busy for a moment. The list can mix providers. A
+top and uses the first entry that can answer — including the call right after one failed, so a
+model is back in use the moment it can answer again. It moves down only when one can&#39;t: its
+allowance has run out, its key or name is wrong, or it is busy. The list can mix providers. A
 typical list is a few Gemini models on your free key, strongest first, then a paid key or a local
 model at the bottom.</p>
 <p>The game never spreads calls across the list to get more use out of it. The top model answers
@@ -366,11 +375,11 @@ that use it too, so it asks first and names them.</p>
 <td>Something is wrong with it, such as <code>key rejected (401)</code> or <code>model not found (404)</code>. Skipped until you fix it.</td>
 </tr>
 <tr>
-<td><strong>Busy, back in …</strong></td>
-<td>The provider is overloaded. A short pause.</td>
+<td><strong>Busy, for about …</strong></td>
+<td>The provider is overloaded. Sits out for ten minutes.</td>
 </tr>
 <tr>
-<td><strong>Rate limited, back in …</strong></td>
+<td><strong>Rate limited, for about …</strong></td>
 <td>Too many requests in a short time. A short pause.</td>
 </tr>
 </tbody></table></div>
@@ -384,10 +393,13 @@ tier; the entry shows that time in your own time zone. Other providers do not sa
 reset, so a Spent model there gets one try an hour later.</li>
 <li><strong>Unusable</strong> stays until you edit that entry or its connection. A new key, endpoint or provider
 on a connection clears every mark on its entries, Spent included.</li>
-<li><strong>Busy.</strong> An overloaded model is retried once, then skipped for 60 seconds. A server that
-cannot be reached counts as busy.</li>
-<li>A busy or rate-limited model is still tried last when nothing else can answer. A minute&#39;s
-pause is never what fails a turn.</li>
+<li><strong>Busy.</strong> An overloaded model sits out for <strong>ten minutes</strong>, at the back of the order: a busy
+provider tends to stay busy, and its refusals are not always quick. A server that cannot be
+reached counts as busy.</li>
+<li>A Spent or busy model is moved to the back, not out: when nothing else can answer it is still
+tried, busy ones first, so a mark that has quietly expired is never what fails a turn.</li>
+<li>Whether a Gemini &quot;429&quot; is a spent day or a short pause is decided by the quota Google names in
+the error, not guessed.</li>
 </ul>
 <p>The first time the game moves down the list, a short notice near the top of the screen says why:
 <em>gemini-3.7-flash (Main Google) has used today&#39;s allowance. Now using gemini-3.6-flash (Main
@@ -404,19 +416,19 @@ not restarted on another model — you would see half a reply replaced by a diff
 <p>A rate limit is a short pause, not a used-up allowance. <strong>When a model is rate limited</strong> decides
 what happens:</p>
 <ul>
-<li><strong>Wait, then try it again</strong> — the default. Keeps your backups&#39; daily allowance for when the top
-model has truly run out.</li>
-<li><strong>Try the next one straight away</strong> — faster, but it spends your backups. The rate-limited model
-is skipped for as long as the provider asked, up to two minutes, or for 60 seconds if it did
-not say.</li>
+<li><strong>Use the next one straight away</strong> — the default. The rate-limited model is skipped for as long
+as the provider asked, up to two minutes, or for 60 seconds if it did not say. A per-minute
+limit is usually over by the next call, which starts at the top of the list again.</li>
+<li><strong>Wait, then try it again</strong> — slower turns, but it keeps your backups&#39; daily allowance for when
+the top model has truly run out.</li>
 </ul>
 <h3 id="a-model-for-each-task">A model for each task</h3>
-<p><strong>Settings → Advanced → Per-task models</strong> points one task — Time skip, Next speaker and so on — at
+<p><strong>☰ → Settings → Advanced → Per-task models</strong> points one task — Time skip, Next speaker and so on — at
 one of your entries. That task tries its pick first, then the list from the top, so it only fails
 when every model is used up. Tasks left on <strong>Start at the top of the list</strong> use the list as
 normal. Use it to run time skips on your strongest model and small jobs on a cheap one.</p>
 <h3 id="if-you-set-up-ai-before-the-list-existed">If you set up AI before the list existed</h3>
-<p>The first time beta reads the list, it builds it from your old settings, so the game plays as it
+<p>The first time the game reads the list, it builds it from your old settings, so the game plays as it
 did:</p>
 <ul>
 <li>Your provider, key and model become the first entry.</li>
@@ -438,17 +450,19 @@ serious or repeated breaches. Open Historia never spreads requests across keys t
 not per key, so several keys in one project share the same allowance.</p>
 <h2 id="worth-knowing">Worth knowing</h2>
 <ul>
-<li><strong>You can switch provider at any time</strong>, mid-campaign. On stable, settings are per-provider, so
-your Gemini key stays put while you try a local model. On beta, each key is a connection and
-stays until you remove it; move an entry to the top to try it first.</li>
+<li><strong>You can switch provider at any time</strong>, mid-campaign. Each key is a connection and stays until
+you remove it; move an entry to the top to try it first.</li>
 <li><strong>Cancel works.</strong> A time skip that is taking too long can be stopped.</li>
+<li><strong>Mind your daily requests.</strong> A free key allows a few hundred a day. <strong>Save AI requests</strong>, on by
+default, keeps a time skip to one to three of them; Settings → AI → <strong>AI requests</strong> shows how
+many you have used today. See <a href="/wiki/settings/#ai-requests">settings</a>.</li>
 <li><strong>Limit AI generation</strong> (Settings → AI) is off by default. Turned on, it gives up on a stalled
 generation and falls back to a canned event rather than waiting forever. It measures <em>silence</em>,
 not total time, so a slow-but-working model is not cut off.</li>
 <li><strong>Expert controls</strong> let you send raw parameters to the provider and enable reasoning on models
-that support it. You do not need these to play. On stable they are in the one settings list.
-On beta, custom parameters sit on connections and entries, as <a href="#adding-backups">above</a>, and
-<strong>Model reasoning</strong> applies to every model in the list.</li>
+that support it. You do not need these to play. Custom parameters sit on connections and
+entries, as <a href="#adding-backups">above</a>, and <strong>Model reasoning</strong> applies to every model in the
+list.</li>
 </ul>
 <h2 id="next">Next</h2>
 <p><a href="/wiki/how-to-play/">How to play</a> — the core loop. Or if something is not connecting,
@@ -460,7 +474,7 @@ For picking between models in more detail, see <a href="/wiki/ai-providers/">AI 
         <a class="next" href="/wiki/how-to-play/"><span>Next →</span><b>How to play</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

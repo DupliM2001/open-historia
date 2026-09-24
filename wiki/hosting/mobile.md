@@ -3,34 +3,39 @@ no Termux.
 
 ## Installing
 
-Download **`open-historia.apk`** (~6 MB) from the
+Download **`open-historia.apk`** (~21 MB) from the
 [`android` release](https://github.com/Open-Historia/open-historia/releases/tag/android).
 
 Android will warn you about installing from your browser rather than the Play Store. That is
 expected for an app distributed this way; allow it for your browser and continue.
 
-## First launch
-
-The app itself is tiny because the world map is not in it. On first launch it downloads about
-**200 MB** of map data and stores it on the phone.
-
-Use Wi-Fi, and let it finish. After that the map is local and the app starts quickly.
-
 ## What it is
 
-A thin client with a small server embedded inside it. Everything runs on the phone: your games
-are saved there, the map is stored there, and the game logic runs there.
+The app is the same game [openhistoria.com/play/](/play/) serves, packaged as an Android app.
+Your games and scenarios are saved on the phone, and the game logic runs there. The world map is
+**not** in the app: it streams from the community content nodes the website uses, so the app
+needs a connection to draw the map, and a blank map usually means no node was reachable — see
+[troubleshooting](/wiki/troubleshooting/).
 
-The only thing that leaves the phone is your AI provider request — the same as any other build.
+Your AI provider requests go straight from the phone to the provider, the same as any other
+build.
+
+<p class="beta-note"><b>The beta app carries the whole world.</b> The beta channel's Android
+build, which has not yet replaced the APK on the release page, ships the world map inside it, trimmed to the zoom the map actually draws, so it plays in
+airplane mode from the first launch — only the Community Hub and your AI provider use the
+network. It can also export games and save the diagnostics log through Android's share sheet, and
+reach a model running on a PC on your own network (Ollama, LM Studio) without that model needing
+browser permissions.</p>
 
 ## Setting up AI
 
-Same as everywhere else: settings, pick a provider, paste a key. See
+Same as everywhere else: the game menu, pick a provider, paste a key. See
 [connecting an AI provider](/wiki/ai-setup/).
 
 A cloud provider is the practical choice on a phone. Running a local model on the handset is not
-realistic; if you have one on a PC on the same network you can point the app at it, but you will
-need that machine reachable and its endpoint entered by IP rather than `localhost`.
+realistic. A model on a PC on the same network has to be entered by that PC's IP address rather
+than `localhost`, and on the stable app it must also accept requests from a browser page — the
+same restriction as [the browser build](/wiki/ai-providers/).
 
 ## Updating
 
@@ -66,11 +71,6 @@ password.
 
 Note that this is not two people playing together. It is one campaign, viewed from a different
 screen.
-
-## The beta APK
-
-There is a separate `android-beta` release carrying the beta channel's features. It installs
-alongside the stable app rather than replacing it, and keeps its own saves.
 
 ## Next
 

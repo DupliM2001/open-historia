@@ -4,7 +4,7 @@ and it is where every scenario except Modern Day comes from — including the of
 You will also see it called the **Scenario Hub**; they are the same thing.
 
 ![The Community Hub](/wiki/img/community-hub.jpg)
-*The hub's shelves. Install counts and likes are real, and a purple title with a ✓ OFFICIAL badge marks a verified official post.*
+*The hub's shelves. Install counts and likes are real, and a ✓ Official badge marks a verified official post.*
 
 ## Browsing
 
@@ -12,13 +12,13 @@ The tab is laid out in shelves:
 
 - **📌 Pinned** — the official and featured scenarios. Only hub collaborators can pin something,
   so this shelf is curated rather than gamed.
-
-A scenario with a **purple title and a ✓ OFFICIAL badge** is a verified official post. Anything
-without one is community work, which is most of the hub and where the more inventive scenarios
-tend to be.
 - **Most installed** — by real install counts.
 - **Most liked** — by reactions on the post.
 - **Most recent** — newest first.
+
+A scenario with a **✓ Official** badge was posted by a hub maintainer — verified by GitHub, not by
+what the title says. Anything without one is community work, which is most of the hub and where
+the more inventive scenarios tend to be. Posts that are not valid scenarios are hidden.
 
 Click any scenario for its detail view: description, cover image, what it contains, and
 **▶ Import & Play**.
@@ -46,9 +46,11 @@ All one click to import.
 then on it behaves exactly like a built-in scenario — it is yours, it works offline, and you can
 edit or clone it.
 
-A bundle carries the map, cities, colours, flags and any custom basemap the author used, so what
-you get is what they built. The one exception is on stable: a map the author uploaded as a tile
-archive rather than drew in the editor is left out. Beta always includes it.
+A bundle carries the map, cities, colours, flags and any custom basemap the author used —
+including a map uploaded as a tile archive rather than drawn in the editor — so what you get is
+what they built. A game you start from an imported scenario remembers where it came from, so
+exporting that game later does not carry the map inside it: the receiver can fetch it from the
+hub.
 
 ## Updates
 

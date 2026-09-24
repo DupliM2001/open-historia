@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,30 +121,17 @@
     <h1>Settings Reference</h1>
     <p class="tagline">Every option in the game, what it does, and which ones are worth changing first.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#which-menu-am-i-looking-at">Which menu am I looking at?</a></li><li class="d3"><a href="#stable-one-flat-menu">Stable — one flat menu</a></li><li class="d3"><a href="#beta-a-quick-menu-then-a-workspace">Beta — a quick menu, then a workspace</a></li><li class="d3"><a href="#translating-between-the-two">Translating between the two</a></li><li class="d2"><a href="#ai-provider">AI provider</a></li><li class="d2"><a href="#limit-ai-generation">Limit AI generation</a></li><li class="d2"><a href="#language">Language</a></li><li class="d2"><a href="#display">Display</a></li><li class="d2"><a href="#map">Map</a></li><li class="d2"><a href="#what-to-change-first">What to change first</a></li><li class="d2"><a href="#where-settings-are-stored">Where settings are stored</a></li><li class="d2"><a href="#the-map-renderer">The map renderer</a></li><li class="d3"><a href="#restart-the-app-after-switching">Restart the app after switching</a></li><li class="d2"><a href="#beta-only-options">Beta-only options</a></li><li class="d3"><a href="#cost-and-speed">Cost and speed</a></li><li class="d3"><a href="#seeing-what-the-ai-did">Seeing what the AI did</a></li><li class="d3"><a href="#diagnostics-and-network">Diagnostics and network</a></li><li class="d3"><a href="#gameplay-and-presentation">Gameplay and presentation</a></li><li class="d2"><a href="#detailed-logging">Detailed logging</a></li><li class="d3"><a href="#please-turn-it-on-before-reporting-a-bug">Please turn it on before reporting a bug</a></li><li class="d3"><a href="#what-it-adds">What it adds</a></li><li class="d3"><a href="#what-it-means-for-your-privacy">What it means for your privacy</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
-    <p>Settings live behind the settings button — <strong>⋮</strong> on stable, <strong>☰</strong> on beta — but <em>what you find there depends on which build you are
-running</em>, and the two are laid out very differently. Work out which one you have first;
-everything below is easier once you know.</p>
-<h2 id="which-menu-am-i-looking-at">Which menu am I looking at?</h2>
-<p class="beta-note"><b>The stable and beta builds have different menus.</b> They hold much the
-same options, but they are organised differently and reached differently. The beta build installs
-alongside the stable app, so it is entirely possible to have both on one machine.</p><h3 id="stable-one-flat-menu">Stable — one flat menu</h3>
-<p><img src="/wiki/img/settings-menu.jpg" alt="The stable settings menu">
-<em>The stable build&#39;s settings: one scrolling list, no tabs. Your API key is stored locally and shown masked.</em></p>
-<p>Press <strong>⋮</strong> and everything is in a single scrolling list. In order, top to bottom: the <strong>AI
-provider</strong> and its key, model and endpoint; <strong>custom parameters</strong>; <strong>UI language</strong> and <strong>AI chat
-language</strong>; <strong>Fullscreen</strong>, <strong>3D Globe</strong> and <strong>3D Terrain</strong>; a <strong>Map</strong> group holding country
-labels, reduced motion and the two camera options; <strong>Limit AI generation</strong>; then <strong>🧪 Cheats</strong>, a
-<strong>📖 Wiki</strong> link and the community links.</p>
-<p>No tabs, no sections, no search. Scroll to what you want.</p>
-<h3 id="beta-a-quick-menu-then-a-workspace">Beta — a quick menu, then a workspace</h3>
-<p><img src="/wiki/img/beta-quick-settings.jpg" alt="Beta quick menu, Settings tab">
-<em>Beta&#39;s quick menu, Settings tab — the four sections open a full-screen workspace.</em></p>
-<p>Press <strong>☰</strong> and you get a small <strong>quick menu</strong> with four tabs — <strong>Game</strong>, <strong>Tools</strong>, <strong>Settings</strong>
-and <strong>Help</strong>. Game holds the current campaign and the switch, duplicate, import and manage
-actions. Tools puts cheats, the events timeline and the AI debug console one click away. Help has
-the guides, bug reporting and the community links.</p>
-<p>Choosing one of the four <strong>Settings</strong> tiles opens a full-screen <strong>workspace</strong> with that section
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-game-menu">The game menu</a></li><li class="d3"><a href="#where-things-are">Where things are</a></li><li class="d2"><a href="#ai">AI</a></li><li class="d3"><a href="#models-and-connections">Models and connections</a></li><li class="d3"><a href="#ai-requests">AI requests</a></li><li class="d3"><a href="#generation-behaviour">Generation behaviour</a></li><li class="d2"><a href="#general">General</a></li><li class="d2"><a href="#map">Map</a></li><li class="d2"><a href="#advanced">Advanced</a></li><li class="d2"><a href="#what-to-change-first">What to change first</a></li><li class="d2"><a href="#where-settings-are-stored">Where settings are stored</a></li><li class="d2"><a href="#detailed-logging">Detailed logging</a></li><li class="d3"><a href="#please-turn-it-on-before-reporting-a-bug">Please turn it on before reporting a bug</a></li><li class="d3"><a href="#what-it-adds">What it adds</a></li><li class="d3"><a href="#what-it-means-for-your-privacy">What it means for your privacy</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <p>Settings live behind the <strong>☰</strong> button in the top-left corner. It opens a small <strong>game menu</strong>,
+and the game menu leads to a full-screen <strong>settings workspace</strong>.</p>
+<h2 id="the-game-menu">The game menu</h2>
+<p><img src="/wiki/img/game-menu-settings.jpg" alt="The game menu, Settings tab">
+<em>The game menu&#39;s Settings tab — the four tiles open the settings workspace at that section.</em></p>
+<p>Press <strong>☰</strong> and you get the game menu with four tabs — <strong>Game</strong>, <strong>Tools</strong>, <strong>Settings</strong> and
+<strong>Help</strong>. Game holds the current campaign and <strong>Game Management</strong> (switch, duplicate, import or
+manage campaigns). Tools puts cheats, the events timeline and the AI debug console one click away.
+Help has the wiki, bug reporting and the community links.</p>
+<p>Choosing one of the four <strong>Settings</strong> tiles opens the full-screen <strong>workspace</strong> with that section
 selected:</p>
 <div class="table-scroll"><table>
 <thead>
@@ -162,79 +149,77 @@ selected:</p>
 <tr>
 <td>◇</td>
 <td><strong>Map</strong></td>
-<td>Basemap, labels, globe, terrain, camera</td>
+<td>Basemap, label font and labels, globe, terrain, camera</td>
 </tr>
 <tr>
 <td>✦</td>
 <td><strong>AI</strong></td>
-<td>Models and backups, connections, reasoning, generation limits</td>
+<td>Models and backups, connections, reasoning, AI requests, generation behaviour</td>
 </tr>
 <tr>
 <td>⌘</td>
 <td><strong>Advanced</strong></td>
-<td>Per-task models, telemetry, experimental, network, diagnostics</td>
+<td>Per-task models, telemetry, network, diagnostics</td>
 </tr>
 </tbody></table></div>
-<p>So on beta, reaching a setting is two steps — the quick menu, then the section — while tools that
-are buried on stable, such as cheats and the timeline, are one click from the quick menu.</p>
-<h3 id="translating-between-the-two">Translating between the two</h3>
+<h3 id="where-things-are">Where things are</h3>
 <div class="table-scroll"><table>
 <thead>
 <tr>
 <th>I want to…</th>
-<th>Stable</th>
-<th>Beta</th>
+<th>Go to</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>Set my API key</td>
-<td>⋮ → top of the list</td>
 <td>☰ → Settings → <strong>AI</strong></td>
 </tr>
 <tr>
 <td>Add a backup model</td>
-<td><em>(not available)</em></td>
 <td>☰ → Settings → <strong>AI</strong> → + Add a backup</td>
 </tr>
 <tr>
+<td>See how many requests I have used today</td>
+<td>☰ → Settings → <strong>AI</strong> → AI requests</td>
+</tr>
+<tr>
 <td>Change language</td>
-<td>⋮ → UI language</td>
 <td>☰ → Settings → <strong>General</strong></td>
 </tr>
 <tr>
 <td>Turn off the globe</td>
-<td>⋮ → 3D Globe</td>
+<td>☰ → Settings → <strong>Map</strong></td>
+</tr>
+<tr>
+<td>Change the basemap</td>
 <td>☰ → Settings → <strong>Map</strong></td>
 </tr>
 <tr>
 <td>Open cheats</td>
-<td>⋮ → 🧪 Cheats</td>
 <td>☰ → <strong>Tools</strong> → Cheats</td>
 </tr>
 <tr>
 <td>Read the wiki</td>
-<td>⋮ → 📖 Wiki</td>
-<td>☰ → <strong>Help</strong> → Guides</td>
+<td>☰ → <strong>Help</strong> → Wiki</td>
 </tr>
 <tr>
 <td>Switch campaign</td>
-<td>Exit to the main menu</td>
-<td>☰ → <strong>Game</strong></td>
+<td>☰ → <strong>Game</strong> → Game Management</td>
 </tr>
 <tr>
 <td>See what the AI cost</td>
-<td><em>(not available)</em></td>
 <td>☰ → <strong>Tools</strong> → AI debug console</td>
 </tr>
 </tbody></table></div>
-<p>Everything from here down applies to both builds unless it says otherwise.</p>
-<h2 id="ai-provider">AI provider</h2>
+<h2 id="ai">AI</h2>
 <p>The only part you must set up. Covered in full in
 <a href="/wiki/ai-setup/">connecting an AI provider</a> and <a href="/wiki/ai-providers/">AI providers and models</a>.</p>
+<h3 id="models-and-connections">Models and connections</h3>
+<p>The AI section opens on a list headed <strong>Models</strong>. Each entry is a model on a <strong>connection</strong>:</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
-<th>Option</th>
+<th>On a connection</th>
 <th></th>
 </tr>
 </thead>
@@ -247,16 +232,8 @@ are buried on stable, such as cheats and the timeline, are one click from the qu
 <td>Yours. Stored locally, never sent to an Open Historia server.</td>
 </tr>
 <tr>
-<td><strong>Model</strong></td>
-<td>Defaults are sensible; see below.</td>
-</tr>
-<tr>
-<td><strong>API Endpoint</strong></td>
+<td><strong>API endpoint</strong></td>
 <td>Only for the two Compatible providers.</td>
-</tr>
-<tr>
-<td><strong>Model reasoning</strong></td>
-<td>Extended reasoning on models that support it. Slower, better on hard turns.</td>
 </tr>
 <tr>
 <td><strong>Custom parameters (JSON)</strong></td>
@@ -267,46 +244,105 @@ are buried on stable, such as cheats and the timeline, are one click from the qu
 <td>For OpenAI-compatible endpoints that handle structured output badly. Toggle it if turns keep failing to parse.</td>
 </tr>
 </tbody></table></div>
-<p>Default models: Gemini <code>gemini-3.5-flash-lite</code>, Anthropic <code>claude-haiku-4-5</code>, and
-<code>http://localhost:11434/v1</code> as the OpenAI-compatible endpoint (Ollama&#39;s default).</p>
-<p>Settings are stored <strong>per provider</strong>, so switching to a local model and back does not lose your
-cloud keys.</p>
-<p class="beta-note"><b>On beta the same options are split in two.</b> A <b>connection</b> holds
-the provider, the key, the endpoint, custom parameters and Strict tool schema. An entry in the
-<b>Models</b> list holds the model, plus, under <b>This model only</b>, custom parameters for that
-model and <b>How the AI answers</b>. Several entries can share one connection, and the list tries
-them from the top as backups. Model reasoning applies to every entry. See
-<a href="/wiki/ai-setup/#backup-models">backup models</a>.</p><h2 id="limit-ai-generation">Limit AI generation</h2>
-<p><strong>Off by default.</strong> Turned on, a generation that goes quiet is abandoned and the turn falls back
-to a canned event instead of hanging indefinitely.</p>
-<p>It measures <strong>silence</strong>, not total elapsed time — a model that is slowly but genuinely producing
-output is not cut off. Worth turning on if you use a local model, or if you have had turns hang.</p>
-<h2 id="language">Language</h2>
-<p><strong>UI language</strong> translates the interface. Applying it reloads the page. Around fifty languages
-are available.</p>
-<p><strong>AI chat language</strong> is separate: it is the language leaders and events are written in. You can
-run an English interface with French diplomacy, or the reverse.</p>
-<h2 id="display">Display</h2>
 <div class="table-scroll"><table>
 <thead>
 <tr>
-<th>Option</th>
+<th>On an entry</th>
 <th></th>
 </tr>
 </thead>
 <tbody><tr>
-<td><strong>Fullscreen</strong></td>
-<td>Borderless fullscreen.</td>
+<td><strong>Model</strong></td>
+<td>The model name. Suggestions come from the models you have used recently.</td>
 </tr>
 <tr>
-<td><strong>3D Globe</strong></td>
-<td>Sphere instead of a flat map, with a real day/night terminator.</td>
-</tr>
-<tr>
-<td><strong>3D Terrain</strong></td>
-<td>Elevation with heavy exaggeration. Labelled &quot;Very Experimental&quot; and it means it. Flat map only, and disabled by a custom background.</td>
+<td><strong>This model only</strong></td>
+<td>Custom parameters for this model alone, and <strong>How the AI answers</strong> — the structured-output method to try first.</td>
 </tr>
 </tbody></table></div>
+<p>Several entries can share one connection, and the list is tried from the top: when one model runs
+out or cannot answer, the next one takes over. See <a href="/wiki/ai-setup/#backup-models">backup models</a>.
+<strong>Model reasoning</strong> sits under the list and applies to every entry.</p>
+<p>A first Gemini connection fills the list with Google&#39;s defaults — <code>gemini-3.5-flash-lite</code>, with
+<code>gemini-3.1-flash-lite</code> as its backup. An OpenAI entry with no model runs <code>gpt-5.6-luna</code>; an
+Anthropic one runs <code>claude-haiku-4-5</code>.</p>
+<h3 id="ai-requests">AI requests</h3>
+<p>A free key allows a few hundred requests a day, and this section decides how many the game
+spends. It shows how many have been used today (counted on this device, from midnight Pacific
+time, which is when a Gemini key&#39;s day begins) and what your last time skip cost.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Save AI requests</strong></td>
+<td><strong>On by default.</strong> A time skip is one request, two when there is something to check afterwards, and never more than three. Off gives the most thorough turns, for a key with no daily limit: every check after a skip makes its own request, the model may look things up, and a flawed answer is sent back to be redone — a busy skip can use twenty requests or more.</td>
+</tr>
+<tr>
+<td><strong>Requests a day your key allows</strong></td>
+<td>500 by default. Used only for the count and to keep background AI off the end of your day. The game never stops you at the limit; your provider does.</td>
+</tr>
+<tr>
+<td><strong>Background AI</strong></td>
+<td><strong>On by default.</strong> While you are not skipping time, countries may write to you unprompted, forces may reposition, agents may file extra reports, and a country you look at gets its first intelligence reading. Off: the game only calls the model when you do something.</td>
+</tr>
+<tr>
+<td><strong>Background requests a day, at most</strong></td>
+<td>30 by default. Background AI also stops by itself once less than a tenth of your day is left.</td>
+</tr>
+<tr>
+<td><strong>Checks after a time skip</strong></td>
+<td>Five switches — move units to match the events, mark occupied and disputed land, take repeats and filler off the timeline, keep the Projects board in step, collect your agents&#39; reports. With Save AI requests on they share one request; turning one off makes it smaller, and saves the request only if it was the only one with work to do.</td>
+</tr>
+</tbody></table></div>
+<p class="beta-note"><b>On beta there is a sixth check</b>, <b>Put new structures on the map</b>:
+bases, shipyards, data centres and ground stations appear where the events built them.</p><h3 id="generation-behaviour">Generation behaviour</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Limit AI generation</strong></td>
+<td><strong>Off by default.</strong> On, the game stops waiting and falls back to canned events when the model goes quiet — five minutes of silence part-way through an answer, or fifteen with no answer at all. It measures <strong>silence</strong>, not elapsed time: a model that is still writing is never interrupted. Worth turning on for a local model, or if you have had turns hang.</td>
+</tr>
+<tr>
+<td><strong>Generate long time skips in segments</strong></td>
+<td><strong>Off by default.</strong> On, skips of more than a few months are generated as several shorter requests merged into one round — slower and costlier, but far less likely to time out on a hosted provider. See <a href="/wiki/time/">time and turns</a>.</td>
+</tr>
+<tr>
+<td><strong>AI lookup functions</strong></td>
+<td>On by default, but only used while Save AI requests is off. The model can call functions — exact power and region names, a region&#39;s neighbours, the war ledger, a chat — in up to three extra requests per task. Needs a provider that supports function calling.</td>
+</tr>
+<tr>
+<td><strong>Show time skip events as they are written</strong></td>
+<td><strong>On by default.</strong> A skip opens the Events panel and fills it as the model writes. Off: the round appears at the end. The turn is the same either way, and Gemini arrives all at once regardless.</td>
+</tr>
+<tr>
+<td><strong>Batch background AI tasks</strong></td>
+<td>Anthropic only, off by default. History consolidation runs through the Message Batches API at about half the price and lands a little later.</td>
+</tr>
+</tbody></table></div>
+<p class="beta-note"><b>On beta, Player focus sits here too</b> — how much of each time skip is
+about your own country, stored with the game rather than the device. See
+<a href="/wiki/time/#player-focus">time and turns</a>.</p><h2 id="general">General</h2>
+<p><strong>UI language</strong> translates the interface. Applying it reloads the page. Twenty-two languages ship
+fully translated — Arabic, Bengali, Chinese, Dutch, French, German, Hindi, Indonesian, Italian,
+Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Swedish, Thai, Turkish,
+Ukrainian, Urdu and Vietnamese — and the list marks them. In those, the interface costs no AI
+requests at all; only content a scenario&#39;s author or a player wrote (scenario names, polity
+names, custom events) is sent to your model to translate, once. Other languages are still
+offered, translated by your model as panels are met.</p>
+<p><strong>AI chat language</strong> is separate: it is the language leaders and events are written in. You can
+run an English interface with French diplomacy, or the reverse.</p>
+<p><strong>Fullscreen</strong> is under Display, and <strong>Reduce motion</strong> under Accessibility. Reduce motion turns on
+both camera switches in the Map section at once — turn it on first if the game feels busy or you
+are prone to motion sickness.</p>
 <h2 id="map">Map</h2>
 <div class="table-scroll"><table>
 <thead>
@@ -316,12 +352,24 @@ run an English interface with French diplomacy, or the reverse.</p>
 </tr>
 </thead>
 <tbody><tr>
+<td><strong>Basemap</strong></td>
+<td>The imagery under the political colours. <em>Scenario default</em> uses whatever the scenario&#39;s author chose; fourteen others override it. See <a href="/wiki/world-map/#basemaps">the world map</a>.</td>
+</tr>
+<tr>
+<td><strong>Country label font</strong></td>
+<td>Empty uses the scenario&#39;s font. Any font installed on your computer works.</td>
+</tr>
+<tr>
 <td><strong>Hide country labels</strong></td>
 <td>Removes country names from the map.</td>
 </tr>
 <tr>
-<td><strong>Reduce motion</strong></td>
-<td>Umbrella switch quieting several animations at once. Turn this on first if the game feels busy or you are prone to motion sickness.</td>
+<td><strong>3D Globe</strong></td>
+<td>Sphere instead of a flat map, with a real day/night terminator. Marked experimental.</td>
+</tr>
+<tr>
+<td><strong>3D Terrain</strong></td>
+<td>Elevation with heavy exaggeration. Marked experimental, and flat map only.</td>
 </tr>
 <tr>
 <td><strong>Disable idle globe rotation</strong></td>
@@ -332,12 +380,45 @@ run an English interface with French diplomacy, or the reverse.</p>
 <td>Stops the camera flying to each event during the <a href="/wiki/events/">staged reveal</a>.</td>
 </tr>
 </tbody></table></div>
-<p>The <strong>basemap</strong> — the imagery under the political colours — is chosen from the map controls on
-stable, and from Settings → Map on beta. See <a href="/wiki/world-map/">the world map</a> for the ten
-options.</p>
+<p>Switching the globe on or off shows the game&#39;s loading screen while the map redraws from nothing.</p>
+<h2 id="advanced">Advanced</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Per-task models</strong></td>
+<td>Point a task at one entry in the list: a cheap model for background tasks, a strong one for the jump itself. The task tries its pick first, then the list from the top. The single most effective way to cut cost without making turns worse.</td>
+</tr>
+<tr>
+<td><strong>Record AI telemetry</strong></td>
+<td>Keeps every AI call — prompt, answer, model, tokens, latency, validation verdict — for the <strong>AI debug console</strong> (200 across sessions). Off: the console sees this session only.</td>
+</tr>
+<tr>
+<td><strong>Rate AI generations</strong></td>
+<td>Off by default. A small 1–10 bar after each time skip, Game Master edit and interactive event, stored beside the call in the console. Feedback for you, not sent anywhere.</td>
+</tr>
+<tr>
+<td><strong>Let other devices connect</strong></td>
+<td>Under <strong>Network</strong>, desktop only. The server answers this machine only until you turn it on. See <a href="/wiki/self-hosting/">hosting a server</a>.</td>
+</tr>
+<tr>
+<td><strong>Keep a diagnostics log</strong></td>
+<td>Under <strong>Diagnostics</strong>. On by default. <strong>📋 Copy log</strong>, <strong>💾 Save log file</strong>, or <strong>💾 Save log file + game</strong> to send with a bug report; the 💾 <strong>Save logging file</strong> button on a failed turn or advisor reply saves the same file with that failure attached. <strong>🔎 View log</strong> reads it in place and <strong>Clear</strong> empties it. Off means nothing is recorded and the stored log is thrown away.</td>
+</tr>
+<tr>
+<td><strong>Detailed logging</strong></td>
+<td>Off by default. See below — <strong>please turn it on if you are going to report a bug</strong>.</td>
+</tr>
+</tbody></table></div>
 <h2 id="what-to-change-first">What to change first</h2>
 <ol>
 <li><strong>Set up your AI provider.</strong> Nothing else matters until this is done.</li>
+<li><strong>Look at AI requests</strong> if you are on a free key — the defaults are chosen for one, and the
+counter tells you what a turn costs.</li>
 <li><strong>Turn on Limit AI generation</strong> if you are running a local model.</li>
 <li><strong>Try the 3D globe.</strong> It is the better way to look at the world, and it costs little.</li>
 <li><strong>Leave 3D terrain off</strong> unless you specifically want it — it is the most expensive thing in
@@ -350,132 +431,10 @@ are therefore <strong>per device and per install</strong>, not per save — movi
 does not carry your API key with it, which is deliberate.</p>
 <p>It also means <strong>the beta build keeps entirely separate settings from the stable one</strong>. Installing
 beta does not inherit your stable API key; you will need to paste it in again.</p>
-<h2 id="the-map-renderer">The map renderer</h2>
-<p class="beta-note"><b>Beta channel only.</b> The stable build has one renderer and no setting
-for it.</p><p><img src="/wiki/img/beta-renderer-setting.jpg" alt="The Legacy map renderer toggle">
-<em>Settings → Map → Renderer on beta. Note that the description mentions only a redraw — restart anyway.</em></p>
-<p>Beta is developing a new map renderer — <strong>Map vNext</strong> — and ships it as the default. It draws
-dissolved polity surfaces, stitched frontiers and curved polity labels, rather than filling each
-region separately.</p>
-<p>It is a work in progress. If you would rather have the older look, or vNext is giving you
-trouble, you can switch back:</p>
-<p><strong>Settings → Map → Renderer → &quot;Legacy map renderer&quot;</strong></p>
-<p>Off by default. On, you get the renderer the game used before vNext — per-region fills and the
-older country labels. This is a <strong>rendering choice only</strong>: no world state, save data or geometry
-differs between them, and you can switch back and forth as often as you like without touching
-your campaign.</p>
-<h3 id="restart-the-app-after-switching">Restart the app after switching</h3>
-<p>The map redraws when you flip the toggle, but <strong>the change does not fully take effect until you
-restart Open Historia</strong>. Switch it, then close the app and reopen it. Until you do, expect the
-map to be only partly converted.</p>
-<p>The in-app description does not currently mention this — it says only that switching redraws the
-map. Restart anyway.</p>
-<p>Also worth knowing: <strong>vNext takes noticeably longer to draw when a campaign opens</strong>, because it
-dissolves every polity&#39;s surface before revealing the map. A long &quot;drawing borders and labels&quot;
-pause on open is normal for vNext, not a hang. The legacy renderer opens faster.</p>
-<h2 id="beta-only-options">Beta-only options</h2>
-<p class="beta-note"><b>Beta channel only.</b> These have no equivalent on stable.</p><p>Every one of these is under <strong>Settings → AI</strong> or <strong>Settings → Advanced</strong>, and none has an
-equivalent on stable.</p>
-<h3 id="cost-and-speed">Cost and speed</h3>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Setting</th>
-<th></th>
-</tr>
-</thead>
-<tbody><tr>
-<td><strong>Generate long time skips in segments</strong></td>
-<td>A long skip runs as several shorter requests merged into one round. Costs more tokens; far less likely to time out. See <a href="/wiki/time/">time and turns</a>.</td>
-</tr>
-<tr>
-<td><strong>Batch background AI tasks</strong></td>
-<td>Anthropic only. Background work (such as history consolidation) rides the Message Batches API at roughly half price. It is not instant, which is why it is only used for work you are not waiting on.</td>
-</tr>
-<tr>
-<td><strong>Backup models</strong></td>
-<td>Settings → AI → <strong>Models</strong>. When one model runs out or can&#39;t answer, the next one in the list takes over. See <a href="/wiki/ai-setup/#backup-models">backup models</a>.</td>
-</tr>
-<tr>
-<td><strong>Connections</strong></td>
-<td>Settings → AI. A saved way to reach a provider — a name, the key, the endpoint — used by as many entries in the list as you like. They replace configuration profiles.</td>
-</tr>
-<tr>
-<td><strong>When a model is rate limited</strong></td>
-<td>Settings → AI. Wait and try it again (the default, which keeps your backups&#39; allowance), or try the next one straight away.</td>
-</tr>
-<tr>
-<td><strong>Per-task models</strong></td>
-<td>Settings → Advanced. Point a task at one entry in the list: a cheap model for background tasks, a strong one for the jump itself. The task tries its pick first, then the list from the top. The single most effective way to cut cost without making turns worse.</td>
-</tr>
-</tbody></table></div>
-<h3 id="seeing-what-the-ai-did">Seeing what the AI did</h3>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Setting</th>
-<th></th>
-</tr>
-</thead>
-<tbody><tr>
-<td><strong>AI debug console</strong></td>
-<td>Every call with its task, model, prompt, answer, token counts, latency and cost. Also on the quick menu&#39;s Tools tab.</td>
-</tr>
-<tr>
-<td><strong>Record AI telemetry</strong></td>
-<td>Keeps that per-call record. On by default. Turning it off empties the debug console.</td>
-</tr>
-<tr>
-<td><strong>Rate AI generations</strong></td>
-<td>Shows a 1–10 rating bar after each jump so you can score what the model produced. Feedback for you, not sent anywhere.</td>
-</tr>
-</tbody></table></div>
-<h3 id="diagnostics-and-network">Diagnostics and network</h3>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Setting</th>
-<th></th>
-</tr>
-</thead>
-<tbody><tr>
-<td><strong>Keep a diagnostics log</strong></td>
-<td>On by default. Records errors, API failures and the exact context the model was given. <strong>Copy log</strong> or <strong>Save as file</strong> to send it with a bug report; the 💾 <strong>Save logging file</strong> button on a failed turn or advisor reply saves the same file with that failure attached. Off means nothing is recorded and the stored log is thrown away.</td>
-</tr>
-<tr>
-<td><strong>Detailed logging</strong></td>
-<td>Off by default. See below — <strong>please turn it on if you are going to report a bug</strong>.</td>
-</tr>
-<tr>
-<td><strong>Let other devices connect</strong></td>
-<td>Opens the server to your network. Beta binds to loopback only by default; stable is open with no toggle and no password. See <a href="/wiki/self-hosting/">hosting a server</a>.</td>
-</tr>
-</tbody></table></div>
-<h3 id="gameplay-and-presentation">Gameplay and presentation</h3>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Setting</th>
-<th></th>
-</tr>
-</thead>
-<tbody><tr>
-<td><strong>Beta unit system</strong></td>
-<td>AI-driven unit movement with postures and standing orders, instead of hands-on control. Stored per save, not per browser. See <a href="/wiki/military/">military and combat</a>.</td>
-</tr>
-<tr>
-<td><strong>Legacy map renderer</strong></td>
-<td>The pre-vNext renderer. <strong>Restart the app after switching.</strong> See above.</td>
-</tr>
-<tr>
-<td><strong>Basemap</strong> and <strong>label font</strong></td>
-<td>Beta moves the basemap picker into Settings → Map and adds a label-font override; on stable the basemap is chosen from the map controls.</td>
-</tr>
-</tbody></table></div>
 <h2 id="detailed-logging">Detailed logging</h2>
-<p><strong>Settings → Advanced → Detailed logging</strong>, off by default.</p>
-<p>The ordinary log records failures. Detailed logging records <strong>everything</strong>, and it is the
-difference between a bug report someone can act on and one that just says the game misbehaved.</p>
+<p><strong>☰ → Settings → Advanced → Diagnostics → Detailed logging</strong>, off by default.</p>
+<p>The ordinary log is a running record of what you did — saves opened, orders queued, turns taken —
+and anything that went wrong. Detailed logging records <strong>everything</strong>, and it is the difference between a bug report someone can act on and one that just says the game misbehaved.</p>
 <h3 id="please-turn-it-on-before-reporting-a-bug">Please turn it on before reporting a bug</h3>
 <p>If you are about to report something — especially anything about the advisor, diplomacy or a turn
 going wrong — switch it on, reproduce the problem, then save the log as a file and attach it. A
@@ -491,16 +450,6 @@ normal one.</p>
 </tr>
 </thead>
 <tbody><tr>
-<td>Entries kept</td>
-<td>400</td>
-<td>5,000</td>
-</tr>
-<tr>
-<td>Total log size</td>
-<td>~192 KB</td>
-<td>~1 MB</td>
-</tr>
-<tr>
 <td>Detail per entry</td>
 <td>600 characters</td>
 <td>20,000</td>
@@ -511,16 +460,18 @@ normal one.</p>
 <td>8</td>
 </tr>
 </tbody></table></div>
-<p>And it records categories the normal log leaves out entirely:</p>
+<p>Both keep up to 5,000 entries and 1 MB; the difference is what gets recorded, not how much is
+kept.</p>
+<p>And it records what the normal log leaves out:</p>
 <ul>
-<li><strong>Every AI task and API call</strong>, not only the ones that failed.</li>
-<li><strong>World-state changes</strong>, turn by turn.</li>
-<li><strong>Panel navigation</strong> and general console output.</li>
-<li><strong>The full text of every conversation with the model</strong> — what you asked the advisor and what it
-answered, every diplomatic message in both directions, and the notes a turn or the idle drip
-dropped into your inbox.</li>
+<li><strong>Every message to and from your advisor</strong>, in full.</li>
+<li><strong>Every diplomatic message</strong>, in full, with who said it to whom.</li>
+<li><strong>Letters the advisor drafted</strong>, and the notes countries send you.</li>
+<li><strong>Every AI task and what it answered</strong>, and why an answer was rejected.</li>
+<li><strong>What each turn changed in the world.</strong></li>
+<li><strong>Every server request and every save</strong>, with sizes.</li>
 </ul>
-<p>That last one is deliberate. The bugs people actually report about diplomacy are about the
+<p>The conversations are deliberate. The bugs people actually report about diplomacy are about the
 <em>content</em> of an exchange — &quot;it forgot what I told it&quot;, &quot;it replied as the wrong country&quot;, &quot;it
 drafted a letter and sent something else&quot; — and a log that records only that an exchange happened
 cannot settle any of them.</p>
@@ -544,7 +495,7 @@ accident inside a provider error or a URL is scrubbed before it is ever stored.<
         <a class="next" href="/wiki/cheats/"><span>Next →</span><b>Cheats &amp; GM console</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

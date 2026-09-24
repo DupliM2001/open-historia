@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -125,7 +125,7 @@
     <p>Open Historia saves continuously. There is no save button, and there is no way to lose an hour
 of play to a crash.</p>
 <p><img src="/wiki/img/saves-library.jpg" alt="The games library">
-<em>Each campaign card carries its country, date and round, with Clone and Archive alongside.</em></p>
+<em>The Games tab. Each card carries its country, date and round; <strong>Current</strong> opens it, and its <strong>⋮</strong> holds Edit, Clone and Export.</em></p>
 <h2 id="games-and-scenarios">Games and scenarios</h2>
 <p>Two different things, and the distinction matters:</p>
 <ul>
@@ -142,16 +142,18 @@ chat history and the colour palette — and then captures a rollback snapshot.</
 <p>There is nothing to do and nothing to remember. Closing the game mid-turn loses at most the
 orders you had typed but not queued.</p>
 <h2 id="undo-and-rollback">Undo and rollback</h2>
-<p><strong>Undo last turn</strong>, in the time panel, restores everything to how it was before the last jump.
+<p><strong>↩ Undo last turn</strong>, in the time panel, restores everything to how it was before the last jump.
 The game keeps <strong>12</strong> turns of snapshots, so you can step back repeatedly. The panel tells you
 how many are available.</p>
 <p><strong>Roll Back Turn</strong>, in the <a href="/wiki/cheats/">cheats panel</a>, jumps straight to the start of any
 earlier turn in the stack and discards everything after it.</p>
-<p>Both restore the full campaign, not just the map — the events, the conversations and your queued
-orders all come back as they were.</p>
+<p>Both restore the full campaign, not just the map — the events, the conversations, your queued
+orders, your agents&#39; reports and any papers that reached you all come back as they were. Your
+standing goal is yours rather than the turn&#39;s, so it stays as it is now.</p>
 <p>Use undo freely. See <a href="/wiki/time/">time and turns</a>.</p>
 <h2 id="cloning">Cloning</h2>
-<p>Both games and scenarios have a <strong>Clone</strong> button on their card in the library.</p>
+<p>Both games and scenarios can be cloned from their card in the library — a game from its <strong>⋮</strong>,
+a scenario with <strong>Clone Scenario</strong>.</p>
 <p>Cloning a <strong>game</strong> is the closest thing to a manual save slot: fork the campaign before doing
 something reckless, and you keep both branches. Cloning a <strong>scenario</strong> gives you an editable copy
 of someone else&#39;s world.</p>
@@ -165,15 +167,25 @@ play, and you should grant it.</p>
 <p>The beta desktop build keeps a <strong>completely separate</strong> library from the stable one. Installing
 the beta cannot touch your stable campaigns, and vice versa.</p>
 <h2 id="moving-a-campaign-between-machines">Moving a campaign between machines</h2>
-<p>Scenarios export and import cleanly — as a <code>.zip</code> bundle carrying the map, cities, colours,
-flags and any custom basemap, or as plain <code>.json</code>.</p>
-<p>Use <strong>Import JSON</strong> in the library header, or the <strong>Download</strong> buttons in a scenario&#39;s editor
-drawer. <strong>Create Scenario</strong> in the Scenarios tab starts a blank one from the base template and
-drops you straight into its editor. This is also how you <a href="/wiki/community-hub/">publish to the Community Hub</a>.</p>
-<p>Games are less portable by design: a game is a running playthrough, tied to the scenario it
-started from. To carry a <em>situation</em> to another machine, the practical route is to export the
-scenario and start there.</p>
-<h2 id="syncing-between-devices">Syncing between devices</h2>
+<p><strong>Games export as one zip.</strong> On a game&#39;s card, <strong>⋮ → Export</strong> saves <code>&lt;name&gt;-game.zip</code>: the world,
+the clock, events, chats, actions, the advisor&#39;s conversation, prompts, colours, flags, tags,
+intercepts — and every rollback snapshot, so the campaign can be continued and undone on the other
+side, not just looked at. The card says so while the zip is being built. <strong>Import game</strong>, in the
+Games tab&#39;s header, brings one back; it lands right beside your current game, marked
+<strong>(Imported)</strong> if its name collides with one you already have.</p>
+<p>The scenario travels only when it has to. A built-in scenario is not included (everyone has it),
+nor one that came from the Community Hub (it can be fetched again). A map too large to carry — over
+32 MB — is left out rather than crashing the export; the game still exports, and the receiver ends
+up in the same position as a game whose scenario is missing. A game whose scenario is gone is still
+listed, opens in the editor, and can still be exported.</p>
+<p><strong>Scenarios</strong> export and import as a <code>.zip</code> bundle carrying the map, cities, colours, flags and
+any custom basemap, or as plain <code>.json</code>. Use <strong>Import JSON</strong> in the Scenarios tab&#39;s header, or the
+<strong>Download</strong> buttons in a scenario&#39;s editor drawer. <strong>Create Scenario</strong> starts a blank one from the
+base template and drops you straight into its editor. This is also how you
+<a href="/wiki/community-hub/">publish to the Community Hub</a>.</p>
+<p>On the stable Android app a file cannot be saved, so export is not offered there.</p>
+<p class="beta-note"><b>On beta the Android app exports too</b>, through Android's share
+sheet.</p><h2 id="syncing-between-devices">Syncing between devices</h2>
 <p>Only in the browser build at <a href="/play/">openhistoria.com/play/</a>, and only if you sign in. The
 desktop app and a self-hosted server do not sync — they keep files on disk.</p>
 <p><strong>Signing in.</strong> There is no password. Use the sign-in chip in the top-right corner and either
@@ -198,7 +210,7 @@ size limit and is skipped, with a warning in the browser console, until larger b
 switched on. Its games still sync.</p>
 <p>Your API key is never synced. Provider settings are per device.</p>
 <h2 id="archiving">Archiving</h2>
-<p><strong>Archive</strong> takes a game out of the main library view without throwing it away, and the same
+<p><strong>Archive</strong>, on a game&#39;s card, takes it out of the main library view without throwing it away, and the same
 button becomes <strong>Unarchive</strong> to bring it back. Useful once you have accumulated a dozen
 half-finished campaigns.</p>
 <h2 id="what-a-save-contains">What a save contains</h2>
@@ -219,7 +231,7 @@ history and intercepts, and the map geometry.</p>
         <a class="next" href="/wiki/editor/"><span>Next →</span><b>The map editor</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

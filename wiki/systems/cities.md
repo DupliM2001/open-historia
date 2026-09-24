@@ -3,11 +3,10 @@ and **structures**, which get built during a campaign.
 
 ## Cities
 
-Cities come from the scenario. Modern Day uses a stock set of roughly seventy thousand; a custom
-scenario can ship its own, or import from the same database.
-
-<p class="beta-note"><b>On beta</b>, Modern Day's <a href="/wiki/new-game/">redrawn map</a> carries
-its own list instead: about 2,500 cities, with their 2014 populations.</p>
+Cities come from the scenario. Modern Day's [hand-drawn map](/wiki/new-game/) carries its own list
+of about 2,500 cities, with their 2014 populations. A scenario on the stock world map uses a stock
+set of roughly seventy thousand; a custom scenario can ship its own, or import from the same
+database. A scenario with no cities shows none.
 
 They appear from about zoom 3.4 and get denser as you zoom in. Click one for its name,
 population, whether it is a capital, and its tier.
@@ -32,7 +31,9 @@ quieter pleasures of playing one.
 Structures are markers placed during play: military bases, ports, embassies, airfields,
 research facilities, landmarks — the kind is free-form, so the world names whatever it needs.
 
-Each has a name, a kind, an owner, a position, and optionally a note and a founding date.
+Each has a name, a kind, an owner, a position, a status — planned, under construction or
+active — and optionally a note and a founding date. The game places a new structure by the place
+its event names and keeps it off other markers.
 
 ### Structures never move borders
 
@@ -54,6 +55,12 @@ a second one on the same spot.
 You get structures by ordering them — *"begin construction of a naval base at Gdynia"* — and by
 the world building its own. Watching foreign bases appear near your borders is a genuinely
 useful early-warning system.
+
+<p class="beta-note"><b>On beta, what an event builds is put on the map.</b> After each skip a
+check — <b>Put new structures on the map</b> in Settings → AI — places the bases, shipyards, data
+centres and ground stations the events said were built; a structure it could not place says where
+it was sent instead. One credited to a country with no land goes to whoever holds the ground.
+Structures are also drawn half again as large.</p>
 
 ## Placing them yourself
 

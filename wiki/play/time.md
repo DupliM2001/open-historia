@@ -6,7 +6,7 @@ Open the time panel with **»** on the date pill, top right.
 
 ## Fixed jumps
 ![The time skip panel](/wiki/img/time-skip-panel.jpg)
-*Each preset shows the date you will land on.*
+*Each preset shows the date you will land on; the custom row and today's AI request count sit underneath.*
 
 
 | Jump | Days |
@@ -61,11 +61,24 @@ twelve months get compressed into a handful of paragraphs; skip a week and you g
 A common early mistake is skipping a year on turn one and wondering why the campaign feels
 thin. Start with months.
 
+## What a skip costs
+
+Under the presets the panel shows today's count — *"0 of 500 AI requests used today · a skip uses
+1, at most 3"*. With **Save AI requests** on (the default), a skip is one request, a second when
+there is something to check afterwards — units to move, fronts to redraw, the Projects board, your
+agents' reports, all in one — and never more than three. Turn it off in Settings → AI for the most
+thorough turns on a key with no daily limit. See [settings](/wiki/settings/#ai-requests).
+
 ## While it runs
 
-A time skip takes a while — the model is simulating the world. The panel shows it working, and
+A time skip takes a while — the model is simulating the world. The time panel says what it is
+doing as it goes (*"Writing 1 month of events…"*, *"Moving the armies, redrawing the fronts…"*), and
 there is a **Cancel** button. Cancelling aborts the request cleanly and leaves the world exactly
 as it was.
+
+The **Events panel** opens as soon as the skip starts and fills as the model writes, so you can
+start reading before it finishes (Gemini delivers the whole answer at once, so there it all arrives
+together). Turn this off with **Show time skip events as they are written** in Settings → AI.
 
 If jumps routinely hang, turn on **Limit AI generation** in Settings → AI. It gives up on a
 stalled generation and falls back to a canned event rather than waiting indefinitely. It watches
@@ -74,20 +87,18 @@ mid-answer.
 
 ## Long skips in segments
 
-<p class="beta-note"><b>Beta channel only.</b> On stable, every skip is a single request and
-there is no setting.</p>
-
 **Settings → AI → "Generate long time skips in segments"**, off by default.
 
-Off, the whole skip is generated in one request. On, a skip of more than a few months is
-generated as **several shorter requests, merged into one round**. The result still arrives as a
-single turn with one set of events — you are not asked anything in between.
+Off, the whole skip is generated in one request. On, a skip of **120 days or more** is generated
+as **several requests of about three months each, merged into one round** — a year is four.
+The result still arrives as a single turn with one set of events; you are not asked anything in
+between.
 
 The trade:
 
 | | Off (default) | On |
 |---|---|---|
-| Requests per skip | One | Several |
+| Requests per skip | One | One per segment |
 | Token cost | Lower | Higher — the prompt is re-sent per segment |
 | Timeouts on long skips | More likely | Far less likely |
 | How the turn reads | More like one continuous stretch | Slightly more episodic |
@@ -96,10 +107,38 @@ The trade:
 provider that drops long requests. Leave it off otherwise: it costs more tokens, and a year
 generated in one pass hangs together better than one generated in pieces.
 
-It only affects long skips. A week or a month is a single request either way.
+It only affects long skips — a week or a month is a single request either way — and never
+auto-jump, which has no span to divide up front. Each segment adds one request to the skip's cap.
 
 Each segment is validated against the world as the previous segments left it, so the pieces
-cannot contradict each other — a war started in the first segment is real by the second.
+cannot contradict each other — a war started in the first segment is real by the second. If one
+segment fails, the turn is **held** rather than lost: **Retry** re-runs only that segment, and
+**Discard** drops the turn. See [troubleshooting](/wiki/troubleshooting/#a-held-time-skip).
+
+## Intervene
+
+Events are revealed one at a time, and three events in you may see the thing you would have acted
+on — an ultimatum, a border crossing — while the events after it assume you did nothing.
+**✋ Intervene here**, under *Next event* and *Skip to end* in the Events panel, stops the round at
+the event you are looking at. It asks once, then:
+
+- the events you have seen are kept;
+- the rest are discarded — they never happen;
+- the date becomes the last kept event's;
+- the next skip is told where you stopped, so it does not write the discarded events again.
+
+It costs no request, and the shortened turn can still be undone. It is offered only while events
+remain unrevealed.
+
+## Interactive events
+
+Now and then a skip offers one of its own weightier events about you to **play out** — a one in
+three chance when it has such an event, and never within three turns of the last offer: its card carries a yellow ⚡ strip,
+and the time panel mentions the offer until the next skip replaces it. See
+[interactive events](/wiki/events/#interactive-events).
+
+**Time stands still while one is in progress.** The skip controls are replaced by a note that
+leads back to the scene; end it or set it aside to carry on.
 
 ## Undo
 
@@ -122,14 +161,32 @@ Every jump increments the **round** counter, which starts at 1. The round is wha
 internally to seed deterministic outcomes such as espionage rolls and combat, which is why the
 same save always replays the same way.
 
-The date is stored as plain text, so scenarios can use non-Gregorian dates such as "1200 BCE"
-without the clock breaking. Loosely formatted dates get repaired rather than rejected.
+The date is stored as plain text, so scenarios can use non-Gregorian dates such as "Third Age
+3019" without the clock breaking. Loosely formatted dates get repaired rather than rejected.
 
-<p class="beta-note"><b>On beta, BC dates are real dates.</b> A year before AD 1 is written with a
-leading minus and counts backwards with no year zero: <code>-0218-03-01</code> is 1 March 218 BC.
-Jumps, the timeline, the war and treaty records and the stat history all do proper arithmetic
-across the boundary, and the date is shown as "3/1/218 BC". Prose dates such as "Third Age 3019"
-still pass through untouched.</p>
+**BC dates are real dates.** A year before AD 1 is written with a leading minus and counts
+backwards with no year zero: `-0218-03-01` is 1 March 218 BC. Jumps, the timeline, the war and
+treaty records and the stat history all do proper arithmetic across the boundary, and the date is
+shown as "3/1/218 BC". Prose dates still pass through untouched.
+
+## Player focus
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+How much of each skip is about **your** country is a choice, made per game in
+**Settings → AI → Player focus — for this game**. A scenario sets where new games start; the
+default is Balanced.
+
+| Level | At least this much of each skip is about you |
+|---|---|
+| **World first** | A quarter, when you have something going on; the rest of the world gets the room. |
+| **Balanced** | 40%, when you have orders, Projects or open threads. |
+| **Focused** | 60%, and other powers' plans take up less of what the AI is shown. |
+| **Spotlight** | Three quarters, with the wider world kept to what matters most. |
+
+It never invents events for you: in a quiet stretch the world fills the skip as usual, and what you
+have going on — orders, milestones due, wars, open threads — is what the share is measured
+against.
 
 ## The first turn is special
 

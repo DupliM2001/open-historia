@@ -1,34 +1,32 @@
 Almost the entire screen is map. Everything else sits around the edges and gets out of the way
 when you are not using it.
 
-<p class="beta-note"><b>This page describes the stable build.</b> The beta channel reorganises the
-menus considerably and adds a Projects button to the toolbar — see
-<a href="/wiki/settings/">the settings reference</a> for a side-by-side of the two menu systems.</p>
-
 ![The in-game HUD](/wiki/img/interface-hud.jpg)
-*The session pill and date pill top, the toolbar bottom left, the advisor on the right edge. Everything else is map.*
+*The game menu, session pill and date pill along the top; the toolbar bottom left; your flag and the advisor bottom right. Everything else is map.*
 
 ## The edges at a glance
 
 | Where | What |
 |---|---|
-| **Top left** | Session pill — scenario, country, date — and **⌂ Exit Game**. |
-| **Top right** | The date pill, with **«** history and **»** time skip. |
-| **Bottom left** | The toolbar: **💬 Chat** and **✦ Actions**. |
-| **Right edge** | **🧭 Advisor** — opens a drawer with Advisor and Stats. |
-| **Corner** | Settings (**⋮**) and search (**🔍**). |
+| **Top left** | **☰** the game menu, the session pill — scenario, country, date — and **⌂ Exit Game**. |
+| **Top right** | The date pill, with **«** events and **»** time skip. |
+| **Bottom left** | The toolbar: **Chat**, **✦ Actions** and **Projects & Operations**, with search beside it. |
+| **Bottom right** | Your flag, and the **Advisor** button, which opens a drawer with Advisor and Stats. |
 
 Panels overlap in a fixed order, so opening the advisor never buries the thing you were reading,
-and the main menu always comes out on top.
+and the main menu always comes out on top. On a phone the whole interface fits the screen and the
+advisor drawer can be closed again like any other panel.
 
 ## The map itself
 
 Clicking things is the primary way you interact with the world.
 
-- **Click a region** → a popup with the region, who administers it, and buttons to open an
-  intelligence briefing, start a chat, or open the owning country's panel.
-- **Click a country** → the country dossier: flag, tags, recent events filtered by importance,
-  and an AI intelligence briefing on request.
+- **Click the map** → a card for the country and the region under your cursor. The country row
+  has **💬** to open a diplomatic chat, **⧉** to copy its name and **ⓘ** to open its panel; the
+  region row names the region.
+- **The country panel** → flag, details, alternative names, related events filtered by
+  importance (All, Major, Minor), and an **Advisor Report** — an AI intelligence reading — on
+  request.
 - **Click a unit** → an intelligence card describing the formation — what it is, whose it is,
   how strong, and what it appears to be doing.
 - **Click a city or structure** → its name, population, and what it is.
@@ -41,18 +39,18 @@ stripes and labels mean.
 Top right, always visible: your country and the current in-game date.
 
 - **»** opens the **time skip** panel — fixed jumps from six hours to a year, a custom amount,
-  auto-jump, and **Undo turn**.
-- **«** opens the **event history** — the events from the last jump, replayed one at a time,
-  with the map animating as each lands.
+  auto-jump, **↩ Undo last turn**, and today's AI request count.
+- **«** opens the **Events** panel — the events from the last jump, replayed one at a time,
+  with the map animating as each lands, and **✋ Intervene here** to stop the round where you
+  want to act.
 
 Full detail in [time and turns](/wiki/time/).
 
 ## The toolbar
 
-Two buttons, bottom left. (Beta adds a third, **Projects** — see
-[projects and operations](/wiki/projects/).)
+Three buttons, bottom left.
 
-### 💬 Chat
+### Chat
 
 Diplomacy. Two tabs:
 
@@ -66,58 +64,66 @@ See [diplomacy](/wiki/diplomacy/) and [espionage](/wiki/espionage/).
 
 ### ✦ Actions
 
-Your order queue for the coming turn. Write orders in plain English, get AI suggestions, refine
-a rough draft into a proper order, and delete anything you change your mind about. Only planned
-orders show; they clear as the turn resolves them. See [giving orders](/wiki/orders/).
+Your order queue for the coming turn, under your **standing goal**. Write orders in plain
+English, get AI suggestions, refine a rough draft into a proper order, and delete anything you
+change your mind about. Only planned orders show; they clear as the turn resolves them. See
+[giving orders](/wiki/orders/).
+
+### Projects & Operations
+
+The board of long-running efforts — research programmes, construction, military and covert
+operations, campaigns — that span many turns. You do not add to it by hand: events, your agents
+and your advisor write it. See [projects and operations](/wiki/projects/).
 
 ## The advisor drawer
 
-The **🧭** button on the right edge opens a drawer you can resize by dragging its left edge. It
+The **Advisor** button, bottom right, opens a drawer you can resize by dragging its left edge. It
 has two tabs.
 
 **Advisor** — a chat with your own analyst. It reads the real game state and answers about it,
 in markdown, sometimes with charts. Ask it anything about your position.
 
-**Stats** — the national stat sheet. Two sub-tabs, **Diplomacy** and **Economy**, covering your
-intelligence rating, strategic indices, stability, population and economic figures. It retargets
-to **whatever country you last clicked**, so it doubles as a way to read anyone.
+**Stats** — the national stat sheet. Two sub-tabs, **Diplomacy** and **Economy**: relations,
+agreements and conflicts on one, the economy, strategic indices, stability, population and your
+intelligence rating on the other. It retargets to **whatever country you last clicked**, so it
+doubles as a way to read anyone.
 
 See [the advisor](/wiki/advisor/) and [national statistics](/wiki/statistics/).
 
-## Settings
+## The game menu
 
-On stable, the **⋮** button opens **one flat menu** with everything in it: your AI provider and
-its key and model, UI and chat language, fullscreen, the 3D globe and terrain, a **Map** group
-holding country labels, reduced motion and the camera options, plus **🧪 Cheats**, a **📖 Wiki**
-link and the community links. No tabs, no sections — scroll to what you want.
+**☰**, top left, opens the game menu, with four tabs:
 
-On beta the equivalent button is **☰**, and it opens a **quick menu** with Game / Tools / Settings / Help tabs, and
-settings themselves live in a separate four-section workspace.
+- **Game** — the current campaign and **Game Management**: switch, duplicate, import or manage
+  campaigns.
+- **Tools** — **Cheats**, **Events / Timeline** and the **AI debug console**, one click away.
+- **Settings** — four tiles, **General**, **Map**, **AI** and **Advanced**, each opening the
+  full-screen settings workspace at that section.
+- **Help** — the wiki, bug reporting and the community links.
 
-Both are laid out side by side in [the settings reference](/wiki/settings/).
+See [the settings reference](/wiki/settings/).
 
 ## Search
 
-The **🔍** button finds real-world places by name and flies the camera to them. It only moves the
-camera — it does not select or change anything.
+The **🔍** button beside the toolbar finds places by name as you type and flies the camera to
+them. The game's own countries and cities come first, under the names they have in your
+campaign, then real-world places from an OpenStreetMap search. It only moves the camera — it does
+not select or change anything.
 
 ## Cheats
 
-The **🧪** cheats panel is the game master's toolbox: annex territory, edit or create countries,
-author events, roll back turns, switch which country you play, inspect regions, and place map
-features.
-
-It is also where **manual troop control** lives. On the stable build, deploying and moving units
-by hand is deliberately filed as a cheat — the intended way to move forces is to order it and
-let the world carry it out. See [cheats and the GM console](/wiki/cheats/) and
-[military and combat](/wiki/military/).
+☰ → **Tools** → **Cheats** is the game master's toolbox: the GM console, standing reminders every
+AI is told, the event editor, interactive events, the history document, rolling back turns,
+annexing territory, editing or creating countries, inspecting regions, the Force Manager,
+difficulty, switching which country you play, and map features. See
+[cheats and the GM console](/wiki/cheats/).
 
 ## The main menu
 
 The session pill's **⌂ Exit Game** returns you to the library, which has three tabs:
 
 - **Games** — your campaigns, by last played and most played.
-- **Scenarios** — the worlds you can start new games on, plus **Create**.
+- **Scenarios** — the worlds you can start new games on, plus **Create Scenario**.
 - **Community** — the [Community Hub](/wiki/community-hub/).
 
 ## If the screen is blank

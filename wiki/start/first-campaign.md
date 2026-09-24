@@ -14,31 +14,35 @@ respond and this walkthrough will not work.
 From the main menu, **Scenarios → Modern Day → New Game**.
 
 The country picker opens with a map and a searchable list. Find **Poland** and select it. Leave
-the **Faction** tab alone for now — that is for inventing a country that does not exist.
+**Create a faction** alone for now — that is for inventing a country that does not exist.
 
-Pick **⚖️ Medium**. Start.
+Pick **⚖️ Medium**, and the game starts.
 
 The map loads centred on your country, with your flag in the corner and the date pill top right.
+If you have not set up a model yet, the **Set up your AI provider** prompt appears now — paste
+your key there and press **Save and play**.
 
 ## 2. Find out where you stand
 
-**Open the advisor** — the 🧭 button on the right edge. Ask it:
+**Open the advisor** — the button in the bottom-right corner. Ask it:
 
 > What are the three biggest risks to Poland right now?
 
 It reads the actual world state and answers about it, sometimes with a chart. This is the
 fastest way to understand a position you have just inherited.
 
-Now **open the Stats tab** in the same drawer. You get your economy, your stability, your
-strategic indices and your intelligence rating. Note the intelligence number — it decides how
-well your spies work and how well you can read other people's, and 40 is ordinary.
+Now **open the Stats tab** in the same drawer. You get your relations and agreements, your
+economy, your stability, your strategic indices and your intelligence rating. Note the
+intelligence number — it decides how well your spies work and how well you can read other
+people's, and 40 is ordinary.
 
-Finally, **click Germany on the map**. Its country panel opens: flag, tags, recent events, and a
-button for an **intelligence briefing**. Read it. Do the same for Russia and Ukraine.
+Finally, **click Germany on the map**. A card opens naming the country and the region you
+clicked; press **ⓘ** for Germany's panel — flag, details, related events, and an **Advisor
+Report** on request. Read it. Do the same for Russia and Ukraine.
 
 ## 3. Talk to someone
 
-Click **Germany**, then open a chat.
+Click **Germany** on the map, then **💬** on its card to open a chat.
 
 Say something with an actual ask in it:
 
@@ -54,8 +58,12 @@ someone into one.
 
 ## 4. Write your orders
 
-Open the **actions** panel (✦ in the bottom toolbar) and queue two or three things. For a first
-turn as Poland, something like:
+Open the **actions** panel (✦ in the bottom toolbar). First, set a **standing goal** at the top
+— the direction behind your orders, such as *"Keep Poland out of any war while tying Germany and
+the United States to our eastern flank."* Your advisor and the simulation steer by it; no other
+country ever sees it.
+
+Then queue two or three orders. For a first turn as Poland, something like:
 
 - *Open formal negotiations with Germany on a permanent allied presence in eastern Poland.*
 - *Begin a two-year programme to expand domestic ammunition production.*
@@ -64,21 +72,25 @@ turn as Poland, something like:
 Three orders is plenty. Each one should be a thing a government could actually decide to do this
 month.
 
-If you are not sure how to phrase one, type a rough version and press the **✦ sparkle** to have
-it rewritten into a proper order. There is also a **suggestions** button that proposes orders
-based on your situation.
+If you are not sure how to phrase one, type a rough version and press the **✦ sparkle** in the
+input to have it rewritten into a proper order. **Get AI suggestions** proposes orders based on
+your situation, and **Help brainstorm actions** opens the advisor to plan a set of orders with
+you.
 
 ## 5. Skip a month
 
 Open the time panel (**»** on the date pill) and choose **1 month**.
 
-This takes a little while — the model is simulating the world. You can cancel if it hangs.
+This takes a little while — the model is simulating the world, and the time panel says what it
+is doing. You can cancel if it hangs. On a free key, the panel also shows how many of the day's
+requests you have used; a skip costs one to three.
 
 ## 6. Read what happened
 
-Events reveal one at a time. Step through them with **Next event**. Watch the map: borders,
-units and markers change as each event lands, and the camera moves to whatever the event is
-about.
+The Events panel opens and fills as the model writes. Step through the events with **Next
+event**. Watch the map: borders, units and markers change as each event lands, and the camera
+moves to whatever the event is about. If an event is something you would have reacted to,
+**✋ Intervene here** stops the round there, and the rest never happens.
 
 Look for:
 
@@ -111,9 +123,9 @@ smaller game than the one on offer.
 **Never using Undo.** A turn that goes absurdly is a turn worth rewinding. It is in the time
 panel and it is there to be used.
 
-**Trying to control your army directly.** On the stable build, hands-on troop deployment lives
-in the **cheats** panel — the intended way to move forces is to *order* it and let the world
-carry it out. See [military and combat](/wiki/military/).
+**Trying to control your army directly.** Forces move because you *order* it and the world
+carries it out; the engine keeps them moving turn after turn. Hands-on deployment exists, but it
+is the **Force Manager** in the cheats panel. See [military and combat](/wiki/military/).
 
 ## Where to go next
 

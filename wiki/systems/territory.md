@@ -13,11 +13,20 @@ change ships attached to that event. There is no separate "conquer" button, and 
 describe territory changing hands without actually changing it — the narration and the mechanical
 change are the same object.
 
+After the skip, the game checks the turn's wording against the map: a place an event names in
+plain words — a city, an alias, a region — is found on the scenario's actual geography, captured
+towns change hands, and contested ones are striped. With **Save AI requests** on this is part of
+the one after-skip check. Ground handed to a country that does not exist yet founds it.
+
+A scenario can also set a **tempo** for the map — at most so many regions changing hands per 30
+days. A skip that moves more than that has the rest held back, and the next skip is told the
+front moves this far and to carry the rest on.
+
 You can also move control by hand from the [cheats panel](/wiki/cheats/), which is the
 game-master route rather than the gameplay one.
 
-![Disputed territory on the map](/wiki/img/world-map-search.jpg)
-*Western Sahara, top left, renders in diagonal stripes — a region more than one country claims.*
+![Disputed territory on the map](/wiki/img/territory-dispute.jpg)
+*Western Sahara, between Morocco and Mauritania, drawn in faint diagonal stripes — a region more than one country claims.*
 
 ## Claims and disputes
 
@@ -35,7 +44,7 @@ recognised or dropped, that is a diplomatic outcome you have to argue for.
 
 Scenario authors can also mark disputes directly when drawing a map. World-level claims override
 whatever the scenario's geometry says, so a campaign can develop new disputes over time without
-the underlying map being edited.
+the underlying map being edited. A dispute that ends stays ended on the map.
 
 ## Playing the difference
 
@@ -50,15 +59,17 @@ The gap between control and claim is most of what makes borders interesting.
   costs your pride a great deal.
 - **Stripes on your own territory are a warning.** Someone is building a case.
 
-## Regions and names
+## Regions and owners
 
-Regions are identified by name rather than by code, which is why the map editor lets you type a
-new country name to bring that country into existence. It also means renaming matters: a region's
-owner is a name, and names are the game's identity system throughout. See
+A region's owner is a country with one stable identity. Renaming a country changes its label, not
+who it is: every region, flag, tag, colour, war record and standing goal follows it, so a
+country does not split in two the turn after it is renamed. In the map editor, typing a country
+name that does not exist yet brings that country into existence. See
 [countries and identity](/wiki/countries/).
 
-The **Regions** tool in the cheats panel inspects any region — who holds it, its name, tags and
-properties — and lets you edit them, including renaming regions on custom maps.
+The **Region Inspector** in the cheats panel inspects any region — who controls it, who is
+sovereign, who claims it, its name and properties — and lets you edit control and make legal
+transfers.
 
 ## What territory does for you
 
@@ -83,10 +94,7 @@ exile, movements, organisations. You can play one. See
 
 ## The sovereignty layer
 
-<p class="beta-note"><b>Beta channel only.</b> The stable release has control and claims. The
-beta channel adds a third layer between them.</p>
-
-Beta separates **control** (who administers the ground) from **sovereignty** (who lawfully owns
+Between control and claims sits a third layer. The game separates **control** (who administers the ground) from **sovereignty** (who lawfully owns
 it), so occupation, exiled governments and unrecognised annexations are all representable:
 "control is not sovereignty".
 
@@ -105,14 +113,17 @@ Each can be applied to a single region or to a country's whole territory at once
 lawful **sovereignty** is a separate act — that is what a treaty does, and it is why an
 occupation can run for years without the map ever conceding the point.
 
-A Region Inspector shows all three layers for any region, plus how each came to be that way.
+The Region Inspector shows all three layers for any region, plus how each came to be that way,
+and the map shows the displaced controller and sovereign on contested and occupied ground. A
+wartime capture is recorded as a change of **control**, not a cession.
 
-On the stable build, that distinction is narrative — an occupation is an occupation because the
-events say so, not because the data models it separately.
+<p class="beta-note"><b>On beta, a puppet is not a fact about land.</b> A
+<a href="/wiki/war/#puppets-and-overlords">puppet</a> keeps its own territory and sovereignty;
+subordination lives in its own ledger. And a structure an event credits to a country with no
+land goes to whoever holds the ground it stands on.</p>
 
 ## Next
 
 - [Military and combat](/wiki/military/) — taking ground.
-- [Relations, treaties and war](/wiki/war/) — the beta ledgers that formalise who is fighting
-  whom.
+- [Relations, treaties and war](/wiki/war/) — the ledgers that formalise who is fighting whom.
 - [The map editor](/wiki/editor/) — drawing regions and disputes yourself.

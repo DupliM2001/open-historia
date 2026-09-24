@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,7 +121,7 @@
     <h1>Hosting a Server</h1>
     <p class="tagline">Run Open Historia on your own machine, play offline, or reach it from your phone on the same network.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-you-get">What you get</a></li><li class="d2"><a href="#running-it">Running it</a></li><li class="d2"><a href="#connecting-from-another-device">Connecting from another device</a></li><li class="d3"><a href="#read-this-before-you-open-it-up">Read this before you open it up</a></li><li class="d2"><a href="#environment-variables">Environment variables</a></li><li class="d2"><a href="#running-as-a-service">Running as a service</a></li><li class="d2"><a href="#the-map-data">The map data</a></li><li class="d2"><a href="#where-your-files-are">Where your files are</a></li><li class="d2"><a href="#privacy">Privacy</a></li><li class="d2"><a href="#what-the-beta-adds">What the beta adds</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-you-get">What you get</a></li><li class="d2"><a href="#running-it">Running it</a></li><li class="d2"><a href="#connecting-from-another-device">Connecting from another device</a></li><li class="d3"><a href="#read-this-before-you-open-it-up">Read this before you open it up</a></li><li class="d2"><a href="#environment-variables">Environment variables</a></li><li class="d2"><a href="#running-as-a-service">Running as a service</a></li><li class="d2"><a href="#the-map-data">The map data</a></li><li class="d2"><a href="#where-your-files-are">Where your files are</a></li><li class="d2"><a href="#privacy">Privacy</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>The desktop app already runs a local server — that is how it works. This page is about running
 that server deliberately: to play entirely offline, to reach your campaign from another device,
 or to keep everything on hardware you control.</p>
@@ -149,17 +149,32 @@ node server/server.js
 <p>Node.js <code>^20.19.0</code> or <code>&gt;=22.12.0</code> is required on the server machine. Client devices need only a
 browser.</p>
 <h2 id="connecting-from-another-device">Connecting from another device</h2>
-<p>Find the server machine&#39;s local IP (<code>ipconfig</code> on Windows, <code>ip addr</code> on Linux, <code>ifconfig</code> on
-macOS) and open <code>http://192.168.x.x:3000</code> from the other device.</p>
-<p>Writes from a different origin are blocked by default. To allow them:</p>
+<p><strong>The server answers only the machine it runs on</strong> until you say otherwise. There are two ways to
+open it up:</p>
+<ul>
+<li><strong>In the game:</strong> ☰ → Settings → Advanced → Network → <strong>Let other devices connect</strong>. It takes
+effect immediately, without a restart, is remembered, and shows the address to type on the
+other device.</li>
+<li><strong>From the environment,</strong> for a headless box: <code>OH_HOST=0.0.0.0 node server/server.js</code> for every
+interface, or <code>OH_HOST=192.168.1.9</code> for one. When <code>OH_HOST</code> is set it wins, and the in-game
+switch says the environment owns the decision.</li>
+</ul>
+<p>Then open the address it gives you — <code>http://192.168.x.x:3000</code> — from the other device.</p>
+<p>Writes from a page served by a <em>different</em> origin are blocked either way, which is what stops a
+web page you visit from editing your saves. To allow them:</p>
 <pre><code>OH_ALLOW_CROSS_ORIGIN=1 node server/server.js
 </code></pre>
 <h3 id="read-this-before-you-open-it-up">Read this before you open it up</h3>
 <p><strong>The game&#39;s API has no password.</strong> There is no login, no token and no permission model.</p>
-<p>The server binds to all network interfaces, so <strong>anyone who can reach port 3000 can read,
-change and delete your games and scenarios.</strong> On a home network behind a router that is
-generally fine. It is not fine on a shared, public or untrusted network, and it is emphatically
-not fine exposed directly to the internet.</p>
+<p>Once it is open, <strong>anyone who can reach port 3000 can read, change and delete your games and
+scenarios.</strong> On a home network behind a router that is generally fine. It is not fine on a
+shared, public or untrusted network, and it is emphatically not fine exposed directly to the
+internet. Turn the switch off again when you are done.</p>
+<p>Two things soften it: requests from other devices are rate-limited (1,200 a minute by default),
+and the <strong>AI relay</strong> — which forwards requests to providers that refuse browser calls — still
+answers only this machine, so your computer cannot be used as an open proxy by anything on the
+network. Set <code>OH_ALLOW_REMOTE_RELAY=1</code> if you do want a device on your network to relay its AI
+calls through this server.</p>
 <p>If you want to reach your game from outside your home, use a private network overlay —
 <strong>Tailscale</strong>, <strong>ZeroTier</strong> or a WireGuard tunnel — rather than forwarding port 3000. Those give
 you the same access without publishing an unauthenticated API to the world.</p>
@@ -178,12 +193,28 @@ in front.</p>
 <td>Port to listen on. Default <code>3000</code>.</td>
 </tr>
 <tr>
+<td><code>OH_HOST</code></td>
+<td>Address to bind. Unset: this machine only, unless the in-game switch says otherwise. <code>0.0.0.0</code> for every interface. Overrides the switch.</td>
+</tr>
+<tr>
 <td><code>OH_DATA_DIR</code></td>
 <td>Where writable state lives — saves, scenarios, uploads. Relocate the whole library with this.</td>
 </tr>
 <tr>
 <td><code>OH_ALLOW_CROSS_ORIGIN</code></td>
-<td>Set to <code>1</code> to accept writes from another origin. Needed for another device.</td>
+<td>Set to <code>1</code> to accept writes from a page on another origin.</td>
+</tr>
+<tr>
+<td><code>OH_ALLOW_REMOTE_RELAY</code></td>
+<td>Set to <code>1</code> to let other devices relay AI calls through this server.</td>
+</tr>
+<tr>
+<td><code>OH_RATE_LIMIT</code></td>
+<td>Requests a minute allowed from each other device. Default <code>1200</code>. This machine is exempt.</td>
+</tr>
+<tr>
+<td><code>OH_RELAY_TIMEOUT_MS</code></td>
+<td>How long the AI relay waits for a generation to finish. Default ten minutes.</td>
 </tr>
 <tr>
 <td><code>OH_ASSETS_DIR</code></td>
@@ -203,11 +234,13 @@ WorkingDirectory=/path/to/open-historia
 ExecStart=/usr/bin/node server/server.js
 Restart=on-failure
 Environment=PORT=3000
+Environment=OH_HOST=0.0.0.0
 
 [Install]
 WantedBy=multi-user.target
 </code></pre>
-<p>Then <code>sudo systemctl enable --now open-historia</code>.</p>
+<p>Then <code>sudo systemctl enable --now open-historia</code>. Drop the <code>OH_HOST</code> line if only that machine
+should reach it — and read the warning above if you keep it.</p>
 <p><strong>macOS</strong> — a <code>launchd</code> plist in <code>~/Library/LaunchAgents/</code>.</p>
 <p><strong>Windows</strong> — Task Scheduler, triggered at logon, running <code>node server/server.js</code> in the project
 directory.</p>
@@ -229,14 +262,6 @@ sent only to the provider you configured.</p>
 <p>Two things do reach the network by default: the browser build&#39;s analytics on the website itself,
 and an anonymous counter that pings when a Community Hub scenario is imported (set
 <code>OH_IMPORT_COUNTER_URL</code> to an empty value to disable it). Neither carries game data.</p>
-<h2 id="what-the-beta-adds">What the beta adds</h2>
-<p class="beta-note"><b>Beta channel only.</b></p><p>The beta channel hardens all of this considerably: the server binds to <strong>loopback only</strong> by
-default, with an explicit <strong>Settings → Network</strong> toggle to let other devices in that takes effect
-immediately and tells you the address to type. The AI relay is fenced so your machine cannot be
-used as an open proxy, there is a configurable request rate limit, and <code>OH_HOST</code> lets a headless
-install pin the bind address.</p>
-<p>If you intend to expose the server on a network you do not fully control, the beta build is the
-better choice.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/mobile/">Playing on your phone</a> — the Android app, which needs no server at all.</li>
@@ -249,7 +274,7 @@ better choice.</p>
         <a class="next" href="/wiki/mobile/"><span>Next →</span><b>Playing on your phone</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

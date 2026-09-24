@@ -76,21 +76,21 @@
           "file": "play/time.md",
           "nav": "Time & turns",
           "title": "Time and Turns",
-          "description": "Nothing happens until you skip time. Jump lengths, auto-jump, cancelling a stuck turn, and undoing one that went badly."
+          "description": "Nothing happens until you skip time. Jump lengths, what a skip costs, Intervene, and undoing a turn that went badly."
         },
         {
           "slug": "orders",
           "file": "play/orders.md",
           "nav": "Giving orders",
           "title": "Giving Orders",
-          "description": "The actions queue: writing orders in plain English, refining them, and how they get resolved."
+          "description": "The actions queue and your standing goal: writing orders in plain English, refining them, and how they get resolved."
         },
         {
           "slug": "events",
           "file": "play/events.md",
           "nav": "Events & history",
           "title": "Events and History",
-          "description": "How a turn's events are revealed one at a time, what they change, and how the world remembers them."
+          "description": "How a turn's events are revealed one at a time, what they change, interactive events, and how the world remembers them."
         }
       ]
     },
@@ -102,14 +102,13 @@
           "file": "systems/diplomacy.md",
           "nav": "Diplomacy",
           "title": "Diplomacy",
-          "description": "Talking to other countries: leader voices, group threads, memory, reactions and unprompted approaches."
+          "description": "Talking to other countries: leader voices, group threads and polls, memory, reactions and unprompted approaches."
         },
         {
           "slug": "war",
           "file": "systems/war.md",
           "nav": "Relations, treaties & war",
           "title": "Relations, Treaties and War",
-          "beta": true,
           "description": "The four ledgers that decide who is at war with whom, how much they like each other, and what they have signed."
         },
         {
@@ -124,7 +123,7 @@
           "file": "systems/military.md",
           "nav": "Military & combat",
           "title": "Military and Combat",
-          "description": "Unit types, strength, movement ranges, era limits and the combat maths — how a clash actually resolves."
+          "description": "Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out."
         },
         {
           "slug": "espionage",
@@ -138,7 +137,6 @@
           "file": "systems/projects.md",
           "nav": "Projects & operations",
           "title": "Projects and Operations",
-          "beta": true,
           "description": "Long-running efforts that span turns: research programmes, construction, covert operations and campaigns."
         },
         {
@@ -186,7 +184,7 @@
           "file": "tools/cheats.md",
           "nav": "Cheats & GM console",
           "title": "Cheats and the Game Master Console",
-          "description": "Fourteen tools for rewriting the world by hand — annex territory, edit countries, author events, roll back turns."
+          "description": "Seventeen tools for rewriting the world by hand — the GM console, standing reminders, events, territory, countries and forces."
         },
         {
           "slug": "saves",
@@ -226,7 +224,7 @@
           "file": "hosting/mobile.md",
           "nav": "Playing on your phone",
           "title": "Playing on Your Phone",
-          "description": "The Android app, what it downloads on first launch, and how it connects."
+          "description": "The Android app: what it is, where your games and the map live, and how it updates."
         }
       ]
     },

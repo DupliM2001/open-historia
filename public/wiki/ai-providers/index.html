@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,7 +121,7 @@
     <h1>AI Providers and Models</h1>
     <p class="tagline">Which providers work, which models to pick, what it costs, and the expert controls.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-the-game-asks-of-a-model">What the game asks of a model</a></li><li class="d2"><a href="#choosing-a-provider">Choosing a provider</a></li><li class="d2"><a href="#defaults">Defaults</a></li><li class="d2"><a href="#trading-up">Trading up</a></li><li class="d2"><a href="#costs">Costs</a></li><li class="d2"><a href="#local-models">Local models</a></li><li class="d2"><a href="#expert-controls">Expert controls</a></li><li class="d2"><a href="#what-the-beta-adds">What the beta adds</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-the-game-asks-of-a-model">What the game asks of a model</a></li><li class="d2"><a href="#choosing-a-provider">Choosing a provider</a></li><li class="d2"><a href="#defaults">Defaults</a></li><li class="d2"><a href="#trading-up">Trading up</a></li><li class="d2"><a href="#costs">Costs</a></li><li class="d2"><a href="#local-models">Local models</a></li><li class="d2"><a href="#expert-controls">Expert controls</a></li><li class="d2"><a href="#seeing-what-the-ai-did">Seeing what the AI did</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p><a href="/wiki/ai-setup/">Connecting an AI provider</a> covers getting set up. This page is about choosing
 well: which provider, which model, what it costs, and what the expert controls do.</p>
 <h2 id="what-the-game-asks-of-a-model">What the game asks of a model</h2>
@@ -188,7 +188,7 @@ cannot. See <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
 </thead>
 <tbody><tr>
 <td>Gemini</td>
-<td><code>gemini-3.5-flash-lite</code></td>
+<td><code>gemini-3.5-flash-lite</code>, with <code>gemini-3.1-flash-lite</code> as its backup</td>
 </tr>
 <tr>
 <td>Anthropic</td>
@@ -196,11 +196,11 @@ cannot. See <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
 </tr>
 <tr>
 <td>OpenAI</td>
-<td>none — you must set one</td>
+<td><code>gpt-5.6-luna</code></td>
 </tr>
 <tr>
 <td>OpenAI Compatible</td>
-<td>endpoint <code>http://localhost:11434/v1</code>, no model set</td>
+<td>no model set — the game picks a chat model from the server&#39;s own list</td>
 </tr>
 </tbody></table></div>
 <p>The defaults are the cheap, fast tier of each family. They are a genuinely reasonable place to
@@ -215,22 +215,28 @@ start, not placeholders.</p>
 </ul>
 <p>Where you will not see much: short jumps in a quiet period, and anything mechanical.</p>
 <p>A reasonable pattern is to play on a cheap model and switch to a stronger one when something
-important is happening. On beta, <strong>Per-task models</strong> does this for you: the time skip on a strong
+important is happening. <strong>Per-task models</strong> does this for you: the time skip on a strong
 model, small jobs on a cheap one.</p>
 <h2 id="costs">Costs</h2>
-<p>Open Historia makes several model calls per turn — the jump itself, plus separate calls for
-things like history consolidation and stat sheets. Diplomacy and the advisor cost extra on top.</p>
+<p>A time skip is <strong>one request</strong> where it can be, two when there is something to check afterwards,
+and never more than three — that is what <strong>Save AI requests</strong> (on by default) guarantees. Turn it
+off and every check after a skip makes its own request, the model may look things up, and a busy
+skip can use twenty or more. Diplomacy, the advisor and <strong>Background AI</strong> (countries writing to
+you unprompted, forces repositioning, extra agent reports — capped at 30 a day by default) cost
+extra on top. Settings → AI → <strong>AI requests</strong> shows today&#39;s count and what your last skip used.</p>
 <p>Rough guidance rather than a price list:</p>
 <ul>
 <li><strong>Gemini free tier</strong> genuinely covers solo play. Watch the rate limits on the larger models —
-hitting one mid-jump stalls the turn. On beta, a
+hitting one mid-jump stalls the turn. A
 <a href="/wiki/ai-setup/#backup-models">backup model</a> takes over when one runs out.</li>
 <li><strong>Cheap tiers</strong> (Haiku, Flash, DeepSeek) run a campaign for small change.</li>
 <li><strong>Frontier models</strong> are noticeably better and noticeably more expensive per turn. Long jumps
 cost more than short ones because there is more to write.</li>
 <li><strong>Local models</strong> cost nothing and run offline.</li>
 </ul>
-<p>If you are watching spend, take shorter jumps and use the advisor less.</p>
+<p>If you are watching spend, leave Save AI requests on, turn Background AI off or lower its cap,
+and use the advisor less. Task prompts open with a fixed prefix that providers cache, so a large
+share of each time-skip prompt is billed at the cheaper cached rate where the provider offers one.</p>
 <h2 id="local-models">Local models</h2>
 <p>Free, private, offline. Setup is in <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
 <p>Be realistic about size. Models around <strong>3B and below</strong> frequently fail to produce valid
@@ -252,18 +258,23 @@ provider accepts — temperature, sampling, provider-specific options. Malformed
 rather than breaking the game.</p>
 <p><strong>Limit AI generation</strong> abandons a stalled generation and falls back to a canned event. It
 measures silence rather than elapsed time. Recommended with local models.</p>
-<p class="beta-note"><b>On beta these live on connections and entries</b> in the Models list,
-with one more per-model setting, <b>How the AI answers</b>. See
-<a href="/wiki/ai-setup/#adding-backups">adding backups</a>.</p><h2 id="what-the-beta-adds">What the beta adds</h2>
-<p><img src="/wiki/img/beta-debug-console.jpg" alt="The beta AI debug console">
-<em>Beta&#39;s debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.</em></p>
-<p class="beta-note"><b>Beta channel only.</b></p><p><a href="/wiki/ai-setup/#backup-models">Backup models</a>: when one runs out, the next one in your list
-takes over. Your keys are saved as connections, shared by as many models as you like.</p>
-<p>Per-task models, picked from that list: a cheap model for background work and a strong one for
-the jump itself. Prompt caching. Background tasks batched at roughly half price on Anthropic. And
-an AI debug console showing every call with its full prompt, answer and cost.</p>
+<p>Custom parameters and Strict tool schema are set on a <strong>connection</strong>; an entry in the Models list
+can have custom parameters of its own and <strong>How the AI answers</strong>, which picks the structured-output
+method to try first. See <a href="/wiki/ai-setup/#adding-backups">adding backups</a>.</p>
+<p class="beta-note"><b>On beta the game sets a temperature per task.</b> Tasks that match or
+classify — placing a name on a region, choosing the next speaker — are asked at 0.1; the ones that
+reconcile or summarise at 0.2; stat sheets and intelligence readings at 0.3. Anything written to be
+read in character (time skips, diplomacy, the advisor) is left at the provider's default. A
+temperature in your own custom parameters still wins, and a model that refuses one (an OpenAI
+reasoning model, say) is remembered and asked without it.</p><h2 id="seeing-what-the-ai-did">Seeing what the AI did</h2>
+<p><img src="/wiki/img/debug-console.jpg" alt="The AI debug console">
+<em>The debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.</em></p>
+<p>The <strong>AI debug console</strong> (☰ → Tools) shows every call with its full prompt, answer, model, token
+counts, latency and validation verdict, with analytics per task and model and a JSON or CSV
+export. It keeps the last 200 calls across sessions while <strong>Record AI telemetry</strong> is on.</p>
 <p>If you care about cost control, about a game that keeps going when a free allowance runs out, or
-about seeing what the game actually sends, that is where to look.</p>
+about seeing what the game actually sends, that — with backup models and per-task models — is
+where to look.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/ai-setup/">Connecting an AI provider</a> — the setup steps.</li>
@@ -276,7 +287,7 @@ about seeing what the game actually sends, that is where to look.</p>
         <a class="next" href="/wiki/troubleshooting/"><span>Next →</span><b>Troubleshooting</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

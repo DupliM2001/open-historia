@@ -16,13 +16,13 @@
   <link rel="icon" type="image/jpeg" href="/logo.png" />
   <title>Military and Combat — Open Historia Wiki</title>
   <link rel="canonical" href="https://openhistoria.com/wiki/military/" />
-  <meta name="description" content="Unit types, strength, movement ranges, era limits and the combat maths — how a clash actually resolves." />
+  <meta name="description" content="Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out." />
 
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="Open Historia" />
   <meta property="og:url" content="https://openhistoria.com/wiki/military/" />
   <meta property="og:title" content="Military and Combat — Open Historia Wiki" />
-  <meta property="og:description" content="Unit types, strength, movement ranges, era limits and the combat maths — how a clash actually resolves." />
+  <meta property="og:description" content="Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out." />
   <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
   <meta property="og:image:type" content="image/jpeg" />
   <meta property="og:image:width" content="1280" />
@@ -30,7 +30,7 @@
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Military and Combat — Open Historia Wiki" />
-  <meta name="twitter:description" content="Unit types, strength, movement ranges, era limits and the combat maths — how a clash actually resolves." />
+  <meta name="twitter:description" content="Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/" class="on" aria-current="page">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/" class="on" aria-current="page">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -119,22 +119,28 @@
       <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> Military and Combat
     </nav>
     <h1>Military and Combat</h1>
-    <p class="tagline">Unit types, strength, movement ranges, era limits and the combat maths — how a clash actually resolves.</p>
+    <p class="tagline">Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-intended-way-to-use-your-army">The intended way to use your army</a></li><li class="d2"><a href="#unit-types">Unit types</a></li><li class="d2"><a href="#strength">Strength</a></li><li class="d2"><a href="#status">Status</a></li><li class="d2"><a href="#reach-how-far-a-unit-can-act">Reach: how far a unit can act</a></li><li class="d2"><a href="#how-combat-resolves">How combat resolves</a></li><li class="d3"><a href="#type-advantage">Type advantage</a></li><li class="d3"><a href="#the-maths">The maths</a></li><li class="d3"><a href="#planning-against-it">Planning against it</a></li><li class="d2"><a href="#structures-do-not-move-borders">Structures do not move borders</a></li><li class="d2"><a href="#the-beta-unit-system">The beta unit system</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
-    <p>Armies in Open Historia are formations on the map with a type, a strength and an owner. Most of
-the time you do not move them by hand — you order a military outcome and the world carries it
-out. Combat, when it resolves locally, uses a deterministic formula you can plan against.</p>
-<h2 id="the-intended-way-to-use-your-army">The intended way to use your army</h2>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-way-to-use-your-army">The way to use your army</a></li><li class="d2"><a href="#unit-types">Unit types</a></li><li class="d2"><a href="#strength-and-composition">Strength and composition</a></li><li class="d2"><a href="#posture">Posture</a></li><li class="d2"><a href="#standing-orders">Standing orders</a></li><li class="d2"><a href="#other-countries39-forces">Other countries&#39; forces</a></li><li class="d2"><a href="#structures-do-not-move-borders">Structures do not move borders</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <p>Armies in Open Historia are formations on the map with a type, a strength, a posture and an
+owner. You do not move them by hand. You state what you want, the turn decides what happens, and
+the engine carries the movement out over however many turns it takes.</p>
+<h2 id="the-way-to-use-your-army">The way to use your army</h2>
 <p>Write it as an order. <em>&quot;Reinforce the eastern border with two armoured divisions&quot;</em>,
-<em>&quot;Launch an offensive toward Kharkiv&quot;</em>, <em>&quot;Withdraw the fleet to home ports&quot;</em>. The turn resolves
-it and the units on the map move accordingly.</p>
-<p>Hands-on troop control does exist — the <strong>Forces panel</strong> — but on the stable build it is opened
-from the <strong>🧪 Cheats</strong> panel, and its own description calls it spawning and commanding units by
-hand. That placement is deliberate: directly editing your order of battle is a game-master tool,
-not the normal loop.</p>
+<em>&quot;Launch an offensive toward Kharkiv&quot;</em>, <em>&quot;Withdraw the fleet to home ports&quot;</em>. The time skip
+resolves it, and after the skip the game moves units to match what the events say — armies
+advance, retreat and take losses where the events say they did. (With <strong>Save AI requests</strong> on,
+that is part of the one after-skip check; it can be turned off in Settings → AI.)</p>
+<p>The model owns movement; you own intent. A place an order or event names — &quot;toward Kyiv&quot;, &quot;the
+Suwałki gap&quot; — is read as an objective and found on the actual map, and new units and structures
+are placed by name and kept off one another.</p>
 <p>Clicking a unit on the map gives you an <strong>intelligence card</strong> — what the formation is, whose it
-is, roughly how strong, and what it appears to be doing. It is a briefing, not a command panel.</p>
+is, roughly how strong, what it is made of, and what it appears to be doing. It is a briefing,
+not a command panel.</p>
+<p>Hands-on control does exist — the <strong>Force Manager</strong>, under <strong>Military</strong> in the
+<a href="/wiki/cheats/">cheats panel</a> — for deploying, inspecting, editing and repairing forces directly.
+That placement is deliberate: editing your order of battle by hand is a game-master tool, not the
+normal loop.</p>
 <h2 id="unit-types">Unit types</h2>
 <div class="table-scroll"><table>
 <thead>
@@ -170,9 +176,10 @@ is, roughly how strong, and what it appears to be doing. It is a briefing, not a
 </tbody></table></div>
 <p>A scenario can restrict which types exist — there is no air force in 1200 AD — so the deploy
 options you see depend on the world you are playing.</p>
-<h2 id="strength">Strength</h2>
-<p>Strength runs from <strong>1 to 1000</strong>, and a new deployment defaults to 100. The Forces panel colours
-it:</p>
+<h2 id="strength-and-composition">Strength and composition</h2>
+<p>Strength is a <strong>percentage of the formation&#39;s established strength</strong>, 0–100: 78 means about three
+quarters of what that formation should have. A new unit starts at 100. A separate
+<strong>composition</strong> says what it actually is — <em>&quot;1 aircraft carrier, 2 frigates&quot;</em>.</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -181,266 +188,71 @@ it:</p>
 </tr>
 </thead>
 <tbody><tr>
-<td>Above 600</td>
+<td>Above 60</td>
 <td>Green</td>
 </tr>
 <tr>
-<td>251 – 600</td>
+<td>26 – 60</td>
 <td>Amber</td>
 </tr>
 <tr>
-<td>250 or below</td>
+<td>25 or below</td>
 <td>Red</td>
 </tr>
 </tbody></table></div>
-<p>A unit that reaches zero strength is destroyed and removed.</p>
-<h2 id="status">Status</h2>
+<p>Strength only changes where the events narrate casualties or reinforcement. A unit that reaches
+zero is destroyed and removed. Saves from before the percentage scale are converted on load —
+anything over 100 is divided by ten.</p>
+<h2 id="posture">Posture</h2>
+<p>What a formation is <strong>doing</strong>, as distinct from whether it is alive. Posture is what makes the map
+readable at a glance: <em>massing</em> on a border and <em>on exercise</em> on the same border are the same
+counter and a completely different message.</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
-<th>Status</th>
-<th>Meaning</th>
+<th>Posture</th>
+<th></th>
 </tr>
 </thead>
 <tbody><tr>
-<td><code>idle</code></td>
-<td>In place, doing nothing in particular</td>
+<td><strong>Holding position</strong></td>
+<td>In place.</td>
 </tr>
 <tr>
-<td><code>moving</code></td>
-<td>Under way</td>
+<td><strong>Massing</strong></td>
+<td>Concentrating.</td>
 </tr>
 <tr>
-<td><code>engaged</code></td>
-<td>In contact with the enemy</td>
+<td><strong>Patrolling</strong></td>
+<td>Working a station around a point.</td>
 </tr>
 <tr>
-<td><code>pending</code></td>
-<td>A deployment you have ordered that the world has not yet resolved — drawn translucent</td>
+<td><strong>In transit</strong></td>
+<td>On its way somewhere.</td>
 </tr>
 <tr>
-<td><code>defeated</code></td>
-<td>Destroyed; removed from the map</td>
+<td><strong>On exercise</strong></td>
+<td>Training, not threatening.</td>
+</tr>
+<tr>
+<td><strong>Blockading</strong></td>
+<td>Closing a sea or a port.</td>
+</tr>
+<tr>
+<td><strong>Withdrawing</strong></td>
+<td>Pulling back.</td>
+</tr>
+<tr>
+<td><strong>Assaulting</strong></td>
+<td>Attacking; arriving under this posture puts the unit in contact with the enemy.</td>
 </tr>
 </tbody></table></div>
-<p><code>pending</code> is the one to understand: a unit you place does not simply exist. It is an intention
-until a time skip resolves it, and the world may resolve it differently from how you imagined.</p>
-<h2 id="reach-how-far-a-unit-can-act">Reach: how far a unit can act</h2>
-<p>Units cannot act across the planet at will. Two separate limits apply, and both scale with the
-era.</p>
-<p><strong>Engagement range</strong> — how far a unit can strike <em>right now</em>:</p>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Type</th>
-<th>km</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Garrison</td>
-<td>60</td>
-</tr>
-<tr>
-<td>Infantry</td>
-<td>100</td>
-</tr>
-<tr>
-<td>Armor</td>
-<td>150</td>
-</tr>
-<tr>
-<td>Artillery</td>
-<td>200</td>
-</tr>
-<tr>
-<td>Naval</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Air</td>
-<td>1200</td>
-</tr>
-</tbody></table></div>
-<p><strong>Movement leash</strong> — how far a single move order may relocate a unit before it has to become a
-multi-turn campaign instead of a teleport:</p>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Type</th>
-<th>km</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Garrison</td>
-<td>200</td>
-</tr>
-<tr>
-<td>Infantry</td>
-<td>800</td>
-</tr>
-<tr>
-<td>Artillery</td>
-<td>800</td>
-</tr>
-<tr>
-<td>Armor</td>
-<td>1000</td>
-</tr>
-<tr>
-<td>Air</td>
-<td>3000</td>
-</tr>
-<tr>
-<td>Naval</td>
-<td>4000</td>
-</tr>
-</tbody></table></div>
-<p><strong>Era factor</strong> — both tables are multiplied by the period:</p>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Period</th>
-<th>Factor</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Before 1500</td>
-<td>×0.5</td>
-</tr>
-<tr>
-<td>1500 – 1849</td>
-<td>×0.7</td>
-</tr>
-<tr>
-<td>1850 – 1944</td>
-<td>×1.0</td>
-</tr>
-<tr>
-<td>1945 onward</td>
-<td>×1.15</td>
-</tr>
-</tbody></table></div>
-<p>So infantry in 1200 AD reach 50 km, not 100. A Bronze Age campaign genuinely does move at Bronze
-Age speed.</p>
-<h2 id="how-combat-resolves">How combat resolves</h2>
-<p>When a clash resolves locally, it uses a seeded formula. The seed is the attacking unit&#39;s id,
-the defending unit&#39;s id and the round number — which means <strong>the same clash in the same save
-always produces the same result</strong>, and reloading does not reroll it.</p>
-<h3 id="type-advantage">Type advantage</h3>
-<p>The attacker&#39;s type is multiplied against the defender&#39;s:</p>
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Attacker ↓ / Defender →</th>
-<th>Infantry</th>
-<th>Armor</th>
-<th>Artillery</th>
-<th>Air</th>
-<th>Naval</th>
-<th>Garrison</th>
-</tr>
-</thead>
-<tbody><tr>
-<td><strong>Armor</strong></td>
-<td>1.5</td>
-<td>1.0</td>
-<td>1.3</td>
-<td>0.7</td>
-<td>0.5</td>
-<td>1.2</td>
-</tr>
-<tr>
-<td><strong>Infantry</strong></td>
-<td>1.0</td>
-<td>0.7</td>
-<td>1.4</td>
-<td>0.6</td>
-<td>0.5</td>
-<td>1.1</td>
-</tr>
-<tr>
-<td><strong>Artillery</strong></td>
-<td>1.2</td>
-<td>1.0</td>
-<td>1.0</td>
-<td>0.5</td>
-<td>0.8</td>
-<td>1.5</td>
-</tr>
-<tr>
-<td><strong>Air</strong></td>
-<td>1.2</td>
-<td>1.4</td>
-<td>1.3</td>
-<td>1.0</td>
-<td>1.5</td>
-<td>1.1</td>
-</tr>
-<tr>
-<td><strong>Naval</strong></td>
-<td>1.1</td>
-<td>1.3</td>
-<td>1.0</td>
-<td>0.7</td>
-<td>1.0</td>
-<td>1.2</td>
-</tr>
-<tr>
-<td><strong>Garrison</strong></td>
-<td>1.2</td>
-<td>0.8</td>
-<td>0.7</td>
-<td>0.6</td>
-<td>0.7</td>
-<td>1.0</td>
-</tr>
-</tbody></table></div>
-<p>The readable version: armour eats infantry and artillery but loses to aircraft and ships.
-Aircraft beat almost everything and are only matched by other aircraft. Artillery smashes
-garrisons and is helpless against air. Garrisons are defensive and bad at attacking anything
-mobile.</p>
-<h3 id="the-maths">The maths</h3>
-<pre><code>attacker power = strength × type advantage × (0.85 + 0.3 × random)
-defender power = strength × type advantage × (0.85 + 0.3 × random) × 1.1
-</code></pre>
-<p>The defender gets a flat <strong>×1.1 bonus</strong> for fighting on its own ground. The random factor is
-between 0.85 and 1.15, so luck moves a result by about ±15% — enough to matter, not enough to
-overturn a real disadvantage.</p>
-<p>Whoever has more power wins. Then losses are worked out from how <em>decisive</em> it was:</p>
-<pre><code>decisiveness = |attacker power − defender power| / total power     (0 = even, 1 = rout)
-
-winner loses  0.10 + 0.25 × (1 − decisiveness)
-loser  loses  0.35 + 0.45 × decisiveness
-</code></pre>
-<p>This has a consequence worth internalising: <strong>a narrow win is expensive</strong>. Win decisively and
-you lose about 10% of your strength; win by a hair and you lose closer to 35%. The loser,
-conversely, loses 35% in a close fight and up to 80% in a rout.</p>
-<p>If the defender is reduced to zero, the region is captured.</p>
-<h3 id="planning-against-it">Planning against it</h3>
-<ul>
-<li><strong>Bring overwhelming force or don&#39;t bother.</strong> The loss curve punishes narrow victories hard.</li>
-<li><strong>Type matters more than numbers at the margin.</strong> A 1.5 advantage is worth 50% more strength.</li>
-<li><strong>Attacking is expensive</strong>, because of the defender&#39;s ground bonus. Being the one who is
-attacked is mechanically good.</li>
-<li><strong>The dice are already cast.</strong> Outcomes are seeded, so reloading the same save will not change
-a specific clash. Undoing the whole turn and doing something different will.</li>
-</ul>
-<h2 id="structures-do-not-move-borders">Structures do not move borders</h2>
-<p>Bases, ports, airfields and other built markers have an owner — whoever <em>runs</em> the facility —
-which is not the same as who owns the ground beneath it. Building a base in an ally&#39;s country
-does not annex it. See <a href="/wiki/cities/">cities and structures</a>.</p>
-<h2 id="the-beta-unit-system">The beta unit system</h2>
-<p class="beta-note"><b>Beta channel only.</b> Everything above describes the stable build's
-classic system.</p><p>The beta channel replaces hands-on control with an AI-driven system. The model owns movement;
-you state intent and the engine carries it out over however many turns it takes.</p>
-<p><strong>Strength is 1–100 on beta</strong>, not 1–1000. Old saves are converted on load by dividing by ten,
-so a campaign moved between builds keeps its proportions.</p>
-<p><strong>Postures</strong> say what a formation is doing, and are what make the map readable at a glance:</p>
-<p><code>holding</code> · <code>massing</code> · <code>patrol</code> · <code>transit</code> · <code>exercise</code> · <code>blockade</code> · <code>withdrawing</code> · <code>assaulting</code></p>
-<p><code>assaulting</code> is the only one that also changes lifecycle — arriving units become engaged.</p>
-<p><strong>Standing orders</strong> carry a unit across turns. A <code>move</code> is minted automatically when the
-distance exceeds what the unit could cross in the elapsed days; a <code>patrol</code> works a station until
-a given round. Orders prune themselves once the unit is within about 60 km of its destination.</p>
+<h2 id="standing-orders">Standing orders</h2>
+<p>A move that is further than the unit could cover in the time skipped becomes a <strong>standing
+order</strong>, and the engine advances it every turn at the unit&#39;s pace until it arrives — within about
+60 km of its destination. A patrol works its station, drifting to a new point each turn (the
+same point every time you replay that turn, never at random). The map draws a heading line to a
+destination and a ring around a patrol station, and counters glide between positions.</p>
 <p>Sustained travel runs at a post-1945 baseline, scaled by era:</p>
 <div class="table-scroll"><table>
 <thead>
@@ -500,14 +312,61 @@ a given round. Orders prune themselves once the unit is within about 60 km of it
 </tbody></table></div>
 <p>So infantry in 1200 AD cover about 14 km a day. A march across a continent is a campaign, not a
 turn.</p>
-<p>Saves are compatible both ways, and the setting is stored per save rather than per browser, so a
-campaign keeps playing the way it was set up. See
-<a href="/wiki/war/">relations, treaties and war</a> for the other half of the beta military model.</p>
+<p>A single order is also held to a <strong>movement leash</strong> — how far one order may relocate a unit before
+it has to become a multi-turn campaign instead of a teleport:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>km</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Garrison</td>
+<td>200</td>
+</tr>
+<tr>
+<td>Infantry</td>
+<td>800</td>
+</tr>
+<tr>
+<td>Artillery</td>
+<td>800</td>
+</tr>
+<tr>
+<td>Armor</td>
+<td>1000</td>
+</tr>
+<tr>
+<td>Air</td>
+<td>3000</td>
+</tr>
+<tr>
+<td>Naval</td>
+<td>4000</td>
+</tr>
+</tbody></table></div>
+<p>multiplied by ×0.5 before 1500, ×0.7 to 1849, ×1.0 to 1944 and ×1.15 after.</p>
+<h2 id="other-countries39-forces">Other countries&#39; forces</h2>
+<p>AI countries&#39; formations respond to the military events a turn wrote: the engine reuses an
+existing formation before raising a new one, holds each type to its era&#39;s leash, and only changes
+strength where the events say so. The map holds at most <strong>12</strong> formations per AI country and
+<strong>80</strong> in total; your own forces count against neither. With <strong>Background AI</strong> on, forces may
+also reposition between turns.</p>
+<p>Combat itself is narrated by the time skip and bound to the <a href="/wiki/war/">war ledger</a>: a battle
+needs an active war with named sides, so fighting cannot quietly appear out of nowhere.</p>
+<p class="beta-note"><b>On beta, what the events raise reaches the map.</b> A ship commissioned or
+a squadron formed in an event becomes a unit; a deployment or garrison the skip resolves joins
+the order of battle; a unit's move is listed once, not twice; and a renamed country's counters
+carry its flag.</p><h2 id="structures-do-not-move-borders">Structures do not move borders</h2>
+<p>Bases, ports, airfields and other built markers have an owner — whoever <em>runs</em> the facility —
+which is not the same as who owns the ground beneath it. Building a base in an ally&#39;s country
+does not annex it. See <a href="/wiki/cities/">cities and structures</a>.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/territory/">Territory</a> — what winning actually transfers.</li>
 <li><a href="/wiki/orders/">Giving orders</a> — phrasing military instructions.</li>
-<li><a href="/wiki/cheats/">Cheats</a> — where the Forces panel lives.</li>
+<li><a href="/wiki/cheats/">Cheats</a> — where the Force Manager lives.</li>
 </ul>
 
     <nav class="wiki-pager" aria-label="Pagination">
@@ -515,7 +374,7 @@ campaign keeps playing the way it was set up. See
         <a class="next" href="/wiki/espionage/"><span>Next →</span><b>Espionage</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

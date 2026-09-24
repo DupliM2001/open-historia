@@ -12,24 +12,27 @@ key and paste it in.**
 | **Diplomacy** | Every other country's leader replies to you in their own voice, and remembers what was said before. |
 | **Events** | Each time you skip time, the model writes what happened — and those events carry machine-readable changes that move borders, units and countries. |
 | **Advisor** | Answers questions about your own position, with charts. |
-| **Intelligence briefings** | Summaries of any country you click. |
+| **Intelligence reports** | An advisor report on any country you click. |
 | **Combat adjudication** | Battles and their consequences are narrated and applied. |
 
 Without a provider the game still runs — the map, the editor, saved games and the interface all
 work — but time skips fall back to a small set of canned events and the advisor cannot answer.
-On beta you get an explicit **Set up your AI provider** prompt the first time you open a
-campaign without one. Stable has no such prompt — it simply falls back quietly, so if turns feel
-lifeless on stable, check here first.
 
 ## Where to put the key
 
-**Settings → AI → Provider.** (The settings button is **⋮** on the stable build and **☰** on beta.) Pick a provider, paste your key, optionally set a model, and
-close the panel. That is the whole setup.
+**The first time you open a campaign without a working model, the game asks.** The
+**Set up your AI provider** prompt *is* the setup: pick a provider, paste your key (or, for a
+self-hosted model, its endpoint), optionally name a model, and press **Save and play**. Above the
+form is a short tutorial video on getting a free Gemini key — hide it if you do not need it — and
+a **Get a key at Google AI Studio** button. **Open full settings** takes you to the AI settings
+instead, and **Not now** puts it away for this session.
 
-<p class="beta-note"><b>On beta</b>, Settings → AI opens a list headed <b>Models</b>. With one
-model in it, it reads like the form above: provider, a connection name, the key and the model.
-The rest of the screen is for <a href="#backup-models">backup models</a>, and you can ignore it
-until you want one.</p>
+![The Set up your AI provider prompt](/wiki/img/ai-setup-prompt.jpg)
+*The prompt a new campaign shows when no model can answer. Saving it is the whole setup.*
+
+To change it later: **☰ → Settings → AI.** That opens a list headed **Models**. With one model in
+it, it reads like the prompt: provider, a connection name, the key and the model. The rest of the
+screen is for [backup models](#backup-models), and you can ignore it until you want one.
 
 Your key is stored in your browser's local storage, or in the desktop app's own profile. It is
 never sent to an Open Historia server, never written to your save files, and never included in a
@@ -61,14 +64,18 @@ and work everywhere.
 
 1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey), sign in, and click
    **Create API key**. It is free and needs no billing details.
-2. In Open Historia: **Settings → AI**, provider **Gemini**, paste the key.
-3. Leave the model alone. The default is `gemini-3.5-flash-lite`, which is fast and has generous
-   free-tier limits.
+2. In Open Historia: the setup prompt, or **☰ → Settings → AI**, provider **Gemini**, paste the
+   key.
+3. Leave the model alone. A new Gemini key gets Google's default list: `gemini-3.5-flash-lite`,
+   with `gemini-3.1-flash-lite` behind it as its [backup](#backup-models). Both are fast and
+   have generous free-tier limits.
 
-If turns feel shallow, move up to a larger Gemini model — but check the free tier's rate limits
-first, because hitting them mid-turn will stall a time skip. On beta you can put the larger model
-at the top of the list and keep `gemini-3.5-flash-lite` below it as a
-[backup](#backup-models).
+No Flash model is in the default list: they are the ones most often busy, and a busy model costs
+a turn its wait before the call moves on. Players who already had Gemini set up were switched to
+this list once, when it changed.
+
+If turns feel shallow, you can put a larger Gemini model at the top of the list and keep the
+Flash-Lite models below it — but check the free tier's rate limits first.
 
 ## Anthropic Claude
 
@@ -83,8 +90,8 @@ pay-per-token — there is no free tier.
 ## OpenAI
 
 1. Create a key at [platform.openai.com](https://platform.openai.com) and load some credit.
-2. Provider **OpenAI**, paste the key, and set a model — this one has no default, so you must
-   type a model name.
+2. Provider **OpenAI**, paste the key. With the model left blank it runs `gpt-5.6-luna`, the
+   model the game is built around; type another name to use that instead.
 
 Requires the desktop or a self-hosted build, because of the browser restriction above.
 
@@ -98,9 +105,10 @@ Use the **OpenAI Compatible** provider for all of these.
 1. Install from [ollama.com](https://ollama.com).
 2. Pull a model: `ollama pull llama3.2`
 3. Provider **OpenAI Compatible**, endpoint `http://localhost:11434/v1` — this is already the
-   default, so you may not have to type anything. Leave the API key blank. Set the model to
-   whatever you pulled. On beta a new connection starts with no endpoint: press
-   **+ Local Ollama** under **Connections** and it is filled in for you.
+   endpoint the setup prompt suggests. Leave the API key blank. Set the model to whatever you
+   pulled, or leave it blank and the game picks a chat model from the server's own list. In
+   Settings a new connection starts with no endpoint: press **+ Local Ollama** under
+   **Connections** and it is filled in for you.
 
 ### LM Studio
 
@@ -147,18 +155,19 @@ name.
 
 ## Backup models
 
-<p class="beta-note"><b>Beta channel only.</b> The stable build uses one provider and one model
-at a time.</p>
-
 Free tiers give each model a daily allowance, and a time skip uses several requests. When your
 model's allowance runs out, every AI call fails until it resets — even if another model, a paid
-key or a local model would have answered. On beta you can list backups, and the game carries on
+key or a local model would have answered. So you can list backups, and the game carries on
 without you.
+
+![The Models list and Connections](/wiki/img/settings-ai-models.jpg)
+*Settings → AI after pasting a Gemini key: Google's default list of two models on one connection, both Ready.*
 
 This is your **Fallback list**: the **Models** section of Settings → AI, and the name error
 messages use for it. Each entry in it is one model on one connection. Every AI call starts at the
-top and uses the first entry that can answer. It moves down only when one can't: its allowance
-has run out, its key or name is wrong, or it is busy for a moment. The list can mix providers. A
+top and uses the first entry that can answer — including the call right after one failed, so a
+model is back in use the moment it can answer again. It moves down only when one can't: its
+allowance has run out, its key or name is wrong, or it is busy. The list can mix providers. A
 typical list is a few Gemini models on your free key, strongest first, then a paid key or a local
 model at the bottom.
 
@@ -203,8 +212,8 @@ Keys stay on this device, as they always have. Each key is used under its provid
 | **Ready** | Tried in its turn. |
 | **Spent until …** | Its allowance is used up. Skipped until the time shown. |
 | **Unusable: …** | Something is wrong with it, such as `key rejected (401)` or `model not found (404)`. Skipped until you fix it. |
-| **Busy, back in …** | The provider is overloaded. A short pause. |
-| **Rate limited, back in …** | Too many requests in a short time. A short pause. |
+| **Busy, for about …** | The provider is overloaded. Sits out for ten minutes. |
+| **Rate limited, for about …** | Too many requests in a short time. A short pause. |
 
 An entry also shows when it last answered, such as *answered 2 min ago*. There is no count of
 requests used or left: only the provider knows that for certain. **Reset** on an entry tries it
@@ -217,10 +226,13 @@ again on the next call — after you top up billing, say.
   reset, so a Spent model there gets one try an hour later.
 - **Unusable** stays until you edit that entry or its connection. A new key, endpoint or provider
   on a connection clears every mark on its entries, Spent included.
-- **Busy.** An overloaded model is retried once, then skipped for 60 seconds. A server that
-  cannot be reached counts as busy.
-- A busy or rate-limited model is still tried last when nothing else can answer. A minute's
-  pause is never what fails a turn.
+- **Busy.** An overloaded model sits out for **ten minutes**, at the back of the order: a busy
+  provider tends to stay busy, and its refusals are not always quick. A server that cannot be
+  reached counts as busy.
+- A Spent or busy model is moved to the back, not out: when nothing else can answer it is still
+  tried, busy ones first, so a mark that has quietly expired is never what fails a turn.
+- Whether a Gemini "429" is a spent day or a short pause is decided by the quota Google names in
+  the error, not guessed.
 
 The first time the game moves down the list, a short notice near the top of the screen says why:
 *gemini-3.7-flash (Main Google) has used today's allowance. Now using gemini-3.6-flash (Main
@@ -241,22 +253,22 @@ not restarted on another model — you would see half a reply replaced by a diff
 A rate limit is a short pause, not a used-up allowance. **When a model is rate limited** decides
 what happens:
 
-- **Wait, then try it again** — the default. Keeps your backups' daily allowance for when the top
-  model has truly run out.
-- **Try the next one straight away** — faster, but it spends your backups. The rate-limited model
-  is skipped for as long as the provider asked, up to two minutes, or for 60 seconds if it did
-  not say.
+- **Use the next one straight away** — the default. The rate-limited model is skipped for as long
+  as the provider asked, up to two minutes, or for 60 seconds if it did not say. A per-minute
+  limit is usually over by the next call, which starts at the top of the list again.
+- **Wait, then try it again** — slower turns, but it keeps your backups' daily allowance for when
+  the top model has truly run out.
 
 ### A model for each task
 
-**Settings → Advanced → Per-task models** points one task — Time skip, Next speaker and so on — at
+**☰ → Settings → Advanced → Per-task models** points one task — Time skip, Next speaker and so on — at
 one of your entries. That task tries its pick first, then the list from the top, so it only fails
 when every model is used up. Tasks left on **Start at the top of the list** use the list as
 normal. Use it to run time skips on your strongest model and small jobs on a cheap one.
 
 ### If you set up AI before the list existed
 
-The first time beta reads the list, it builds it from your old settings, so the game plays as it
+The first time the game reads the list, it builds it from your old settings, so the game plays as it
 did:
 
 - Your provider, key and model become the first entry.
@@ -282,17 +294,19 @@ not per key, so several keys in one project share the same allowance.
 
 ## Worth knowing
 
-- **You can switch provider at any time**, mid-campaign. On stable, settings are per-provider, so
-  your Gemini key stays put while you try a local model. On beta, each key is a connection and
-  stays until you remove it; move an entry to the top to try it first.
+- **You can switch provider at any time**, mid-campaign. Each key is a connection and stays until
+  you remove it; move an entry to the top to try it first.
 - **Cancel works.** A time skip that is taking too long can be stopped.
+- **Mind your daily requests.** A free key allows a few hundred a day. **Save AI requests**, on by
+  default, keeps a time skip to one to three of them; Settings → AI → **AI requests** shows how
+  many you have used today. See [settings](/wiki/settings/#ai-requests).
 - **Limit AI generation** (Settings → AI) is off by default. Turned on, it gives up on a stalled
   generation and falls back to a canned event rather than waiting forever. It measures *silence*,
   not total time, so a slow-but-working model is not cut off.
 - **Expert controls** let you send raw parameters to the provider and enable reasoning on models
-  that support it. You do not need these to play. On stable they are in the one settings list.
-  On beta, custom parameters sit on connections and entries, as [above](#adding-backups), and
-  **Model reasoning** applies to every model in the list.
+  that support it. You do not need these to play. Custom parameters sit on connections and
+  entries, as [above](#adding-backups), and **Model reasoning** applies to every model in the
+  list.
 
 ## Next
 

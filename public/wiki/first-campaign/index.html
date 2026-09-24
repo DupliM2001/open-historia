@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -132,23 +132,27 @@ respond and this walkthrough will not work.</p>
 <h2 id="1-start-the-game">1. Start the game</h2>
 <p>From the main menu, <strong>Scenarios → Modern Day → New Game</strong>.</p>
 <p>The country picker opens with a map and a searchable list. Find <strong>Poland</strong> and select it. Leave
-the <strong>Faction</strong> tab alone for now — that is for inventing a country that does not exist.</p>
-<p>Pick <strong>⚖️ Medium</strong>. Start.</p>
-<p>The map loads centred on your country, with your flag in the corner and the date pill top right.</p>
+<strong>Create a faction</strong> alone for now — that is for inventing a country that does not exist.</p>
+<p>Pick <strong>⚖️ Medium</strong>, and the game starts.</p>
+<p>The map loads centred on your country, with your flag in the corner and the date pill top right.
+If you have not set up a model yet, the <strong>Set up your AI provider</strong> prompt appears now — paste
+your key there and press <strong>Save and play</strong>.</p>
 <h2 id="2-find-out-where-you-stand">2. Find out where you stand</h2>
-<p><strong>Open the advisor</strong> — the 🧭 button on the right edge. Ask it:</p>
+<p><strong>Open the advisor</strong> — the button in the bottom-right corner. Ask it:</p>
 <blockquote>
 <p>What are the three biggest risks to Poland right now?</p>
 </blockquote>
 <p>It reads the actual world state and answers about it, sometimes with a chart. This is the
 fastest way to understand a position you have just inherited.</p>
-<p>Now <strong>open the Stats tab</strong> in the same drawer. You get your economy, your stability, your
-strategic indices and your intelligence rating. Note the intelligence number — it decides how
-well your spies work and how well you can read other people&#39;s, and 40 is ordinary.</p>
-<p>Finally, <strong>click Germany on the map</strong>. Its country panel opens: flag, tags, recent events, and a
-button for an <strong>intelligence briefing</strong>. Read it. Do the same for Russia and Ukraine.</p>
+<p>Now <strong>open the Stats tab</strong> in the same drawer. You get your relations and agreements, your
+economy, your stability, your strategic indices and your intelligence rating. Note the
+intelligence number — it decides how well your spies work and how well you can read other
+people&#39;s, and 40 is ordinary.</p>
+<p>Finally, <strong>click Germany on the map</strong>. A card opens naming the country and the region you
+clicked; press <strong>ⓘ</strong> for Germany&#39;s panel — flag, details, related events, and an <strong>Advisor
+Report</strong> on request. Read it. Do the same for Russia and Ukraine.</p>
 <h2 id="3-talk-to-someone">3. Talk to someone</h2>
-<p>Click <strong>Germany</strong>, then open a chat.</p>
+<p>Click <strong>Germany</strong> on the map, then <strong>💬</strong> on its card to open a chat.</p>
 <p>Say something with an actual ask in it:</p>
 <blockquote>
 <p>Chancellor, Poland wants firmer guarantees on the eastern flank. What would Berlin want in
@@ -160,8 +164,11 @@ earlier in the thread.</p>
 <p>Diplomacy here is not a menu of treaty buttons. If you want an alliance, you have to talk
 someone into one.</p>
 <h2 id="4-write-your-orders">4. Write your orders</h2>
-<p>Open the <strong>actions</strong> panel (✦ in the bottom toolbar) and queue two or three things. For a first
-turn as Poland, something like:</p>
+<p>Open the <strong>actions</strong> panel (✦ in the bottom toolbar). First, set a <strong>standing goal</strong> at the top
+— the direction behind your orders, such as <em>&quot;Keep Poland out of any war while tying Germany and
+the United States to our eastern flank.&quot;</em> Your advisor and the simulation steer by it; no other
+country ever sees it.</p>
+<p>Then queue two or three orders. For a first turn as Poland, something like:</p>
 <ul>
 <li><em>Open formal negotiations with Germany on a permanent allied presence in eastern Poland.</em></li>
 <li><em>Begin a two-year programme to expand domestic ammunition production.</em></li>
@@ -169,16 +176,20 @@ turn as Poland, something like:</p>
 </ul>
 <p>Three orders is plenty. Each one should be a thing a government could actually decide to do this
 month.</p>
-<p>If you are not sure how to phrase one, type a rough version and press the <strong>✦ sparkle</strong> to have
-it rewritten into a proper order. There is also a <strong>suggestions</strong> button that proposes orders
-based on your situation.</p>
+<p>If you are not sure how to phrase one, type a rough version and press the <strong>✦ sparkle</strong> in the
+input to have it rewritten into a proper order. <strong>Get AI suggestions</strong> proposes orders based on
+your situation, and <strong>Help brainstorm actions</strong> opens the advisor to plan a set of orders with
+you.</p>
 <h2 id="5-skip-a-month">5. Skip a month</h2>
 <p>Open the time panel (<strong>»</strong> on the date pill) and choose <strong>1 month</strong>.</p>
-<p>This takes a little while — the model is simulating the world. You can cancel if it hangs.</p>
+<p>This takes a little while — the model is simulating the world, and the time panel says what it
+is doing. You can cancel if it hangs. On a free key, the panel also shows how many of the day&#39;s
+requests you have used; a skip costs one to three.</p>
 <h2 id="6-read-what-happened">6. Read what happened</h2>
-<p>Events reveal one at a time. Step through them with <strong>Next event</strong>. Watch the map: borders,
-units and markers change as each event lands, and the camera moves to whatever the event is
-about.</p>
+<p>The Events panel opens and fills as the model writes. Step through the events with <strong>Next
+event</strong>. Watch the map: borders, units and markers change as each event lands, and the camera
+moves to whatever the event is about. If an event is something you would have reacted to,
+<strong>✋ Intervene here</strong> stops the round there, and the rest never happens.</p>
 <p>Look for:</p>
 <ul>
 <li>Whether your orders were <strong>picked up</strong> — an event should reference the negotiation you opened.</li>
@@ -203,9 +214,9 @@ lose all the texture. Start with months.</p>
 smaller game than the one on offer.</p>
 <p><strong>Never using Undo.</strong> A turn that goes absurdly is a turn worth rewinding. It is in the time
 panel and it is there to be used.</p>
-<p><strong>Trying to control your army directly.</strong> On the stable build, hands-on troop deployment lives
-in the <strong>cheats</strong> panel — the intended way to move forces is to <em>order</em> it and let the world
-carry it out. See <a href="/wiki/military/">military and combat</a>.</p>
+<p><strong>Trying to control your army directly.</strong> Forces move because you <em>order</em> it and the world
+carries it out; the engine keeps them moving turn after turn. Hands-on deployment exists, but it
+is the <strong>Force Manager</strong> in the cheats panel. See <a href="/wiki/military/">military and combat</a>.</p>
 <h2 id="where-to-go-next">Where to go next</h2>
 <ul>
 <li><a href="/wiki/diplomacy/">Diplomacy</a> — how leaders, memory and group threads work.</li>
@@ -220,7 +231,7 @@ difficulty changes.</li>
         <a class="next" href="/wiki/new-game/"><span>Next →</span><b>Starting a game</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

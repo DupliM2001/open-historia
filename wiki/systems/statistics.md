@@ -1,6 +1,7 @@
-Every country has a **stat sheet** — leader, government, stability, six strategic indices,
-population and a set of economic figures. Open it from the **Stats** tab of the advisor drawer
-(**🧭**, right edge).
+Every country has a **stat sheet** — relations, agreements and conflicts, then leader,
+government, stability, six strategic indices, population and a set of economic figures. Open it
+from the **Stats** tab of the advisor drawer (the **Advisor** button, bottom right). It has two
+tabs, **🤝 Diplomacy** and **📈 Economy**.
 
 It retargets to **whatever country you last clicked on the map**, so it works as a dossier on
 anyone, not just yourself.
@@ -110,15 +111,10 @@ that you need [espionage](/wiki/espionage/). And generating a sheet for a countr
 interested in is itself the trigger that gets them an intelligence rating assessed, if they did
 not have one.
 
-## The beta version
+## A record, not a snapshot
 
-<p class="beta-note"><b>Beta channel only.</b> Everything in this section is beta. On the stable
-release the sheet is a snapshot generated when you ask for one, with no history, no charts and
-no diplomacy block.</p>
-
-The beta channel turns the stat sheet from a snapshot into a record, and splits it into two
-tabs — **🤝 Diplomacy** and **📈 Economy**. Everything on the stable sheet is under Economy;
-Diplomacy is entirely new.
+The sheet can keep a history, so it is a record of the campaign rather than a snapshot. Everything
+above is under **📈 Economy**; **🤝 Diplomacy** is below.
 
 ### Tracked history
 
@@ -160,7 +156,7 @@ missing year zero, so a campaign starting in 218 BC plots in the right order.
 
 ### The diplomacy block
 
-Every sheet now carries a **🤝 Diplomacy** section, which is where beta's
+Every sheet carries a **🤝 Diplomacy** section, which is where the
 [relation ledgers](/wiki/war/) actually become visible. Three counts across the top — relations,
 active agreements, conflicts — and then the detail:
 
@@ -184,14 +180,14 @@ disappearing — the relationship still has a history.*
 An empty list means no record exists, which is **not** the same as neutrality — a pair of
 countries that have never interacted simply has nothing written down yet.
 
-### Also on beta
+### Territory, overseas and landless
 
 **Countries with overseas territories** get a per-capita figure twice: for the core and
 integrated territory, and for the **whole polity** including dependencies. The two can differ
 sharply, and the sheet shows both rather than picking one.
 
 **Landless polities work.** A government-in-exile, a rebel movement or an organisation with no
-mapped territory used to fail to produce a sheet at all. They now get a valid one.
+mapped territory gets a valid sheet.
 
 **Population follows the land.** When territory changes hands, its people and economy go with
 it, so the game keeps track of how much of a country sits in each piece of its territory. For a
@@ -203,6 +199,20 @@ territory also keeps its own income level, so Puerto Rico
 is not credited with mainland American productivity. And a country holding part of another's land
 is assessed on **that part only**: Russia holding Crimea is not handed the whole of Ukraine's
 population.
+
+## Scenario stat sheets
+
+The standard sheet is written for the modern world. A scenario can replace it entirely: in the
+scenario editor's **National Stats** section, **Customize full sheet** turns the standard layout
+into the scenario's own — sections and statistics you can rename, reorder, delete or add, each
+with a type (number, percentage, currency/value), a unit, a range, decimals, an icon, a colour
+and a line of **AI guidance** on what the value means in this world and what kinds of events
+should move it. A Bronze Age scenario can track grain stores and chariots instead of GDP and
+unemployment. The sheet is scenario data, so it travels with exports; **Use standard sheet**
+goes back.
+
+<p class="beta-note"><b>On beta the advisor reads your stat sheet</b> — and the world's war,
+relation and treaty ledgers — so it can answer about your figures rather than estimating them.</p>
 
 ## Next
 

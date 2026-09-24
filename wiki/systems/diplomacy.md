@@ -2,8 +2,8 @@ Diplomacy is a conversation, not a menu. There is no "propose alliance" button a
 accept/decline dialog. You open a chat with a country and talk its leader into something, or
 fail to.
 
-Find it in the **💬 Chat** panel, **Diplomacy** tab, or from the popup when you click a country
-on the map.
+Find it in the **Chat** panel, **Diplomacy** tab — **Start New Chat** to open a thread — or with
+**💬** on the card when you click a country on the map.
 
 ## Talking to a country
 ![The diplomacy tab](/wiki/img/diplomacy-threads.jpg)
@@ -18,8 +18,7 @@ What works is roughly what would work on a real government:
 - **Offer something.** A demand with nothing attached gets refused by anyone who can afford to.
 - **Be concrete.** "Let's cooperate" goes nowhere. "Preferential grain transit in exchange for
   your vote at the UN" is a proposal someone can answer.
-- **Know who you are talking to.** Read their dossier and ask for an intelligence briefing
-  first. A country in crisis wants different things from a confident one.
+- **Know who you are talking to.** Read their panel and ask for the advisor's report first. A country in crisis wants different things from a confident one.
 - **Follow up.** Agreements reached in conversation become real through subsequent events and
   orders, not the moment the words are said.
 
@@ -31,6 +30,13 @@ it, and neither has one you kept a promise to.
 
 This is separate from the world's event history. The event log records what happened; the
 diplomatic memory records how *that country* feels about you because of it.
+
+**They know what has happened since.** A thread can sit for months of game time. When you write
+into it after the world has moved on, your message carries a short note of what happened on the
+public record since the thread last spoke — the newest events, borders moved, countries renamed,
+founded or dissolved. Your bubble shows it as one small line, *"⏳ Since 1 December 2015 · 3 events
+· 1 border change"*, with the whole note on hover. Only what is public goes in it: a leader learns
+secrets through its own threads, not yours.
 
 ## Reactions
 
@@ -45,9 +51,19 @@ probing.
 for a summit.*
 
 
-You can open a thread with several countries at once. Speaking passes around the participants
-in rotation, and the panel shows whose turn it is, with a **Let X speak →** control to hand the
-floor on.
+You can open a thread with several countries at once. When you speak, **one request answers for
+the whole table**: every other participant can reply, react, rename the thread, bring someone in
+or show someone out, and call or answer a **poll**. The lines are said one at a time — each speaker
+is seen typing for a few seconds before its line appears — and you can **cut in**: speak before the
+table has finished and the lines not yet said never are, and the next turn knows who was
+interrupted.
+
+A **poll** in a thread is binding: every AI participant votes in the same turn, and you can see
+the question, the options and the votes, and cast your own.
+
+Each country hears only what was said while it was in the room: a power brought in on turn six is
+not written as though it heard turn two. What a leader heard in its *own* other threads, it may
+bring with it.
 
 Group threads are where multi-party diplomacy actually happens: mediating between two rivals,
 assembling a coalition, or being ganged up on.
@@ -65,14 +81,23 @@ of mediation, a windfall produces a trade delegation. The other side always spea
 **As general outreach.** Treaty feelers, non-aggression proposals, warnings, summit invitations —
 approaches that are not tied to any single event.
 
-Together these are capped at **three per jump**, and only when the approach genuinely serves the
-sender's interests. You will not be buried in spam.
+The simulation is told to write these only when some country plausibly would — an approach has
+to serve the sender's interests — so a quiet turn brings none.
 
-**Unprompted, while you play.** Roughly once a real-world minute, while the game is open and the
-tab is visible, there is a small chance some country simply writes to you. It never fires during
-a time skip, and a hidden tab never rolls.
+**Unprompted, while you play.** On average every **eight minutes** of real time while the game is
+on screen, the model is asked whether some country with a live reason to speak would write to
+you; most of the time nobody does. It never fires during a time skip or while events are still
+being revealed. Each attempt is a request nobody pressed a button for, so it only runs while
+**Background AI** is on (Settings → AI → AI requests), and stops at its daily cap. A scenario can
+change the cadence, or switch it off, with its **Idle diplomacy** feature.
 
-Unread threads are badged. Answering them is most of the game's texture — a campaign where you
+A document can arrive this way too: a paper held by you and other governments reaches you as a
+note in the thread with them, spoken by whoever sent it.
+
+**You are told when they write.** A message that lands while its thread is not on screen raises
+a toast (click it to open the thread), an optional two-note chime (the 🔊 toggle), and a 🔔
+notification centre until you open the panel; desktop notifications can be allowed too. Unread
+threads are badged. Answering them is most of the game's texture — a campaign where you
 never reply is a much smaller campaign.
 
 ## The world cannot sign for you
@@ -110,19 +135,21 @@ The **Spy** tab of the same panel shows conversations you are *not* part of, as 
 intelligence service can read them. That is a whole system of its own — see
 [espionage](/wiki/espionage/).
 
-## The beta diplomatic model
+## The ledgers behind the talk
 
-<p class="beta-note"><b>Beta channel only.</b> The stable release tracks relationships
-narratively — the world knows how countries feel because the events and conversations say so.</p>
-
-The beta channel adds explicit ledgers: numeric relation scores between every pair of countries,
-a formal register of treaties and their status, and a war ledger that is the single authority on
-who is fighting whom. See [relations, treaties and war](/wiki/war/).
+Conversations sit on top of explicit ledgers: numeric relation scores between every pair of
+countries, a formal register of treaties and their status, and a war ledger that is the single
+authority on who is fighting whom. See [relations, treaties and war](/wiki/war/).
 
 You read them from the **🤝 Diplomacy** block on any country's
 [stat sheet](/wiki/statistics/#the-diplomacy-block) — every bilateral score that country holds,
 its treaty register and its current wars, for anyone you click on the map. Checking a country's
 existing friendships before you open a thread with them changes how you play.
+
+<p class="beta-note"><b>On beta, an overlord can make demands.</b> In the one-on-one thread
+between a <a href="/wiki/war/#puppets-and-overlords">puppet and its overlord</a>, a message can be a
+demand, answered on a card with Accept, Refuse or an alternative — and only a refusal costs the
+puppet loyalty.</p>
 
 ## Next
 

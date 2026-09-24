@@ -8,8 +8,8 @@ model plays, and a button that advances time.
 2. **Write down what you intend to do.** Orders go in the actions queue, in plain English.
 3. **Talk to people.** Open a chat with any country and negotiate, threaten, or ask questions.
 4. **Skip time.** Choose how far — six hours, a month, a year.
-5. **Read what happened.** The world hands you back a set of events, revealed one at a time,
-   with the map changing as each one lands.
+5. **Read what happened.** The world hands you back a set of events, arriving as the model
+   writes them and revealed one at a time, with the map changing as each one lands.
 
 Then you do it again. That is the whole game. Everything else is detail.
 
@@ -25,9 +25,9 @@ picture. Medium difficulty.
 
 Then, before you do anything else:
 
-- **Open the advisor** (🧭 on the right) and ask "what should I be worried about?" It reads your
+- **Open the advisor** (bottom-right corner) and ask "what should I be worried about?" It reads your
   actual position and answers about it.
-- **Click a neighbour** on the map. Read its panel. Ask for an intelligence briefing.
+- **Click a neighbour** on the map, then **ⓘ** for its panel. Ask for the advisor's report.
 - **Open a chat** with someone and say something. They will answer in their leader's voice.
 
 Now write one order — something modest, like *"begin talks with France about a trade
@@ -47,6 +47,12 @@ produces a different chain of consequences than *"raise tariffs"*.
 
 **Ask for things that take time.** A single month will not industrialise a country. Orders that
 span turns get carried forward and referred back to.
+
+**Set a standing goal.** Orders are what your government does this turn; the **standing goal**
+field at the top of the Actions panel is the direction behind them — *"keep out of the war and
+grow the economy"*, *"unify Italy by 1870"*. Your ministers handle whatever your orders did not
+cover in its spirit, and your advisor weighs its advice against it. It never creates an action
+you did not order, and no other country knows it.
 
 **Don't write fiction.** You are giving orders, not narrating outcomes. *"Our army crushes
 theirs and takes the capital"* is not an order — it is you trying to write the event. Say
@@ -69,24 +75,38 @@ detail is lost. If something important is in motion, take smaller steps.
 
 ## Reading the results
 
-Events arrive as a set and are revealed **one at a time**. The map rolls back to how it looked
-before the jump and each event's changes are applied as you step through it — so you see the
-border move, the unit appear, the government fall. The camera follows.
+The Events panel opens as soon as the skip starts and fills as the model writes, with the time
+panel saying what the skip is doing ("Writing 1 month of events…"). Events are revealed **one at
+a time**: each one's changes are applied to the map as you step to it — so you see the border
+move, the unit appear, the government fall. The camera follows, and each card has chips for the
+countries, regions and forces it is about; click one to fly there.
 
 Use **Next event** to step through, or **Skip to end** to jump to the final state.
+
+**Saw something you would have acted on?** Three events in, an ultimatum arrives — and the four
+events after it assume you did nothing. **✋ Intervene here** stops the round at the event you are
+looking at: what you have seen is kept, the rest never happens, the date becomes that event's,
+and your next orders go out before what came next. It costs no request, and the shortened turn can
+still be undone.
+
+**Now and then a skip offers a moment to play out.** One of its events about you — a summit, an
+ultimatum, a night in a bunker — carries a yellow ⚡ strip: **Play it out** turns it into an
+[interactive event](/wiki/events/#interactive-events), played beat by beat; **Let it pass** leaves
+it as written.
 
 You can reopen the history at any time with the **«** button on the date pill.
 
 ## Made a mess of it?
 
-**Undo turn** restores the world to how it was before the last time skip. It is right there in
+**↩ Undo last turn** restores the world to how it was before the last time skip. It is right there in
 the time panel. The game keeps several turns of history, so you can step back more than once.
 
 This is not cheating — it is the main way people play. A time skip is a roll of the dice as much
 as a decision, and rewinding a turn that went absurdly is normal.
 
 For heavier intervention, the [cheats panel](/wiki/cheats/) lets you annex territory, edit
-countries, author events by hand and switch which country you play.
+countries, author events by hand, set standing reminders every AI is told, and switch which
+country you play.
 
 ## What the AI is and isn't doing
 

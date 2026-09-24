@@ -97,7 +97,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/" class="on" aria-current="page">Relations, treaties &amp; war <em>beta</em></a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations <em>beta</em></a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/" class="on" aria-current="page">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -120,13 +120,10 @@
     </nav>
     <h1>Relations, Treaties and War</h1>
     <p class="tagline">The four ledgers that decide who is at war with whom, how much they like each other, and what they have signed.</p>
-    <p class="beta-note"><b>Beta channel only.</b> This system is not in the stable release yet. To try it, install the
-      <a href="https://github.com/Open-Historia/open-historia/releases/tag/desktop-beta">beta build</a>, which installs alongside
-      the stable app and keeps its own saves.</p>
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#wars">Wars</a></li><li class="d3"><a href="#combat-requires-a-war">Combat requires a war</a></li><li class="d2"><a href="#relations">Relations</a></li><li class="d2"><a href="#agreements">Agreements</a></li><li class="d2"><a href="#storylines">Storylines</a></li><li class="d2"><a href="#what-this-changes-to-play">What this changes to play</a></li><li class="d2"><a href="#on-the-stable-release">On the stable release</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
-    <p>On the stable release, who is at war with whom is a matter of what the events say. The beta
-channel makes it a matter of record: four <strong>ledgers</strong> that the engine owns, validates and
-enforces.</p>
+    
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#wars">Wars</a></li><li class="d3"><a href="#combat-requires-a-war">Combat requires a war</a></li><li class="d2"><a href="#relations">Relations</a></li><li class="d2"><a href="#agreements">Agreements</a></li><li class="d2"><a href="#storylines">Storylines</a></li><li class="d2"><a href="#what-this-changes-to-play">What this changes to play</a></li><li class="d2"><a href="#puppets-and-overlords">Puppets and overlords</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <p>Who is at war with whom is not just a matter of what the events say. It is a matter of record:
+four <strong>ledgers</strong> that the engine owns, validates and enforces.</p>
 <p>The model does not write these directly. It emits compact updates, the engine checks them
 against the rules, and folds the valid ones in once per turn. That is what stops the world
 drifting into a state where two countries are simultaneously allied and at war.</p>
@@ -217,7 +214,12 @@ countries have no tracked relationship yet, not that they are indifferent to eac
 <p>Relations move for concrete reasons rather than drifting. A ring of yours exposed publicly in
 someone else&#39;s country sours that pair; so does breaking an agreement, and so does backing their
 rival. The size of each move is the simulation&#39;s to decide — there is no fixed tariff per
-offence.</p>
+offence. A score that contradicts a pair&#39;s declared status — &quot;friendly&quot; while at war — is
+reconciled rather than left standing.</p>
+<p><strong>The world is allowed to move against you.</strong> Nothing spares the player: a foreign power may
+start something with you, and when there is a fight both sides fight. What the simulation is
+told not to do is <strong>invent</strong> a rivalry the record does not support — neighbours are not enemies
+for sharing a border — and that applies to every pair of countries on the map, you included.</p>
 <h2 id="agreements">Agreements</h2>
 <p>A register of what has actually been signed:</p>
 <div class="table-scroll"><table>
@@ -287,7 +289,7 @@ unravelling, a succession crisis building.</p>
 <p>Each carries a status (<code>active</code>, <code>dormant</code>, <code>resolved</code>), a <strong>pressure</strong> and <strong>momentum</strong> value
 from 0 to 100, and a date at which it is next due attention. Every live war gets a mirrored
 storyline. At most <strong>96</strong> are kept.</p>
-<p>Storylines are why a beta campaign has continuity between turns that nothing in the event log
+<p>Storylines are why a campaign has continuity between turns that nothing in the event log
 explains: something has been building for six turns and is now due.</p>
 <p><strong>They are not allowed to stall.</strong> An active war, or any storyline at pressure <strong>55</strong> or above,
 that goes <strong>45 days</strong> of game time without a visible milestone has to move: link a real event,
@@ -306,11 +308,55 @@ turn thirty.</li>
 <li><strong>Old saves are migrated.</strong> A campaign started before the ledgers existed has them seeded from
 its existing treaty events and conversations on the next jump.</li>
 </ul>
-<h2 id="on-the-stable-release">On the stable release</h2>
-<p>None of this is modelled. Wars, relations and treaties exist because events and conversations
-say they do, and the world&#39;s memory of them comes from the
-<a href="/wiki/events/">event history</a> and each country&#39;s own
-<a href="/wiki/diplomacy/">diplomatic memory</a>. In practice it works, and it drifts more.</p>
+<h2 id="puppets-and-overlords">Puppets and overlords</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>On beta a fifth ledger records who <strong>directs</strong> whom. A <strong>puppet</strong> is a country whose will is
+directed by an <strong>overlord</strong> while it stays a separate country: it keeps its own territory, its own
+sovereignty and its own colour. One puppet has one overlord; an overlord may hold many; and there
+are no chains — making a country that holds puppets into a puppet hands its puppets to the new
+overlord, permanently.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>What the overlord holds</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Protectorate</strong></td>
+<td>Its foreign policy and defence; it governs itself at home.</td>
+</tr>
+<tr>
+<td><strong>Puppet state</strong></td>
+<td>Its government. It keeps the flag and the name; the decisions are the overlord&#39;s.</td>
+</tr>
+<tr>
+<td><strong>Client state</strong></td>
+<td>Its lead: it depends on the overlord&#39;s backing but makes most of its own decisions.</td>
+</tr>
+</tbody></table></div>
+<p>An arrangement is either <strong>open</strong> — a published protectorate, a satellite every government knows
+about — or <strong>covert</strong>. A covert puppet knows it is one and behaves accordingly with whoever in the
+room has not found out. Other governments learn of a covert arrangement through an <strong>active agent</strong>
+inside either party, and go on believing what they last learned until fresh reporting corrects
+them. The country panel and the map card show what <em>you</em> know: the kind, one sentence on what it
+means from your side, and chips for mood, since when, and open or covert.</p>
+<p><strong>Loyalty</strong> is how far a puppet accepts direction, 0–100. It is always hidden — even for an open
+arrangement — and shown to the overlord only as a band: <strong>Loyal</strong> (75+), <strong>Content</strong>, <strong>Restless</strong>
+or <strong>Seething</strong> (below 25). A puppet whose loyalty falls below 35 is given a hidden storyline
+toward revolt; whether anything comes of it is the simulation&#39;s call, and a rising can be
+suppressed as well as won — at a cost in standing. Annexing a puppet costs the overlord standing
+too: 8 points of international reputation (out of 100) for a covert arrangement, 16 for one
+the world could see.</p>
+<p><strong>Demands.</strong> In the one-on-one thread between an overlord and its puppet, a message can be a
+<strong>demand</strong>. It appears as a card hanging off the message that made it. The puppet can
+<strong>Accept</strong>, <strong>Refuse</strong>, or offer an <strong>alternative</strong> in its own words, which the overlord either
+accepts or answers by demanding again. Only a refusal costs loyalty, charged once per turn; a
+refusal can still be thought better of (&quot;Accept after all&quot;), and what has been agreed is final.
+When you are the overlord, a toggle in the composer makes your message a demand. The cards are
+choices, so answering one costs no request.</p>
+<p>The <a href="/wiki/cheats/">GM console</a> can make, reclassify or release a puppet directly. A scenario can
+switch the whole system off with its <strong>Puppet states</strong> feature, and then nothing mentions
+subordination at all.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/diplomacy/">Diplomacy</a> — the conversations these ledgers record the results of.</li>
@@ -323,7 +369,7 @@ say they do, and the world&#39;s memory of them comes from the
         <a class="next" href="/wiki/territory/"><span>Next →</span><b>Territory</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-11</b> · main <code>5ee1ab55</code> · beta <code>0b6db0ac</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

@@ -24,41 +24,42 @@ One scenario can seed as many games as you like, and playing one never changes i
 Open the **Community** tab in the main menu, find one, and hit **Import & Play**. It downloads
 into your library and behaves exactly like a built-in scenario from then on.
 
-<p class="beta-note"><b>Beta's Modern Day is redrawn.</b> Stable plays Modern Day on the stock
-world map and starts you as Russia. Beta ships a hand-drawn world instead — 4,848 regions, 202
-countries with their own colours, about 2,500 cities — still starting on 1 January 2016, with the
-United States as the default country. Campaigns you began on the old map are not lost: they move
-to a copy called <b>Modern Day (classic map)</b> and carry on there.</p>
+**Modern Day is a hand-drawn world** — 4,848 regions, 202 countries with their own colours and
+common English names, about 2,500 cities — starting on 1 January 2016, with the United States as
+the default country. Campaigns begun on the older stock-map version are not lost: they move to a
+copy called **Modern Day (classic map)** and carry on there.
 
 If a scenario you imported gets updated by its author, an **⬆ Update** button appears on its
 card. Updating is safe — games already in progress keep working on the version they started on.
 
 ## Choosing a country
 
-Selecting **New Game** on a scenario opens the picker. It has two tabs.
+Selecting **New Game** on a scenario opens the picker, drawn on that scenario's own map. It has
+two tabs, **Pick a country** and **Create a faction**.
 
-### Country
+### Pick a country
 ![The country picker](/wiki/img/new-game-country-picker.jpg)
-*Pick a country, or switch to the Faction tab to invent one.*
+*Pick a country, or switch to Create a faction to invent one.*
 
 
 A map and a searchable list of every country in the scenario. Click one on the map or pick it
-from the list.
+from the list — or press **Scenario default** to play whoever the scenario's author chose.
 
 The list is built from the scenario's actual roster, which includes **countries that hold no
 land** — governments in exile, movements, organisations. Playing one of those is a very
 different game: you have no territory to defend and no territory to lose.
 
-### Faction
+### Create a faction
 
 This is where you invent a country that does not exist. You give it:
 
 - **A name** — this is its identity everywhere in the game, so choose it properly.
 - **A colour** — how it paints on the map.
 - **A flag** — optional; pick from the library or leave it blank.
-- **Lore** — a few sentences on who you are and what you want. The world reads this. It is worth
-  writing something real, because it shapes how every other country treats you.
-- **Starting regions** — select territory on the map, or none at all for a landless faction.
+- **Lore** — who this power is: its history, cause and ambitions. The world reads this. It is
+  worth writing something real, because it steers the story the AI tells and how every other
+  country treats you.
+- **Starting territory** — **Claim regions** on the map, or **Start landless**.
 
 The regions you take are carved out of whoever held them, and that country will notice.
 
@@ -67,20 +68,28 @@ The regions you take are carved out of whoever held them, and that country will 
 *Six levels. Medium is the honest one.*
 
 
-Six levels. Difficulty does not give the AI secret information or extra resources — it changes
-how the world *treats* you: whether your plans succeed on their merits, how competent your
-rivals are, and whether events tend to break your way.
+Six levels. Difficulty does not give the AI secret information or extra resources, and at no
+level is the world biased against you — it changes how much **benefit of the doubt** your plans
+get, how competent your rivals are, how hard consequences press, and how firm other governments
+are at the table. It has its own instructions for the time skip, for diplomacy and for
+interactive events.
 
-| | | What changes |
-|---|---|---|
-| 😴 | **Very Easy** | Your actions almost always succeed and outperform expectations. Rivals act passively. Events tend to benefit you. |
-| 🙂 | **Easy** | Reasonable actions succeed. Rivals are slow to exploit mistakes. Setbacks stay small and recoverable. |
-| ⚖️ | **Medium** | Actions succeed or fail on their merits. Rivals pursue their own interests with normal competence. |
-| 😰 | **Hard** | Rivals are competent and opportunistic. Weak or vague orders fail or backfire. Success needs sound strategy. |
-| 🔥 | **Very Hard** | Rivals actively counter you and form coalitions. Only well-reasoned plans succeed. Events often work against you. |
-| 💀 | **Impossible** | Rivals are ruthless, coordinated and relentless. Even good plans meet complications, and crises compound. |
+| | | Your plans | Rivals | Consequences | At the table |
+|---|---|---|---|---|---|
+| 😴 | **Very Easy** | Very generous reading | Relaxed | Low | Soft |
+| 🙂 | **Easy** | Generous | Moderate | Low–medium | Flexible |
+| ⚖️ | **Medium** | Neutral | Normal | Normal | Interest-based |
+| 😰 | **Hard** | Little leeway | High | High | Firm |
+| 🔥 | **Very Hard** | Almost none | Very high | Very high | Very firm |
+| 💀 | **Impossible** | None | Elite | Maximum | Maximum |
 
-**Medium** is the honest one and the right default. The difference between Medium and Hard is
+At the easy end, when several outcomes are equally plausible the less punishing one is preferred
+— but no level grants a success the world state makes impossible. At the hard end, weak
+assumptions are punished and errors can compound naturally — but even Impossible is "full causal
+consequences", never a scripted conspiracy against you.
+
+**Medium** — "the simulator neither helps nor targets the player" — is the honest one and the
+right default. The difference between Medium and Hard is
 mostly whether a vague order gets a charitable reading — on Hard, *"improve the economy"* will
 get you an event about a policy that did not work.
 
@@ -89,12 +98,12 @@ from the [cheats panel](/wiki/cheats/).
 
 ## Opening a campaign
 
-Starting or resuming a game shows a loading screen while the map is drawn, naming the scenario
-and the country. On stable this is brief.
+Starting or resuming a game shows its scenario's cover, then a loading screen — the logo turning
+over a dark ground — while the map works out every country's surface. A pause here is normal
+rather than a hang; the map is revealed once it is drawn.
 
-<p class="beta-note"><b>On beta this takes noticeably longer</b> — Map vNext dissolves every
-polity's surface before revealing the map, so a pause on "drawing borders and labels" is normal
-rather than a hang. The <a href="/wiki/settings/">legacy renderer</a> opens faster.</p>
+On a new game's first turn, a scenario with a *World Before Round One* briefing also writes its
+own backstory — the recent history that led to the situation you have inherited.
 
 ## What gets created
 
@@ -103,8 +112,9 @@ documents — world state, game state, events, actions and chat history. From th
 game is independent: editing the scenario later does not touch it.
 
 Games appear in the **Games** tab of the main menu, sorted by last played and most played, with
-a cover image and your country, date and turn number on the card. From the card you can play,
-edit, or clone it.
+your country, date, round, and pending actions and events on the card. **Current** opens it,
+**Archive** puts it away, and the card's **⋮** holds Edit, Clone and Export. See
+[saves and rollback](/wiki/saves/).
 
 ## Starting well
 

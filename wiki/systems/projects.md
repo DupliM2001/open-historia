@@ -1,13 +1,16 @@
 Some things a country does cannot happen in one turn. A nuclear programme, a canal, a rearmament
 plan, a decade-long insurgency, a covert operation to destabilise a neighbour — these are
-*efforts*, not actions, and the beta channel gives them their own board.
+*efforts*, not actions, and they get their own board.
 
-Open it from the toolbar alongside Chat and Actions.
+Open it with the **Projects & Operations** button in the toolbar, alongside Chat and Actions. A
+new campaign's board is empty — *"Nothing on the board yet"* — until events and your advisor
+start writing to it; **🧭 Ask your advisor to populate this** gets it to file the efforts you
+already have under way.
 
 This is also where research and technology live. There is no tech tree; there is a research
 programme with milestones that either progresses or stalls.
 
-![The Projects and Operations board](/wiki/img/beta-projects.jpg)
+![The Projects and Operations board](/wiki/img/projects-board.jpg)
 *A board on a campaign that has been running a while. Note the counts — **Mine (4)**,
 **Foreign (2)** — the tag chips, the priority control on each card, and that an **ongoing** effort
 carries no target date and so can never run late.*
@@ -74,6 +77,16 @@ You do **not** author a project's content. Projects are written *by* the world �
 your intelligence service, and by the advisor — in response to what your country is doing. You
 steer them; you do not type them into existence.
 
+After each time skip the board is brought into step with what happened — progress, stalls and new
+long-term efforts — reading every event of the turn, including ones taken off the timeline as
+filler. With **Save AI requests** on, this shares the one after-skip request; it can be turned
+off in Settings → AI. If that update fails, the turn is held rather than lost — see
+[troubleshooting](/wiki/troubleshooting/#a-held-projects-board). The time skip itself is shown
+the board, so an effort you push is narrated as what it actually is.
+
+<p class="beta-note"><b>On beta a project's activity lists only the events that moved it</b>,
+rather than every event that mentioned it in passing.</p>
+
 Closing keeps the record. Completing marks pending milestones done and forces progress to 100%;
 failing or cancelling marks them missed and preserves the real progress reached. Only an explicit
 delete erases a project entirely.
@@ -123,17 +136,8 @@ The board filters by owner (yours or foreign), free text, and tag chips, with se
 orders and a separate **Closed** view. On a long campaign with a busy intelligence service you
 will need them.
 
-## On the stable release
-
-None of this exists. Long-running efforts happen, but they live in the narrative and in your
-own head — an event refers back to the programme you started six turns ago because the
-[event history](/wiki/events/) remembers it, not because anything is tracking milestones.
-
-If you want the board, install the beta build. It sits alongside the stable app and keeps its own
-saves.
-
 ## Next
 
 - [Espionage](/wiki/espionage/) — where the foreign entries and the doubt come from.
 - [Giving orders](/wiki/orders/) — how efforts get started.
-- [Relations, treaties and war](/wiki/war/) — the other half of the beta model.
+- [Relations, treaties and war](/wiki/war/) — the ledgers the board sits beside.
