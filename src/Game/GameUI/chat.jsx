@@ -467,7 +467,7 @@ const PollCard = ({ poll, playerCountry, onVote }) => {
                     </button>
                 );
             })}
-            <span data-no-translate style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem" }}>
+            <span style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem" }}>
                 {total === 0 ? "Nobody has voted yet" : `${total} vote${total === 1 ? "" : "s"} cast`}
                 {mine ? "" : " · your vote is yours to cast"}
             </span>
