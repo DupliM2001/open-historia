@@ -2378,7 +2378,7 @@ const SettingsMenu = ({
         panelContent = (
             <QuickMenuPanel title="Help" description="Guides, bug reporting and community links.">
                 <div style={grid}>
-                    <QuickAction title="Guides" description="How-to pages and setup help" symbol="?" href="/guides/" />
+                    <QuickAction title="Wiki" description="How-to pages and setup help" symbol="?" href="/wiki/" />
                     {reportBugUrl && <QuickAction title="Report a Bug" description="Open the issue/report page" symbol="!" tone="amber" href={reportBugUrl} />}
                 </div>
                 <div style={{ alignItems: isMobile ? "stretch" : "center", display: "flex", flexDirection: isMobile ? "column" : "row", gap: "0.55rem", justifyContent: "space-between" }}>

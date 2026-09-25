@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-H9EQ4JFZXZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-H9EQ4JFZXZ');
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111113" />
+  <link rel="icon" type="image/jpeg" href="/logo.png" />
+  <title>Military and Combat — Open Historia Wiki</title>
+  <link rel="canonical" href="https://openhistoria.com/wiki/military/" />
+  <meta name="description" content="Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out." />
+
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="Open Historia" />
+  <meta property="og:url" content="https://openhistoria.com/wiki/military/" />
+  <meta property="og:title" content="Military and Combat — Open Historia Wiki" />
+  <meta property="og:description" content="Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out." />
+  <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="720" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Military and Combat — Open Historia Wiki" />
+  <meta name="twitter:description" content="Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out." />
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" />
+  <link rel="stylesheet" href="/wiki.css" />
+
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Open Historia",
+      "item": "https://openhistoria.com/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Wiki",
+      "item": "https://openhistoria.com/wiki/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Military and Combat",
+      "item": "https://openhistoria.com/wiki/military/"
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><img class="mark" src="/icon-192.png" alt="" width="28" height="28" /> Open Historia</a>
+    <nav class="nav-links">
+      <a href="/#features">Features</a>
+      <a class="nav-keep" href="/wiki/">Wiki</a>
+      <a href="/#download">Download</a>
+      <a href="https://github.com/Open-Historia/open-historia" target="_blank" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="/play/">▶ Play</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap wiki-layout">
+  <aside class="wiki-sidebar">
+    <div class="wiki-search">
+      <input type="search" id="wikiSearch" placeholder="Search the wiki…" aria-label="Search the wiki" autocomplete="off" />
+      <ul id="wikiResults" hidden></ul>
+    </div>
+    <ul class="wiki-nav">
+        <li class="sec"><ul><li><a href="/wiki/">Wiki home</a></li></ul></li>
+        <li class="sec">
+          <span>Getting started</span>
+          <ul><li><a href="/wiki/install/">Install</a></li><li><a href="/wiki/ai-setup/">Connect an AI</a></li><li><a href="/wiki/how-to-play/">How to play</a></li><li><a href="/wiki/first-campaign/">Your first campaign</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Playing</span>
+          <ul><li><a href="/wiki/new-game/">Starting a game</a></li><li><a href="/wiki/interface/">The interface</a></li><li><a href="/wiki/world-map/">The world map</a></li><li><a href="/wiki/time/">Time &amp; turns</a></li><li><a href="/wiki/orders/">Giving orders</a></li><li><a href="/wiki/events/">Events &amp; history</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Game systems</span>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/" class="on" aria-current="page">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Tools</span>
+          <ul><li><a href="/wiki/settings/">Settings</a></li><li><a href="/wiki/cheats/">Cheats &amp; GM console</a></li><li><a href="/wiki/saves/">Saves &amp; rollback</a></li><li><a href="/wiki/editor/">The map editor</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Sharing &amp; hosting</span>
+          <ul><li><a href="/wiki/community-hub/">The community hub</a></li><li><a href="/wiki/self-hosting/">Hosting a server</a></li><li><a href="/wiki/mobile/">Playing on your phone</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Reference</span>
+          <ul><li><a href="/wiki/ai-providers/">AI providers &amp; models</a></li><li><a href="/wiki/troubleshooting/">Troubleshooting</a></li></ul>
+        </li>
+      </ul>
+  </aside>
+
+  <main class="wiki-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> Military and Combat
+    </nav>
+    <h1>Military and Combat</h1>
+    <p class="tagline">Unit types, strength, posture, standing orders and era limits — how forces move when you order them and the engine carries it out.</p>
+    
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-way-to-use-your-army">The way to use your army</a></li><li class="d2"><a href="#unit-types">Unit types</a></li><li class="d2"><a href="#strength-and-composition">Strength and composition</a></li><li class="d2"><a href="#posture">Posture</a></li><li class="d2"><a href="#standing-orders">Standing orders</a></li><li class="d2"><a href="#other-countries39-forces">Other countries&#39; forces</a></li><li class="d2"><a href="#structures-do-not-move-borders">Structures do not move borders</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <p>Armies in Open Historia are formations on the map with a type, a strength, a posture and an
+owner. You do not move them by hand. You state what you want, the turn decides what happens, and
+the engine carries the movement out over however many turns it takes.</p>
+<h2 id="the-way-to-use-your-army">The way to use your army</h2>
+<p>Write it as an order. <em>&quot;Reinforce the eastern border with two armoured divisions&quot;</em>,
+<em>&quot;Launch an offensive toward Kharkiv&quot;</em>, <em>&quot;Withdraw the fleet to home ports&quot;</em>. The time skip
+resolves it, and after the skip the game moves units to match what the events say — armies
+advance, retreat and take losses where the events say they did. (With <strong>Save AI requests</strong> on,
+that is part of the one after-skip check; it can be turned off in Settings → AI.)</p>
+<p>The model owns movement; you own intent. A place an order or event names — &quot;toward Kyiv&quot;, &quot;the
+Suwałki gap&quot; — is read as an objective and found on the actual map, and new units and structures
+are placed by name and kept off one another.</p>
+<p>Clicking a unit on the map gives you an <strong>intelligence card</strong> — what the formation is, whose it
+is, roughly how strong, what it is made of, and what it appears to be doing. It is a briefing,
+not a command panel.</p>
+<p>Hands-on control does exist — the <strong>Force Manager</strong>, under <strong>Military</strong> in the
+<a href="/wiki/cheats/">cheats panel</a> — for deploying, inspecting, editing and repairing forces directly.
+That placement is deliberate: editing your order of battle by hand is a game-master tool, not the
+normal loop.</p>
+<h2 id="unit-types">Unit types</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Glyph</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Infantry</td>
+<td>🛡</td>
+</tr>
+<tr>
+<td>Armor</td>
+<td>⚙</td>
+</tr>
+<tr>
+<td>Air</td>
+<td>✈</td>
+</tr>
+<tr>
+<td>Naval</td>
+<td>⚓</td>
+</tr>
+<tr>
+<td>Artillery</td>
+<td>💥</td>
+</tr>
+<tr>
+<td>Garrison</td>
+<td>🏰</td>
+</tr>
+</tbody></table></div>
+<p>A scenario can restrict which types exist — there is no air force in 1200 AD — so the deploy
+options you see depend on the world you are playing.</p>
+<h2 id="strength-and-composition">Strength and composition</h2>
+<p>Strength is a <strong>percentage of the formation&#39;s established strength</strong>, 0–100: 78 means about three
+quarters of what that formation should have. A new unit starts at 100. A separate
+<strong>composition</strong> says what it actually is — <em>&quot;1 aircraft carrier, 2 frigates&quot;</em>.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Strength</th>
+<th>Colour</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Above 60</td>
+<td>Green</td>
+</tr>
+<tr>
+<td>26 – 60</td>
+<td>Amber</td>
+</tr>
+<tr>
+<td>25 or below</td>
+<td>Red</td>
+</tr>
+</tbody></table></div>
+<p>Strength only changes where the events narrate casualties or reinforcement. A unit that reaches
+zero is destroyed and removed. Saves from before the percentage scale are converted on load —
+anything over 100 is divided by ten.</p>
+<h2 id="posture">Posture</h2>
+<p>What a formation is <strong>doing</strong>, as distinct from whether it is alive. Posture is what makes the map
+readable at a glance: <em>massing</em> on a border and <em>on exercise</em> on the same border are the same
+counter and a completely different message.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Posture</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Holding position</strong></td>
+<td>In place.</td>
+</tr>
+<tr>
+<td><strong>Massing</strong></td>
+<td>Concentrating.</td>
+</tr>
+<tr>
+<td><strong>Patrolling</strong></td>
+<td>Working a station around a point.</td>
+</tr>
+<tr>
+<td><strong>In transit</strong></td>
+<td>On its way somewhere.</td>
+</tr>
+<tr>
+<td><strong>On exercise</strong></td>
+<td>Training, not threatening.</td>
+</tr>
+<tr>
+<td><strong>Blockading</strong></td>
+<td>Closing a sea or a port.</td>
+</tr>
+<tr>
+<td><strong>Withdrawing</strong></td>
+<td>Pulling back.</td>
+</tr>
+<tr>
+<td><strong>Assaulting</strong></td>
+<td>Attacking; arriving under this posture puts the unit in contact with the enemy.</td>
+</tr>
+</tbody></table></div>
+<h2 id="standing-orders">Standing orders</h2>
+<p>A move that is further than the unit could cover in the time skipped becomes a <strong>standing
+order</strong>, and the engine advances it every turn at the unit&#39;s pace until it arrives — within about
+60 km of its destination. A patrol works its station, drifting to a new point each turn (the
+same point every time you replay that turn, never at random). The map draws a heading line to a
+destination and a ring around a patrol station, and counters glide between positions.</p>
+<p>Sustained travel runs at a post-1945 baseline, scaled by era:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>km/day</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Garrison</td>
+<td>0 — it does not travel</td>
+</tr>
+<tr>
+<td>Artillery</td>
+<td>35</td>
+</tr>
+<tr>
+<td>Infantry</td>
+<td>40</td>
+</tr>
+<tr>
+<td>Armor</td>
+<td>90</td>
+</tr>
+<tr>
+<td>Naval</td>
+<td>600</td>
+</tr>
+<tr>
+<td>Air</td>
+<td>2000</td>
+</tr>
+</tbody></table></div>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Period</th>
+<th>Factor</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Before 1500</td>
+<td>×0.35</td>
+</tr>
+<tr>
+<td>1500 – 1849</td>
+<td>×0.5</td>
+</tr>
+<tr>
+<td>1850 – 1944</td>
+<td>×0.75</td>
+</tr>
+<tr>
+<td>1945 onward</td>
+<td>×1.0</td>
+</tr>
+</tbody></table></div>
+<p>So infantry in 1200 AD cover about 14 km a day. A march across a continent is a campaign, not a
+turn.</p>
+<p>A single order is also held to a <strong>movement leash</strong> — how far one order may relocate a unit before
+it has to become a multi-turn campaign instead of a teleport:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>km</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Garrison</td>
+<td>200</td>
+</tr>
+<tr>
+<td>Infantry</td>
+<td>800</td>
+</tr>
+<tr>
+<td>Artillery</td>
+<td>800</td>
+</tr>
+<tr>
+<td>Armor</td>
+<td>1000</td>
+</tr>
+<tr>
+<td>Air</td>
+<td>3000</td>
+</tr>
+<tr>
+<td>Naval</td>
+<td>4000</td>
+</tr>
+</tbody></table></div>
+<p>multiplied by ×0.5 before 1500, ×0.7 to 1849, ×1.0 to 1944 and ×1.15 after.</p>
+<h2 id="other-countries39-forces">Other countries&#39; forces</h2>
+<p>AI countries&#39; formations respond to the military events a turn wrote: the engine reuses an
+existing formation before raising a new one, holds each type to its era&#39;s leash, and only changes
+strength where the events say so. The map holds at most <strong>12</strong> formations per AI country and
+<strong>80</strong> in total; your own forces count against neither. With <strong>Background AI</strong> on, forces may
+also reposition between turns.</p>
+<p>Combat itself is narrated by the time skip and bound to the <a href="/wiki/war/">war ledger</a>: a battle
+needs an active war with named sides, so fighting cannot quietly appear out of nowhere.</p>
+<p class="beta-note"><b>On beta, what the events raise reaches the map.</b> A ship commissioned or
+a squadron formed in an event becomes a unit; a deployment or garrison the skip resolves joins
+the order of battle; a unit's move is listed once, not twice; and a renamed country's counters
+carry its flag.</p><h2 id="structures-do-not-move-borders">Structures do not move borders</h2>
+<p>Bases, ports, airfields and other built markers have an owner — whoever <em>runs</em> the facility —
+which is not the same as who owns the ground beneath it. Building a base in an ally&#39;s country
+does not annex it. See <a href="/wiki/cities/">cities and structures</a>.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li><a href="/wiki/territory/">Territory</a> — what winning actually transfers.</li>
+<li><a href="/wiki/orders/">Giving orders</a> — phrasing military instructions.</li>
+<li><a href="/wiki/cheats/">Cheats</a> — where the Force Manager lives.</li>
+</ul>
+
+    <nav class="wiki-pager" aria-label="Pagination">
+        <a class="prev" href="/wiki/territory/"><span>← Previous</span><b>Territory</b></a>
+        <a class="next" href="/wiki/espionage/"><span>Next →</span><b>Espionage</b></a>
+      </nav>
+    <p class="wiki-stale">Open Historia is under active development on two channels, and this
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      here does not match what you see in the game, trust the game and
+      <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <img class="mark" src="/icon-192.png" alt="" width="22" height="22" loading="lazy" /> <b>Open Historia</b> · AGPL-3.0 licensed ·
+    <a href="/">Home</a> ·
+    <a href="/wiki/">Wiki</a> ·
+    <a href="https://github.com/Open-Historia/open-historia" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">Discord</a> ·
+    <a href="/sitemap.xml">Sitemap</a>
+  </div>
+</footer>
+
+<script>
+// Client-side search over a generated index — no dependency, no server, no network call.
+// The index is small enough (a few tens of KB) that a plain substring scan is instant.
+(function () {
+  var input = document.getElementById("wikiSearch");
+  var list = document.getElementById("wikiResults");
+  if (!input || !list) return;
+  var index = null, pending = false;
+
+  function load() {
+    if (index || pending) return;
+    pending = true;
+    fetch("/wiki/search-index.json")
+      .then(function (r) { return r.json(); })
+      .then(function (data) { index = data; pending = false; render(); })
+      .catch(function () { pending = false; });
+  }
+
+  function render() {
+    var q = input.value.trim().toLowerCase();
+    if (!q || !index) { list.hidden = true; list.innerHTML = ""; return; }
+    var hits = [];
+    for (var i = 0; i < index.length && hits.length < 12; i++) {
+      var page = index[i];
+      if (page.haystack.indexOf(q) === -1) continue;
+      // A title match is what the reader almost always meant, so float those first.
+      hits.push({ page: page, rank: page.title.toLowerCase().indexOf(q) === -1 ? 1 : 0 });
+    }
+    hits.sort(function (a, b) { return a.rank - b.rank; });
+    if (hits.length === 0) {
+      list.innerHTML = "<li class='none'>No matches</li>";
+    } else {
+      list.innerHTML = hits.map(function (h) {
+        return "<li><a href='" + h.page.url + "'>" + h.page.title +
+               "<span>" + (h.page.section || "Wiki") + "</span></a></li>";
+      }).join("");
+    }
+    list.hidden = false;
+  }
+
+  input.addEventListener("focus", load);
+  input.addEventListener("input", function () { load(); render(); });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { input.value = ""; list.hidden = true; input.blur(); }
+    if (e.key === "Enter") { var a = list.querySelector("a"); if (a) window.location.href = a.getAttribute("href"); }
+  });
+  document.addEventListener("click", function (e) {
+    if (!list.hidden && !input.contains(e.target) && !list.contains(e.target)) list.hidden = true;
+  });
+})();
+</script>
+</body>
+</html>
