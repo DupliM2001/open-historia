@@ -3,17 +3,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-H9EQ4JFZXZ"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-
-      gtag('config', 'G-H9EQ4JFZXZ');
-    </script>
-    <!-- Umami (cookieless visit counts) -->
-    <script defer src="https://cloud.umami.is/script.js" data-website-id="452a6cce-d389-4c2d-bc09-e221194c93a2"></script>
+    <!-- Visit counters: asked for first, loaded only after a yes (consent.js). -->
+    <script defer src="/consent.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Page not found — Open Historia</title>
     <!-- Same compass favicon as the landing page (assemble-site copies site/ to the
@@ -30,12 +21,7 @@
          one. Deleting this file silently restores that behaviour. -->
     <meta name="robots" content="noindex" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap"
-    />
+    <link rel="stylesheet" href="/fonts/fonts.css" />
 
     <style>
       :root {
@@ -160,6 +146,7 @@
         <a class="btn" href="/play/">Play</a>
         <a class="btn" href="/guides/">Guides</a>
       </div>
+      <p style="margin-top:1.75rem;font-size:.9rem;text-align:center"><a href="/privacy/" style="color:inherit">Privacy</a> · <a href="/privacy/#choices" data-consent-open style="color:inherit">Privacy choices</a></p>
     </main>
   </body>
 </html>

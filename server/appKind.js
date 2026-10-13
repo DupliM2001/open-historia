@@ -11,8 +11,11 @@
 
 export const APP_CHANNELS = Object.freeze(["stable", "beta", "multiplayer"]);
 
-// OH_VISIT_COUNT=0 has the page count nothing: for a test server, and for anybody
-// running the server who would rather not be counted.
+// OH_VISIT_COUNT=0: no visit counter, neither Google Analytics nor Umami, on
+// the game page or on the pages served beside it (the wiki, the privacy
+// policy). Both go through one gate (public/consent.js), which loads nothing
+// for an application that answers "uncounted". For a test server, and for
+// anybody running the server who would rather not be counted.
 
 export const appKindOf = (versions = {}, env = {}) => {
   if (String(env?.OH_VISIT_COUNT ?? "") === "0") return { app: "uncounted" };

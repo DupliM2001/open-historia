@@ -92,20 +92,18 @@ const emitWebVersion = (isWeb: boolean) => {
 // The Android app does not report to the website's Google Analytics: its
 // players never saw the site that set it up, a store listing would have to
 // declare it, and on a device with no network it was one more failed request
-// per start. index.html keeps the tag for the website (and the desktop, as
-// before); the android build drops it, and fails if any of it survives — a
-// reworded snippet must not ship silently.
-const GOOGLE_TAG = /[ \t]*<!-- Google tag \(gtag\.js\) -->[\s\S]*?<\/script>\s*<script>[\s\S]*?<\/script>\r?\n?/
+// per start. No page carries a counter itself any more: the website and the
+// desktop add the gate that asks first (public/consent.js, through
+// src/runtime/visitCount.js), and the Android app never does. This keeps it so:
+// the android build fails if a counter, or the gate, is written into its page.
 const dropWebAnalytics = (isAndroid: boolean) => ({
   name: 'oh-drop-web-analytics',
   apply: 'build' as const,
   transformIndexHtml(html: string) {
-    if (!isAndroid) return html
-    const stripped = html.replace(GOOGLE_TAG, '')
-    if (/googletagmanager|gtag\(/.test(stripped)) {
-      throw new Error('oh-drop-web-analytics: the Google tag is still in the Android index.html')
+    if (isAndroid && /googletagmanager|gtag\(|umami|consent\.js/.test(html)) {
+      throw new Error('oh-drop-web-analytics: a visit counter is written into the Android index.html')
     }
-    return stripped
+    return html
   },
 })
 

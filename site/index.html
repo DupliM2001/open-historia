@@ -2,17 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-H9EQ4JFZXZ"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-H9EQ4JFZXZ');
-</script>
-<!-- Umami (cookieless visit counts) -->
-<script defer src="https://cloud.umami.is/script.js" data-website-id="452a6cce-d389-4c2d-bc09-e221194c93a2"></script>
+<!-- Visit counters: asked for first, loaded only after a yes (consent.js). -->
+<script defer src="/consent.js"></script>
 
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Open Historia — Play AI-driven alternate history</title>
@@ -82,10 +73,7 @@
 }
 </script>
 <link rel="preload" as="image" href="/play/screenshots/screenshot.webp" fetchpriority="high" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" /></noscript>
+<link rel="stylesheet" href="/fonts/fonts.css" />
 <style>
   :root{
     --parch:#111113; --parch2:#17171a; --marble:#1a1a1f; --marble2:#212128;
@@ -594,7 +582,7 @@
       <div class="feat"><div class="fi">🤝</div><h4>Natural-language diplomacy</h4><p>Click any country to negotiate, threaten, or ally through open-ended chat.</p></div>
       <div class="feat"><div class="fi">🎖️</div><h4>Troops &amp; warfare</h4><p>Deploy and maneuver armies; the AI resolves fronts and moves the borders.</p></div>
       <div class="feat"><div class="fi">🖌️</div><h4>Built-in map editor</h4><p>Draw regions, paint owners, place cities — build a world and hit Apply &amp; Play.</p></div>
-      <div class="feat"><div class="fi">🌐</div><h4>Scenario hub</h4><p>Browse and import community scenarios in-game, or publish your own.</p></div>
+      <div class="feat"><div class="fi">🌐</div><h4>Scenario hub</h4><p>Browse and import community scenarios in-game, or publish your own. Every shared scenario is public domain (CC0).</p></div>
       <div class="feat"><div class="fi">🦉</div><h4>Strategy advisor</h4><p>Consult an AI advisor for guidance, economic analysis, and situation briefings.</p></div>
       <div class="feat"><div class="fi">🔒</div><h4>Runs on your machine</h4><p>Self-hostable and local-first — it runs at localhost, with your own AI backend.</p></div>
       <div class="feat"><div class="fi">⚖️</div><h4>Free &amp; open source</h4><p>AGPL-3.0 licensed and community-built. Fork it, mod it, ship it — as long as your changes stay open too.</p></div>
@@ -637,7 +625,8 @@
     <div class="faq">
       <details><summary>Do I need to install anything else?</summary><p>Just <b>Node.js</b>, and the launcher offers to install it for you if it's missing (via winget on Windows, Homebrew on macOS, or your package manager on Linux). Everything else — including all map data — ships inside the download.</p></details>
       <details><summary>Is it really free?</summary><p>Yes. Open Historia is free and open source under the GNU AGPL v3. The AI features connect to an AI backend you configure — see the <a href="https://github.com/Open-Historia/open-historia#readme" target="_blank" rel="noopener">README</a> or ask in <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">Discord</a> for setup help.</p></details>
-      <details><summary>Where does it run — is my data uploaded?</summary><p>The game runs locally on your own machine and opens in your browser at <code>localhost:3000</code>. Your saves and scenarios stay on your computer.</p></details>
+      <details><summary>Where does it run — is my data uploaded?</summary><p>The game runs locally on your own machine and opens in your browser at <code>localhost:3000</code>. Your saves and scenarios stay on your computer, and your AI key goes only to the AI provider you choose. Visits are counted only if you say yes. The <a href="/privacy/">privacy policy</a> lists everything the game contacts.</p></details>
+      <details><summary>Who owns the scenarios people share?</summary><p>Nobody: every scenario made in Open Historia that is posted or shared in any way is <b>public domain</b>. Whoever shares one dedicates it under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener">CC0 1.0</a>, so anyone may copy, change and share it, for any purpose, without asking or giving credit. The game says so before you publish and writes it into the file.</p></details>
       <details><summary>How do I update later?</summary><p>Run the <b>Update Open Historia</b> script that comes with your install — it fetches the latest version while preserving your saves, scenarios, and map data. You can choose the Stable or Beta channel when updating.</p></details>
       <details><summary>What about mobile?</summary><p>Download the Android APK and open it — that is the whole setup. Your games live on the phone and the world map is kept there after it downloads the first time, so there is no server to run and nothing to point it at.</p></details>
       <details><summary>Can I help by hosting a server?</summary><p>Yes! Running a <a href="https://github.com/Open-Historia/open-historia-node" target="_blank" rel="noopener">content node</a> caches the game's map data and serves it to nearby players, so everyone loads faster. It's a one-click install and completely safe — a node only serves read-only, checksum-verified map files and never touches games, accounts, or API keys. See <a href="#host">Host a server node</a>.</p></details>
@@ -668,6 +657,8 @@
       <a href="https://www.reddit.com/r/OpenHistoria" target="_blank" rel="noopener">Reddit</a>
       <a href="https://x.com/open_historia" target="_blank" rel="noopener">X</a>
       <a href="https://github.com/Open-Historia/open-historia/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="/privacy/">Privacy</a>
+      <a href="/privacy/#choices" data-consent-open>Privacy choices</a>
     </div>
     <p class="foot-legal">Open Historia is an independent, open-source project and is not affiliated with, endorsed, sponsored, approved, or authorized by Pax Historia. Pax Historia has no involvement in the development, operation, or distribution of Open Historia. Pax Historia™ and all associated trademarks, trade names, and logos are the exclusive property of Pax Historia.</p>
   </div>

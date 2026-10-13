@@ -31,7 +31,6 @@
       "package.json",
       ".github/workflows/desktop-installer.yml",
       "scripts/fetch-map-assets.mjs",
-      "src/runtime/web/account.js",
       ".github/workflows/desktop-beta.yml",
       ".github/workflows/android-apk.yml"
     ],
@@ -218,9 +217,6 @@
       "src/runtime/library.js",
       "src/Game/GameUI/libraryBar.jsx",
       "server/libraryStore.js",
-      "src/runtime/web/account.js",
-      "src/runtime/web/sync.js",
-      "src/runtime/web/accountWidget.js",
       "src/runtime/gameZip.js"
     ],
     "tools/editor.md": [

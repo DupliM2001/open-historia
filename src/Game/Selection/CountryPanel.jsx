@@ -5,6 +5,7 @@ import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { useBackToClose } from "../../runtime/backToClose.js";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import { TEXT_COMPONENTS } from "../GameUI/markdown.jsx";
 import { getNationFlags, getNationTags, loadRegionCatalog } from "../../runtime/assets.js";
 import { resolveCountryTags } from "../../runtime/countryTags.js";
 import { readEventsState, readWorldState } from "../../runtime/gameState.js";
@@ -433,7 +434,8 @@ const CountryInfoPanel = () => {
                 <div style={{ color: "#f87171", fontSize: "0.78rem" }}>{report.error}</div>
             ) : (
                 <div className="timeline-markdown" style={{ color: "rgba(255,255,255,0.85)", fontSize: "0.79rem", lineHeight: 1.55 }}>
-                <ReactMarkdown>{String(report)}</ReactMarkdown>
+                {/* A picture on another website is shown as a link, never fetched (markdown.jsx). */}
+                <ReactMarkdown components={TEXT_COMPONENTS}>{String(report)}</ReactMarkdown>
                 </div>
             )}
             </div>

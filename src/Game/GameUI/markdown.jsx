@@ -12,12 +12,12 @@
 // model, and the handful of tags one actually reaches for are already handled by
 // normalizeMarkdown; turning raw HTML on to catch the rest would hand model
 // output a direct line to the DOM for no gain the player would ever notice.
-import React, { useEffect, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 
-import { normalizeMarkdown } from "./markdownText.js";
+import { imageLoadsElsewhere, normalizeMarkdown } from "./markdownText.js";
 
 // remark-breaks makes a single newline a real line break. The panels used to get
 // that from `white-space: pre-wrap` on the bubble, which cannot work once there
@@ -34,12 +34,36 @@ const TableWrap = ({ node, ...props }) => (
 );
 
 // Links go to the OS browser (electron/main.cjs's window-open handler sends
-// http(s) to shell.openExternal), never in-app.
-const ExternalLink = ({ node, ...props }) => (
-    <a {...props} target="_blank" rel="noreferrer noopener" />
+// http(s) to shell.openExternal), never in-app. A link also tells what it holds
+// that it is inside one, for LocalImage below.
+const InsideLink = createContext(false);
+const ExternalLink = ({ node, children, ...props }) => (
+    <a {...props} target="_blank" rel="noreferrer noopener"><InsideLink.Provider value>{children}</InsideLink.Provider></a>
 );
 
-const COMPONENTS = { table: TableWrap, a: ExternalLink };
+// A picture is never fetched from another website because a model, or a
+// scenario's author, wrote ![…](https://…) into the text: the request alone
+// tells that website who is reading, and when. What would have been the
+// picture is its alt text as an ordinary link, which the player may follow or
+// not; a picture that was a link's own text stays that link's text, since a
+// link cannot hold another. A picture from the game's own address still draws
+// (markdownText.js imageLoadsElsewhere has the rule).
+const LocalImage = ({ node, src, alt, title, ...props }) => {
+    const insideLink = useContext(InsideLink);
+    const address = String(src ?? "").trim();
+    if (!address) return alt || null;
+    if (!imageLoadsElsewhere(address)) return <img {...props} src={address} alt={alt ?? ""} title={title} />;
+    if (insideLink) return alt || address;
+    return <ExternalLink href={address} title={title}>{alt || address}</ExternalLink>;
+};
+
+const COMPONENTS = { table: TableWrap, a: ExternalLink, img: LocalImage };
+
+// The timeline's cards and the country panel's Advisor Report call ReactMarkdown
+// themselves, under their own stylesheet (time.jsx, CountryPanel.jsx). The text
+// comes from the same place, so they take the picture rule from here, and the
+// link that goes with it: LocalImage has to know when it is inside one.
+export const TEXT_COMPONENTS = { a: ExternalLink, img: LocalImage };
 
 const markdownStyles = `
 .oh-md {

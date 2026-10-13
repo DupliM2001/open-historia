@@ -29,6 +29,7 @@ import { unseenEvents } from "../../runtime/unseenEvents.js";
 import { isSceneInProgress } from "../AI/interactiveRewind.js";
 import { offeredEvent } from "../../runtime/interactiveOffer.js";
 import { normalizeMarkdown } from "./markdownText.js";
+import { TEXT_COMPONENTS } from "./markdown.jsx";
 import { useUnseenEventIds } from "./useUnseenEvents.js";
 import { isMainMenuOpen, useMainMenuOpen } from "./libraryBar";
 import {
@@ -121,7 +122,8 @@ const ensureTimelineStyles = () => {
 // normalizeMarkdown repairs the <br>/<b> tags it writes instead of markdown -
 // the same three the advisor and the chat have always had (markdown.jsx). The
 // card keeps its own stylesheet rather than borrowing .oh-md, which is sized for
-// a side panel.
+// a side panel. Its links and pictures are markdown.jsx's (TEXT_COMPONENTS): a
+// picture on another website is shown as a link, never fetched.
 const EVENT_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 const SpinnerRing = ({ size = 14, tone = "rgba(255,255,255,0.88)" }) => {
@@ -828,7 +830,7 @@ const EventDocument = ({ report }) => {
         </button>
         {open && (
             <div className="timeline-markdown" style={{ borderTop: "1px solid rgba(251,191,36,0.12)", color: "rgba(228,228,231,0.84)", fontSize: "0.74rem", lineHeight: 1.55, padding: "0.55rem 0.8rem 0.7rem" }}>
-            <ReactMarkdown>{report.body}</ReactMarkdown>
+            <ReactMarkdown components={TEXT_COMPONENTS}>{report.body}</ReactMarkdown>
             </div>
         )}
         </div>
@@ -929,7 +931,7 @@ const EventCard = ({ event, footer = null, lookups, openMapChanges = null, onTog
 
         {event.description && (
             <div className="timeline-markdown" style={{ color: "rgba(228,228,231,0.82)", fontSize: "0.77rem", lineHeight: "1.58" }}>
-            <ReactMarkdown remarkPlugins={EVENT_REMARK_PLUGINS}>{normalizeMarkdown(event.description)}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={EVENT_REMARK_PLUGINS} components={TEXT_COMPONENTS}>{normalizeMarkdown(event.description)}</ReactMarkdown>
             </div>
         )}
 

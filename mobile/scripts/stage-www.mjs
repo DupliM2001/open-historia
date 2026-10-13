@@ -3,8 +3,9 @@
 // (npm run build:android → dist-android/), plus the world map inside the APK.
 // It used to be the website's bundle verbatim, which connected to a community
 // content node for every tile; now everything the game needs is on the phone,
-// and the only network use is the community hub and the player's own AI
-// provider.
+// and what still uses the network is the community hub, the player's own AI
+// provider, the update check, and what a map draws from other services
+// (imagery, flags, place search). public/privacy/index.html lists them.
 //
 // This copies dist-android/ into mobile/www/ (Capacitor's webDir), drops the
 // website-only files that ride along in the output (marketing pages, the
@@ -26,9 +27,12 @@ const target = path.join(mobileDir, "www");
 // some of them large (the screenshots alone are 8 MB).
 const SITE_ONLY = [
   "screenshots", "screenshot.png",
-  "guides", "get-started", "how-to-play", "self-hosting", "pax-historia-alternative",
+  "guides", "get-started", "how-to-play", "self-hosting", "pax-historia-alternative", "privacy",
   "sitemap.xml", "sitemap.txt", "robots.txt",
   "sw.js", "version.json",
+  // The gate that asks before the visit counters load, and the website's fonts.
+  // The app counts nothing and never adds the gate (src/runtime/visitCount.js).
+  "consent.js", "fonts",
   "content-manifest.json", "content-manifest.json.sig",
   "node-directory.json", "node-directory.json.sig",
 ];

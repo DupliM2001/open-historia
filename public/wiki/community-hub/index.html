@@ -2,17 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-H9EQ4JFZXZ"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-
-    gtag('config', 'G-H9EQ4JFZXZ');
-  </script>
-  <!-- Umami (cookieless visit counts) -->
-  <script defer src="https://cloud.umami.is/script.js" data-website-id="452a6cce-d389-4c2d-bc09-e221194c93a2"></script>
+  <!-- Visit counters: asked for first, loaded only after a yes (consent.js). -->
+  <script defer src="/consent.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111113" />
   <link rel="icon" type="image/jpeg" href="/logo.png" />
@@ -35,9 +26,7 @@
   <meta name="twitter:description" content="Download scenarios other players have made, and publish your own." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" />
+  <link rel="stylesheet" href="/fonts/fonts.css" />
   <link rel="stylesheet" href="/wiki.css" />
 
   <script type="application/ld+json">
@@ -200,6 +189,13 @@ download it, and a copy from before that was never checked: updating swaps it fo
 checked copy. If you have edited that scenario the game asks first, because updating replaces
 your changes — clone the scenario beforehand if you want to keep them.</p>
 <h2 id="publishing-your-own">Publishing your own</h2>
+<p><strong>Everything you publish is public domain.</strong> Every scenario made in Open Historia that is posted
+or shared in any way is dedicated to the public domain under
+<a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0</a>: anyone may copy, change and share
+it, for any purpose, without asking or giving credit, and that cannot be taken back. The same goes
+for changes you suggest to somebody else&#39;s scenario. Only publish what you made yourself, or what is
+already free to give away like this. The game says so before you publish, the post form asks you to
+confirm it, and the exported file carries it.</p>
 <p>Build a scenario in <a href="/wiki/editor/">the map editor</a>, then publish it from its card. The game
 exports the bundle locally and opens the hub&#39;s post form with the details filled in; you attach
 the bundle and post it.</p>
@@ -257,6 +253,8 @@ in-game can always be downloaded from the repository directly and imported with 
     <a href="/wiki/">Wiki</a> ·
     <a href="https://github.com/Open-Historia/open-historia" target="_blank" rel="noopener">GitHub</a> ·
     <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">Discord</a> ·
+    <a href="/privacy/">Privacy</a> ·
+    <a href="/privacy/#choices" data-consent-open>Privacy choices</a> ·
     <a href="/sitemap.xml">Sitemap</a>
     <p class="foot-legal">Open Historia is an independent, open-source project and is not affiliated with, endorsed, sponsored, approved, or authorized by Pax Historia. Pax Historia has no involvement in the development, operation, or distribution of Open Historia. Pax Historia™ and all associated trademarks, trade names, and logos are the exclusive property of Pax Historia.</p>
   </div>

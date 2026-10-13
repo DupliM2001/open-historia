@@ -1,10 +1,12 @@
 /*! Open Historia — the loading screen's fonts, served with the game © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
-/* Cinzel and EB Garamond used to come from fonts.googleapis.com at runtime:
+/* Cinzel and EB Garamond used to come from Google Fonts at runtime:
    a request to Google on every start, and on a device with no network
    (the Android app, the desktop offline) the loading screen fell back to
    Georgia/serif. These are the same fonts, served from the bundle:
    Fontsource 5.3.0 builds, Latin and Latin Extended, only the faces
-   StartupScreen.jsx uses. SIL Open Font License 1.1 (OFL-*.txt beside them). */
+   StartupScreen.jsx uses. SIL Open Font License 1.1 (OFL-*.txt beside them).
+   The website's entry screen (runtime/web/homePage.js) is set in the same
+   faces; a weight it asks for that is not here is drawn in the nearest one. */
 
 /* Latin */
 @font-face {

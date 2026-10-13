@@ -56,6 +56,7 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
+import { SCENARIO_LICENSE_FILE, SCENARIO_LICENSE_TEXT, SCENARIO_LICENSE_URL } from "../../runtime/scenarioLicense.js";
 import { restoreBundleFiles, splitBundleFiles } from "../../runtime/bundleFiles.js";
 import { buildGameZipBlob, formatZipSize, readGameZip, saveGameZipToDisk } from "../../runtime/gameZip.js";
 import { saveBlobToDisk } from "../../runtime/saveFile.js";
@@ -1594,6 +1595,11 @@ const EditorDrawer = ({
           <div style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.82rem", lineHeight: 1.5, marginBottom: "0.85rem" }}>
             Download the scenario as one self-contained file — custom map geometry, cities and basemap all travel with it, ready to share or re-import. The <strong>.zip</strong> carries a custom basemap as a real image file (smaller, and the form the community hub expects); the <strong>JSON</strong> packs everything into one text file.
           </div>
+          <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: "10px", color: "rgba(255,255,255,0.88)", fontSize: "0.8rem", lineHeight: 1.5, marginBottom: "0.85rem", padding: "0.55rem 0.7rem" }}>
+            <div style={{ fontWeight: 700 }}>A scenario you post or share in any way is public domain (CC0 1.0).</div>
+            <div>Anyone may copy, change and share it, for any purpose, without asking or crediting you. The file says so.</div>
+            <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>What public domain means ↗</a>
+          </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
             <button className="oh-tap-row" onClick={() => onExportBundle("zip")} style={touchFit(actionButtonStyle, touch)} type="button">
               Download .zip
@@ -2746,6 +2752,8 @@ const LibraryTopBar = () => {
         const lifted = splitBundleFiles(bundle);
         Object.assign(files, lifted.files);
         files["scenario.json"] = JSON.stringify(lifted.bundle);
+        // Said in the file too, for whoever it reaches (scenarioLicense.js).
+        files[SCENARIO_LICENSE_FILE] = SCENARIO_LICENSE_TEXT;
         saveBlobToDisk(await zipBundle(files), `${id}-scenario.zip`);
       } else {
         saveJsonBundleToDisk(bundle, `${id}-scenario.json`);
