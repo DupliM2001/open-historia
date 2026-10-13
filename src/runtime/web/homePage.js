@@ -1,14 +1,17 @@
 /*! Open Historia — web-mode home / connect screen © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The website's entry screen: it automatically connects the player to the best
-// available content node (lowest latency + free capacity), lets them sign in
-// (Google), and enters the game. Injected as a full-screen overlay over the (already-mounted) game; web
-// build only, never in the local download.
+// available content node (lowest latency + free capacity) and enters the game.
+// Injected as a full-screen overlay over the (already-mounted) game; web build
+// only, never in the local download.
 
+// Cinzel + EB Garamond from the bundle, as the loading screen has them
+// (StartupScreen.jsx): this screen used to add a Google Fonts stylesheet, which
+// told Google about every visit before the visitor had pressed anything.
+import "../../assets/fonts/fonts.css";
 import { connectBestNode } from "./nodeConnect.js";
 import { isNativeApp } from "./nativeBoot.js";
 
 const ENTERED_KEY = "oh:entered";
-const FONTS_HREF = "https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap";
 
 // The independence notice, as it stands on the website: a legal text, shown as
 // written in every language.
@@ -73,11 +76,7 @@ const css = `
     .oh-bar>i{display:block;height:100%;background:var(--grad-gold);width:0;transition:width .5s ease}
     .oh-conn-sub{color:var(--sepia);font-size:.92rem;margin-top:12px;font-style:italic}
 
-    /* account + buttons */
-    .oh-acct{margin-top:20px;text-align:left}
-    .oh-h4{font-family:var(--display);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--bronze);margin:0 0 10px;text-align:center}
-    .oh-gbtn{display:flex;justify-content:center;min-height:44px}
-    .oh-msg{color:var(--sepia);font-size:.9rem;margin:9px 0 0;text-align:center}
+    /* buttons */
     .oh-btn{width:100%;font-family:var(--display);font-size:.9rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
       cursor:pointer;border-radius:11px;padding:14px 20px;border:1px solid transparent;transition:transform .12s ease,box-shadow .2s,background .2s}
       .oh-btn:hover{transform:translateY(-2px)}
@@ -215,9 +214,6 @@ const demoAcknowledged = () => {
 
       export const showHomePage = () => {
         if (typeof document === "undefined" || document.getElementById("oh-home-root")) return;
-        if (!document.getElementById("oh-home-fonts")) {
-          document.head.append(el("link", { id: "oh-home-fonts", rel: "stylesheet", href: FONTS_HREF }));
-        }
         document.head.append(el("style", { textContent: css }));
 
         connPanel = el("div", { className: "oh-conn" });
@@ -231,6 +227,8 @@ const demoAcknowledged = () => {
                         el("a", { href: "https://github.com/Open-Historia/open-historia", target: "_blank", rel: "noopener", textContent: "GitHub" }),
                         el("a", { href: "https://discord.gg/QaqAK7fQAg", target: "_blank", rel: "noopener", textContent: "Discord" }),
                         el("a", { href: "https://github.com/Open-Historia/open-historia-node", target: "_blank", rel: "noopener", textContent: "Host a node" }),
+                        // The site root's page: the game itself is under /play/.
+                        el("a", { href: "/privacy/", target: "_blank", rel: "noopener", textContent: "Privacy" }),
         );
 
         const card = el("div", { className: "oh-card" },

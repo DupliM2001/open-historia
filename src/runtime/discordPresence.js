@@ -4,8 +4,13 @@
 // The desktop app and the downloadable local server only: the website and the
 // Android app have no server beside a Discord app to talk through, so the
 // request is never made there.
-import { useEffect } from "react";
+//
+// The player can turn it off (Settings → General → Privacy, "Show what I am
+// playing on Discord"; on unless turned off). Off, nothing is reported, and the
+// goodbye is sent once so that what Discord is showing comes down at once.
+import { useEffect, useRef, useState } from "react";
 import { formatGameDateReadable } from "./gameDates.js";
+import { MAP_SETTING_KEYS, getMapSettingDefaultOn } from "./mapSettings.js";
 
 // Held back this long, so a burst of changes (a game opening, a jump landing)
 // is one request.
@@ -31,13 +36,56 @@ const onLocalServer = () => {
   }
 };
 
+// Whether this build has a Discord app to talk to at all, for Settings: the
+// switch is not shown where it could do nothing.
+export const presenceAvailable = onLocalServer;
+
+// The player's switch. Stored with the other on/off settings (mapSettings.js),
+// and on by default: only a stored "0" is off.
+export const presenceAllowed = () => getMapSettingDefaultOn(MAP_SETTING_KEYS.discordPresence);
+
+// The switch, followed live: Settings announces a change in this window
+// ("mapSettings:updated"), and the browser announces one made in another
+// window of the same game ("storage"), which would otherwise go on reporting
+// until it was reloaded.
+const usePresenceAllowed = () => {
+  const [allowed, setAllowed] = useState(presenceAllowed);
+  useEffect(() => {
+    const read = () => setAllowed(presenceAllowed());
+    read();
+    window.addEventListener("mapSettings:updated", read);
+    window.addEventListener("storage", read);
+    return () => {
+      window.removeEventListener("mapSettings:updated", read);
+      window.removeEventListener("storage", read);
+    };
+  }, []);
+  return allowed;
+};
+
+// The goodbye, sent when the player turns the switch off: a scene the server
+// does not know, which it reads as nothing to show.
+export const PRESENCE_GONE = { scene: "none" };
+
+const postPresence = (body) => {
+  fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {});
+};
+
 export const useDiscordPresence = (presence) => {
+  const allowed = usePresenceAllowed();
   const body = JSON.stringify(presence);
   useEffect(() => {
-    if (!onLocalServer()) return undefined;
-    const timer = setTimeout(() => {
-      fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {});
-    }, PRESENCE_DEBOUNCE_MS);
+    if (!onLocalServer() || !allowed) return undefined;
+    const timer = setTimeout(() => postPresence(body), PRESENCE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [body]);
+  }, [allowed, body]);
+
+  // Turned off while something may be showing: the goodbye, once, so Discord
+  // takes the activity down now. Nothing is sent for a switch that was already
+  // off when the page opened: nothing was reported.
+  const wasAllowed = useRef(allowed);
+  useEffect(() => {
+    if (wasAllowed.current && !allowed && onLocalServer()) postPresence(JSON.stringify(PRESENCE_GONE));
+    wasAllowed.current = allowed;
+  }, [allowed]);
 };

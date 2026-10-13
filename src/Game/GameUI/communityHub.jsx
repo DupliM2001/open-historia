@@ -30,6 +30,7 @@ import {
 } from "../../runtime/communityBasemaps.js";
 import { splitBundleFiles } from "../../runtime/bundleFiles.js";
 import { zipBundle } from "../../runtime/bundleZip.js";
+import { SCENARIO_LICENSE_FILE, SCENARIO_LICENSE_TEXT, SCENARIO_LICENSE_URL } from "../../runtime/scenarioLicense.js";
 import { sha256Hex } from "../../runtime/basemapLibrary.js";
 import { listFlags } from "../../runtime/flagLibrary.js";
 import {
@@ -580,6 +581,8 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
       const lifted = splitBundleFiles(bundle);
       Object.assign(files, lifted.files);
       files["scenario.json"] = JSON.stringify(lifted.bundle);
+      // Said in the file too, for whoever it reaches (scenarioLicense.js).
+      files[SCENARIO_LICENSE_FILE] = SCENARIO_LICENSE_TEXT;
       const fileName = `${scenario.id}-scenario.zip`;
       saveBlobToDisk(await zipBundle(files), fileName);
       if (coverBlob && coverDownloadName) saveBlobToDisk(coverBlob, coverDownloadName);
@@ -672,11 +675,21 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
             </a>
           </div>
 
+          <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.76rem", marginBottom: "0.7rem" }}>
+            Scenarios on the Hub are public domain (CC0 1.0): free to play, change and share.
+          </div>
+
           {publishPickerOpen && (
             <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "14px", marginBottom: "0.9rem", padding: "0.8rem" }}>
               <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.8rem", marginBottom: "0.55rem" }}>
                 Pick a scenario to publish. Its bundle downloads to your computer, and a prefilled hub post opens —
                 drag the downloaded file into the Description box there and submit.
+              </div>
+              {/* Said before the scenario is chosen: choosing one is what publishes it. */}
+              <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: "10px", color: "rgba(255,255,255,0.88)", fontSize: "0.8rem", lineHeight: 1.5, marginBottom: "0.6rem", padding: "0.55rem 0.7rem" }}>
+                <div style={{ fontWeight: 700 }}>Everything you publish to the Hub is public domain (CC0 1.0).</div>
+                <div>Anyone may copy, change and share it, for any purpose, without asking or crediting you. Only publish what you made yourself, or what is already free to give away like this.</div>
+                <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>What public domain means ↗</a>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
                 {scenarios.map((scenario) => (

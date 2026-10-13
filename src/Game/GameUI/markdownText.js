@@ -289,3 +289,43 @@ export const normalizeMarkdown = (value) => {
 
     return out.join("\n");
 };
+
+// Whether drawing the picture at `src` would ask somebody else for it.
+//
+// Markdown's ![alt](address) is drawn by the browser fetching the address, with
+// nobody pressing anything: a model, or the author of a scenario, who writes
+// one into a reply learns the address of every player whose screen shows it,
+// and when. So the renderer (markdown.jsx) draws a picture only when this says
+// no, and shows a link in its place otherwise.
+//
+// Somebody else is any address that is not the page's own: http(s) to another
+// host, "//host/…", and the spellings a browser reads the same way ("/\host").
+// The address is resolved the way the browser would resolve it rather than
+// matched by pattern, so there is no spelling to slip past. A data: picture is
+// its own bytes and asks nobody. The page's own server is not a picture shelf
+// either: under /api/ it answers requests, some of which fetch from elsewhere
+// (the community file route) and none of which a line of text should be making.
+//
+// `page` is the address the text is shown on; without one (node, a test) every
+// address that names a host counts as somebody else's.
+const NO_PAGE = "http://page.invalid/";
+
+export const imageLoadsElsewhere = (src, page = globalThis.location?.href) => {
+    const address = String(src ?? "").trim();
+    if (!address) return false;
+    if (/^data:/i.test(address)) return false;
+    let base;
+    try {
+        base = new URL(page || NO_PAGE);
+    } catch {
+        base = new URL(NO_PAGE);
+    }
+    let target;
+    try {
+        target = new URL(address, base);
+    } catch {
+        return true;
+    }
+    if (target.origin === "null" || target.origin !== base.origin) return true;
+    return /^\/api(?:\/|$)/i.test(target.pathname);
+};

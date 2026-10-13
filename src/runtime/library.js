@@ -10,6 +10,7 @@ import {
 import { logDebugEvent, setDebugLogContext } from "./debugLog.js";
 import { setActiveFeatures } from "./gameFeatures.js";
 import { enqueueContentStrings } from "./translator.js";
+import { withScenarioLicense } from "./scenarioLicense.js";
 
 const LIBRARY_API_ROOT = "/api/library";
 const SCENARIOS_API_ROOT = "/api/scenarios";
@@ -400,8 +401,10 @@ export const clearGameAsset = async (gameId, assetKey) => {
 
 // Always the whole scenario: geometry, cities, basemap, flags, colours, tags
 // and any custom tile archive. There is no light export.
+// Every scenario that leaves the game says it is public domain
+// (scenarioLicense.js): the record rides in the bundle itself.
 export const exportScenarioBundle = async (scenarioId) =>
-  requestJson(`${SCENARIOS_API_ROOT}/${encodeURIComponent(scenarioId)}/export`);
+  withScenarioLicense(await requestJson(`${SCENARIOS_API_ROOT}/${encodeURIComponent(scenarioId)}/export`));
 
 export const importScenarioBundle = async (bundle) => {
   const details = await requestJson(`${SCENARIOS_API_ROOT}/import`, {

@@ -13,6 +13,7 @@
 //     files/background.json a suggested basemap, when there is one
 
 import { zipBundle, unzipBundle, looksLikeZip } from "./bundleZip.js";
+import { SCENARIO_LICENSE_FILE, SCENARIO_LICENSE_TEXT, scenarioLicense } from "./scenarioLicense.js";
 import { countChanges, summarizeChangesForComment } from "./scenarioChanges.js";
 import { SUGGESTION_MARKER } from "./hubPosts.js";
 
@@ -132,7 +133,10 @@ export const buildSuggestionZip = async (suggestion) => {
     }
     return change;
   });
-  files["suggestion.json"] = JSON.stringify({ ...suggestion, changes });
+  // Suggested changes are public domain like the scenario they are for
+  // (scenarioLicense.js), and the file says so.
+  files["suggestion.json"] = JSON.stringify({ ...suggestion, changes, license: scenarioLicense() });
+  files[SCENARIO_LICENSE_FILE] = SCENARIO_LICENSE_TEXT;
   return zipBundle(files);
 };
 

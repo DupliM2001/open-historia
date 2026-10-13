@@ -2,7 +2,7 @@
 // Builds dist-site/: the marketing landing page (site/) at the root, and the web
 // game (dist-web/, built with `--base /play/`) under /play/. Deploy dist-site to
 // Cloudflare Pages so openhistoria.com serves the landing page and its "Play"
-// button opens the game (connect + sign-in screen) at /play/.
+// button opens the game (its entry screen) at /play/.
 import { rmSync, mkdirSync, cpSync, existsSync } from "node:fs";
 import path from "node:path";
 
@@ -28,8 +28,8 @@ const outDir = path.join(root, "dist-site");
 const ROOT_PAGES = [
   "wiki", "wiki.css",
   "guides", "get-started", "how-to-play", "ai-setup", "self-hosting",
-  "pax-historia-alternative", "sitemap", "save-move",
-  "guides.css", "robots.txt", "sitemap.xml",
+  "pax-historia-alternative", "privacy", "sitemap", "save-move",
+  "guides.css", "consent.js", "fonts", "robots.txt", "sitemap.xml",
 ];
 
 // Image assets referenced with absolute "/…" paths by BOTH the root guide pages and

@@ -1,6 +1,6 @@
 # Web Build (openhistoria.com)
 
-The web build is the browser-only edition of Open Historia served from the trusted central origin (openhistoria.com / the `/play/` site). It runs the **entire game client unchanged** with **zero server**: a `window.fetch` interceptor answers every same-origin `/api/*` call out of IndexedDB, heavy map tiles stream from a Cloudflare Worker proxy (or a hash-verified community node swarm), and optional magic-link/Google accounts sync your games as client-side-encrypted blobs. Everything in this page lives under `src/runtime/web/` and ships in the web build and in the Android app (`--mode android`, which sets `VITE_OH_WEB` too and adds `VITE_OH_NATIVE` — see [mobile.md](mobile.md)); it is dynamically imported behind `import.meta.env.VITE_OH_WEB` so it is dead-code-eliminated from the desktop download, which keeps its real same-origin Express server.
+The web build is the browser-only edition of Open Historia served from the trusted central origin (openhistoria.com / the `/play/` site). It runs the **entire game client unchanged** with **zero server**: a `window.fetch` interceptor answers every same-origin `/api/*` call out of IndexedDB, heavy map tiles stream from a Cloudflare Worker proxy (or a hash-verified community node swarm), and games stay in this browser: there are no accounts and no sync (§10). Everything in this page lives under `src/runtime/web/` and ships in the web build and in the Android app (`--mode android`, which sets `VITE_OH_WEB` too and adds `VITE_OH_NATIVE` — see [mobile.md](mobile.md)); it is dynamically imported behind `import.meta.env.VITE_OH_WEB` so it is dead-code-eliminated from the desktop download, which keeps its real same-origin Express server.
 
 See also: [Server build](server.md) (the Express store this mirrors), [World state](world-state.md), [Assets & PMTiles](assets-and-data.md), [Scenario & game library](runtime-services.md), [Community hub](runtime-services.md).
 
@@ -13,7 +13,7 @@ The whole web backend is behind one Vite mode flag. `.env.web` sets `VITE_OH_WEB
 | Step | Location | What happens |
 |---|---|---|
 | Gate | `src/main.jsx:28` | `if (import.meta.env.VITE_OH_WEB)` dynamically `import("./runtime/web/index.js")`, calls `installWebBackend()`, then `mount()`s the React app. Non-web builds just `mount()`. |
-| Entry | `src/runtime/web/index.js` | `installWebBackend()` — seed → install interceptor → accounts/sync → home page. |
+| Entry | `src/runtime/web/index.js` | `installWebBackend()` — seed → install interceptor → drop a leftover sign-in → home page. |
 | Content fetch | `src/runtime/assets.js` (`warmPmtilesArchive`) | For pmtiles, dynamically imports `web/contentTrust.js` and tries `fetchVerifiedBuffer(url)` (node swarm) before the origin; the origin's bytes are then held to the same signed manifest by `verifyOriginBuffer(url, buffer)`. A scenario's own archive skips both. |
 | Worker fetches | `src/runtime/assets.js` (`prepareWorkerFetchableUrl`) | Workers never see the `window.fetch` patch, so the scenario's regions GeoJSON reaches MapLibre's `custom-regions-source` and the cartography worker through a `blob:` copy (`Nations.jsx` via `useWorkerFetchableUrl`); the runtime URL stays the epoch/cache key. |
 
@@ -21,9 +21,8 @@ The whole web backend is behind one Vite mode flag. `.env.web` sets `VITE_OH_WEB
 
 1. `await ensureSeeded()` — write the default scenario into IndexedDB before any `/api` call (`libraryStore.js`).
 2. `installWebApiRouter()` — monkey-patch `window.fetch` (`router.js`).
-3. If the URL carries `?magic=<token>`, `redeemMagicToken()` then race a `syncNow()` (12 s cap) **before first render** so a signed-in user's games are already present, then strip the token from the URL with `history.replaceState`.
-4. `initAccountWidget()` — the corner sign-in/sync chip (`accountWidget.js`).
-5. If `shouldShowHome()` (not yet "entered" this tab session) → `showHomePage()`; otherwise `connectBestNode()` in the background.
+3. `forgetRetiredAccount()` — deletes what a sign-in from before accounts were removed left in `kv` (`retiredAccount.js`, §10). Not awaited.
+4. If `shouldShowHome()` (not yet "entered" this tab session) → `showHomePage()`; otherwise `connectBestNode()` in the background.
 
 Build scripts (`package.json`):
 
@@ -46,8 +45,6 @@ Every URL points at the **registry Worker** (`open-historia-registry.nichojkrol.
 | `VITE_OH_PMTILES_URL` | Worker `/content` | CORS+range proxy for the 60–100 MB pmtiles (Cloudflare Pages caps at 25 MB/file). Also the base for `default-regions.geojson`. Falls back to `/assets` (local dev). | `router.js:55`, `libraryStore.js:325` |
 | `VITE_OH_DIRECTORY_URL` | Worker `/node-directory.json` | The **signed** live node directory (updates as nodes are accepted/paused/banned). | `contentTrust.js:17` |
 | `VITE_OH_HUB_URL` | Worker root | Community-hub GitHub proxy (`/hub/*`), because GitHub attachments send no CORS. | `router.js:109` |
-| `VITE_OH_ACCOUNT_URL` | Worker root | Accounts (`/account/*`) + encrypted sync (`/sync/*`). | `account.js:11` |
-| `VITE_OH_GOOGLE_CLIENT_ID` | Google OAuth client id | Public client id for "Sign in with Google". Empty ⇒ Google button hidden (accounts effectively disabled). | `account.js:77` |
 | `VITE_OH_MANIFEST_URL` | *(unset)* → `/content-manifest.json` | Signed asset→hash manifest; ships with the build, same-origin default. | `contentTrust.js:18` |
 
 ---
@@ -56,7 +53,7 @@ Every URL points at the **registry Worker** (`open-historia-registry.nichojkrol.
 
 There is no Express server. `installWebApiRouter()` (`router.js:138`) replaces `window.fetch` once (`installed` guard). The wrapper:
 
-- Resolves the request URL against `location.href`. **Only** same-origin requests whose path starts with `/api/` are intercepted; everything else (AI providers, GitHub API, ESRI tiles, static assets, Google Identity, node URLs) passes straight to the saved `originalFetch`.
+- Resolves the request URL against `location.href`. **Only** same-origin requests whose path starts with `/api/` are intercepted; everything else (AI providers, GitHub API, ESRI tiles, static assets, node URLs) passes straight to the saved `originalFetch`.
 - Builds a real `Request`, dispatches to `route(request, url)`, and returns a real `Response` — so all the existing client code (`src/runtime/library.js`, `src/runtime/assets.js`, `documentIO.js`, `basemapLibrary.js`) runs **unchanged**.
 - On throw: `SyntaxError` (bad JSON body) → `400`, anything else → `500` (mirrors Express body-parser behavior).
 
@@ -106,9 +103,9 @@ A dependency-free promise wrapper. Database `open-historia-web`, `DB_VERSION = 2
 | `basemapMeta` | `id` | basemap metadata |
 | `basemapPayload` | `id` | basemap binary payloads |
 | `flags` | `id` | flag records |
-| `kv` | `key` | small singletons (manifests, ui-settings, `seeded`, sync versions, account session/DEK) |
+| `kv` | `key` | small singletons (manifests, ui-settings, `seeded`) |
 
-Helpers: `idbGet`, `idbGetAll`, `idbPut`, `idbDelete`, `idbUpdate` (read-modify-write one record), and kv-specific `kvGet(key, fallback)`, `kvPut`, `kvUpdate`. `runTx` resolves on transaction **commit** (via `oncomplete`), not merely on request success, so writes are durable before a caller reads back.
+Helpers: `idbGet`, `idbGetAll`, `idbPut`, `idbDelete`, and kv-specific `kvGet(key, fallback)`, `kvPut`, `kvUpdate`. `runTx` resolves on transaction **commit** (via `oncomplete`), not merely on request success, so writes are durable before a caller reads back.
 
 ---
 
@@ -254,7 +251,7 @@ Because every byte is hash-verified, an un-vetted node can at worst be useless; 
 | `/oh/v1/content/<sha256>` | GET | fetch a hash-addressed content blob |
 | `/oh/v1/hub?url=…` | GET | node-served community bundle download |
 
-A 20 s heartbeat re-selects a node if the current one goes draining/full/unreachable. `reportPresence(nodeId)` (`account.js:48`) tells the **registry** (not the node) which node a **signed-in** player is on so the admin panel can show connectivity — a node itself never learns a player's identity; signed-out players report nothing.
+A 20 s heartbeat re-selects a node if the current one goes draining/full/unreachable. Nothing tells the registry which node a player is on: the presence report that a signed-in player's browser used to send went with accounts (§10). A node sees the address of whoever fetches from it, and never an identity.
 
 ---
 
@@ -265,50 +262,16 @@ A full-screen parchment/Roman overlay injected over the already-mounted game on 
 | Control | Behavior |
 |---|---|
 | Connection panel | "Finding the nearest node…" → connected node card (**anonymous node id only**, region, latency, `players/max` bar) or "Connected via the origin" fallback. Fed by `connectBestNode()` → `renderConnection`. |
-| Account section | Google sign-in button (via Google Identity Services), or "Signed in as …" + Sign out. Hidden if `!accountConfigured()` or no `googleClientId()`. |
 | **⚔ Enter Open Historia** | `enter()` — sets the `oh:entered` flag and removes the overlay. |
-| Footer links | GitHub, Discord, Host a node. |
+| Footer links | GitHub, Discord, Host a node, Privacy (`/privacy/`, the site root's page). |
+
+Its fonts are the bundle's (`src/assets/fonts/fonts.css`, the loading screen's Cinzel and EB Garamond): the screen loads no stylesheet from another host (`src/noGoogleFonts.test.js`).
 
 ---
 
-## 10. Accounts + end-to-end-encrypted sync
+## 10. Accounts and sync (removed)
 
-Optional, web-only. The registry Worker only ever stores **ciphertext** and the wrapped data key — it never sees plaintext saves.
-
-### `account.js` — identity + client crypto
-
-- **Session** lives in `kv` (`account:session`) so it survives reloads; email in `account:email`; the raw 32-byte **DEK** cached in memory + `kv` (`account:dek`), **never uploaded** in the clear.
-- Sign-in: magic link (`requestMagicLink` → email; `redeemMagicToken` from `?magic=`) or Google (`signInWithGoogle` hands the GIS credential to `/account/google`). Both establish a session then `ensureDek(session, hasKey)`.
-- `ensureDek`: existing account → pull the DEK from `/account/key`; first sign-in ever → generate `crypto.getRandomValues(32)` and register it. The Worker stores it wrapped under (a) the **offline admin master key** (recovery) and (b) a Worker secret (cross-device delivery).
-- **Crypto:** `encryptRecord`/`decryptRecord` are AES-256-GCM to/from `base64(iv‖ciphertext)`. `encodeRecord`/`decodeRecord` preserve binary fields (`Uint8Array`/`ArrayBuffer` → `{__u8:base64}`) so a full record with cover/pmtiles bytes round-trips through JSON.
-- **Fingerprint:** `recordFingerprint` hashes a `syncHashView` that **excludes** `lastPlayedAt`/`playCount` (`VOLATILE_META_FIELDS`) — merely *opening* a game bumps those, and hashing them would re-upload heavy blobs for a stat tick nobody edited. The ciphertext still encodes the full record, so stats ride along on the next genuine edit.
-
-### `sync.js` — the reconciliation engine
-
-Full-scan model (compare local SHA-256 vs last-synced version), so no write can be missed. **v1 scope = games + scenarios + their catalog manifests** (map-editor docs and basemaps wait for R2). Each record → one blob (`games:<id>`, `scenarios:<id>`, `kv:<manifest>`).
-
-- `syncNow()` (`:128`) runs `pull` then `push`, persisting `sync:versions` (`{blob_id:{version,sha?,deleted?}}`, device-local, never synced). Emits `oh:sync` events (`syncing`/`ok`/`error`) — but only flashes "Syncing…" once **real** work starts, so an empty 20 s poll doesn't look like a phantom upload.
-- `pull`: apply any server blob newer than known version (decrypt → `idbPut`/`kvPut`), or tombstone deletions. A single bad blob is caught per-item so it can't red-line the whole sync.
-- `push`: upload locally-changed records (`sha` differs); on **409 conflict** it's **last-writer-wins = take the server copy**; `413` = too large (waits for R2); then tombstone records gone locally.
-- `startSync()` runs `syncNow` immediately, every 20 s, and on tab `visibilitychange`→hidden.
-
-### Transport endpoints (session-authed, `Bearer <session>`)
-
-| Endpoint | Method | Returns |
-|---|---|---|
-| `/account/request` | POST | send magic link (`{ok, devLink?}`) |
-| `/account/verify` | POST | `{email, session, hasKey}` |
-| `/account/google` | POST | `{email, session, hasKey}` |
-| `/account/key` | GET / POST | fetch / register the DEK |
-| `/account/presence` | POST | report `{nodeId}` (admin visibility) |
-| `/sync/manifest` | GET | `[{blob_id, version, deleted}]` |
-| `/sync/blob?id=` | GET | `{ciphertext, sha256, version, deleted}` |
-| `/sync/blob?id=` | PUT | `200 {version}` \| `409 {conflict,current}` \| `413` |
-| `/sync/blob?id=` | DELETE | tombstone |
-
-### `accountWidget.js` — the corner chip
-
-A fixed top-right sign-in/sync control (DOM, not React). A colored dot shows sync state (idle/ok=green/syncing=amber/error=red); the panel offers Google sign-in when signed out, or **Sync now** / **Sign out** when signed in. Listens for `oh:sync` (status) and `oh:auth` (start/stop `startSync`) events.
+The web build used to offer optional magic-link/Google accounts with encrypted sync of games and scenarios through the registry Worker. The saves were encrypted in the browser before upload (AES-256-GCM), but the sync was not end-to-end: each account's data key was sent to the Worker, which kept it wrapped under keys the project held (an admin master key for recovery, a Worker secret for handing it to the player's other devices), so the project could have recovered the key and read them. Both were removed: games live in this browser's IndexedDB and move between devices by game export/import. The client code (`account.js`, `sync.js`, `accountWidget.js`), the `VITE_OH_ACCOUNT_URL`/`VITE_OH_GOOGLE_CLIENT_ID` settings, the presence reports to the registry and the `oh:turn-complete` event that only the sync engine listened for are gone, and the game calls none of the Worker's `/account/*` or `/sync/*` routes. The one piece left is `retiredAccount.js`, which deletes a leftover session, email, data key and sync version table (`account:session`, `account:email`, `account:dek`, `sync:versions`) from `kv` at boot (§1), so a browser that signed in before the removal no longer holds an identity the player cannot see.
 
 ---
 
@@ -337,7 +300,7 @@ The interceptor also answers these through the same `ctx` handler pattern (retur
 | Cover image URL | fetchable `/api/.../assets/cover?token=` | base64 `data:` URL (bypasses the fetch interceptor) — see §6 |
 | PMTiles hosting | served by the server | Worker CORS+range proxy + hash-verified node swarm; default `regions.geojson` fetched from the content origin, not seeded |
 | Default scenario | full data on disk | seeded from `generated/defaultScenario.js`; big geometry fetched on demand |
-| Accounts / sync | n/a | magic-link/Google + AES-256-GCM E2E sync (`account.js`/`sync.js`) |
+| Accounts / sync | n/a | none: saves stay in this browser and move by export/import (§10) |
 | Community bundle download | direct | proxied via Worker `/hub/file` or a connected node (CORS) |
 | Code shipped | this whole tree stripped out | this whole tree, behind `VITE_OH_WEB` |
 
@@ -353,13 +316,12 @@ The interceptor also answers these through the same `ctx` handler pattern (retur
 | `src/runtime/web/libraryStore.js` | scenarios/games/runtime store + handlers |
 | `src/runtime/web/models.js` | constants, `resolveOwnerRef`, meta readers |
 | `src/runtime/web/util.js` | response builders, base64, SHA-256, range serving |
-| `src/runtime/web/account.js` | session, DEK, AES-GCM, sync transport |
-| `src/runtime/web/sync.js` | pull/push reconciliation engine |
-| `src/runtime/web/accountWidget.js` | corner sign-in/sync chip |
+| `src/runtime/web/retiredAccount.js` | deletes a leftover sign-in from `kv` at boot |
+| `src/runtime/web/fakeIndexedDb.js` | in-memory IndexedDB for node tests of the stores (never bundled) |
 | `src/runtime/web/homePage.js` | entry/connect overlay |
 | `src/runtime/web/contentTrust.js` | verified node-swarm content fetch |
 | `src/runtime/web/trust.js` | Ed25519 signed-manifest verification |
-| `src/runtime/web/nodeConnect.js` | node selection + heartbeat + presence |
+| `src/runtime/web/nodeConnect.js` | node selection + heartbeat |
 | `src/runtime/web/settingsStore.js` | ui-settings + language handlers |
 | `src/runtime/web/basemapStore.js` / `flagStore.js` / `editorStore.js` | secondary store handlers |
 | `trust/pinned-key.js` | pinned root public key(s) |

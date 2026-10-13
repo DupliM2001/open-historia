@@ -4,6 +4,12 @@ Copyright (C) 2026 Open Historia
 
 This project is licensed under the terms of the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See the [LICENSE](LICENSE) file for details.
 
+## Scenarios Are Public Domain
+
+The licence above covers the game's code. **Scenarios are different: every scenario made in Open Historia that is posted or shared in any way is public domain.** Whoever posts or shares one dedicates it to the public domain under the [Creative Commons CC0 1.0 Public Domain Dedication](https://creativecommons.org/publicdomain/zero/1.0/): anyone may copy, change, publish and use it, for any purpose, without asking and without giving credit. The same goes for changes suggested to a scenario on the [Scenario Hub](https://github.com/Open-Historia/Open-historia-scenarios).
+
+The game says so on the screens a scenario leaves it from, and writes it into every exported file (`PUBLIC-DOMAIN.txt` in a `.zip`, a `license` record in the scenario's JSON). It does not cover material that was never the poster's to give away, or a detailed map a scenario only names, which keeps the licence on its own post.
+
 Contributions are accepted under the [Contributor Copyright Assignment Agreement](CLA.md), which assigns the copyright in contributions to the Open Historia Organisation. CLA Assistant asks you to sign it on your first pull request; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 <!-- Open Historia — portions (install, Android app, hub & preset docs) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). -->
@@ -102,7 +108,8 @@ Download **`open-historia.apk`** from the
 and open it to install (allow installs from your browser when Android asks).
 Everything is on the phone: your saves and scenarios, the scenario workshop and
 the world map — it plays in airplane mode from the first launch. The community
-hub and your own AI provider are the only things that use the network. A model
+hub, your own AI provider, the update check and the map's imagery and flags are what
+use the network; the [privacy policy](https://openhistoria.com/privacy/) lists them. A model
 running on your own network (Ollama, LM Studio) works too, with no CORS setup.
 
 <details>
