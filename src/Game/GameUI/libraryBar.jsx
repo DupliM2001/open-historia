@@ -190,6 +190,137 @@ const actionButtonStyle = {
   transition: "background 0.18s ease, border-color 0.18s ease, transform 0.18s ease",
 };
 
+// The main menu's pages, in the order the rail shows them (the owner,
+// 2026-10-14: "restyle this ui so the tabs that are currently on top appear as
+// semi square buttons on a menu on the left side of the screen").
+const MENU_TABS = Object.freeze([
+  Object.freeze({ id: "games", label: "Games" }),
+  Object.freeze({ id: "scenarios", label: "Scenarios" }),
+  Object.freeze({ id: "community", label: "Community" }),
+]);
+const MENU_RAIL_WIDTH = "6.9rem";
+const MENU_RAIL_ICON = 22;
+
+// The rail's icons: one for each page, and Settings.
+const MenuIcon = ({ kind, size = MENU_RAIL_ICON }) => {
+  const common = {
+    fill: "none",
+    height: size,
+    stroke: "currentColor",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 1.9,
+    viewBox: "0 0 24 24",
+    width: size,
+  };
+  switch (kind) {
+    case "games":
+      return (
+        <svg aria-hidden="true" {...common}>
+          <rect x="3.5" y="5" width="17" height="14" rx="3" />
+          <path d="m10.3 9.2 4.5 2.8-4.5 2.8z" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "scenarios":
+      return (
+        <svg aria-hidden="true" {...common}>
+          <path d="M9 4.5 3.5 6.5v13l5.5-2 6 2 5.5-2v-13l-5.5 2z" />
+          <path d="M9 4.5v13M15 6.5v13" />
+        </svg>
+      );
+    case "community":
+      return (
+        <svg aria-hidden="true" {...common}>
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M3.5 12h17" />
+          <path d="M12 3.5c2.3 2.3 3.5 5.2 3.5 8.5s-1.2 6.2-3.5 8.5c-2.3-2.3-3.5-5.2-3.5-8.5s1.2-6.2 3.5-8.5z" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg aria-hidden="true" {...common}>
+          <circle cx="12" cy="12" r="3.2" />
+          <path d="M12 2.7v2.1M12 19.2v2.1M4.7 12H2.6M21.4 12h-2.1M5.9 5.9l1.5 1.5M16.6 16.6l1.5 1.5M18.1 5.9l-1.5 1.5M7.4 16.6l-1.5 1.5" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+};
+
+// A page's button on the rail: a rounded square, its icon over its name.
+const railButtonStyle = (active) => ({
+  alignItems: "center",
+  background: active ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.035)",
+  border: `1px solid ${active ? "rgba(255,255,255,0.24)" : "rgba(255,255,255,0.07)"}`,
+  borderRadius: "16px",
+  boxShadow: active ? "inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 20px rgba(0,0,0,0.28)" : "none",
+  color: active ? "#ffffff" : "rgba(236,236,240,0.7)",
+  cursor: "pointer",
+  display: "flex",
+  flexDirection: "column",
+  flexShrink: 0,
+  fontSize: "0.74rem",
+  fontWeight: 700,
+  gap: "0.45rem",
+  height: "5.1rem",
+  justifyContent: "center",
+  letterSpacing: "0.01em",
+  padding: "0.5rem 0.3rem",
+  transition: actionButtonStyle.transition,
+  width: "5.4rem",
+});
+
+// The rail down the left of the main menu, on a screen wide enough for it: the
+// mark and the name, a rounded square for each page, and Settings at its
+// foot. A phone keeps the pages as a row across the top.
+const MenuRail = ({ activeTab, onTab, onOpenSettings }) => (
+  <nav
+    style={{
+      alignItems: "center",
+      background: "#0b0b0d",
+      borderRight: "1px solid rgba(255,255,255,0.08)",
+      display: "flex",
+      flexDirection: "column",
+      flexShrink: 0,
+      gap: "0.6rem",
+      overflowY: "auto",
+      padding: `calc(1rem + ${SAFE_TOP}) 0.75rem calc(1rem + ${SAFE_BOTTOM}) calc(0.75rem + ${SAFE_LEFT})`,
+      scrollbarWidth: "none",
+      width: `calc(${MENU_RAIL_WIDTH} + ${SAFE_LEFT})`,
+    }}
+  >
+    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexShrink: 0, gap: "0.45rem", marginBottom: "0.8rem" }}>
+      <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", height: "3.15rem", justifyContent: "center", overflow: "hidden", width: "3.15rem" }}>
+        <img alt="" src="/logo.png" style={{ height: "2.05rem", width: "2.05rem" }} />
+      </div>
+      <div style={{ color: "#fff", fontSize: "0.8rem", fontWeight: 800, letterSpacing: "-0.01em", lineHeight: 1.15, textAlign: "center" }}>
+        Open Historia
+      </div>
+    </div>
+    {MENU_TABS.map((tab) => (
+      <button
+        key={tab.id}
+        aria-current={activeTab === tab.id ? "page" : undefined}
+        className="oh-tap-row"
+        onClick={() => onTab(tab.id)}
+        style={railButtonStyle(activeTab === tab.id)}
+        type="button"
+      >
+        <MenuIcon kind={tab.id} />
+        <span>{tab.label}</span>
+      </button>
+    ))}
+    <div style={{ flex: 1, minHeight: "0.6rem" }} />
+    {typeof onOpenSettings === "function" && (
+      <button className="oh-tap-row" onClick={onOpenSettings} style={railButtonStyle(false)} type="button">
+        <MenuIcon kind="settings" />
+        <span>Settings</span>
+      </button>
+    )}
+  </nav>
+);
+
 // On a touch screen .oh-tap / .oh-tap-row (styles.css) make a control a
 // finger's 44 px, but a min-height written inline beats a class, and every pill
 // in this file writes one. So where a finger is the pointer the inline floor is
@@ -1662,7 +1793,7 @@ const EditorDrawer = ({
   );
 };
 
-const LibraryTopBar = () => {
+const LibraryTopBar = ({ onOpenSettings } = {}) => {
   const {
     activeGame,
     activeGameId,
@@ -3669,7 +3800,11 @@ const LibraryTopBar = () => {
       />
 
       {/* The Main Menu: a full page over everything in-game. Opens on app start
-          (module default) and via Exit Game; closes only by entering a game. */}
+          (module default) and via Exit Game; closes only by entering a game.
+          On a wide screen its pages are a rail down the left (MenuRail) and
+          each page has a header of its own: its name, and its actions. On a
+          phone the pages are a row across the top, and the actions head the
+          page by name. */}
       <Presence open={menuOpen}>
         <div
           style={{
@@ -3677,75 +3812,69 @@ const LibraryTopBar = () => {
               "#0f0f11",
             color: "#fff",
             display: "flex",
-            flexDirection: "column",
+            flexDirection: isMobile ? "column" : "row",
             fontFamily: "sans-serif",
             inset: 0,
             position: "fixed",
             zIndex: 10046,
           }}
         >
-          <div
-            style={{
-              alignItems: "center",
-              borderBottom: "1px solid rgba(255,255,255,0.08)",
-              display: "grid",
-              flexShrink: 0,
-              gap: isMobile ? "0.4rem" : "0.9rem",
-              // Three columns keeps the tabs optically centred on a desktop. A
-              // phone has room for the three tabs and nothing more: the logo —
-              // decorative, and its wordmark already hidden there — gives up its
-              // space, and the tab's own actions move down to head the page,
-              // where they have room for their names (below).
-              gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) auto minmax(0, 1fr)",
-              // Clear of a status bar the page draws under, and of a notch at
-              // the side in landscape; every inset is 0 on a desktop.
-              height: `calc(${BAR_HEIGHT}px + ${SAFE_TOP})`,
-              padding: `${SAFE_TOP} calc(${isMobile ? "0.5rem" : "1rem"} + ${SAFE_RIGHT}) 0 calc(${isMobile ? "0.5rem" : "1rem"} + ${SAFE_LEFT})`,
-            }}
-          >
-            {!isMobile && (
-              <div style={{ alignItems: "center", display: "flex", gap: "0.8rem", minWidth: 0 }}>
-                <div style={{ alignItems: "center", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "999px", display: "flex", flexShrink: 0, height: "2.65rem", justifyContent: "center", overflow: "hidden", width: "2.65rem" }}>
-                  <img alt="Open Historia" src="/logo.png" style={{ height: "1.7rem", width: "1.7rem" }} />
-                </div>
-                <div style={{ color: "#fff", fontSize: "1.05rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
-                  Open Historia
-                </div>
+          {isMobile ? (
+            <div style={{ borderBottom: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+              <div
+                style={{
+                  alignItems: "center",
+                  display: "flex",
+                  gap: "0.55rem",
+                  // Clear of a status bar the page draws under, and of a notch
+                  // at the side in landscape.
+                  height: `calc(${BAR_HEIGHT}px + ${SAFE_TOP})`,
+                  overflowX: "auto",
+                  padding: `${SAFE_TOP} calc(0.5rem + ${SAFE_RIGHT}) 0 calc(0.5rem + ${SAFE_LEFT})`,
+                  scrollbarWidth: "none",
+                }}
+              >
+                {MENU_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    aria-current={activeTab === tab.id ? "page" : undefined}
+                    className="oh-tap-row"
+                    onClick={() => setActiveTab(tab.id)}
+                    style={touchFit({
+                      ...actionButtonStyle,
+                      background: activeTab === tab.id ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
+                      borderColor: activeTab === tab.id ? "rgba(255,255,255,0.19)" : "rgba(255,255,255,0.08)",
+                      minWidth: "0",
+                      padding: "0.55rem 0.6rem",
+                    }, touch)}
+                    type="button"
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+          ) : (
+            <MenuRail activeTab={activeTab} onOpenSettings={onOpenSettings} onTab={setActiveTab} />
+          )}
 
+          <div style={{ display: "flex", flex: 1, flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+          {!isMobile && (
             <div
               style={{
                 alignItems: "center",
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
                 display: "flex",
-                gap: "0.55rem",
-                justifyContent: isMobile ? "flex-start" : "center",
-                justifySelf: "center",
-                minWidth: 0,
-                overflowX: "auto",
-                scrollbarWidth: "none",
+                flexShrink: 0,
+                gap: "0.9rem",
+                height: `calc(${BAR_HEIGHT}px + ${SAFE_TOP})`,
+                justifyContent: "space-between",
+                padding: `${SAFE_TOP} calc(1.6rem + ${SAFE_RIGHT}) 0 1.6rem`,
               }}
             >
-              {["games", "scenarios", "community"].map((tab) => (
-                <button
-                  key={tab}
-                  className="oh-tap-row"
-                  onClick={() => setActiveTab(tab)}
-                  style={touchFit({
-                    ...actionButtonStyle,
-                    background: activeTab === tab ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
-                    borderColor: activeTab === tab ? "rgba(255,255,255,0.19)" : "rgba(255,255,255,0.08)",
-                    minWidth: isMobile ? "0" : "6.6rem",
-                    padding: isMobile ? "0.55rem 0.6rem" : undefined,
-                  }, touch)}
-                  type="button"
-                >
-                  {tab === "games" ? "Games" : tab === "scenarios" ? "Scenarios" : "Community"}
-                </button>
-              ))}
-            </div>
-
-            {!isMobile && (
+              <h1 style={{ color: "#fff", fontSize: "1.42rem", fontWeight: 800, letterSpacing: "-0.03em", margin: 0, minWidth: 0 }}>
+                {MENU_TABS.find((tab) => tab.id === activeTab)?.label ?? ""}
+              </h1>
               <div style={{ alignItems: "center", display: "flex", flexShrink: 0, gap: "0.55rem", justifyContent: "flex-end" }}>
                 {tabActions.map(({ label, run }) => (
                   // padding: undefined leaves these the browser's own padding in
@@ -3755,10 +3884,10 @@ const LibraryTopBar = () => {
                   </button>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? `1.1rem calc(0.8rem + ${SAFE_RIGHT}) calc(2.5rem + ${SAFE_BOTTOM}) calc(0.8rem + ${SAFE_LEFT})` : `1.5rem calc(1.6rem + ${SAFE_RIGHT}) calc(3rem + ${SAFE_BOTTOM}) calc(1.6rem + ${SAFE_LEFT})` }}>
+          <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? `1.1rem calc(0.8rem + ${SAFE_RIGHT}) calc(2.5rem + ${SAFE_BOTTOM}) calc(0.8rem + ${SAFE_LEFT})` : `1.5rem calc(1.6rem + ${SAFE_RIGHT}) calc(3rem + ${SAFE_BOTTOM}) 1.6rem` }}>
             {/* Phones: the tab's actions head the page, by name. In the bar they
                 were a bare ⟳ and ⬆ named only by a tooltip, which a finger
                 never sees, and the bar has no room for words beside the tabs. */}
@@ -3911,6 +4040,7 @@ const LibraryTopBar = () => {
                 </MenuRow>
               </>
             )}
+          </div>
           </div>
         </div>
       </Presence>

@@ -518,7 +518,12 @@ const Main = ({
   return (
     <>
       {showWebGLWarning && <WebGLWarningPopup />}
-      <LibraryTopBar />
+      {/* The main menu's Settings opens the settings themselves, on General:
+          the quick menu is drawn under the main menu. */}
+      <LibraryTopBar onOpenSettings={() => {
+        setSettingsInitialSection("general");
+        setIsSettingsOpen(true);
+      }} />
       <DateWidget
         activePanel={activeBottomPanel}
         mapRef={mapRef}

@@ -640,12 +640,15 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
         />
       ) : (
         <>
-          <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.9rem" }}>
-            <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.78rem" }}>
+          {/* The page's help on the left, wrapping in its own room, and its
+              controls together on the right: beside the main menu's rail the
+              row is narrower, and the controls must not be pushed apart. */}
+          <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem 1rem", marginBottom: "0.9rem" }}>
+            <div style={{ color: "rgba(255,255,255,0.55)", flex: "1 1 20rem", fontSize: "0.78rem", lineHeight: 1.5, minWidth: 0 }}>
               Community scenarios from the hub — ⬇ = imports, 👍 = likes. Open any post to 👍 like or 💬 comment on GitHub.
               {" "}<span style={{ color: "#e4e4e7" }}>The OFFICIAL badge marks a post made by a team member of the game.</span>
             </div>
-            <div style={{ flex: 1 }} />
+            <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.5rem", justifyContent: "flex-end", marginLeft: "auto" }}>
             <input
               type="text"
               className="oh-tap-row"
@@ -673,6 +676,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
               <DiscordMark size="1.05rem" />
               Join the Discord
             </a>
+            </div>
           </div>
 
           <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.76rem", marginBottom: "0.7rem" }}>

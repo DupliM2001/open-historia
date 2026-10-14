@@ -134,7 +134,9 @@ Both launchers use `hasOpened` latches so the panel body isn't mounted until fir
 
 ### 4.2 Menu chrome
 
-Full-page overlay at z 10046. Header is a 3-column grid: **logo/title** | **tab buttons** | **actions**.
+Full-page overlay at z 10046. On a wide screen the pages are a **rail down the left** (`MenuRail` in `libraryBar.jsx`, 6.9rem wide): the logo and the name at its head, a rounded square (16px corners, icon over name) for each of `MENU_TABS` (Games, Scenarios, Community; the open one marked `aria-current="page"`), and **Settings** at its foot (opens the settings on General). Right of it, each page has a header of its own: the page's name as an `<h1>` and that page's actions. On a phone the pages stay a row of buttons across the top and the actions head the page by name.
+
+Scrollbars everywhere are thin and dark (`styles.css`: `scrollbar-color: rgba(255, 255, 255, 0.16) transparent`, brighter on hover, a `::-webkit-scrollbar` fallback where `scrollbar-color` is unsupported) so they never show as a white bar.
 
 | Tab | Content | Component |
 |---|---|---|

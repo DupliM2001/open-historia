@@ -393,6 +393,44 @@ body {
   pointer-events: none !important;
 }
 
+/* Scrollbars: thin and dark, so they do not stand out against the dark
+   interface (the owner: "restyle all the scroll bars so they dont stand out
+   so much being white"). The thumb is a faint light grey on no track, a little
+   brighter while the pointer is over what scrolls. `scrollbar-color` is
+   inherited, so this reaches every scrolling element; `scrollbar-width` is
+   not, so it is set on each, and a style that hides a scrollbar outright
+   (scrollbarWidth: "none" written inline) still wins. Browsers that do not
+   know these properties are given the same look the older way. */
+:root {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+* {
+  scrollbar-width: thin;
+}
+*:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    background: transparent;
+    height: 10px;
+    width: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-clip: padding-box;
+    background-color: rgba(255, 255, 255, 0.16);
+    border: 2px solid transparent;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.28);
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
 button,
 [role="button"],
 a,
