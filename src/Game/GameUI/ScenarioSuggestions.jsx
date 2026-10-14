@@ -559,7 +559,7 @@ export const SuggestChangesDialog = ({ scenario, onClose, onUpdate = null }) => 
               <MapChangeSummary changes={mapChanges} />
             </div>
           )}
-          <div style={quietTextStyle}>Changes you suggest are public domain (CC0 1.0), like the scenario they are for.</div>
+          <div style={quietTextStyle}>Changes you suggest are released under CC BY 4.0, like the scenario they are for.</div>
           <div>
             <label style={labelStyle}>Your name (optional)</label>
             <input style={inputStyle} value={by} onChange={(event) => setBy(event.target.value)} maxLength={80} />

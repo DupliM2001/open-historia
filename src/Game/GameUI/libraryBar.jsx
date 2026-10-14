@@ -1596,9 +1596,9 @@ const EditorDrawer = ({
             Download the scenario as one self-contained file — custom map geometry, cities and basemap all travel with it, ready to share or re-import. The <strong>.zip</strong> carries a custom basemap as a real image file (smaller, and the form the community hub expects); the <strong>JSON</strong> packs everything into one text file.
           </div>
           <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: "10px", color: "rgba(255,255,255,0.88)", fontSize: "0.8rem", lineHeight: 1.5, marginBottom: "0.85rem", padding: "0.55rem 0.7rem" }}>
-            <div style={{ fontWeight: 700 }}>A scenario you post or share in any way is public domain (CC0 1.0).</div>
-            <div>Anyone may copy, change and share it, for any purpose, without asking or crediting you. The file says so.</div>
-            <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>What public domain means ↗</a>
+            <div style={{ fontWeight: 700 }}>A scenario you post or share in any way is released under CC BY 4.0.</div>
+            <div>The file says so.</div>
+            <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>About CC BY 4.0 ↗</a>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
             <button className="oh-tap-row" onClick={() => onExportBundle("zip")} style={touchFit(actionButtonStyle, touch)} type="button">

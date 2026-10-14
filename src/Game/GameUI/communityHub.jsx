@@ -676,7 +676,7 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
           </div>
 
           <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.76rem", marginBottom: "0.7rem" }}>
-            Scenarios on the Hub are public domain (CC0 1.0): free to play, change and share.
+            Scenarios on the Hub are released under CC BY 4.0.
           </div>
 
           {publishPickerOpen && (
@@ -687,9 +687,9 @@ const CommunityPanel = ({ fullPage = false, onImported }) => {
               </div>
               {/* Said before the scenario is chosen: choosing one is what publishes it. */}
               <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: "10px", color: "rgba(255,255,255,0.88)", fontSize: "0.8rem", lineHeight: 1.5, marginBottom: "0.6rem", padding: "0.55rem 0.7rem" }}>
-                <div style={{ fontWeight: 700 }}>Everything you publish to the Hub is public domain (CC0 1.0).</div>
-                <div>Anyone may copy, change and share it, for any purpose, without asking or crediting you. Only publish what you made yourself, or what is already free to give away like this.</div>
-                <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>What public domain means ↗</a>
+                <div style={{ fontWeight: 700 }}>Everything you publish to the Hub is released under CC BY 4.0.</div>
+                <div>Only publish what you made yourself, or what you may share under this licence.</div>
+                <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>About CC BY 4.0 ↗</a>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
                 {scenarios.map((scenario) => (

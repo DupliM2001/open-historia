@@ -4,57 +4,11 @@ Copyright (C) 2026 Open Historia
 
 This project is licensed under the terms of the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See the [LICENSE](LICENSE) file for details.
 
-## Scenarios Are Public Domain
+## Scenarios Are Released Under CC BY 4.0
 
-The licence above covers the game's code. **Scenarios are different: every scenario made in Open Historia that is posted or shared in any way is public domain.** Whoever posts or shares one dedicates it to the public domain under the [Creative Commons CC0 1.0 Public Domain Dedication](https://creativecommons.org/publicdomain/zero/1.0/): anyone may copy, change, publish and use it, for any purpose, without asking and without giving credit. The same goes for changes suggested to a scenario on the [Scenario Hub](https://github.com/Open-Historia/Open-historia-scenarios).
+The licence above covers the game's code. **Scenarios are different: every scenario made in Open Historia that is posted or shared in any way is released under the [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) licence (CC BY 4.0).** The same goes for changes suggested to a scenario on the [Scenario Hub](https://github.com/Open-Historia/Open-historia-scenarios).
 
-The game says so on the screens a scenario leaves it from, and writes it into every exported file (`PUBLIC-DOMAIN.txt` in a `.zip`, a `license` record in the scenario's JSON). It does not cover material that was never the poster's to give away, or a detailed map a scenario only names, which keeps the licence on its own post.
-
-Contributions are accepted under the [Contributor Copyright Assignment Agreement](CLA.md), which assigns the copyright in contributions to the Open Historia Organisation. CLA Assistant asks you to sign it on your first pull request; see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-<!-- Open Historia — portions (install, Android app, hub & preset docs) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). -->
-<h1 align="center">Open Historia</h1>
-
-<div align="center">
-  <strong>An open-source, better alternative to <a href="https://www.paxhistoria.co/games">Pax Historia</a>.</strong>
-</div>
-
-> **Open Historia is an independent, open-source project** and is not affiliated with, endorsed, sponsored, approved, or authorized by Pax Historia. Pax Historia has no involvement in the development, operation, or distribution of Open Historia. Pax Historia™ and all associated trademarks, trade names, and logos are the exclusive property of Pax Historia.
-
-<br />
-
-<div align="center">
-  <!-- Discord -->
-  <a href="https://discord.gg/QaqAK7fQAg">
-    <img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&logo=discord&logoColor=white"
-      alt="Discord" />
-  </a>
-  <!-- Reddit -->
-  <a href="https://www.reddit.com/r/OpenHistoria">
-    <img src="https://img.shields.io/badge/reddit-r%2FOpenHistoria-FF4500.svg?style=flat-square&logo=reddit&logoColor=white"
-      alt="Reddit" />
-  </a>
-  <!-- License -->
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg?style=flat-square"
-      alt="License: AGPL-3.0" />
-  </a>
-  <!-- Status -->
-  <a href="#">
-    <img src="https://img.shields.io/badge/status-early%20development-orange.svg?style=flat-square"
-      alt="Early Development" />
-  </a>
-</div>
-
-<div align="center">
-  <sub>Built with ❤︎ by <a href="https://github.com/Open-Historia/open-historia/graphs/contributors">contributors</a>.
-</div>
-
-<br />
-<br />
-
-![](https://github.com/Open-Historia/open-historia/blob/main/public/screenshots/screenshot.webp?raw=true)
----
+The game says so on the screens a scenario leaves it from, and writes it into every exported file (`LICENSE.txt` in a `.zip`, a `license` record in the scenario's JSON). It does not cover material that was never the poster's to license, or a detailed map or a music track a scenario only names, each of which keeps the licence on its own post.
 
 ## ✨ Features
 

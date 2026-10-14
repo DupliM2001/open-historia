@@ -133,8 +133,8 @@ export const buildSuggestionZip = async (suggestion) => {
     }
     return change;
   });
-  // Suggested changes are public domain like the scenario they are for
-  // (scenarioLicense.js), and the file says so.
+  // Suggested changes are under the same licence as the scenario they are
+  // for (scenarioLicense.js), and the file says so.
   files["suggestion.json"] = JSON.stringify({ ...suggestion, changes, license: scenarioLicense() });
   files[SCENARIO_LICENSE_FILE] = SCENARIO_LICENSE_TEXT;
   return zipBundle(files);
