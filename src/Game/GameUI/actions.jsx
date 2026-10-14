@@ -425,9 +425,6 @@ const StandingGoal = ({ country, round, gameDate, isOpen }) => {
             }}
             >
             {"\u{1F3AF} Set a standing goal"}
-            <span style={{ color: "rgba(255,255,255,0.45)", display: "block", fontSize: "0.72rem", marginTop: "0.15rem" }}>
-            What your government is steering toward. Your advisor and the simulation keep it in mind; foreign leaders never see it.
-            </span>
             </button>
         );
     }
@@ -657,9 +654,8 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         }
     };
 
-    const suggestionButtonLabel = hasRequestedSuggestions
-    ? (isSuggesting ? "Refreshing AI suggestions..." : "Refresh AI suggestions")
-    : (isSuggesting ? "Loading AI suggestions..." : "Get AI suggestions");
+    // One name whatever it is doing: the spinner beside it says it is working.
+    const suggestionButtonLabel = "AI Suggestions";
 
     return (
         <div
@@ -730,19 +726,12 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem", padding: "0.875rem 1.25rem", flex: 1, minHeight: 0, ...(scrollAsOne ? { overflowY: "auto", scrollbarWidth: "none" } : { overflow: "hidden" }) }}>
-        <p
-        style={{
-            color: "rgba(255,255,255,0.75)",
-            fontSize: "0.82rem",
-            lineHeight: "1.55",
-            margin: 0,
-        }}
-        >
-        Submit actions for {countryDisplayName} for {gameDate}. Your actions will affect how the game world responds.
-        </p>
 
         <StandingGoal country={game.country} round={game.round} gameDate={game.gameDate} isOpen={isOpen} />
 
+        {/* Brainstorm and AI Suggestions side by side, to leave the room to the
+            submitted actions (the owner, 2026-10-14). */}
+        <div style={{ display: "flex", flexShrink: 0, gap: "0.5rem" }}>
         <button
         type="button"
         className="oh-tap-row"
@@ -763,7 +752,8 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             letterSpacing: "0.01em",
             padding: "0.55rem 1rem",
             transition: "background 0.15s, border-color 0.15s",
-            width: "100%",
+            flex: "1 1 0",
+            minWidth: 0,
         }}
         onMouseEnter={(event) => {
             event.currentTarget.style.background = "rgba(255,255,255,0.1)";
@@ -774,7 +764,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             event.currentTarget.style.borderColor = "rgba(255,255,255,0.2)";
         }}
         >
-        Help brainstorm actions
+        Brainstorm
         </button>
 
         <button
@@ -794,7 +784,8 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             justifyContent: "center",
             padding: "0.52rem 1rem",
             transition: "background 0.15s, border-color 0.15s",
-            width: "100%",
+            flex: "1 1 0",
+            minWidth: 0,
         }}
         onMouseEnter={(event) => {
             event.currentTarget.style.background = "rgba(255,255,255,0.09)";
@@ -808,6 +799,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         {isSuggesting && <SpinnerRing size={14} />}
         <span>{suggestionButtonLabel}</span>
         </button>
+        </div>
 
         {(hasRequestedSuggestions || isSuggesting || suggestions.length > 0) && (
             <div
@@ -817,7 +809,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
                 gap: "0.5rem",
                 // Uncapped when the whole body scrolls: a box that scrolls on
                 // its own inside one that scrolls catches the thumb halfway.
-                ...(scrollAsOne ? { flexShrink: 0 } : { maxHeight: "13rem", overflowY: "auto" }),
+                ...(scrollAsOne ? { flexShrink: 0 } : { maxHeight: "9rem", overflowY: "auto" }),
                 scrollbarWidth: "none",
             }}
             >
@@ -832,7 +824,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
             </div>
         )}
 
-        <div style={{ display: "flex", flexDirection: "column", ...(scrollAsOne ? { flexShrink: 0 } : { flex: 1, overflow: "hidden" }) }}>
+        <div style={{ display: "flex", flexDirection: "column", ...(scrollAsOne ? { flexShrink: 0 } : { flex: 1, minHeight: "12rem", overflow: "hidden" }) }}>
         <p
         style={{
             color: "rgba(255,255,255,0.9)",
