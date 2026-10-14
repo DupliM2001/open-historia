@@ -68,13 +68,12 @@ your changes — clone the scenario beforehand if you want to keep them.
 
 ## Publishing your own
 
-**Everything you publish is public domain.** Every scenario made in Open Historia that is posted
-or shared in any way is dedicated to the public domain under
-[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/): anyone may copy, change and share
-it, for any purpose, without asking or giving credit, and that cannot be taken back. The same goes
-for changes you suggest to somebody else's scenario. Only publish what you made yourself, or what is
-already free to give away like this. The game says so before you publish, the post form asks you to
-confirm it, and the exported file carries it.
+**Everything you publish is released under CC BY 4.0.** Every scenario made in Open Historia that is
+posted or shared in any way is released under the
+[Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/)
+licence, and that cannot be taken back. The same goes for changes you suggest to somebody else's
+scenario. Only publish what you made yourself, or what you may share under this licence. The game
+says so before you publish, the post form asks you to confirm it, and the exported file carries it.
 
 Build a scenario in [the map editor](/wiki/editor/), then publish it from its card. The game
 exports the bundle locally and opens the hub's post form with the details filled in; you attach

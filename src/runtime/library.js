@@ -401,7 +401,7 @@ export const clearGameAsset = async (gameId, assetKey) => {
 
 // Always the whole scenario: geometry, cities, basemap, flags, colours, tags
 // and any custom tile archive. There is no light export.
-// Every scenario that leaves the game says it is public domain
+// Every scenario that leaves the game names the licence it is shared under
 // (scenarioLicense.js): the record rides in the bundle itself.
 export const exportScenarioBundle = async (scenarioId) =>
   withScenarioLicense(await requestJson(`${SCENARIOS_API_ROOT}/${encodeURIComponent(scenarioId)}/export`));
