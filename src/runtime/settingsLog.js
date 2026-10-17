@@ -68,7 +68,7 @@ registerSettingsSnapshot("Display", () => [
     ["AI chat language", languageDisplayName(getStoredChatLanguage())],
     ["Fullscreen", onOff(typeof document !== "undefined" && document.fullscreenElement)],
     // The vault door at every opening, not only after an update.
-    ["Every time the game opens", onOff(getMapSetting(MAP_SETTING_KEYS.vaultDoorAlways))],
+    ["Show the vault door every time", onOff(getMapSetting(MAP_SETTING_KEYS.vaultDoorAlways))],
     // The umbrella switch: on exactly when both of the map's motion switches are.
     ["Reduce motion", onOff(getMapSetting(MAP_SETTING_KEYS.disableIdleRotation) && getMapSetting(MAP_SETTING_KEYS.disableEventCamera))],
     // The OS setting, which holds all three motion switches on while it is.

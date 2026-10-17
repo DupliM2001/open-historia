@@ -290,9 +290,9 @@ test("a switch shows the door every time the game opens: off by default", () => 
   assert.match(mapSettings, /export const vaultDoorAlways = \(\) => \{\s+try \{\s+return getMapSetting\(MAP_SETTING_KEYS\.vaultDoorAlways\);\s+\} catch \{\s+return false;/);
   assert.match(mapSettings, /\[MAP_SETTING_KEYS\.vaultDoorAlways\]: "Vault door every time the game opens",/);
   const display = settings.slice(settings.indexOf('<SettingsSection title="Display"'), settings.indexOf('<SettingsSection title="Accessibility"'));
-  assert.match(display, /<Toggle\s+label="Every time the game opens"\s+enabled=\{mapSettings\.vaultDoorAlways\}\s+onToggle=\{\(\) => updateMapSetting\("vaultDoorAlways", MAP_SETTING_KEYS\.vaultDoorAlways, !mapSettings\.vaultDoorAlways\)\}/);
-  assert.match(display, /\{"Off, the door shows only the first time the game opens after an update\."\}/);
+  assert.match(display, /<Toggle\s+label="Show the vault door every time"\s+enabled=\{mapSettings\.vaultDoorAlways\}\s+onToggle=\{\(\) => updateMapSetting\("vaultDoorAlways", MAP_SETTING_KEYS\.vaultDoorAlways, !mapSettings\.vaultDoorAlways\)\}/);
+  assert.match(display, /\{"On: the vault door appears every time you start the game\. Off: only the first time you start it after an update\."\}/);
   assert.match(settings, /vaultDoorAlways: getMapSetting\(MAP_SETTING_KEYS\.vaultDoorAlways\),/);
   // The Logging file says how it is set, by the panel's name for it.
-  assert.match(read("../../runtime/settingsLog.js"), /\["Every time the game opens", onOff\(getMapSetting\(MAP_SETTING_KEYS\.vaultDoorAlways\)\)\],/);
+  assert.match(read("../../runtime/settingsLog.js"), /\["Show the vault door every time", onOff\(getMapSetting\(MAP_SETTING_KEYS\.vaultDoorAlways\)\)\],/);
 });

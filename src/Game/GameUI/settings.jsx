@@ -2797,11 +2797,11 @@ const SettingsWorkspace = ({
                         update (runtime/vaultDoorDue.js); this shows it at every
                         opening. */}
                     <Toggle
-                    label="Every time the game opens"
+                    label="Show the vault door every time"
                     enabled={mapSettings.vaultDoorAlways}
                     onToggle={() => updateMapSetting("vaultDoorAlways", MAP_SETTING_KEYS.vaultDoorAlways, !mapSettings.vaultDoorAlways)}
                     />
-                    <div style={{ ...helperStyle, marginTop: "-0.6rem", marginBottom: "0.6rem" }}>{"Off, the door shows only the first time the game opens after an update."}</div>
+                    <div style={{ ...helperStyle, marginTop: "-0.6rem", marginBottom: "0.6rem" }}>{"On: the vault door appears every time you start the game. Off: only the first time you start it after an update."}</div>
                 </SettingsSection>
                 <SettingsSection title="Accessibility" description="Reduce automatic camera motion and map animations without changing simulation behavior.">
                     <Toggle
