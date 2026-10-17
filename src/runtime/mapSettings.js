@@ -6,6 +6,7 @@
 // beside the data it subscribes to.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { logDebugEvent, logSettingChange } from "./debugLog.js";
+import { isConstrainedDevice } from "./deviceProfile.js";
 
 // Immediate source of truth for string-valued settings. This also keeps a
 // runtime override functional in privacy/file contexts where localStorage
@@ -156,9 +157,13 @@ export function getMapSetting(key) {
 // soundEffects, seasonsWeather and weatherEffects ship on;
 // limitAiGeneration and chunkLongJumps, which used to, went default-off in the
 // beta.
+const OFF_IN_LOW_MEMORY = new Set([MAP_SETTING_KEYS.weatherEffects]);
+
 export function getMapSettingDefaultOn(key) {
     if (typeof localStorage === "undefined") return true;
-    return localStorage.getItem(key) !== "0";
+    const stored = localStorage.getItem(key);
+    if (stored === null && OFF_IN_LOW_MEMORY.has(key) && isConstrainedDevice()) return false;
+    return stored !== "0";
 }
 
 // Whether the door shows every time the game opens rather than the first time
