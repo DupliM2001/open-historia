@@ -80,14 +80,18 @@ export const militaryLookup = (world) => {
 
 // A turn's lasting change to how a country makes war (a time skip's
 // polityChanges[].military, Game/AI/gameplaySchemas.js): by how much each of
-// its five figures moves, so the model needs no figure it was not shown. Null
-// for none.
-export const MILITARY_SHIFT_FIELDS = Object.freeze(["quality", "technology", "land", "sea", "air"]);
+// its figures moves, the share of its people under arms in points of that
+// share (the model calls it `manpower`). Null for none. The model is shown
+// the figures it changes (militaryStanding.js): "i spent a decade as ukraine
+// to prepare against russia ... AND IT DIDNT MOVE" (a player, 2026-10-17).
+export const MILITARY_SHIFT_FIELDS = Object.freeze(["quality", "technology", "land", "sea", "air", "spending", "manpowerShare"]);
+// The most of its people a country can keep under arms, in percent.
+export const MANPOWER_SHARE_MOST = 50;
 export const normalizeMilitaryShift = (value) => {
   if (!isRecord(value)) return null;
   const out = {};
   for (const field of MILITARY_SHIFT_FIELDS) {
-    const raw = value[field];
+    const raw = field === "manpowerShare" ? value.manpowerShare ?? value.manpower : value[field];
     if (raw === null || raw === undefined || raw === "") continue;
     const number = Number(raw);
     if (!Number.isFinite(number) || number === 0) continue;
@@ -105,7 +109,15 @@ export const shiftedMilitary = (world, name, shift) => {
   const now = militaryLookup(world)(name) ?? {};
   const out = {};
   for (const [field, by] of Object.entries(moves)) {
-    const from = Number.isFinite(Number(now[field])) ? Number(now[field]) : 50;
+    const has = now[field] !== null && now[field] !== undefined && Number.isFinite(Number(now[field]));
+    if (field === "manpowerShare") {
+      // (From the scenario's share, or the game's twelve, where it has none of its own.)
+      const from = has ? Number(now[field]) : warSettingsOf(world).manpowerShare ?? 12;
+      const to = Math.round((from + by) * 10) / 10;
+      out[field] = to < 0.1 ? 0.1 : to > MANPOWER_SHARE_MOST ? MANPOWER_SHARE_MOST : to;
+      continue;
+    }
+    const from = has ? Number(now[field]) : 50;
     const to = from + by;
     out[field] = to < 0 ? 0 : to > 100 ? 100 : to;
   }

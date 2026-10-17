@@ -105,6 +105,13 @@ const NEW_UPDATES = [
               "The Economy tab opens again for every country: it no longer stops on a stat sheet error.",
             ],
           },
+          {
+            heading: "Military power",
+            icon: "chess",
+            items: [
+              "Your military figures now change with what you do: training, new weapons, a bigger defence budget and a larger army raise them over the years, and losses and cuts lower them.",
+            ],
+          },
         ],
         button: "To the field",
       },

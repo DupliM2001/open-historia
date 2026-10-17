@@ -290,7 +290,7 @@ const extractTemplatePlaceholderKeys = (template) => {
 };
 
 const LIVE_RUNTIME_VARIABLE_KEYS = Object.freeze({
-  actions: Object.freeze(["playerPolity", "playerPolityReputationContext", "playerPolityIntelligenceContext"]),
+  actions: Object.freeze(["playerPolity", "playerPolityReputationContext", "playerPolityIntelligenceContext", "playerPolityMilitaryContext"]),
   autoJumpForward: Object.freeze([
     "playerPolity",
     "date",
@@ -303,6 +303,7 @@ const LIVE_RUNTIME_VARIABLE_KEYS = Object.freeze({
     "worldInitiativeContext",
     "playerPolityReputationContext",
     "playerPolityIntelligenceContext",
+    "playerPolityMilitaryContext",
     "pendingUnitOrders",
     "unitsSummary",
     "projectsSummary",
@@ -310,8 +311,8 @@ const LIVE_RUNTIME_VARIABLE_KEYS = Object.freeze({
     "diplomaticContinuity",
     "worldBeforeRoundOne",
   ]),
-  interactiveCreation: Object.freeze(["playerPolity", "playerPolityReputationContext", "playerPolityIntelligenceContext"]),
-  interactiveExecutor: Object.freeze(["playerPolity", "playerPolityReputationContext", "playerPolityIntelligenceContext"]),
+  interactiveCreation: Object.freeze(["playerPolity", "playerPolityReputationContext", "playerPolityIntelligenceContext", "playerPolityMilitaryContext"]),
+  interactiveExecutor: Object.freeze(["playerPolity", "playerPolityReputationContext", "playerPolityIntelligenceContext", "playerPolityMilitaryContext"]),
   countryStatSheet: Object.freeze([
     "statsTerritorialContext",
     "statsTerritorialReferenceContext",
@@ -347,6 +348,7 @@ const LIVE_RUNTIME_VARIABLE_KEYS = Object.freeze({
     "worldInitiativeContext",
     "playerPolityReputationContext",
     "playerPolityIntelligenceContext",
+    "playerPolityMilitaryContext",
     "pendingUnitOrders",
     "unitsSummary",
     "projectsSummary",

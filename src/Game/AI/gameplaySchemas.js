@@ -268,7 +268,7 @@ const polityChangeSchema = {
     // none it was not shown. Its five keys named in words: the schema's size guard (projectOpSchema.test.js).
     military: {
       type: "object",
-      description: "Lasting change in how it fights: quality, technology, land, sea, air, each -40 to 40.",
+      description: "Lasting change in how it fights, each -40 to 40: quality, technology, spending, manpower, land, sea, air.",
       additionalProperties: { type: "number" },
     },
     tags: stringArraySchema(
