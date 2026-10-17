@@ -45,6 +45,8 @@ const PATHS = {
   upload: ["M12 3v12", "m17 8-5-5-5 5", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"],
   file: ["M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", "M14 2v4a2 2 0 0 0 2 2h4"],
   chevronDown: ["m6 9 6 6 6-6"],
+  chevronLeft: ["m15 18-6-6 6-6"],
+  chevronRight: ["m9 18 6-6-6-6"],
   menu: ["M4 6h16", "M4 12h16", "M4 18h16"],
   review: ["M7.9 20A9 9 0 1 0 4 16.1L2 22Z"],
 };

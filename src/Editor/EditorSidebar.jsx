@@ -89,7 +89,6 @@ const EditorSidebar = ({
   onNameChange,
   documents,
   search,
-  onClose,
   activeTool,
   onToolChange,
   toolOptions = null,
@@ -117,6 +116,8 @@ const EditorSidebar = ({
   isMobile = false,
   mobileOpen = false,
   onMobileOpenChange,
+  hidden = false,
+  onHiddenChange,
 }) => {
   useBackToClose(isMobile && mobileOpen, () => onMobileOpenChange?.(false));
   const save = SAVE[saveStatus] || SAVE.saved;
@@ -198,11 +199,6 @@ const EditorSidebar = ({
               style={{ ...inputStyle, padding: "4px 7px", borderRadius: 8, fontSize: 14, fontWeight: 800, letterSpacing: "-0.01em" }}
             />
           </div>
-          {onClose && (
-            <button type="button" onClick={onClose} title="Close map editor" aria-label="Close map editor" style={{ ...smallIconButton(), height: 32, minWidth: 32, flexShrink: 0 }}>
-              <Icon name="close" size={16} />
-            </button>
-          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {documents}
@@ -321,7 +317,46 @@ const EditorSidebar = ({
     </aside>
   );
 
-  if (!isMobile) return sidebar;
+  const tab = (
+    <button
+      type="button"
+      onClick={() => onHiddenChange?.(!hidden)}
+      title={hidden ? "Show" : "Hide"}
+      aria-label={hidden ? "Show" : "Hide"}
+      aria-expanded={!hidden}
+      style={{
+        position: "fixed",
+        top: "50%",
+        left: hidden ? 0 : SIDEBAR_WIDTH - 1,
+        transform: "translateY(-50%)",
+        zIndex: 34,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 20,
+        height: 64,
+        padding: 0,
+        background: EDITOR_NAV,
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderLeft: "none",
+        borderRadius: "0 10px 10px 0",
+        boxShadow: "6px 0 18px rgba(0,0,0,0.3)",
+        color: "rgba(255,255,255,0.75)",
+        cursor: "pointer",
+      }}
+    >
+      <Icon name={hidden ? "chevronRight" : "chevronLeft"} size={15} />
+    </button>
+  );
+
+  if (!isMobile) {
+    return (
+      <>
+        {!hidden && sidebar}
+        {tab}
+      </>
+    );
+  }
   return (
     <>
       <div style={{ position: "fixed", bottom: 16, left: 12, zIndex: 40, display: "flex", gap: 6 }}>

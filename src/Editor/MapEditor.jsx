@@ -132,6 +132,13 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
   const d = useMapDocument();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [exitAsk, setExitAsk] = useState(false);
+  const dock = isMobile || sidebarHidden ? 0 : SIDEBAR_WIDTH;
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    return () => cancelAnimationFrame(frame);
+  }, [dock]);
   // Opened from a scenario: the scenario's own map (regions/cities/colors) is
   // loaded once it arrives, so never auto-seed the default world underneath it.
   const scenarioMode = Boolean(onApplyToScenario);
@@ -919,8 +926,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
   // The ✕, and on a phone Back (runtime/backToClose.js), which used to reach
   // past the Workshop to whatever was open under it. Answers false when the
   // player chooses to stay, and Back then leaves the Workshop open.
-  const requestClose = async () => {
-    if (scenarioMode && scenarioDirty) {
+  const requestClose = async ({ confirmed = false } = {}) => {
+    if (scenarioMode && scenarioDirty && !confirmed) {
       const ok = window.confirm(
         "This scenario has Workshop changes that have not been saved into the scenario yet. Close without applying them?",
       );
@@ -1284,39 +1291,73 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, d.polities, d.regionCount, regionEpoch, paintOwner]);
 
-  const scenarioButton = (primary) => ({
+  const scenarioButton = (primary, dim = Boolean(scenarioAction) || !hydrated) => ({
     alignItems: "center",
     background: primary ? "#2bc1f3" : "rgba(255,255,255,0.06)",
     border: `1px solid ${primary ? "#2bc1f3" : "rgba(255,255,255,0.12)"}`,
     borderRadius: 10,
     color: "#fff",
-    cursor: scenarioAction || !hydrated ? "default" : "pointer",
+    cursor: dim ? "default" : "pointer",
     display: "flex",
     fontSize: 12.5,
     fontWeight: 700,
     justifyContent: "center",
     minHeight: 36,
-    opacity: scenarioAction || !hydrated ? 0.7 : 1,
+    opacity: dim ? 0.7 : 1,
     padding: "0 10px",
   });
-  const scenarioActions = onApplyToScenario ? (
+  const exitButton = onClose ? (
+    <button onClick={() => setExitAsk(true)} disabled={Boolean(scenarioAction)} style={scenarioButton(false, Boolean(scenarioAction))}>
+      {scenarioAction === "save-exit" ? "Saving…" : "Exit"}
+    </button>
+  ) : null;
+  const exitQuestion = exitAsk && onClose ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 11px", borderRadius: 12, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)" }}>
+      <div style={{ fontSize: 12, lineHeight: 1.4, color: "#fde68a" }}>
+        {scenarioMode && scenarioDirty
+          ? "This scenario has Workshop changes that have not been saved into the scenario yet. Close without applying them?"
+          : "Leave the map editor?"}
+      </div>
+      {onApplyToScenario && (
+        <button
+          onClick={() => {
+            setExitAsk(false);
+            persistScenario({ play: false, closeAfter: true });
+          }}
+          disabled={Boolean(scenarioAction) || !hydrated}
+          title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and leave the Workshop`}
+          style={scenarioButton(true)}
+        >
+          Save & Exit
+        </button>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <button onClick={() => setExitAsk(false)} style={scenarioButton(false, false)}>
+          Cancel
+        </button>
+        <button
+          onClick={() => {
+            setExitAsk(false);
+            void requestClose({ confirmed: true });
+          }}
+          style={{ ...scenarioButton(false, false), background: "rgba(185,28,28,0.72)", borderColor: "rgba(248,113,113,0.4)" }}
+        >
+          Exit
+        </button>
+      </div>
+    </div>
+  ) : null;
+  const scenarioActions = exitQuestion || (onApplyToScenario ? (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
       <button
         onClick={() => persistScenario({ play: false, closeAfter: false })}
         disabled={Boolean(scenarioAction) || !hydrated}
         title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and keep editing`}
-        style={scenarioButton(false)}
+        style={{ ...scenarioButton(false), gridColumn: exitButton ? undefined : "1 / -1" }}
       >
         {!hydrated ? "Loading map…" : scenarioAction === "save" ? "Saving…" : "💾 Save"}
       </button>
-      <button
-        onClick={() => persistScenario({ play: false, closeAfter: true })}
-        disabled={Boolean(scenarioAction) || !hydrated}
-        title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and leave the Workshop`}
-        style={scenarioButton(false)}
-      >
-        {scenarioAction === "save-exit" ? "Saving…" : "Save & Exit"}
-      </button>
+      {exitButton}
       <button
         onClick={() => persistScenario({ play: true })}
         disabled={Boolean(scenarioAction) || !hydrated}
@@ -1326,7 +1367,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         {scenarioAction === "play" ? "Applying…" : "▶ Apply & Play"}
       </button>
     </div>
-  ) : null;
+  ) : exitButton);
 
   const toolOptions = d.activeTool === "paint" ? (
     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -1396,12 +1437,12 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         overflow: "hidden",
         fontFamily: "sans-serif",
         color: "white",
-        "--editor-dock": isMobile ? "0px" : `${SIDEBAR_WIDTH}px`,
+        "--editor-dock": `${dock}px`,
         "--editor-top": "12px",
         "--editor-bottom": isMobile ? "68px" : "12px",
       }}
     >
-      <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: isMobile ? 0 : SIDEBAR_WIDTH }}>
+      <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: dock }}>
       <OlMap
         basemap={d.basemap}
         types={d.types}
@@ -1837,7 +1878,6 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
             }}
           />
         }
-        onClose={onClose ? () => { void requestClose(); } : null}
         activeTool={d.activeTool}
         onToolChange={d.setActiveTool}
         toolOptions={toolOptions}
@@ -1868,6 +1908,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         isMobile={isMobile}
         mobileOpen={sidebarOpen}
         onMobileOpenChange={setSidebarOpen}
+        hidden={sidebarHidden}
+        onHiddenChange={setSidebarHidden}
       />
 
       <FlagPicker
