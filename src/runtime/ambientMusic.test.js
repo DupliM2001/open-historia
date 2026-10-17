@@ -698,15 +698,15 @@ test("a game drawn while the big hit is still far off: the build fades out on it
 // And then: "have frankincense and discovery be the only 2 game songs, get rid of the other two".
 const FRANKINCENSE = "/audio/frankincense-and-myrrh.mp3";
 const DISCOVERY = "/audio/discovery.mp3";
-const GAME_LENGTHS = { [FRANKINCENSE]: 192.2, [DISCOVERY]: 235.3 };
+const GAME_LENGTHS = { [FRANKINCENSE]: 192.2, [DISCOVERY]: 235.3, "/audio/honour-among-thieves.mp3": 240 };
 const levelOf = (name, at) => calmGainAt(at, { ...PASSAGE_CALM, ...MUSIC_TRACKS[name].loud });
 
 test("in a game the game's own music plays in the background: after a breath of silence, one piece and then the other, levelled", () => {
-  assert.deepEqual(MUSIC_GAME_PIECES, ["frankincenseAndMyrrh", "discovery"]);
-  // The two that were tried first are gone, from the game and from its files.
+  assert.deepEqual(MUSIC_GAME_PIECES, ["frankincenseAndMyrrh", "discovery", "honourAmongThieves"]);
   assert.equal(MUSIC_TRACKS.hourOfTheWitch, undefined);
-  assert.equal(MUSIC_TRACKS.honourAmongThieves, undefined);
-  for (const gone of ["hour-of-the-witch.mp3", "honour-among-thieves.mp3"]) assert.equal(fs.existsSync(path.join(root, "public", "audio", gone)), false, gone);
+  assert.equal(fs.existsSync(path.join(root, "public", "audio", "hour-of-the-witch.mp3")), false);
+  assert.equal(fs.existsSync(path.join(root, "public", "audio", "honour-among-thieves.mp3")), true);
+  assert.equal(MUSIC_TRACKS.honourAmongThieves.loud.rms.length, Math.ceil(240 / 5));
   // Each was measured for the whole of it, five seconds at a time.
   assert.equal(MUSIC_TRACKS.frankincenseAndMyrrh.loud.rms.length, Math.ceil(192.2 / 5));
   assert.equal(MUSIC_TRACKS.discovery.loud.rms.length, Math.ceil(235.3 / 5));
@@ -761,8 +761,12 @@ test("in a game the game's own music plays in the background: after a breath of 
   assert.ok(audio.currentTime < 1, `from its start: ${audio.currentTime}`);
   assert.equal(audio.paused, false);
   near(audio.volume, 0.25 * levelOf("discovery", audio.currentTime), 0.01);
-  // And round: the first again after it, from its start.
+  // Then the third.
   time.advance(235300 + 600);
+  assert.equal(audio.src, "/audio/honour-among-thieves.mp3");
+  assert.ok(audio.currentTime < 2.5, `from its start: ${audio.currentTime}`);
+  // And round: the first again after it, from its start.
+  time.advance(240000 + 600);
   assert.equal(audio.src, FRANKINCENSE);
   assert.ok(audio.currentTime < 2.5, `from its start: ${audio.currentTime}`);
   assert.deepEqual(sounding(), ["game"]);
@@ -802,7 +806,7 @@ test("the war room takes the game's music's place, and the game's carries on fro
 // "Have it randomly pick one track or the other, make it do the same for the war room."
 test("each game starts on one of the game's pieces, picked at random, from its start", () => {
   // The rolls: the menu the game opens on, the first game's piece, the menu come back to, the second game's piece.
-  const { director, time, of, sounding } = stage({ gamePieces: MUSIC_GAME_PIECES, lengths: GAME_LENGTHS, random: rolls(0, 0.7, 0, 0.1) });
+  const { director, time, of, sounding } = stage({ gamePieces: MUSIC_GAME_PIECES, lengths: GAME_LENGTHS, random: rolls(0, 0.5, 0, 0.1) });
   director.unlock();
   director.setScene("game");
   time.advance(40000);
@@ -1239,7 +1243,7 @@ test("it is on unless the player turns it off, and Settings says whose music it 
     assert.ok(piece.loud.rms.every((figure) => figure > 0), piece.work);
   }
   const pieces = Object.values(MUSIC_TRACKS).filter(Boolean);
-  assert.equal(pieces.length, 6);
+  assert.equal(pieces.length, 7);
   for (const piece of pieces) {
     assert.deepEqual([piece.artist, piece.licence], ["Scott Buckley", "CC BY 4.0"]);
   }
@@ -1265,9 +1269,9 @@ test("it is on unless the player turns it off, and Settings says whose music it 
   };
   for (const piece of [MUSIC_TRACKS.passage, ...pieces.filter((entry) => entry.drama)]) assert.equal(kindOf(piece), "constant", piece.file);
   assert.equal(kindOf(MUSIC_TRACKS.clearSkies), "constant");
-  // And they are small: the six together under 30 MB.
+  // And they are small: the seven together under 35 MB.
   const total = pieces.reduce((sum, piece) => sum + fs.statSync(path.join(root, "public", piece.file)).size, 0);
-  assert.ok(total < 30 * 1024 * 1024, `${Math.round(total / 1048576)} MB`);
+  assert.ok(total < 35 * 1024 * 1024, `${Math.round(total / 1048576)} MB`);
   // Each file by its name, its piece, where it is from, and where it plays.
   const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const piece of pieces) {
@@ -1275,10 +1279,10 @@ test("it is on unless the player turns it off, and Settings says whose music it 
   }
   assert.match(credits, /vanguard\.mp3\r?\n {4}"Vanguard" by Scott Buckley\r?\n {4}https:\/\/www\.scottbuckley\.com\.au\/library\/vanguard\/\r?\n {4}Plays in the war room and while a battlefield is shown\./);
   const readme = read("README.md");
-  assert.ok(readme.includes("\"Passage Of Time\", \"Clear Skies\", \"Frankincense and Myrrh\", \"Discovery\", \"Legionnaire (2022 Remaster)\" and \"Vanguard\", all released under [CC BY 4.0]"));
-  for (const gone of ["Hour Of The Witch", "Honour Among Thieves"]) assert.ok(!credits.includes(gone) && !readme.includes(gone), gone);
+  assert.ok(readme.includes("\"Passage Of Time\", \"Clear Skies\", \"Frankincense and Myrrh\", \"Discovery\", \"Honour Among Thieves\", \"Legionnaire (2022 Remaster)\" and \"Vanguard\", all released under [CC BY 4.0]"));
+  for (const gone of ["Hour Of The Witch"]) assert.ok(!credits.includes(gone) && !readme.includes(gone), gone);
   assert.ok(readme.includes("re-encoded at a lower bitrate to make the game smaller and otherwise unchanged"));
-  for (const file of ["frankincense-and-myrrh", "discovery"]) {
+  for (const file of ["frankincense-and-myrrh", "discovery", "honour-among-thieves"]) {
     assert.match(credits, new RegExp(`${file}\\.mp3\\r?\\n {4}"[^"]+" by Scott Buckley\\r?\\n {4}https://www\\.scottbuckley\\.com\\.au/library/${file}/\\r?\\n {4}Plays in a game, in the background\\.`), file);
   }
   assert.match(credits, /clear-skies\.mp3\r?\n {4}"Clear Skies" by Scott Buckley\r?\n {4}https:\/\/www\.scottbuckley\.com\.au\/library\/clear-skies\/\r?\n {4}Plays on the menu, in turn with Passage Of Time, and from its own build\r?\n {4}on while a game opened under it loads\./);

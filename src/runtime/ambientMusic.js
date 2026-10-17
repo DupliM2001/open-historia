@@ -204,6 +204,21 @@ export const MUSIC_TRACKS = Object.freeze({
       ]),
     }),
   }),
+  honourAmongThieves: Object.freeze({
+    file: "audio/honour-among-thieves.mp3",
+    work: "Honour Among Thieves",
+    ...COMPOSER,
+    loud: Object.freeze({
+      step: 5,
+      rms: Object.freeze([
+        0.097, 0.107, 0.116, 0.146, 0.137, 0.139, 0.149, 0.143, 0.147, 0.146,
+        0.150, 0.147, 0.148, 0.148, 0.155, 0.146, 0.146, 0.129, 0.161, 0.162,
+        0.171, 0.197, 0.187, 0.185, 0.197, 0.188, 0.196, 0.189, 0.190, 0.184,
+        0.183, 0.191, 0.184, 0.141, 0.159, 0.160, 0.163, 0.164, 0.181, 0.183,
+        0.184, 0.181, 0.183, 0.187, 0.190, 0.170, 0.168, 0.140,
+      ]),
+    }),
+  }),
 });
 // The war room's pieces (names in MUSIC_TRACKS): one after the other, round
 // again at the end. Which of them a game's war room starts on is picked at
@@ -212,7 +227,7 @@ export const MUSIC_WAR_PIECES = Object.freeze(["war", "vanguard"]);
 // The pieces that play in a game (names in MUSIC_TRACKS), in the background:
 // one after the other, round again at the end, and which of them a game
 // starts on is picked at random.
-export const MUSIC_GAME_PIECES = Object.freeze(["frankincenseAndMyrrh", "discovery"]);
+export const MUSIC_GAME_PIECES = Object.freeze(["frankincenseAndMyrrh", "discovery", "honourAmongThieves"]);
 // The menu's other pieces (names in MUSIC_TRACKS). The menu's pieces are
 // Passage Of Time and these: which of them a visit to the menu plays is
 // picked at random, and on a menu left idle they follow one another, each

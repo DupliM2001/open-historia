@@ -1,6 +1,6 @@
 The music of Open Historia
 
-All six pieces are by Scott Buckley (https://www.scottbuckley.com.au/) and are
+All seven pieces are by Scott Buckley (https://www.scottbuckley.com.au/) and are
 released under the Creative Commons Attribution 4.0 International License
 (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
 
@@ -25,6 +25,11 @@ clear-skies.mp3
 frankincense-and-myrrh.mp3
     "Frankincense and Myrrh" by Scott Buckley
     https://www.scottbuckley.com.au/library/frankincense-and-myrrh/
+    Plays in a game, in the background.
+
+honour-among-thieves.mp3
+    "Honour Among Thieves" by Scott Buckley
+    https://www.scottbuckley.com.au/library/honour-among-thieves/
     Plays in a game, in the background.
 
 discovery.mp3
