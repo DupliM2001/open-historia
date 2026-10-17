@@ -56,7 +56,7 @@ const formatPop = (n) => {
   return String(n);
 };
 
-const SearchBar = ({ api, features, polities, setSelection, onAddCity }) => {
+const SearchBar = ({ api, features, polities, setSelection, onAddCity, placement = "up", fill = false }) => {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState({ custom: [], regions: [], world: [] });
@@ -96,8 +96,8 @@ const SearchBar = ({ api, features, polities, setSelection, onAddCity }) => {
   const hasResults = results.custom.length || results.regions.length || results.world.length;
 
   return (
-    <div ref={boxRef} style={{ position: "relative", flex: "1 1 170px", maxWidth: 300, minWidth: 140 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}>
+    <div ref={boxRef} style={fill ? { position: "relative", flex: 1, minWidth: 0 } : { position: "relative", flex: "1 1 170px", maxWidth: 300, minWidth: 140 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 34, boxSizing: "border-box", padding: "0 9px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10 }}>
         <Icon name="search" size={14} style={{ opacity: 0.6, flexShrink: 0 }} />
         <input
           value={query}
@@ -131,7 +131,7 @@ const SearchBar = ({ api, features, polities, setSelection, onAddCity }) => {
           style={{
             ...panelSurface,
             position: "absolute",
-            bottom: "calc(100% + 10px)",
+            ...(placement === "down" ? { top: "calc(100% + 6px)" } : { bottom: "calc(100% + 10px)" }),
             left: 0,
             width: "min(320px, calc(100vw - 40px))",
             padding: 6,

@@ -677,7 +677,7 @@ test("only the save repairs borders: no Topology panel, and a merge that fails p
   const read = (name) => fs.readFileSync(new URL(name, import.meta.url), "utf8");
   assert.ok(!fs.existsSync(new URL("./TopologyPanel.jsx", import.meta.url)), "the panel's file is gone");
   const mapEditor = read("./MapEditor.jsx");
-  const bottomBar = read("./BottomBar.jsx");
+  const bottomBar = read("./EditorSidebar.jsx");
   const olMap = read("./OlMap.jsx");
   assert.ok(!mapEditor.includes("TopologyPanel") && !mapEditor.includes("openPanel === \"topology\""), "MapEditor mounts no such panel");
   assert.ok(!bottomBar.includes("\"topology\"") && !bottomBar.includes("label=\"Topology\""), "the bottom bar has no chip for it");

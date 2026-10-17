@@ -8,9 +8,8 @@
 
 import { useState } from "react";
 import Icon from "./Icon.jsx";
-import { panelSurface } from "./editorStyles.js";
+import { inputStyle, panelSurface, toolButton } from "./editorStyles.js";
 import { listDocuments, deleteDocument } from "./documentIO.js";
-import { useIsMobile } from "../runtime/useIsMobile.js";
 
 const menuItem = {
   display: "flex",
@@ -24,16 +23,12 @@ const menuItem = {
   cursor: "pointer",
   fontSize: 12.5,
   textAlign: "left",
-  borderRadius: 6,
+  borderRadius: 8,
 };
 
-const DocumentsMenu = ({ docName, onNameChange, currentId, author, onAuthorChange, onNew, onSave, onExport, onExportGame, onOpen }) => {
+const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExport, onExportGame, onOpen }) => {
   const [open, setOpen] = useState(false);
   const [docs, setDocs] = useState([]);
-  // On a phone the three top bars (this one, the centred toolbar, the top-right
-  // action buttons) fight for the same row. Collapse to just the icon so this one
-  // stays narrow and clear of the toolbar.
-  const isMobile = useIsMobile();
 
   const refresh = async () => setDocs(await listDocuments());
   const toggle = async () => {
@@ -58,47 +53,20 @@ const DocumentsMenu = ({ docName, onNameChange, currentId, author, onAuthorChang
   };
 
   return (
-    <div style={{ position: "fixed", top: 12, left: 12, zIndex: 36 }}>
+    <div style={{ position: "relative", flexShrink: 0 }}>
       <button
         onClick={toggle}
-        title={isMobile ? (docName || "Untitled Map") : undefined}
-        style={{
-          ...panelSurface,
-          display: "flex",
-          alignItems: "center",
-          gap: isMobile ? 0 : 8,
-          padding: isMobile ? "8px 10px" : "7px 12px",
-          fontSize: isMobile ? 16 : 13,
-          fontWeight: 700,
-          cursor: "pointer",
-          color: "white",
-        }}
+        title="Documents"
+        aria-label="Documents"
+        aria-expanded={open}
+        style={{ ...toolButton(open, false), height: 34, gap: 3, padding: "0 7px" }}
       >
-        🗺️
-        {!isMobile && (
-          <>
-            <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{docName || "Untitled Map"}</span>
-            <Icon name="plus" size={12} style={{ transform: "rotate(45deg)", opacity: 0.5 }} />
-          </>
-        )}
+        <Icon name="file" size={16} />
+        <Icon name="chevronDown" size={12} style={{ opacity: 0.6 }} />
       </button>
 
       {open && (
-        <div style={{ ...panelSurface, marginTop: 6, width: 260, padding: 6, display: "flex", flexDirection: "column", gap: 2 }}>
-          {/* On a phone the bottom bar has no room for the name box, so it is here. */}
-          {isMobile && onNameChange && (
-            <div style={{ padding: "4px 8px 0" }}>
-              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>
-                Map name
-              </div>
-              <input
-                value={docName || ""}
-                onChange={(e) => onNameChange(e.target.value)}
-                placeholder="Map name"
-                style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.28)", color: "#fff", fontSize: 12.5, outline: "none" }}
-              />
-            </div>
-          )}
+        <div style={{ ...panelSurface, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 60, width: 270, padding: 6, display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={{ padding: "4px 8px 6px" }}>
             <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>
               Made by
@@ -107,7 +75,7 @@ const DocumentsMenu = ({ docName, onNameChange, currentId, author, onAuthorChang
               value={author || ""}
               onChange={(e) => onAuthorChange(e.target.value)}
               placeholder="your name / username"
-              style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.28)", color: "#fff", fontSize: 12.5, outline: "none" }}
+              style={{ ...inputStyle, padding: "6px 8px", fontSize: 12.5 }}
             />
           </div>
           <div style={{ height: 1, background: "rgba(255,255,255,0.1)", margin: "2px 0 4px" }} />

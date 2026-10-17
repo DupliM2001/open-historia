@@ -12,8 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import "ol/ol.css";
 import OlMap from "./OlMap.jsx";
-import Toolbar from "./Toolbar.jsx";
-import BottomBar from "./BottomBar.jsx";
+import EditorSidebar, { SIDEBAR_WIDTH } from "./EditorSidebar.jsx";
 import TypeManager from "./TypeManager.jsx";
 import RegionsPanel from "./RegionsPanel.jsx";
 import PolitiesPanel from "./PolitiesPanel.jsx";
@@ -65,7 +64,7 @@ import { addBuiltinMap, addOwnMap, makeStartingMap, removeMap, scenarioMaps, set
 import { DETAILED_MAP_NEEDS_BASIC_MAP_MESSAGE, buildGameSeed, gameCityToFeature } from "./exportPreset.js";
 import { normalizeGroups } from "../runtime/groups.js";
 import { isWaterType, normalizeRegionTypes } from "../runtime/regionTypes.js";
-import { panelSurface, inputStyle } from "./editorStyles.js";
+import { inputStyle, pillButton } from "./editorStyles.js";
 import FmgPanel from "./fmg/FmgPanel.jsx";
 import SuggestionReviewPanel, { useSuggestionMarkup, useSuggestionReview } from "./SuggestionReviewPanel.jsx";
 import { checkFmgAvailable, generateFmgWorld } from "./fmg/fmgDriver.js";
@@ -132,6 +131,7 @@ const WAR_TOOL_HINTS = {
 const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, review: reviewSource = null } = {}) => {
   const d = useMapDocument();
   const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // Opened from a scenario: the scenario's own map (regions/cities/colors) is
   // loaded once it arrives, so never auto-seed the default world underneath it.
   const scenarioMode = Boolean(onApplyToScenario);
@@ -1284,6 +1284,109 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, d.polities, d.regionCount, regionEpoch, paintOwner]);
 
+  const scenarioButton = (primary) => ({
+    alignItems: "center",
+    background: primary ? "#2bc1f3" : "rgba(255,255,255,0.06)",
+    border: `1px solid ${primary ? "#2bc1f3" : "rgba(255,255,255,0.12)"}`,
+    borderRadius: 10,
+    color: "#fff",
+    cursor: scenarioAction || !hydrated ? "default" : "pointer",
+    display: "flex",
+    fontSize: 12.5,
+    fontWeight: 700,
+    justifyContent: "center",
+    minHeight: 36,
+    opacity: scenarioAction || !hydrated ? 0.7 : 1,
+    padding: "0 10px",
+  });
+  const scenarioActions = onApplyToScenario ? (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+      <button
+        onClick={() => persistScenario({ play: false, closeAfter: false })}
+        disabled={Boolean(scenarioAction) || !hydrated}
+        title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and keep editing`}
+        style={scenarioButton(false)}
+      >
+        {!hydrated ? "Loading map…" : scenarioAction === "save" ? "Saving…" : "💾 Save"}
+      </button>
+      <button
+        onClick={() => persistScenario({ play: false, closeAfter: true })}
+        disabled={Boolean(scenarioAction) || !hydrated}
+        title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and leave the Workshop`}
+        style={scenarioButton(false)}
+      >
+        {scenarioAction === "save-exit" ? "Saving…" : "Save & Exit"}
+      </button>
+      <button
+        onClick={() => persistScenario({ play: true })}
+        disabled={Boolean(scenarioAction) || !hydrated}
+        title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and start playing it`}
+        style={{ ...scenarioButton(true), gridColumn: "1 / -1" }}
+      >
+        {scenarioAction === "play" ? "Applying…" : "▶ Apply & Play"}
+      </button>
+    </div>
+  ) : null;
+
+  const toolOptions = d.activeTool === "paint" ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {d.colors[paintOwner] && (
+          <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: 4, border: "1px solid rgba(255,255,255,0.3)", background: `rgb(${d.colors[paintOwner].join(",")})` }} />
+        )}
+        <select
+          value={paintOwner}
+          onChange={(e) => setPaintOwner(e.target.value)}
+          style={{ ...inputStyle, padding: "5px 7px", fontSize: 12 }}
+          title="Stable polity key to assign while painting"
+        >
+          <option value="">Unowned / erase ownership</option>
+          {polityChoices.map((row) => (
+            <option key={row.key} value={row.key}>
+              {row.name}{row.name !== row.key ? ` — ${row.key}` : ""}
+            </option>
+          ))}
+        </select>
+      </span>
+      <span style={{ color: "rgba(255,255,255,0.55)" }}>paint over</span>
+      <select
+        value={paintOnlyOwner}
+        onChange={(e) => setPaintOnlyOwner(e.target.value)}
+        style={{ ...inputStyle, padding: "5px 7px", fontSize: 12 }}
+        title="Restrict a paint stroke to regions that currently have this owner"
+      >
+        <option value="*">Any region</option>
+        <option value="__unowned__">Unowned regions only</option>
+        {polityChoices.map((row) => (
+          <option key={`filter-${row.key}`} value={row.key}>
+            Only {row.name}
+          </option>
+        ))}
+      </select>
+      <button type="button" onClick={() => setOpenPanel("polities")} style={{ ...pillButton(false), alignSelf: "flex-start" }}>
+        Manage polities…
+      </button>
+    </div>
+  ) : d.activeTool === "modify" ? (
+    <div style={{ color: d.selection.length ? "rgba(255,255,255,0.7)" : "#fbbf24" }}>
+      <b>Manual vertex override:</b>{" "}
+      {d.selection.length === 0
+        ? "select the regions to edit first"
+        : d.selection.length === 1
+          ? "1 selected region · drag a vertex · drag an edge to insert · Alt-click a vertex to remove · snap magnet enabled · Ctrl/Cmd+Z undo"
+          : `${d.selection.length} selected regions · drag a vertex · drag an edge to insert · Alt-click a vertex to remove · snap magnet enabled · Ctrl/Cmd+Z undo`}
+    </div>
+  ) : d.activeTool === "border" ? (
+    <div style={{ color: d.selection.length === 2 ? "rgba(255,255,255,0.74)" : "#fbbf24" }}>
+      <b>Shared border precision:</b>{" "}
+      {d.selection.length === 2
+        ? "drag a border vertex or edge on either selected region; the released point is welded into BOTH regions · cyan halo = shared-border magnet · Alt-click removes the corresponding shared vertex · a 100 m topology check runs after each edit · Ctrl/Cmd+Z undo"
+        : `select exactly 2 neighbouring regions first (${d.selection.length} selected)`}
+    </div>
+  ) : isWarTool(d.activeTool) ? (
+    <div style={{ color: "rgba(255,255,255,0.7)" }}>{WAR_TOOL_HINTS[d.activeTool]}</div>
+  ) : null;
+
   return (
     <div
       style={{
@@ -1293,8 +1396,12 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         overflow: "hidden",
         fontFamily: "sans-serif",
         color: "white",
+        "--editor-dock": isMobile ? "0px" : `${SIDEBAR_WIDTH}px`,
+        "--editor-top": "12px",
+        "--editor-bottom": isMobile ? "68px" : "12px",
       }}
     >
+      <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: isMobile ? 0 : SIDEBAR_WIDTH }}>
       <OlMap
         basemap={d.basemap}
         types={d.types}
@@ -1381,251 +1488,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         onWarShapeChange={changeWarShape}
         onWarShapeRemove={removeWarShape}
       />
-
-      <DocumentsMenu
-        docName={d.name}
-        onNameChange={d.setName}
-        currentId={docId}
-        author={d.author}
-        onAuthorChange={d.setAuthor}
-        onNew={newDoc}
-        onSave={saveNow}
-        onExport={() => exportFromMenu(exportDocument)}
-        onExportGame={() => exportFromMenu(exportGameSeed)}
-        onOpen={openDoc}
-      />
-
-      {(onClose || onApplyToScenario) && (
-        // On a phone the buttons stack vertically (Apply above Close) and drop their
-        // labels, so the block is one icon wide and does not overlap the centred
-        // toolbar. On desktop it stays a labelled horizontal row.
-        <div style={{ position: "fixed", top: 12, right: 12, zIndex: 40, display: "flex", flexDirection: isMobile ? "column" : "row", gap: 8 }}>
-          {onApplyToScenario && (
-            <>
-              <button
-                onClick={() => persistScenario({ play: false, closeAfter: false })}
-                disabled={Boolean(scenarioAction) || !hydrated}
-                title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and keep editing`}
-                style={{
-                  ...panelSurface,
-                  padding: isMobile ? "9px 11px" : "8px 12px",
-                  cursor: scenarioAction || !hydrated ? "default" : "pointer",
-                  color: "white",
-                  fontWeight: 700,
-                  fontSize: isMobile ? 15 : 13,
-                  opacity: scenarioAction || !hydrated ? 0.75 : 1,
-                }}
-              >
-                {!hydrated ? (isMobile ? "⏳" : "Loading map…") : isMobile ? "💾" : scenarioAction === "save" ? "Saving…" : "💾 Save"}
-              </button>
-              <button
-                onClick={() => persistScenario({ play: false, closeAfter: true })}
-                disabled={Boolean(scenarioAction) || !hydrated}
-                title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and leave the Workshop`}
-                style={{
-                  ...panelSurface,
-                  padding: isMobile ? "9px 11px" : "8px 12px",
-                  cursor: scenarioAction || !hydrated ? "default" : "pointer",
-                  color: "white",
-                  fontWeight: 700,
-                  fontSize: isMobile ? 15 : 13,
-                  opacity: scenarioAction || !hydrated ? 0.75 : 1,
-                }}
-              >
-                {isMobile ? "↩" : scenarioAction === "save-exit" ? "Saving…" : "Save & Exit"}
-              </button>
-              <button
-                onClick={() => persistScenario({ play: true })}
-                disabled={Boolean(scenarioAction) || !hydrated}
-                title={!hydrated ? "The scenario’s map is still loading" : `Save this map into ${scenarioName || "the scenario"} and start playing it`}
-                style={{
-                  ...panelSurface,
-                  padding: isMobile ? "9px 11px" : "8px 15px",
-                  cursor: scenarioAction || !hydrated ? "default" : "pointer",
-                  color: "white",
-                  fontWeight: 700,
-                  fontSize: isMobile ? 16 : 13,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: isMobile ? 0 : 6,
-                  background: scenarioAction ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.14)",
-                  border: "1px solid rgba(255,255,255,0.23)",
-                  opacity: scenarioAction || !hydrated ? 0.8 : 1,
-                }}
-              >
-                {isMobile ? (scenarioAction === "play" ? "…" : "▶") : (scenarioAction === "play" ? "Applying…" : "▶ Apply & Play")}
-              </button>
-            </>
-          )}
-          {onClose && (
-            <button
-              onClick={() => { void requestClose(); }}
-              title="Close map editor"
-              aria-label="Close map editor"
-              style={{
-                ...panelSurface,
-                padding: isMobile ? "9px 11px" : "8px 13px",
-                cursor: "pointer",
-                color: "white",
-                fontWeight: 700,
-                fontSize: isMobile ? 16 : 13,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: isMobile ? 0 : 6,
-              }}
-            >
-              {isMobile ? "✕" : "✕ Close"}
-            </button>
-          )}
-        </div>
-      )}
-
-      <Toolbar
-        activeTool={d.activeTool}
-        isMobile={isMobile}
-        onToolChange={d.setActiveTool}
-        onFit={() => api?.fitToData()}
-        canUndo={history.canUndo}
-        canRedo={history.canRedo}
-        onUndo={() => api?.undo()}
-        onRedo={() => api?.redo()}
-      />
-
-      {d.activeTool === "paint" && (
-        <div
-          style={{
-            ...panelSurface,
-            position: "fixed",
-            top: "var(--editor-toolbar-bottom, 58px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 31,
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            justifyContent: "center",
-            gap: 8,
-            padding: "7px 10px",
-            fontSize: 12,
-            maxWidth: "calc(100vw - 20px)",
-          }}
-        >
-          <span style={{ color: "rgba(255,255,255,0.72)", fontWeight: 700 }}>Paint polity</span>
-          {d.colors[paintOwner] && (
-            <span style={{ width: 16, height: 16, borderRadius: 4, border: "1px solid rgba(255,255,255,0.3)", background: `rgb(${d.colors[paintOwner].join(",")})` }} />
-          )}
-          <select
-            value={paintOwner}
-            onChange={(e) => setPaintOwner(e.target.value)}
-            style={{ ...inputStyle, width: 220, padding: "4px 7px" }}
-            title="Stable polity key to assign while painting"
-          >
-            <option value="">Unowned / erase ownership</option>
-            {polityChoices.map((row) => (
-              <option key={row.key} value={row.key}>
-                {row.name}{row.name !== row.key ? ` — ${row.key}` : ""}
-              </option>
-            ))}
-          </select>
-
-          <span style={{ color: "rgba(255,255,255,0.48)" }}>paint over</span>
-          <select
-            value={paintOnlyOwner}
-            onChange={(e) => setPaintOnlyOwner(e.target.value)}
-            style={{ ...inputStyle, width: 190, padding: "4px 7px" }}
-            title="Restrict a paint stroke to regions that currently have this owner"
-          >
-            <option value="*">Any region</option>
-            <option value="__unowned__">Unowned regions only</option>
-            {polityChoices.map((row) => (
-              <option key={`filter-${row.key}`} value={row.key}>
-                Only {row.name}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={() => setOpenPanel("polities")}
-            style={{ ...panelSurface, padding: "4px 8px", cursor: "pointer", fontSize: 11 }}
-          >
-            Manage polities…
-          </button>
-          <span style={{ color: "rgba(255,255,255,0.46)", whiteSpace: "nowrap" }}>
-            click or drag · one stroke = one undo
-          </span>
-        </div>
-      )}
-
-      {d.activeTool === "modify" && (
-        <div
-          style={{
-            ...panelSurface,
-            position: "fixed",
-            top: "var(--editor-toolbar-bottom, 58px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 31,
-            padding: "7px 11px",
-            maxWidth: "min(760px, calc(100vw - 24px))",
-            fontSize: 11.5,
-            color: d.selection.length ? "rgba(255,255,255,0.78)" : "#fbbf24",
-            textAlign: "center",
-          }}
-        >
-          <b>Manual vertex override:</b>{" "}
-          {d.selection.length === 0
-            ? "select the regions to edit first"
-            : d.selection.length === 1
-              ? "1 selected region · drag a vertex · drag an edge to insert · Alt-click a vertex to remove · snap magnet enabled · Ctrl/Cmd+Z undo"
-              : `${d.selection.length} selected regions · drag a vertex · drag an edge to insert · Alt-click a vertex to remove · snap magnet enabled · Ctrl/Cmd+Z undo`}
-        </div>
-      )}
-
-      {d.activeTool === "border" && (
-        <div
-          style={{
-            ...panelSurface,
-            position: "fixed",
-            top: "var(--editor-toolbar-bottom, 58px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 31,
-            padding: "7px 11px",
-            maxWidth: "min(850px, calc(100vw - 24px))",
-            fontSize: 11.5,
-            color: d.selection.length === 2 ? "rgba(255,255,255,0.84)" : "#fbbf24",
-            textAlign: "center",
-          }}
-        >
-          <b>Shared border precision:</b>{" "}
-          {d.selection.length === 2
-            ? "drag a border vertex or edge on either selected region; the released point is welded into BOTH regions · cyan halo = shared-border magnet · Alt-click removes the corresponding shared vertex · a 100 m topology check runs after each edit · Ctrl/Cmd+Z undo"
-            : `select exactly 2 neighbouring regions first (${d.selection.length} selected)`}
-        </div>
-      )}
-
-      {isWarTool(d.activeTool) && (
-        <div
-          style={{
-            ...panelSurface,
-            position: "fixed",
-            top: "var(--editor-toolbar-bottom, 58px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 31,
-            padding: "7px 11px",
-            maxWidth: "min(760px, calc(100vw - 24px))",
-            fontSize: 11.5,
-            color: "rgba(255,255,255,0.78)",
-            textAlign: "center",
-          }}
-        >
-          {WAR_TOOL_HINTS[d.activeTool]}
-        </div>
-      )}
+      </div>
 
       {openPanel === "types" && (
         <TypeManager types={d.types} setTypes={d.setTypes} usage={typeUsage} onClose={() => setOpenPanel(null)} />
@@ -1930,30 +1793,25 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         />
       )}
 
-      <BottomBar
-        counts={d.counts}
-        polityCount={polityCount}
-        groupCount={groupCount}
-        clipboardCount={clipboardCount}
-        suggestionCount={review.active ? review.pendingCount : null}
-        basemap={d.basemap}
-        hasCustomBackground={Boolean(customBg)}
-        onOpenBasemaps={() => setBasemapPickerOpen(true)}
-        detailedMapLabel={d.doc?.metadata?.tiledBasemap?.name || ""}
+      <EditorSidebar
         name={d.name}
         onNameChange={d.setName}
-        saveStatus={d.saveStatus}
-        saveError={saveError}
-        onRetrySave={() => {
-          autoRetriesRef.current = 0;
-          void saveNow();
-        }}
-        scenarioDirty={scenarioMode ? scenarioDirty : false}
-        openPanel={openPanel}
-        onOpenPanel={togglePanel}
-        isMobile={isMobile}
+        documents={
+          <DocumentsMenu
+            currentId={docId}
+            author={d.author}
+            onAuthorChange={d.setAuthor}
+            onNew={newDoc}
+            onSave={saveNow}
+            onExport={() => exportFromMenu(exportDocument)}
+            onExportGame={() => exportFromMenu(exportGameSeed)}
+            onOpen={openDoc}
+          />
+        }
         search={
           <SearchBar
+            placement="down"
+            fill
             api={api}
             features={d.features}
             polities={d.polities}
@@ -1979,6 +1837,37 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
             }}
           />
         }
+        onClose={onClose ? () => { void requestClose(); } : null}
+        activeTool={d.activeTool}
+        onToolChange={d.setActiveTool}
+        toolOptions={toolOptions}
+        canUndo={history.canUndo}
+        canRedo={history.canRedo}
+        onUndo={() => api?.undo()}
+        onRedo={() => api?.redo()}
+        onFit={() => api?.fitToData()}
+        counts={d.counts}
+        polityCount={polityCount}
+        groupCount={groupCount}
+        clipboardCount={clipboardCount}
+        suggestionCount={review.active ? review.pendingCount : null}
+        openPanel={openPanel}
+        onOpenPanel={togglePanel}
+        basemap={d.basemap}
+        hasCustomBackground={Boolean(customBg)}
+        onOpenBasemaps={() => setBasemapPickerOpen(true)}
+        detailedMapLabel={d.doc?.metadata?.tiledBasemap?.name || ""}
+        saveStatus={d.saveStatus}
+        saveError={saveError}
+        onRetrySave={() => {
+          autoRetriesRef.current = 0;
+          void saveNow();
+        }}
+        scenarioDirty={scenarioMode ? scenarioDirty : false}
+        actions={scenarioActions}
+        isMobile={isMobile}
+        mobileOpen={sidebarOpen}
+        onMobileOpenChange={setSidebarOpen}
       />
 
       <FlagPicker
@@ -2003,7 +1892,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         onShownOver={showDetailedOver}
       />
 
-      <BorderCleanupNote lines={cleanupNote} top={isMobile ? 200 : 56} />
+      <BorderCleanupNote lines={cleanupNote} top={12} />
       <BorderCleanupChoice choice={cleanChoice} onChoose={answerClean} />
       <BorderCleanupOverlay state={borderCleanup} onStop={() => { cleanupStopRef.current = true; }} />
 

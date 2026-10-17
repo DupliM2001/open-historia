@@ -58,14 +58,14 @@ const NEW_UPDATES = [
     date: "2026-10-17",
     banners: [
       {
-        title: "Games and groups",
+        title: "Games, groups and the map editor",
         items: [
           "Archiving or deleting the game you have open takes you back to the menu instead of opening another game.",
           "An archived game can be deleted from its card: Delete is beside Unarchive.",
           "Create a faction is now part of Play as a group: name it, give it a colour, a flag and an area, or start with none.",
           "The map shows again when choosing a group's area, in the same colours as the country picker.",
           "Emptying Recently deleted asks in the menu itself, so it works everywhere.",
-          "The map editor's Region panel is laid out in sections, with nothing cut off at the side.",
+          "The map editor is laid out anew in the menus' style: tools, panels and saving sit in one sidebar, the chosen tool's options show under the tools, and the Region panel is in sections.",
         ],
       },
     ],
