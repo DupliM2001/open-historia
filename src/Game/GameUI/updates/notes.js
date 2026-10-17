@@ -53,6 +53,41 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-games-and-groups",
+    kind: "minor",
+    date: "2026-10-17",
+    banners: [
+      {
+        title: "Games and groups",
+        items: [
+          "Archiving or deleting the game you have open takes you back to the menu instead of opening another game.",
+          "An archived game can be deleted from its card: Delete is beside Unarchive.",
+          "Create a faction is now part of Play as a group: name it, give it a colour, a flag and an area, or start with none.",
+          "The map shows again when choosing a group's area, in the same colours as the country picker.",
+          "Emptying Recently deleted asks in the menu itself, so it works everywhere.",
+          "The map editor's Region panel is laid out in sections, with nothing cut off at the side.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "2026-10-country-picker-cards",
+    kind: "minor",
+    date: "2026-10-17",
+    banners: [
+      {
+        title: "A bigger country picker",
+        items: [
+          "Choosing a country opens a larger picker: the map beside a list of the countries you can play.",
+          "Each country in the list shows its flag where one is known, and its colour on the map.",
+          "The map and the list use the scenario's own country colours.",
+          "Scenario cards show their cover whole, with the name and description below it.",
+          "Community cards line up, with their counts and buttons on one line at the bottom.",
+        ],
+      },
+    ],
+  },
+  {
     // "make it so you can also deploy "armies" which are just groups of troops not arranged in a front", "a group
     // should also be run by a single general. using the deploy tool should give the option to do a front or swarm",
     // "troops should move independantly like they do in fronts", "JUST MAKE IT DEPLOY IN A GROUPED FORMATION TO

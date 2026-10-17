@@ -56,7 +56,7 @@ const GROUP_CREATOR_TEXTS = {
   noAreaText: "The group starts with no area on the map. It can take one as the story goes.",
 };
 
-const FactionCreator = ({ regionsGeojson, onCreate, onCancel, busy, mode = "faction" }) => {
+const FactionCreator = ({ regionsGeojson, ownerOverrides = null, customBackground = null, colors = null, onCreate, onCancel, busy, mode = "faction" }) => {
   const group = mode === "group";
   const [name, setName] = useState("");
   const [color, setColor] = useState("#a1a1aa");
@@ -171,6 +171,9 @@ const FactionCreator = ({ regionsGeojson, onCreate, onCancel, busy, mode = "fact
                 countryOptions={[]}
                 onPickCountry={() => {}}
                 regionsGeojson={regionsGeojson}
+                ownerOverrides={ownerOverrides}
+                customBackground={customBackground}
+                colors={colors}
                 selectionMode="regions"
                 selectedRegionIds={regionIds}
                 onToggleRegion={toggleRegion}

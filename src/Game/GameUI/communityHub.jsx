@@ -88,15 +88,17 @@ const countPublishableFlags = async (flagsData) => {
 
 // Never wider than the phone it is on: at 320 px a 19rem card pushed the
 // search results sideways off the screen.
-const CARD_WIDTH = "min(19rem, calc(100vw - 2rem))";
+const CARD_WIDTH = "min(21rem, calc(100vw - 2rem))";
 // Discovery follows the available page rail at every desktop width. auto-fill
 // grows from a few readable columns on smaller screens to more columns on wide
 // displays instead of stopping at a resolution-specific max width.
 const COMMUNITY_GRID_TEMPLATE = "repeat(auto-fill, minmax(min(100%, 16.5rem), 1fr))";
 const cardSurface = {
-  background: "rgba(255,255,255,0.04)",
+  background: "#12141a",
   border: "1px solid rgba(255,255,255,0.09)",
   borderRadius: "16px",
+  boxShadow: "0 14px 32px rgba(0,0,0,0.45)",
+  boxSizing: "border-box",
   color: "#fff",
   display: "flex",
   flexDirection: "column",
@@ -111,8 +113,8 @@ const cardSurface = {
 const pillButton = {
   alignItems: "center",
   background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: "999px",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: "9px",
   color: "rgba(246,246,248,0.92)",
   cursor: "pointer",
   display: "inline-flex",
@@ -139,8 +141,8 @@ const rowTitleStyle = {
 
 const searchInputStyle = {
   background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: "999px",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: "9px",
   color: "#fff",
   fontSize: "0.8rem",
   height: "2rem",
@@ -269,47 +271,95 @@ const ScenarioCard = ({ post, busy, onImport, onSelect, touch, isMobile, status,
         </div>
       </div>
     </div>
-    <LibraryBadge status={status} />
-    <div style={{ color: "rgba(244,244,246,0.72)", flex: 1, fontSize: "0.8rem", lineHeight: 1.5 }}>
+    <div style={{ alignItems: "center", display: "flex", minHeight: "1.35rem" }}>
+      <LibraryBadge status={status} />
+    </div>
+    <div
+      style={{
+        color: "rgba(244,244,246,0.72)",
+        display: "-webkit-box",
+        fontSize: "0.8rem",
+        height: "2.35rem",
+        lineHeight: 1.45,
+        maxHeight: "2.35rem",
+        minHeight: "2.35rem",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        WebkitBoxOrient: "vertical",
+        WebkitLineClamp: 2,
+      }}
+    >
       {post.description || "No description."}
     </div>
-    {/* On a phone the card can be narrower than the counts and both pills,
-        so a pill that does not fit drops to a line of its own, on the right. */}
-    <div style={{ alignItems: "center", display: "flex", flexWrap: isMobile ? "wrap" : undefined, gap: "0.5rem", justifyContent: isMobile ? "flex-end" : undefined }}>
-      {post.installs != null && (
-        <span title="Times this scenario has been imported" style={{ color: "rgba(255,255,255,0.65)", fontSize: "0.76rem" }}>⬇ {post.installs}</span>
-      )}
-      <span title="Liked (👍 reactions on the hub post)" style={{ color: "rgba(255,255,255,0.65)", fontSize: "0.76rem" }}>👍 {post.upvotes}</span>
-      <span title="Comments on the hub post" style={{ color: "rgba(255,255,255,0.65)", fontSize: "0.76rem" }}>💬 {post.comments}</span>
-      <div style={{ flex: 1 }} />
-      <a
-        href={post.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="oh-tap-row"
-        onClick={(event) => event.stopPropagation()}
-        title="Open the GitHub post to 👍 like or 💬 comment"
-        style={touchFit({ ...pillButton, minHeight: "1.8rem", textDecoration: "none" }, touch)}
-      >
-        👍 Like ↗
-      </a>
-      <button
-        type="button"
-        className="oh-tap-row"
-        disabled={!post.bundleUrl || busy}
-        onClick={(event) => { event.stopPropagation(); onImport(post); }}
-        title={!post.bundleUrl ? "This post has no scenario file attached" : !status ? "Import into your Scenarios" : armed ? "Click again to import another copy" : "This scenario is already in your library"}
-        style={touchFit({
-          ...pillButton,
-          minHeight: "1.8rem",
-          background: post.bundleUrl ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
-          borderColor: post.bundleUrl ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)",
-          color: post.bundleUrl ? "#fff" : "rgba(255,255,255,0.35)",
-          cursor: post.bundleUrl && !busy ? "pointer" : "default",
-        }, touch)}
-      >
-        {importLabel(busy, status, armed)}
-      </button>
+    <div
+      style={{
+        alignItems: "center",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "0.45rem",
+        justifyContent: "space-between",
+        marginTop: "auto",
+        minHeight: "1.85rem",
+        width: "100%",
+      }}
+    >
+      <div style={{ alignItems: "center", display: "inline-flex", flexShrink: 0, gap: "0.45rem", whiteSpace: "nowrap" }}>
+        {post.installs != null && (
+          <span title="Times this scenario has been imported" style={{ alignItems: "center", color: "rgba(255,255,255,0.65)", display: "inline-flex", fontSize: "0.76rem", gap: "0.2rem", lineHeight: 1 }}>⬇ {post.installs}</span>
+        )}
+        <span title="Liked (👍 reactions on the hub post)" style={{ alignItems: "center", color: "rgba(255,255,255,0.65)", display: "inline-flex", fontSize: "0.76rem", gap: "0.2rem", lineHeight: 1 }}>👍 {post.upvotes}</span>
+        <span title="Comments on the hub post" style={{ alignItems: "center", color: "rgba(255,255,255,0.65)", display: "inline-flex", fontSize: "0.76rem", gap: "0.2rem", lineHeight: 1 }}>💬 {post.comments}</span>
+      </div>
+      <div style={{ alignItems: "center", display: "inline-flex", flexShrink: 0, gap: "0.35rem", marginLeft: "auto", whiteSpace: "nowrap" }}>
+        <a
+          href={post.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="oh-tap-row"
+          onClick={(event) => event.stopPropagation()}
+          title="Open the GitHub post to 👍 like or 💬 comment"
+          style={touchFit({
+            ...pillButton,
+            boxSizing: "border-box",
+            flexShrink: 0,
+            fontSize: "0.76rem",
+            height: "1.85rem",
+            lineHeight: "1.85rem",
+            minHeight: "1.85rem",
+            padding: "0 0.65rem",
+            textDecoration: "none",
+            verticalAlign: "middle",
+            whiteSpace: "nowrap",
+          }, touch)}
+        >
+          👍 Like ↗
+        </a>
+        <button
+          type="button"
+          className="oh-tap-row"
+          disabled={!post.bundleUrl || busy}
+          onClick={(event) => { event.stopPropagation(); onImport(post); }}
+          title={!post.bundleUrl ? "This post has no scenario file attached" : !status ? "Import into your Scenarios" : armed ? "Click again to import another copy" : "This scenario is already in your library"}
+          style={touchFit({
+            ...pillButton,
+            boxSizing: "border-box",
+            background: post.bundleUrl ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+            borderColor: post.bundleUrl ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)",
+            color: post.bundleUrl ? "#fff" : "rgba(255,255,255,0.35)",
+            cursor: post.bundleUrl && !busy ? "pointer" : "default",
+            flexShrink: 0,
+            fontSize: "0.76rem",
+            height: "1.85rem",
+            lineHeight: "1.85rem",
+            minHeight: "1.85rem",
+            padding: "0 0.65rem",
+            verticalAlign: "middle",
+            whiteSpace: "nowrap",
+          }, touch)}
+        >
+          {importLabel(busy, status, armed)}
+        </button>
+      </div>
     </div>
   </div>
 );
@@ -328,7 +378,7 @@ const ScenarioRow = ({ title, posts, busyId, onImport, onSelect, emptyText, layo
         ))}
       </div>
     ) : (
-      <div style={{ display: "flex", gap: "0.8rem", overflowX: "auto", paddingBottom: "0.35rem", scrollbarWidth: "thin" }}>
+      <div style={{ alignItems: "stretch", display: "flex", gap: "0.8rem", overflowX: "auto", paddingBottom: "0.35rem", scrollbarWidth: "thin" }}>
         {posts.map((post) => (
           <ScenarioCard key={post.id} post={post} busy={busyId === post.id} onImport={onImport} onSelect={onSelect} touch={touch} isMobile={isMobile} status={libraryOf(post).status} armed={armedId === post.id} />
         ))}

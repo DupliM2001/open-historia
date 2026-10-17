@@ -43,17 +43,16 @@ test("the library's outlines are its cards' shape: a game's and a scenario's, as
   const games = render(skeleton.MenuCardSkeletons, { count: 8, kind: "game", width: SHELF });
   assert.equal(count(games, 'class="oh-skeleton"'), 8);
   assert.equal(count(games, 'aria-hidden="true" class="oh-skeleton"'), 8, "every outline is hidden from a screen reader");
-  // GameCard: 24px corners, at least 14rem, 1.2rem in, a phone shelf's width.
+  // GameCard: 24px corners, at least 22rem, 1.2rem in, a phone shelf's width.
   assert.equal(count(games, "border-radius:24px"), 8);
-  assert.equal(count(games, "min-height:14rem"), 8);
+  assert.equal(count(games, "min-height:22rem"), 8);
   assert.equal(count(games, "padding:1.2rem"), 8);
   assert.equal(count(games, `flex:0 0 ${SHELF}`), 8);
   const scenarios = render(skeleton.MenuCardSkeletons, { count: 3, kind: "scenario", width: SHELF });
   assert.equal(count(scenarios, 'class="oh-skeleton"'), 3);
-  // ScenarioCard: at least 15rem, its title 4rem below the pill.
-  assert.equal(count(scenarios, "min-height:15rem"), 3);
+  // ScenarioCard: at least 22rem, its title 4rem below the pill.
+  assert.equal(count(scenarios, "min-height:22rem"), 3);
   assert.equal(count(scenarios, "margin-top:4rem"), 3);
-  assert.equal(count(scenarios, "min-height:14rem"), 0);
   // Words nowhere: an outline is shapes and nothing else.
   for (const html of [games, scenarios]) assert.equal(seen(html).trim(), "");
 });
@@ -62,15 +61,15 @@ test("the real cards are the size the outlines say", () => {
   const card = (name, next) => libraryBar.slice(libraryBar.indexOf(`const ${name} = `), libraryBar.indexOf(next));
   const game = card("GameCard", "// A responsive shelf on the main menu.");
   const scenario = card("ScenarioCard", "// Edit, Clone and Export live behind");
-  for (const [source, height] of [[game, "14rem"], [scenario, "15rem"]]) {
+  for (const [source, height, padding] of [[game, "22rem", /padding: "1rem 1\.05rem",/], [scenario, "22rem", /padding: "1rem 1\.05rem",/]]) {
     assert.match(source, /borderRadius: "24px",/);
     assert.match(source, new RegExp(`minHeight: "${height}",`));
-    assert.match(source, /padding: "1\.2rem",/);
+    assert.match(source, padding);
     assert.match(source, /flex: `0 0 \$\{SHELF_CARD_WIDTH\}`,/);
   }
   assert.match(hub, /aspectRatio: "16 \/ 9",/);
   assert.match(hub, /const ScenarioCover = \(\{ post, borderRadius = "10px", marginBottom \}\) =>/);
-  assert.match(hub, /borderRadius: "16px",\s+color: "#fff",\s+display: "flex",\s+flexDirection: "column",\s+flex: `0 0 \$\{CARD_WIDTH\}`,\s+gap: "0\.55rem",\s+maxWidth: CARD_WIDTH,\s+minWidth: 0,\s+padding: "0\.9rem",/);
+  assert.match(hub, /borderRadius: "16px",\s+boxShadow: "0 14px 32px rgba\(0,0,0,0\.45\)",\s+boxSizing: "border-box",\s+color: "#fff",\s+display: "flex",\s+flexDirection: "column",\s+flex: `0 0 \$\{CARD_WIDTH\}`,\s+gap: "0\.55rem",\s+maxWidth: CARD_WIDTH,\s+minWidth: 0,\s+padding: "0\.9rem",/);
   assert.match(hub, /<div style=\{\{ display: "grid", gap: "0\.8rem", gridTemplateColumns: COMMUNITY_GRID_TEMPLATE, paddingBottom: "0\.35rem" \}\}>/);
   const lobbies = read("../../multiplayer/ui/LobbiesTab.jsx");
   assert.match(lobbies, /borderRadius: "18px",\s+padding: "1\.2rem 1\.3rem",/);

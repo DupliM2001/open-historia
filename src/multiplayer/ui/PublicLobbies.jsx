@@ -9,14 +9,15 @@ import React, { useEffect, useState } from "react";
 import { configuredServer, listPublicRooms } from "../signaling/publicServers.js";
 
 const card = {
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.08)",
+  background: "#12141a",
+  border: "1px solid rgba(255,255,255,0.09)",
+  boxShadow: "0 14px 32px rgba(0,0,0,0.45)",
   borderRadius: "18px",
   overflow: "hidden",
   padding: "1.2rem 1.3rem",
   position: "relative",
 };
-const input = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: "#f8fafc", fontSize: "0.84rem", outline: "none", padding: "0.5rem 0.7rem", boxSizing: "border-box" };
+const input = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "9px", color: "#f8fafc", fontSize: "0.84rem", outline: "none", padding: "0.5rem 0.7rem", boxSizing: "border-box" };
 const cell = { borderTop: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.82)", fontSize: "0.82rem", padding: "0.55rem 0.5rem", textAlign: "left" };
 // Anyone's text, kept from reordering the text around it.
 const isolate = { unicodeBidi: "isolate" };

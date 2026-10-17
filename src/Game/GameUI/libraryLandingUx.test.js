@@ -136,7 +136,7 @@ test("a copy downloaded the old way asks for its Update in the open, and an edit
   assert.match(question, /role="dialog"/);
   assert.match(question, /setReplaceEditsTarget\(null\);\s+handleScenarioUpdate\(pending\.scenario, \{ post: pending\.post, replaceEdits: true \}\);/);
   assert.equal(question.match(/handleScenarioUpdate\(/g)?.length, 1, "one way to say yes");
-  assert.match(question, /onClick=\{\(\) => setReplaceEditsTarget\(null\)\}\s+style=\{touchFit\(\{ \.\.\.actionButtonStyle, minHeight: "2\.6rem" \}, touch\)\}\s+type="button"\s+>\s+Not now\s+</);
+  assert.match(question, /onClick=\{\(\) => setReplaceEditsTarget\(null\)\}\s+style=\{touchFit\(\{ \.\.\.themeButtonStyle, minHeight: "2\.6rem" \}, touch\)\}\s+type="button"\s+>\s+Not now\s+</);
   assert.match(source, /useBackToClose\(Boolean\(replaceEditsTarget\), \(\) => setReplaceEditsTarget\(null\)\);/);
   // A drawer open on the scenario is loaded again, so its Save cannot write
   // the form it held over the hub's file.

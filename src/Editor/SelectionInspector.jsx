@@ -19,8 +19,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Panel from "./Panel.jsx";
 import Icon from "./Icon.jsx";
-import { pillButton } from "./editorStyles.js";
-import { Row, TextField, SelectField, ColorField, TagField, Toggle } from "./fields.jsx";
+import { inputStyle, pillButton } from "./editorStyles.js";
+import { TextField, SelectField, ColorField, TagField, Toggle } from "./fields.jsx";
 import { isWaterType } from "../runtime/regionTypes.js";
 import { TAG_SUGGESTIONS } from "../runtime/countryTags.js";
 import { rgbToHex } from "./fields.jsx";
@@ -38,6 +38,20 @@ const commonOr = (arr, blank = "") => {
 };
 
 const foldPolityName = (value) => String(value ?? "").trim().toLowerCase();
+
+const InspectorSection = ({ title, children }) => (
+  <section style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+    <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>{title}</div>
+    {children}
+  </section>
+);
+
+const Field = ({ label, title, children }) => (
+  <div title={title} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+    <span style={{ color: "rgba(255,255,255,0.72)", fontSize: 12 }}>{label}</span>
+    {children}
+  </div>
+);
 
 // freezingRegions / onSetFreezing(ids, on): the water regions that can freeze
 // (warGeographyDoc.js), offered for a selection that is all water.
@@ -143,55 +157,61 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
     setOwner(key);
   };
 
+  const actionButton = { ...pillButton(false), display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 9px", minWidth: 0 };
+
   return (
     <Panel
       title={single ? "Region" : `${selection.length} regions`}
       icon="modify"
       onClose={() => setSelection([])}
       side="right"
-      width={300}
+      width={320}
     >
       {single && (
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", fontFamily: "ui-monospace, monospace", overflowWrap: "anywhere" }}>
           {summaries[0]?.id}
         </div>
       )}
-      {single && (
-        <Row label="Name">
-          <TextField
-            value={form.name}
+
+      <InspectorSection title="Region">
+        {single && (
+          <Field label="Name">
+            <TextField
+              value={form.name}
+              onChange={(v) => {
+                setForm((f) => ({ ...f, name: v }));
+                apply({ name: v });
+              }}
+            />
+          </Field>
+        )}
+        <Field label="Type">
+          <SelectField
+            value={form.typeId}
             onChange={(v) => {
-              setForm((f) => ({ ...f, name: v }));
-              apply({ name: v });
+              setForm((f) => ({ ...f, typeId: v }));
+              apply({ typeId: v });
             }}
-            width={160}
+            options={[
+              ...(form.typeId ? [] : [{ value: "", label: "— mixed —" }]),
+              ...types.map((t) => ({ value: t.id, label: t.name })),
+            ]}
+            width="100%"
           />
-        </Row>
-      )}
-      <Row label="Type">
-        <SelectField
-          value={form.typeId}
-          onChange={(v) => {
-            setForm((f) => ({ ...f, typeId: v }));
-            apply({ typeId: v });
-          }}
-          options={[
-            ...(form.typeId ? [] : [{ value: "", label: "— mixed —" }]),
-            ...types.map((t) => ({ value: t.id, label: t.name })),
-          ]}
-          width={160}
-        />
-      </Row>
-      {allWater && onSetFreezing && (
-        <Row label="Can freeze" title="Ices over in a season of its climate zone whose effects say Water freezes (the War map panel's Climate tab).">
-          <Toggle value={allFreeze} onChange={(on) => onSetFreezing(summaries.map((s) => String(s.id)), on)} />
-        </Row>
-      )}
-      <Row label="Polity" title="The polity that owns these regions. Type an existing polity's name, or a name that does not exist yet and press Enter to create it — a country that has never existed is one keystroke away. Rename and manage polities in the Polities panel; changing a display name there keeps all territory attached.">
-        <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+        </Field>
+        {allWater && onSetFreezing && (
+          <div title="Ices over in a season of its climate zone whose effects say Water freezes (the War map panel's Climate tab)." style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5 }}>
+            <span style={{ color: "rgba(255,255,255,0.72)" }}>Can freeze</span>
+            <Toggle value={allFreeze} onChange={(on) => onSetFreezing(summaries.map((s) => String(s.id)), on)} />
+          </div>
+        )}
+      </InspectorSection>
+
+      <InspectorSection title="Polity">
+        <Field label="Polity" title="The polity that owns these regions. Type an existing polity's name, or a name that does not exist yet and press Enter to create it — a country that has never existed is one keystroke away. Rename and manage polities in the Polities panel; changing a display name there keeps all territory attached.">
           <span style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
             {ownerRgb && (
-              <span style={{ width: 18, height: 18, borderRadius: 4, border: "1px solid rgba(255,255,255,0.3)", background: rgbToHex(ownerRgb) }} />
+              <span style={{ width: 18, height: 18, flexShrink: 0, borderRadius: 4, border: "1px solid rgba(255,255,255,0.3)", background: rgbToHex(ownerRgb) }} />
             )}
             <input
               value={ownerShown}
@@ -207,13 +227,11 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
                 }
               }}
               style={{
+                ...inputStyle,
                 flex: 1,
                 minWidth: 0,
-                padding: "0.45rem 0.5rem",
-                borderRadius: 8,
+                padding: "5px 7px",
                 border: `1px solid ${draftIsNew ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.16)"}`,
-                background: "rgba(0,0,0,0.28)",
-                color: "white",
               }}
             />
             <datalist id="oh-polity-options">
@@ -221,12 +239,12 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
                 <option key={row.key} value={row.name} label={row.name !== row.key ? row.key : undefined} />
               ))}
             </datalist>
-            <button type="button" onClick={onOpenPolities} style={pillButton(false)} title="Create, rename and manage polities">
+            <button type="button" onClick={onOpenPolities} style={{ ...pillButton(false), flexShrink: 0 }} title="Create, rename and manage polities">
               Polities…
             </button>
           </span>
           {ownerDraft !== null && !draftText && form.owner && (
-            <button type="button" onClick={() => setOwner("")} style={pillButton(false)}>
+            <button type="button" onClick={() => setOwner("")} style={{ ...pillButton(false), alignSelf: "flex-start" }}>
               Make unowned
             </button>
           )}
@@ -234,171 +252,182 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
             <button
               type="button"
               onClick={commitOwner}
-              style={pillButton(true)}
+              style={{ ...pillButton(true), alignSelf: "flex-start", maxWidth: "100%", overflowWrap: "anywhere", textAlign: "left" }}
               title="No polity has this name yet. Create it and give it these regions (Enter does the same)."
             >
               Create “{draftText}”
             </button>
           )}
-        </span>
-      </Row>
-      <Row
-        label="Disputed by"
-        title="Countries that claim this region. With any claimant set, the region renders STRIPED — the current owner's colour plus each claimant's — here and in the game."
-      >
-        <TagField
-          value={form.claimants}
-          suggestions={polityOptions.map((row) => row.key)}
-          placeholder={form.claimantsMixed ? "mixed — adds to every region…" : undefined}
-          onChange={(next) => {
-            const claimants = next.map((v) => String(v).trim()).filter(Boolean);
-            // Differing lists change per region: an added claimant joins each
-            // region's own list and a removed one leaves it, so the claims only
-            // some regions carry survive. Identical lists are replaced whole.
-            const delta = form.claimantsMixed ? claimantDelta(form.claimants, claimants) : null;
-            setForm((f) => ({ ...f, claimants }));
-            apply({ claimants: delta ? (list) => applyClaimantDelta(list, delta) : claimants });
-          }}
-        />
-      </Row>
-      <Row
-        label="Controlled by group"
-        title="A group — a cartel, a militia, a zombie outbreak — that controls these regions without owning them. The game outlines the group's whole area and tints it in the group's colour; the AI is told what the group is. Create and describe groups in the Groups panel."
-      >
-        <span style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
-          {form.group && groupRegistry[form.group] && (
-            <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, background: groupRegistry[form.group].color, boxShadow: "0 0 0 1px rgba(0,0,0,0.5)" }} />
-          )}
-          <SelectField
-            value={form.group}
-            onChange={(value) => {
-              setForm((f) => ({ ...f, group: value }));
-              apply({ group: value || null });
-            }}
-            options={[
-              { value: "", label: selection.length > 1 && !form.group ? "— none / mixed —" : "— none —" },
-              ...[...new Set([...Object.keys(groupRegistry), ...(form.group ? [form.group] : [])])]
-                .sort((a, b) => a.localeCompare(b))
-                .map((name) => ({ value: name, label: name })),
-            ]}
-            width={130}
-          />
-          <button type="button" onClick={onOpenGroups} style={pillButton(false)} title="Create, describe and colour groups">
-            Groups…
-          </button>
-        </span>
-      </Row>
-      {form.owner && setColorOverride && (
-        <Row label="Colour" title="The colour this country is painted, here and in the game">
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <ColorField
-              value={ownerRgb || [128, 128, 128]}
-              onChange={(rgb) => setColorOverride(form.owner, rgb)}
+        </Field>
+        {form.owner && (setColorOverride || setFlag) && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {setColorOverride && (
+              <Field label="Colour" title="The colour this country is painted, here and in the game">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <ColorField
+                    value={ownerRgb || [128, 128, 128]}
+                    onChange={(rgb) => setColorOverride(form.owner, rgb)}
+                  />
+                  {isCustomColor && (
+                    <button
+                      onClick={() => setColorOverride(form.owner, null)}
+                      style={pillButton(false)}
+                      title="Go back to this country's standard colour"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </span>
+              </Field>
+            )}
+            {setFlag && (
+              <Field label="Flag" title="Shown in the country panel and profile circles in-game">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {ownerFlag && (
+                    <img
+                      src={bundledFlagUrl(ownerFlag)}
+                      alt=""
+                      style={{ width: 26, height: 18, flexShrink: 0, objectFit: "contain", borderRadius: 3, border: "1px solid rgba(255,255,255,0.3)" }}
+                    />
+                  )}
+                  <button onClick={() => onOpenFlagPicker(form.owner)} style={{ ...pillButton(false), minWidth: 0 }}>
+                    {ownerFlag ? "Change" : "Choose flag"}
+                  </button>
+                </span>
+              </Field>
+            )}
+          </div>
+        )}
+        {form.owner && setTags && (
+          <Field
+            label="Tags"
+            title="What this country IS — ideology, alignment, posture. Shown in the country panel, and given to the AI as context for everything this country does."
+          >
+            <TagField
+              value={ownerTags}
+              suggestions={TAG_SUGGESTIONS}
+              onChange={(next) => setTags(form.owner, next)}
             />
-            {isCustomColor && (
-              <button
-                onClick={() => setColorOverride(form.owner, null)}
-                style={pillButton(false)}
-                title="Go back to this country's standard colour"
-              >
-                Reset
-              </button>
-            )}
-          </span>
-        </Row>
-      )}
-      {form.owner && setFlag && (
-        <Row label="Flag" title="Shown in the country panel and profile circles in-game">
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {ownerFlag && (
-              <img
-                src={bundledFlagUrl(ownerFlag)}
-                alt=""
-                style={{ width: 26, height: 18, objectFit: "contain", borderRadius: 3, border: "1px solid rgba(255,255,255,0.3)" }}
-              />
-            )}
-            <button onClick={() => onOpenFlagPicker(form.owner)} style={pillButton(false)}>
-              {ownerFlag ? "Change" : "Choose flag"}
-            </button>
-          </span>
-        </Row>
-      )}
-      {form.owner && setTags && (
-        <Row
-          label="Tags"
-          title="What this country IS — ideology, alignment, posture. Shown in the country panel, and given to the AI as context for everything this country does."
+          </Field>
+        )}
+        {/* The country's military figures, here as in the Countries panel (MilitaryFields.jsx), kept with its record as
+            `military`: "make it so the military settings per country are availible just by selecting the country so
+            you dont need to go into the country menu" (the owner, 2026-10-16). For a selection of one country's land. */}
+        {form.owner && upsertPolity && (
+          <div data-oh-selection-military="">
+            <MilitaryFields
+              recordKey={form.owner}
+              value={polities?.[form.owner]?.military}
+              defaults={militaryDefaults}
+              onChange={(military) => upsertPolity(form.owner, { military: military ?? undefined })}
+              onRate={() => rateMilitaryFigures({
+                name: polities?.[form.owner]?.name || form.owner,
+                note: polities?.[form.owner]?.note,
+                population: polities?.[form.owner]?.population,
+                rated: militaryScaleOf(polities, groups),
+                date: militaryDefaults?.gameDate,
+                era: Number.isInteger(militaryDefaults?.era) ? militaryDefaults.era : null,
+                rules: militaryDefaults?.rules,
+              })}
+            />
+          </div>
+        )}
+      </InspectorSection>
+
+      <InspectorSection title="Claims">
+        <Field
+          label="Disputed by"
+          title="Countries that claim this region. With any claimant set, the region renders STRIPED — the current owner's colour plus each claimant's — here and in the game."
         >
           <TagField
-            value={ownerTags}
-            suggestions={TAG_SUGGESTIONS}
-            onChange={(next) => setTags(form.owner, next)}
+            value={form.claimants}
+            suggestions={polityOptions.map((row) => row.key)}
+            placeholder={form.claimantsMixed ? "mixed — adds to every region…" : undefined}
+            onChange={(next) => {
+              const claimants = next.map((v) => String(v).trim()).filter(Boolean);
+              // Differing lists change per region: an added claimant joins each
+              // region's own list and a removed one leaves it, so the claims only
+              // some regions carry survive. Identical lists are replaced whole.
+              const delta = form.claimantsMixed ? claimantDelta(form.claimants, claimants) : null;
+              setForm((f) => ({ ...f, claimants }));
+              apply({ claimants: delta ? (list) => applyClaimantDelta(list, delta) : claimants });
+            }}
           />
-        </Row>
-      )}
-      {/* The country's military figures, here as in the Countries panel (MilitaryFields.jsx), kept with its record as
-          `military`: "make it so the military settings per country are availible just by selecting the country so
-          you dont need to go into the country menu" (the owner, 2026-10-16). For a selection of one country's land. */}
-      {form.owner && upsertPolity && (
-        <div data-oh-selection-military="" style={{ marginTop: 6 }}>
-          <MilitaryFields
-            recordKey={form.owner}
-            value={polities?.[form.owner]?.military}
-            defaults={militaryDefaults}
-            onChange={(military) => upsertPolity(form.owner, { military: military ?? undefined })}
-            onRate={() => rateMilitaryFigures({
-              name: polities?.[form.owner]?.name || form.owner,
-              note: polities?.[form.owner]?.note,
-              population: polities?.[form.owner]?.population,
-              rated: militaryScaleOf(polities, groups),
-              date: militaryDefaults?.gameDate,
-              era: Number.isInteger(militaryDefaults?.era) ? militaryDefaults.era : null,
-              rules: militaryDefaults?.rules,
-            })}
-          />
-        </div>
-      )}
+        </Field>
+        <Field
+          label="Controlled by group"
+          title="A group — a cartel, a militia, a zombie outbreak — that controls these regions without owning them. The game outlines the group's whole area and tints it in the group's colour; the AI is told what the group is. Create and describe groups in the Groups panel."
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+            {form.group && groupRegistry[form.group] && (
+              <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, background: groupRegistry[form.group].color, boxShadow: "0 0 0 1px rgba(0,0,0,0.5)" }} />
+            )}
+            <span style={{ flex: 1, minWidth: 0, display: "flex" }}>
+              <SelectField
+                value={form.group}
+                onChange={(value) => {
+                  setForm((f) => ({ ...f, group: value }));
+                  apply({ group: value || null });
+                }}
+                options={[
+                  { value: "", label: selection.length > 1 && !form.group ? "— none / mixed —" : "— none —" },
+                  ...[...new Set([...Object.keys(groupRegistry), ...(form.group ? [form.group] : [])])]
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((name) => ({ value: name, label: name })),
+                ]}
+                width="100%"
+              />
+            </span>
+            <button type="button" onClick={onOpenGroups} style={{ ...pillButton(false), flexShrink: 0 }} title="Create, describe and colour groups">
+              Groups…
+            </button>
+          </span>
+        </Field>
+      </InspectorSection>
 
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-        <button
-          onClick={() => {
-            setForm((f) => ({ ...f, owner: "" }));
-            apply({ owner: null });
-          }}
-          style={pillButton(false)}
-        >
-          Clear country
-        </button>
-        {selection.length >= 2 && (
-          <button onClick={() => api?.mergeRegions(selection)} style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}>
-            <Icon name="merge" size={13} /> Merge
-          </button>
-        )}
-        <button
-          onClick={() => api?.copyRegions(selection)}
-          style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}
-          title="Duplicate the selection beside itself, on this map"
-        >
-          <Icon name="copy" size={13} /> Duplicate
-        </button>
-        {onCopyToClipboard && (
+      <InspectorSection title="Actions">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
           <button
-            onClick={() => onCopyToClipboard(selection)}
-            style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}
-            title="Copy the selection to the region clipboard, to paste into another map (Ctrl+C)"
+            onClick={() => {
+              setForm((f) => ({ ...f, owner: "" }));
+              apply({ owner: null });
+            }}
+            style={actionButton}
           >
-            <Icon name="copy" size={13} /> Copy to clipboard
+            Clear country
           </button>
-        )}
-        <button onClick={() => api?.zoomToSelection(selection)} style={{ ...pillButton(false), display: "flex", alignItems: "center", gap: 4 }}>
-          <Icon name="fit" size={13} /> Zoom
-        </button>
-        <button
-          onClick={() => api?.deleteRegions(selection)}
-          style={{ ...pillButton(false), color: "#f87171", display: "flex", alignItems: "center", gap: 4 }}
-        >
-          <Icon name="trash" size={13} /> Delete
-        </button>
-      </div>
+          {selection.length >= 2 && (
+            <button onClick={() => api?.mergeRegions(selection)} style={actionButton}>
+              <Icon name="merge" size={13} /> Merge
+            </button>
+          )}
+          <button
+            onClick={() => api?.copyRegions(selection)}
+            style={actionButton}
+            title="Duplicate the selection beside itself, on this map"
+          >
+            <Icon name="copy" size={13} /> Duplicate
+          </button>
+          {onCopyToClipboard && (
+            <button
+              onClick={() => onCopyToClipboard(selection)}
+              style={actionButton}
+              title="Copy the selection to the region clipboard, to paste into another map (Ctrl+C)"
+            >
+              <Icon name="copy" size={13} /> Copy to clipboard
+            </button>
+          )}
+          <button onClick={() => api?.zoomToSelection(selection)} style={actionButton}>
+            <Icon name="fit" size={13} /> Zoom
+          </button>
+          <button
+            onClick={() => api?.deleteRegions(selection)}
+            style={{ ...actionButton, gridColumn: "1 / -1", background: "rgba(127,29,29,0.34)", border: "1px solid rgba(248,113,113,0.28)", color: "#fecaca" }}
+          >
+            <Icon name="trash" size={13} /> Delete
+          </button>
+        </div>
+      </InspectorSection>
     </Panel>
   );
 };

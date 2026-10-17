@@ -68,7 +68,7 @@ import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { DIFFICULTY_LEVELS } from "../../runtime/difficulty.js";
 import { POLITICAL_WORLD_CAPABILITY, politicalWorldCapability } from "../../runtime/politicalWorldCapability.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
-import { flagEmojiFromGid } from "../../runtime/countryFlags.js";
+import { bundledFlagUrl, flagImageUrlFromGid, gidToAlpha2 } from "../../runtime/countryFlags.js";
 import { splitScenarioBundleImage, unresolvedBundleBackground } from "../../runtime/communityBasemaps.js";
 import { noteMissingBasemapTried, retryMissingBasemap } from "../../runtime/missingBasemap.js";
 import { zipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
@@ -134,6 +134,8 @@ const hexToRgbArray = (hex) => {
   const n = parseInt(m[1], 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 };
+
+const gameShelfMemory = { search: "", sort: "recent", view: "active" };
 
 // Set by the mounted LibraryTopBar; lets outside callers open the main menu
 // on a specific tab.
@@ -218,6 +220,19 @@ const actionButtonStyle = {
   transition: "background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease",
 };
 
+const themeButtonStyle = {
+  ...actionButtonStyle,
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: "9px",
+  boxShadow: "none",
+};
+
+const themeSurfaceStyle = {
+  background: "#12141a",
+  border: "1px solid rgba(255,255,255,0.09)",
+  boxShadow: "0 14px 32px rgba(0,0,0,0.45)",
+};
+
 const APP_SHELL_MAX_WIDTH = "3000px";
 // Let the library rail follow the available shell width instead of targeting
 // one desktop class. auto-fill adds/removes columns as room changes, while the
@@ -239,6 +254,12 @@ const ButtonIcon = ({ kind, size = 15, strokeWidth = 1.9 }) => {
   };
 
   switch (kind) {
+    case "close":
+      return (
+        <svg aria-hidden="true" {...common}>
+          <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+        </svg>
+      );
     case "settings":
       return (
         <svg aria-hidden="true" {...common}>
@@ -700,7 +721,7 @@ const PromptSectionEditor = ({
     && edits[segment.id].trim() !== (defaults[segment.id] ?? "").trim()
     && edits[segment.id].trim() !== (englishDefaults[segment.id] ?? "").trim();
   const editedCount = segments.filter(isEdited).length;
-  const smallButtonStyle = { ...actionButtonStyle, fontSize: "0.72rem", minHeight: "1.7rem", padding: "0 0.6rem" };
+  const smallButtonStyle = { ...themeButtonStyle, fontSize: "0.72rem", minHeight: "1.7rem", padding: "0 0.6rem" };
 
   const handlePromptImportFile = async (event) => {
     const [file] = Array.from(event.target.files ?? []);
@@ -761,7 +782,7 @@ const PromptSectionEditor = ({
               <button
                 className="oh-tap-row"
                 onClick={handlePromptExport}
-                style={touchFit({ ...actionButtonStyle, minHeight: "2rem", padding: "0 0.8rem" }, touch)}
+                style={touchFit({ ...themeButtonStyle, minHeight: "2rem", padding: "0 0.8rem" }, touch)}
                 type="button"
               >
                 Export all prompts
@@ -772,7 +793,7 @@ const PromptSectionEditor = ({
                 <button
                   className="oh-tap-row"
                   onClick={() => promptFileInputRef.current?.click()}
-                  style={touchFit({ ...actionButtonStyle, minHeight: "2rem", padding: "0 0.8rem" }, touch)}
+                  style={touchFit({ ...themeButtonStyle, minHeight: "2rem", padding: "0 0.8rem" }, touch)}
                   type="button"
                 >
                   Import all prompts
@@ -831,7 +852,7 @@ const PromptSectionEditor = ({
             className="oh-tap-row"
             onClick={() => setPromptSectionKey(section.key)}
             style={touchFit({
-              ...actionButtonStyle,
+              ...themeButtonStyle,
               background:
                 section.key === currentSection.key ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
               borderColor:
@@ -942,168 +963,209 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
   return (
     <div
       style={{
-        ...surfaceStyle,
-        borderColor: selected ? `${scenario.accentColor}66` : "rgba(255,255,255,0.08)",
+        ...themeSurfaceStyle,
+        background: "#12141a",
+        borderColor: selected ? `${scenario.accentColor}88` : "rgba(255,255,255,0.09)",
         borderRadius: "24px",
+        boxShadow: selected ? `0 0 0 1px ${scenario.accentColor}66, 0 16px 38px rgba(0,0,0,0.55)` : "0 14px 32px rgba(0,0,0,0.45)",
+        display: "flex",
         flex: `0 0 ${SHELF_CARD_WIDTH}`,
-        minHeight: "15rem",
+        flexDirection: "column",
+        minHeight: "22rem",
         overflow: "hidden",
         position: "relative",
+        transition: "border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease",
       }}
     >
-      <button
-        onClick={() => onSelect(scenario.id)}
-        style={{
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          inset: 0,
-          padding: 0,
-          position: "absolute",
-          zIndex: 1,
-        }}
-        type="button"
-      />
+      {/* ── Top Half: Artwork Cover Banner ── */}
       <div
         style={{
-          background:
-            `url("${cardImageUrl}") center/cover, ` +
-            `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
-          boxShadow: COVER_TINT,
-          inset: 0,
-          opacity: 0.96,
-          position: "absolute",
+          height: "9.6rem",
+          overflow: "hidden",
+          position: "relative",
+          width: "100%",
         }}
-      />
-      <div aria-hidden="true" style={accentGlowStyle(scenario.accentColor, { at: "14% 18%", alpha: "b8", reach: "34%" })} />
+      >
+        <button
+          onClick={() => onSelect(scenario.id)}
+          style={{
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            inset: 0,
+            padding: 0,
+            position: "absolute",
+            zIndex: 1,
+          }}
+          title={`Select ${scenario.name}`}
+          type="button"
+        />
+        <div
+          style={{
+            background:
+              `url("${cardImageUrl}") center/cover, ` +
+              `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
+            boxShadow: COVER_TINT,
+            inset: 0,
+            opacity: 0.98,
+            position: "absolute",
+          }}
+        />
+        <div aria-hidden="true" style={accentGlowStyle(scenario.accentColor, { at: "14% 18%", alpha: "b8", reach: "34%" })} />
+
+        {/* Floating Badges over Cover */}
+        <div
+          style={{
+            alignItems: "flex-start",
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "0.8rem 0.9rem",
+            position: "relative",
+            width: "100%",
+            zIndex: 2,
+          }}
+        >
+          <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+            <span
+              style={{
+                backdropFilter: "blur(8px)",
+                background: selected ? `${scenario.accentColor}88` : "rgba(10,12,18,0.72)",
+                border: "1px solid rgba(255,255,255,0.18)",
+                borderRadius: "999px",
+                color: "rgba(248,248,250,0.96)",
+                display: "inline-flex",
+                fontSize: "0.68rem",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                padding: "0.22rem 0.55rem",
+                textShadow: SCENARIO_CARD_TEXT_SHADOW,
+                textTransform: "uppercase",
+              }}
+            >
+              {scenario.eyebrow || "Scenario"}
+            </span>
+            {isBuiltIn && (
+              <span
+                style={{
+                  backdropFilter: "blur(8px)",
+                  background: "rgba(10,12,18,0.72)",
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  borderRadius: "999px",
+                  color: "#fff",
+                  display: "inline-flex",
+                  fontSize: "0.68rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  padding: "0.22rem 0.55rem",
+                  textShadow: SCENARIO_CARD_TEXT_SHADOW,
+                  textTransform: "uppercase",
+                }}
+              >
+                Built-In
+              </span>
+            )}
+          </div>
+          <span style={{ alignItems: "center", display: "inline-flex", gap: "0.4rem" }}>
+            <SuggestionCountBadge count={openSuggestionsOf(scenario).length} onClick={() => onEdit(scenario.id)} />
+            <span
+              style={{
+                backdropFilter: "blur(8px)",
+                background: "rgba(10,12,18,0.72)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: "999px",
+                color: "rgba(255,255,255,0.85)",
+                fontSize: "0.69rem",
+                fontWeight: 600,
+                padding: "0.2rem 0.55rem",
+              }}
+            >
+              {scenario.gameCount} game{scenario.gameCount === 1 ? "" : "s"}
+            </span>
+          </span>
+        </div>
+      </div>
+
+      {/* ── Bottom Half: Sleek Dark Cockpit Panel (#12141a) ── */}
       <div
         style={{
+          borderTop: "1px solid rgba(255,255,255,0.08)",
           display: "flex",
+          flex: 1,
           flexDirection: "column",
-          height: "100%",
+          gap: "0.55rem",
           justifyContent: "space-between",
-          padding: "1.2rem",
+          padding: "1rem 1.05rem",
           position: "relative",
           zIndex: 2,
         }}
       >
         <div>
-          <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between" }}>
-            <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
-              <span
-                style={{
-                  background: selected ? `${scenario.accentColor}66` : "rgba(255,255,255,0.12)",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: "999px",
-                  color: "rgba(248,250,252,0.96)",
-                  display: "inline-flex",
-                  fontSize: "0.69rem",
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  padding: "0.35rem 0.6rem",
-                  textTransform: "uppercase",
-                }}
-              >
-                {scenario.eyebrow || "Scenario"}
-              </span>
-              {isBuiltIn && (
-                <span
-                  style={{
-                    background: "rgba(255,255,255,0.18)",
-                    border: "1px solid rgba(255,255,255,0.22)",
-                    borderRadius: "999px",
-                    color: "#fff",
-                    display: "inline-flex",
-                    fontSize: "0.69rem",
-                    fontWeight: 700,
-                    letterSpacing: "0.08em",
-                    padding: "0.35rem 0.6rem",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Built-In
-                </span>
-              )}
-            </div>
-            <span style={{ alignItems: "center", display: "inline-flex", gap: "0.45rem" }}>
-              {/* Changes people suggested on the hub post the player made of
-                  this scenario: the editor's Community card lists them. */}
-              <SuggestionCountBadge count={openSuggestionsOf(scenario).length} onClick={() => onEdit(scenario.id)} />
-              <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.74rem" }}>
-                {scenario.gameCount} game{scenario.gameCount === 1 ? "" : "s"}
-              </span>
-            </span>
+          <div
+            style={{
+              color: "#fff",
+              fontSize: "1.32rem",
+              fontWeight: 800,
+              letterSpacing: "-0.025em",
+              lineHeight: 1.2,
+              marginBottom: "0.4rem",
+            }}
+          >
+            {scenario.heroTitle || scenario.name}
           </div>
-          <div style={{ marginTop: "4rem" }}>
-            <div
-              style={{
-                color: "#fff",
-                fontSize: "2rem",
-                fontWeight: 800,
-                letterSpacing: "-0.03em",
-                lineHeight: 1,
-                textShadow: SCENARIO_CARD_TEXT_SHADOW,
-              }}
-            >
-              {scenario.heroTitle || scenario.name}
-            </div>
-            <div
-              style={{
-                color: "rgba(248,248,250,0.96)",
-                textShadow: SCENARIO_CARD_TEXT_SHADOW,
-                display: "-webkit-box",
-                fontSize: "0.92rem",
-                lineHeight: 1.45,
-                marginTop: "0.65rem",
-                maxWidth: "16rem",
-                overflow: "hidden",
-                WebkitBoxOrient: "vertical",
-                WebkitLineClamp: 6,
-              }}
-              title={scenario.heroSubtitle || scenario.description || scenario.subtitle || undefined}
-            >
-              {scenario.heroSubtitle || scenario.description || scenario.subtitle}
-            </div>
+          <div
+            style={{
+              color: "rgba(228,228,235,0.78)",
+              display: "-webkit-box",
+              fontSize: "0.82rem",
+              lineHeight: 1.45,
+              overflow: "hidden",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 3,
+            }}
+            title={scenario.heroSubtitle || scenario.description || scenario.subtitle || undefined}
+          >
+            {scenario.heroSubtitle || scenario.description || scenario.subtitle}
           </div>
         </div>
 
         <div>
-          <div
-            style={{
-              color: "rgba(255,255,255,0.92)",
-              textShadow: SCENARIO_CARD_TEXT_SHADOW,
-              display: "-webkit-box",
-              fontSize: "0.8rem",
-              marginBottom: "0.7rem",
-              overflow: "hidden",
-              WebkitBoxOrient: "vertical",
-              WebkitLineClamp: 2,
-            }}
-            title={scenario.subtitle || undefined}
-          >
-            {scenario.subtitle}
-          </div>
+          {scenario.subtitle && scenario.subtitle !== (scenario.heroSubtitle || scenario.description) && (
+            <div
+              style={{
+                color: "rgba(255,255,255,0.5)",
+                display: "-webkit-box",
+                fontSize: "0.75rem",
+                marginBottom: "0.45rem",
+                overflow: "hidden",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 1,
+              }}
+              title={scenario.subtitle || undefined}
+            >
+              {scenario.subtitle}
+            </div>
+          )}
           <AssetBadgeRow badges={assetBadges} />
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
-            {/* A hub-imported, unmodified scenario whose post has a newer bundle
-                (or whose own file was never checked by the hub) swaps its
-                primary action for Update; everyone else starts games.
-                Updating downloads the post's file and replaces the copy, which
-                takes a few seconds and showed nothing: the button now turns a
-                ring and says so until it is done, and takes no second press
-                (which would download and replace it all again). */}
+
+          {/* Action Bar */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.6rem" }}>
             <button
               aria-busy={updating || undefined}
               className="oh-tap-row"
               disabled={updating}
               onClick={() => (updateIsPrimary ? onUpdate(scenario) : onPlay(scenario))}
               style={touchFit({
-                ...actionButtonStyle,
-                background: updating || updateIsPrimary ? "#1d7f4ccc" : `${scenario.accentColor}cc`,
-                borderColor: updating || updateIsPrimary ? "#27a663dd" : `${scenario.accentColor}dd`,
+                ...themeButtonStyle,
+                background: updating || updateIsPrimary ? "#1d7f4ccc" : `${scenario.accentColor}`,
+                borderColor: updating || updateIsPrimary ? "#27a663dd" : `${scenario.accentColor}`,
+                borderRadius: "11px",
+                boxShadow: `0 3px 12px ${scenario.accentColor}33`,
                 color: "#fff",
                 cursor: updating ? "progress" : "pointer",
-                flex: 1,
+                fontSize: "0.88rem",
+                fontWeight: 700,
+                minHeight: "2.35rem",
+                width: "100%",
               }, touch)}
               title={updating || updateIsPrimary
                 ? (updateReason === "unchecked" ? UPDATE_UNCHECKED_NOTE : UPDATE_NEWER_TITLE)
@@ -1114,12 +1176,42 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
                 ? <><ButtonIcon kind="working" /> Updating…</>
                 : updateIsPrimary ? <><ButtonIcon kind="update" /> Update</> : <><ButtonIcon kind="play" /> New Game</>}
             </button>
-            <button className="oh-tap-row" onClick={() => onEdit(scenario.id)} style={touchFit({ ...actionButtonStyle, flex: 1 }, touch)} type="button">
-              <ButtonIcon kind="edit" /> Edit
-            </button>
-            <button className="oh-tap-row" onClick={() => onClone(scenario)} style={touchFit({ ...actionButtonStyle, flexBasis: "100%" }, touch)} type="button">
-              <ButtonIcon kind="clone" /> Clone Scenario
-            </button>
+            <div style={{ display: "flex", gap: "0.45rem" }}>
+              <button
+                className="oh-tap-row"
+                onClick={() => onEdit(scenario.id)}
+                style={touchFit({
+                  ...themeButtonStyle,
+                  background: "rgba(255,255,255,0.06)",
+                  borderColor: "rgba(255,255,255,0.12)",
+                  borderRadius: "9px",
+                  flex: 1,
+                  fontSize: "0.78rem",
+                  minHeight: "2rem",
+                  padding: "0 0.6rem",
+                }, touch)}
+                type="button"
+              >
+                <ButtonIcon kind="edit" /> Edit
+              </button>
+              <button
+                className="oh-tap-row"
+                onClick={() => onClone(scenario)}
+                style={touchFit({
+                  ...themeButtonStyle,
+                  background: "rgba(255,255,255,0.06)",
+                  borderColor: "rgba(255,255,255,0.12)",
+                  borderRadius: "9px",
+                  flex: 1.3,
+                  fontSize: "0.78rem",
+                  minHeight: "2rem",
+                  padding: "0 0.6rem",
+                }, touch)}
+                type="button"
+              >
+                <ButtonIcon kind="clone" /> Clone Scenario
+              </button>
+            </div>
           </div>
           {/* An old link, said in the open: why the copy should be updated,
               and for a copy the player has edited the Update itself (New Game
@@ -1145,7 +1237,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
                 <button
                   className="oh-tap-row"
                   onClick={() => onUpdate(scenario)}
-                  style={touchFit({ ...actionButtonStyle, background: "#1d7f4ccc", borderColor: "#27a663dd", color: "#fff", minHeight: "2rem", padding: "0 0.8rem" }, touch)}
+                  style={touchFit({ ...themeButtonStyle, background: "#1d7f4ccc", borderColor: "#27a663dd", color: "#fff", minHeight: "2rem", padding: "0 0.8rem" }, touch)}
                   type="button"
                 >
                   <ButtonIcon kind="update" /> Update
@@ -1251,249 +1343,288 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onDelete
   return (
     <div
       style={{
-        ...surfaceStyle,
-        borderColor: active ? `${game.accentColor}66` : "rgba(255,255,255,0.08)",
+        ...themeSurfaceStyle,
+        borderColor: active ? `${game.accentColor}88` : "rgba(255,255,255,0.09)",
         borderRadius: "24px",
+        boxShadow: active ? `0 0 0 1px ${game.accentColor}66, 0 16px 38px rgba(0,0,0,0.55)` : "0 14px 32px rgba(0,0,0,0.45)",
+        display: "flex",
         flex: `0 0 ${SHELF_CARD_WIDTH}`,
-        minHeight: "14rem",
-        overflow: "hidden",
+        flexDirection: "column",
+        minHeight: "22rem",
+        overflow: "visible",
         position: "relative",
       }}
     >
+      <div style={{ borderRadius: "24px 24px 0 0", height: "9.6rem", overflow: "hidden", position: "relative", width: "100%" }}>
+        <div
+          style={{
+            background:
+              `url("${cardImageUrl}") center/cover, ` +
+              `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
+            boxShadow: COVER_TINT,
+            inset: 0,
+            opacity: 0.98,
+            position: "absolute",
+          }}
+        />
+        <div aria-hidden="true" style={accentGlowStyle(game.accentColor, { at: "14% 18%", alpha: "b8", reach: "34%" })} />
+      </div>
       <div
         style={{
-          background:
-            `url("${cardImageUrl}") center/cover, ` +
-            `url("${DEFAULT_SCENARIO_COVER}") center/cover`,
-          boxShadow: COVER_TINT,
-          inset: 0,
-          opacity: 0.97,
-          position: "absolute",
-        }}
-      />
-      <div aria-hidden="true" style={accentGlowStyle(game.accentColor, { at: "16% 20%", alpha: "a8", reach: "32%" })} />
-      <div
-        style={{
+          alignItems: "flex-start",
           display: "flex",
-          flexDirection: "column",
-          height: "100%",
+          gap: "0.5rem",
           justifyContent: "space-between",
-          padding: "1.2rem",
+          left: 0,
+          padding: "0.8rem 0.9rem",
+          position: "absolute",
+          right: 0,
+          top: 0,
+          zIndex: 3,
+        }}
+      >
+        <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.4rem", minWidth: 0 }}>
+          <span style={{
+                backdropFilter: "blur(8px)",
+                background: active ? `${game.accentColor}88` : "rgba(10,12,18,0.72)",
+                border: "1px solid rgba(255,255,255,0.18)",
+                borderRadius: "999px",
+                color: "rgba(248,248,250,0.96)",
+                display: "inline-flex",
+                flex: "0 0 auto",
+                fontSize: "0.68rem",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                padding: "0.22rem 0.55rem",
+                textShadow: SCENARIO_CARD_TEXT_SHADOW,
+                textTransform: "uppercase",
+                whiteSpace: "nowrap",
+              }}>
+            {active ? "Current Game" : game.eyebrow || "Game"}
+          </span>
+          <span
+            style={{
+              backdropFilter: "blur(8px)",
+              background: "rgba(10,12,18,0.72)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: "999px",
+              color: "rgba(255,255,255,0.85)",
+              fontSize: "0.69rem",
+              fontWeight: 600,
+              maxWidth: "11rem",
+              overflow: "hidden",
+              padding: "0.2rem 0.55rem",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={game.scenarioName}
+          >
+            {game.scenarioName}
+          </span>
+        </div>
+
+        <div style={{ flex: "0 0 auto", position: "relative" }}>
+          <button
+            ref={cardMenuButtonRef}
+            aria-haspopup="menu"
+            aria-expanded={cardMenuOpen}
+            aria-label={busy ? "Working…" : `More for ${game.name}`}
+            className="oh-tap"
+            disabled={busy}
+            onClick={() => setCardMenuOpen((open) => !open)}
+            style={touchFit({
+              ...themeButtonStyle,
+              backdropFilter: "blur(8px)",
+              background: cardMenuOpen ? "rgba(255,255,255,0.18)" : "rgba(10,12,18,0.72)",
+              cursor: busy ? "progress" : "pointer",
+              fontSize: "1.05rem",
+              lineHeight: 1,
+              minWidth: "2rem",
+              opacity: busy ? 0.5 : 1,
+              padding: "0.3rem 0.45rem",
+            }, touch, { icon: true })}
+            title={busy ? "Working…" : undefined}
+            type="button"
+          >
+            <ButtonIcon kind="menu" size={16} />
+          </button>
+          {cardMenuOpen && (
+            <div
+              ref={cardMenuRef}
+              role="menu"
+              style={{
+                ...themeSurfaceStyle,
+                borderRadius: 12,
+                display: "flex",
+                flexDirection: "column",
+                minWidth: "13rem",
+                overflow: "hidden",
+                position: "absolute",
+                right: 0,
+                top: "calc(100% + 0.35rem)",
+                zIndex: 4,
+              }}
+            >
+              {cardMenuItems.map(([label, run, working]) => (
+                <button
+                  key={label}
+                  className="oh-tap-row"
+                  disabled={exporting}
+                  onClick={() => { setHoveredMenuItem(null); run(); }}
+                  onFocus={() => setHoveredMenuItem(label)}
+                  onBlur={() => setHoveredMenuItem(null)}
+                  onMouseEnter={() => setHoveredMenuItem(label)}
+                  onMouseLeave={() => setHoveredMenuItem(null)}
+                  role="menuitem"
+                  style={touchFit({
+                    ...themeButtonStyle,
+                    background:
+                      working || hoveredMenuItem === label ? "rgba(255,255,255,0.16)" : "transparent",
+                    border: "none",
+                    borderRadius: 0,
+                    color: working || hoveredMenuItem === label ? "#fff" : "rgba(248,250,252,0.82)",
+                    cursor: working ? "progress" : undefined,
+                    justifyContent: "flex-start",
+                    minWidth: "8rem",
+                    opacity: exporting && !working ? 0.45 : 1,
+                    padding: "0.55rem 0.8rem",
+                    textAlign: "left",
+                  }, touch)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+              <div
+                style={{
+                  borderTop: "1px solid rgba(255,255,255,0.08)",
+                  color: "rgba(255,255,255,0.45)",
+                  fontSize: "0.68rem",
+                  lineHeight: 1.35,
+                  padding: "0.5rem 0.8rem 0.55rem",
+                }}
+              >
+                An exported game carries its conversations, advisors and events — worth a look before posting it publicly.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div
+        style={{
+          borderTop: "1px solid rgba(255,255,255,0.08)",
+          display: "flex",
+          flex: 1,
+          flexDirection: "column",
+          gap: "0.55rem",
+          justifyContent: "space-between",
+          padding: "1rem 1.05rem",
           position: "relative",
-          zIndex: 1,
+          zIndex: 2,
         }}
       >
         <div>
-          <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
-            {/* The pill and the scenario name are both caption text and read as a
-                pair; the corner belongs to the menu. */}
-            <div style={{ alignItems: "center", display: "flex", gap: "0.5rem", minWidth: 0 }}>
-              <span
-                style={{
-                  background: active ? `${game.accentColor}66` : "rgba(255,255,255,0.12)",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: "999px",
-                  color: "rgba(248,250,252,0.96)",
-                  display: "inline-flex",
-                  flex: "0 0 auto",
-                  fontSize: "0.69rem",
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  padding: "0.35rem 0.6rem",
-                  textTransform: "uppercase",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {active ? "Current Game" : game.eyebrow || "Game"}
-              </span>
-              <span
-                style={{
-                  color: "rgba(255,255,255,0.82)",
-                  textShadow: CARD_TEXT_SHADOW,
-                  fontSize: "0.76rem",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-                title={game.scenarioName}
-              >
-                {game.scenarioName}
-              </span>
+          <div style={{ color: "#fff", fontSize: "1.32rem", fontWeight: 800, letterSpacing: "-0.025em", lineHeight: 1.2, marginBottom: "0.4rem" }}>
+            {game.name}
+          </div>
+          <div style={{ display: "grid", gap: "0.4rem", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0.6fr)", marginBottom: "0.55rem" }}>
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", gridColumn: "1 / -1", minWidth: 0, padding: "0.4rem 0.55rem" }}>
+              <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>{"Country"}</div>
+              <div style={{ color: "#fff", fontSize: "0.8rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={game.country || undefined}>{game.country || "No player country"}</div>
             </div>
-
-            <div style={{ flex: "0 0 auto", position: "relative" }}>
-              {/* Building a zip takes a moment — measured, one to two seconds on a
-                  phone for a game with its roll-back points, longer when a map has
-                  to go in — and the menu closes on the click, so without this the
-                  card looks like it did nothing and gets pressed again. */}
-              <button
-                ref={cardMenuButtonRef}
-                aria-haspopup="menu"
-                aria-expanded={cardMenuOpen}
-                aria-label={busy ? "Working…" : `More for ${game.name}`}
-                className="oh-tap"
-                disabled={busy}
-                onClick={() => setCardMenuOpen((open) => !open)}
-                style={touchFit({
-                  ...actionButtonStyle,
-                  background: cardMenuOpen ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.35)",
-                  cursor: busy ? "progress" : "pointer",
-                  fontSize: "1.05rem",
-                  lineHeight: 1,
-                  minWidth: "2rem",
-                  opacity: busy ? 0.5 : 1,
-                  padding: "0.3rem 0.45rem",
-                }, touch, { icon: true })}
-                title={busy ? "Working…" : undefined}
-                type="button"
-              >
-                <ButtonIcon kind="menu" size={16} />
-              </button>
-              {cardMenuOpen && (
-                <>
-                  <div
-                    ref={cardMenuRef}
-                    role="menu"
-                    style={{
-                      ...surfaceStyle,
-                      borderRadius: 12,
-                      display: "flex",
-                      flexDirection: "column",
-                      minWidth: "13rem",
-                      overflow: "hidden",
-                      position: "absolute",
-                      right: 0,
-                      top: "calc(100% + 0.35rem)",
-                      zIndex: 2,
-                    }}
-                  >
-                    {/* Not boilerplate: an exported game carries every diplomatic
-                        conversation, advisor exchange and event in the campaign,
-                        and some of that is fiction a player may not want in
-                        public. Saying so is what stops the careful half deciding
-                        not to share at all — the same reasoning as the Diagnostics
-                        warning in settings.jsx. */}
-                    {cardMenuItems.map(([label, run, working]) => (
-                      <button
-                        key={label}
-                        className="oh-tap-row"
-                        disabled={exporting}
-                        onClick={() => { setHoveredMenuItem(null); run(); }}
-                        onFocus={() => setHoveredMenuItem(label)}
-                        onBlur={() => setHoveredMenuItem(null)}
-                        onMouseEnter={() => setHoveredMenuItem(label)}
-                        onMouseLeave={() => setHoveredMenuItem(null)}
-                        role="menuitem"
-                        style={touchFit({
-                          ...actionButtonStyle,
-                          background:
-                            working || hoveredMenuItem === label ? "rgba(255,255,255,0.16)" : "transparent",
-                          border: "none",
-                          borderRadius: 0,
-                          // Keyboard focus lands here too, so the highlight follows
-                          // Tab as well as the pointer.
-                          color: working || hoveredMenuItem === label ? "#fff" : "rgba(248,250,252,0.82)",
-                          cursor: working ? "progress" : undefined,
-                          justifyContent: "flex-start",
-                          // The row grows by a character when it changes to
-                          // "Exporting…"; a fixed width stops the menu twitching.
-                          minWidth: "8rem",
-                          opacity: exporting && !working ? 0.45 : 1,
-                          padding: "0.55rem 0.8rem",
-                          textAlign: "left",
-                        }, touch)}
-                        type="button"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    {(
-                      <div
-                        style={{
-                          borderTop: "1px solid rgba(255,255,255,0.08)",
-                          color: "rgba(255,255,255,0.45)",
-                          fontSize: "0.68rem",
-                          lineHeight: 1.35,
-                          padding: "0.5rem 0.8rem 0.55rem",
-                        }}
-                      >
-                        An exported game carries its conversations, advisors and events — worth a look before posting it publicly.
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", minWidth: 0, padding: "0.4rem 0.55rem" }}>
+              <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>{"Date"}</div>
+              <div style={{ color: "#fff", fontSize: "0.8rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{game.currentDate || "No date"}</div>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", minWidth: 0, padding: "0.4rem 0.55rem" }}>
+              <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>{"Round"}</div>
+              <div style={{ color: "#fff", fontSize: "0.8rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{game.round || 1}</div>
             </div>
           </div>
-
-          <div style={{ marginTop: "2rem" }}>
-            <div style={{ color: "#fff", fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.03em", textShadow: CARD_TEXT_SHADOW }}>
-              {game.name}
-            </div>
-            <div style={{ color: "rgba(248,248,250,0.91)", fontSize: "0.92rem", marginTop: "0.45rem", textShadow: CARD_TEXT_SHADOW }}>
-              {game.country || "No player country"} / {game.currentDate || "No date"} / Round {game.round || 1}
-            </div>
-            <div
-              style={{
-                color: "rgba(248,248,250,0.91)",
-                textShadow: CARD_TEXT_SHADOW,
-                display: "-webkit-box",
-                fontSize: "0.84rem",
-                lineHeight: 1.45,
-                marginTop: "0.5rem",
-                overflow: "hidden",
-                WebkitBoxOrient: "vertical",
-                WebkitLineClamp: 6,
-              }}
-              title={game.description || undefined}
-            >
-              {game.description || "Playable campaign session."}
-            </div>
+          <div
+            style={{
+              color: "rgba(228,228,235,0.78)",
+              display: "-webkit-box",
+              fontSize: "0.82rem",
+              lineHeight: 1.45,
+              overflow: "hidden",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 3,
+            }}
+            title={game.description || undefined}
+          >
+            {game.description || "Playable campaign session."}
           </div>
         </div>
 
         <div>
-          <div style={{ color: "rgba(255,255,255,0.78)", fontSize: "0.8rem", marginBottom: "0.75rem", textShadow: CARD_TEXT_SHADOW }}>
-            {game.pendingActions} pending action{game.pendingActions === 1 ? "" : "s"} / {game.eventCount} event{game.eventCount === 1 ? "" : "s"}
+          <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.6rem" }}>
+            {[["Actions", game.pendingActions], ["Events", game.eventCount]].map(([label, count]) => (
+              <span key={label} style={{ alignItems: "center", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", color: "rgba(255,255,255,0.6)", display: "inline-flex", fontSize: "0.72rem", gap: "0.35rem", padding: "0.2rem 0.5rem" }}>
+                {label}
+                <span style={{ color: "#fff", fontWeight: 700 }}>{count ?? 0}</span>
+              </span>
+            ))}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
             <button
               className="oh-tap-row"
               onClick={() => onActivate(game.id)}
               style={touchFit({
-                ...actionButtonStyle,
-                background: active ? "rgba(0,0,0,0.42)" : `${game.accentColor}cc`,
-                borderColor: active ? "rgba(255,255,255,0.22)" : `${game.accentColor}dd`,
+                ...themeButtonStyle,
+                background: active ? "rgba(255,255,255,0.06)" : game.accentColor,
+                borderColor: active ? "rgba(255,255,255,0.22)" : game.accentColor,
+                borderRadius: "11px",
+                boxShadow: active ? "none" : `0 3px 12px ${game.accentColor}33`,
                 color: "#fff",
-                flexBasis: "100%",
+                fontSize: "0.88rem",
+                fontWeight: 700,
+                minHeight: "2.35rem",
+                width: "100%",
               }, touch)}
               type="button"
             >
               {active ? "Current" : <><ButtonIcon kind="play" /> Play</>}
             </button>
-            {/* Hide a finished or abandoned run without destroying it — the case
-                Delete cannot serve. Archiving the ACTIVE game is allowed: the
-                server hands the active slot to another game first. */}
-            <button
-              className="oh-tap-row"
-              onClick={() => onArchive(game)}
-              style={touchFit({ ...actionButtonStyle, flex: 1 }, touch)}
-              title={game.archived ? "Move back into your library" : "Hide from the library without deleting"}
-              type="button"
-            >
-              <ButtonIcon kind="archive" /> {game.archived ? "Unarchive" : "Archive"}
-            </button>
-            {game.archived && onDelete && game.canDelete && (
+            <div style={{ display: "flex", gap: "0.45rem" }}>
               <button
                 className="oh-tap-row"
-                disabled={busy}
-                onClick={() => onDelete(game)}
-                style={touchFit({ ...actionButtonStyle, background: "rgba(127,29,29,0.34)", borderColor: "rgba(248,113,113,0.28)", color: "#fecaca", flex: 1 }, touch)}
+                onClick={() => onArchive(game)}
+                style={touchFit({
+                  ...themeButtonStyle,
+                  background: "rgba(255,255,255,0.06)",
+                  flex: 1,
+                  fontSize: "0.78rem",
+                  minHeight: "2rem",
+                  padding: "0 0.6rem",
+                }, touch)}
+                title={game.archived ? "Move back into your library" : "Hide from the library without deleting"}
                 type="button"
               >
-                Delete
+                <ButtonIcon kind="archive" /> {game.archived ? "Unarchive" : "Archive"}
               </button>
-            )}
+              {game.archived && onDelete && game.canDelete && (
+                <button
+                  className="oh-tap-row"
+                  disabled={busy}
+                  onClick={() => onDelete(game)}
+                  style={touchFit({
+                    ...themeButtonStyle,
+                    background: "rgba(127,29,29,0.34)",
+                    borderColor: "rgba(248,113,113,0.28)",
+                    color: "#fecaca",
+                    flex: 1,
+                    fontSize: "0.78rem",
+                    minHeight: "2rem",
+                    padding: "0 0.6rem",
+                  }, touch)}
+                  type="button"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1554,7 +1685,7 @@ const deletedWhen = (deletedAt) => {
 const DeletedCard = ({ busy, entry, onRestore, touch }) => (
   <div
     style={{
-      ...surfaceStyle,
+      ...themeSurfaceStyle,
       borderRadius: "24px",
       display: "flex",
       flex: `0 0 ${SHELF_CARD_WIDTH}`,
@@ -1577,7 +1708,7 @@ const DeletedCard = ({ busy, entry, onRestore, touch }) => (
       className="oh-tap-row"
       disabled={busy}
       onClick={() => onRestore(entry)}
-      style={touchFit({ ...actionButtonStyle, alignSelf: "flex-start", cursor: busy ? "progress" : "pointer" }, touch)}
+      style={touchFit({ ...themeButtonStyle, alignSelf: "flex-start", cursor: busy ? "progress" : "pointer" }, touch)}
       type="button"
     >
       <ButtonIcon kind="refresh" /> Restore
@@ -1596,6 +1727,7 @@ const RecentlyDeletedRow = ({ kind, onChanged, trash }) => {
   const touch = useTouchPrimary();
   const [busy, setBusy] = useState(false);
   const [rowError, setRowError] = useState(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
   const entries = (trash?.entries ?? []).filter((entry) => entry.kind === kind);
   if (!entries.length) return null;
 
@@ -1611,12 +1743,13 @@ const RecentlyDeletedRow = ({ kind, onChanged, trash }) => {
       onChanged();
     }
   };
+  const count = entries.length;
+  const question = kind === "game"
+    ? (count === 1 ? "Delete the game in Recently deleted for good? This cannot be undone." : `Delete the ${count} games in Recently deleted for good? This cannot be undone.`)
+    : (count === 1 ? "Delete the scenario in Recently deleted for good? This cannot be undone." : `Delete the ${count} scenarios in Recently deleted for good? This cannot be undone.`);
   const handleEmpty = () => {
-    const count = entries.length;
-    const question = kind === "game"
-      ? (count === 1 ? "Delete the game in Recently deleted for good? This cannot be undone." : `Delete the ${count} games in Recently deleted for good? This cannot be undone.`)
-      : (count === 1 ? "Delete the scenario in Recently deleted for good? This cannot be undone." : `Delete the ${count} scenarios in Recently deleted for good? This cannot be undone.`);
-    if (window.confirm(question)) run(() => emptyTrash(kind));
+    setConfirmEmpty(false);
+    run(() => emptyTrash(kind));
   };
   const description = trash.keepCount
     ? (kind === "game"
@@ -1634,12 +1767,21 @@ const RecentlyDeletedRow = ({ kind, onChanged, trash }) => {
         </div>
       )}
       <MenuRow
-        action={(
-          <button className="oh-tap-row" disabled={busy} onClick={handleEmpty} style={touchFit({ ...actionButtonStyle, flexShrink: 0 }, touch)} type="button">
+        action={confirmEmpty ? (
+          <div style={{ display: "flex", flexShrink: 0, gap: "0.45rem" }}>
+            <button className="oh-tap-row" disabled={busy} onClick={() => setConfirmEmpty(false)} style={touchFit({ ...themeButtonStyle }, touch)} type="button">
+              Cancel
+            </button>
+            <button className="oh-tap-row" disabled={busy} onClick={handleEmpty} style={touchFit({ ...themeButtonStyle, background: "rgba(185,28,28,0.72)", borderColor: "rgba(248,113,113,0.4)", color: "#fff" }, touch)} type="button">
+              Empty
+            </button>
+          </div>
+        ) : (
+          <button className="oh-tap-row" disabled={busy} onClick={() => setConfirmEmpty(true)} style={touchFit({ ...themeButtonStyle, flexShrink: 0 }, touch)} type="button">
             Empty
           </button>
         )}
-        description={description}
+        description={confirmEmpty ? question : description}
         icon="🗑️"
         title="Recently deleted"
       >
@@ -1652,7 +1794,7 @@ const RecentlyDeletedRow = ({ kind, onChanged, trash }) => {
 };
 
 const browseControlStyle = {
-  ...actionButtonStyle,
+  ...themeButtonStyle,
   minHeight: "2.35rem",
   padding: "0 0.85rem",
 };
@@ -1725,32 +1867,75 @@ const CreateScenarioTile = ({ busy, onCreate }) => (
   </button>
 );
 
-const SectionTabs = ({ badges = {}, currentSection, sections, setSection, touch }) => (  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", marginBottom: "0.95rem" }}>
-    {sections.map((sectionKey) => (
-      <button
-        key={sectionKey}
-        className="oh-tap-row"
-        onClick={() => setSection(sectionKey)}
-        style={touchFit({
-          ...actionButtonStyle,
-          background:
-            currentSection === sectionKey ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)",
-          borderColor:
-            currentSection === sectionKey ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)",
-          minHeight: "2rem",
-          padding: "0 0.8rem",
-        }, touch)}
-        type="button"
-      >
-        {editorSectionLabels[sectionKey] || sectionKey}
-        {badges[sectionKey] && (
-          <span style={{ background: "rgba(245,158,11,0.16)", border: "1px solid rgba(245,158,11,0.28)", borderRadius: "999px", color: "#fde68a", fontSize: "0.57rem", fontWeight: 800, marginLeft: "0.32rem", padding: "0.12rem 0.35rem" }}>
-            {badges[sectionKey]}
-          </span>
-        )}
-      </button>
-    ))}
-  </div>
+const EDITOR_SECTION_GROUPS = Object.freeze([
+  Object.freeze({ label: "Presentation", sections: Object.freeze(["overview", "assets", "music"]) }),
+  Object.freeze({ label: "Setting", sections: Object.freeze(["world", "history", "politics"]) }),
+  Object.freeze({ label: "War", sections: Object.freeze(["fronts"]) }),
+  Object.freeze({ label: "Rules and AI", sections: Object.freeze(["stats", "features", "prompts"]) }),
+  Object.freeze({ label: "Sharing", sections: Object.freeze(["bundles"]) }),
+]);
+
+const EDITOR_SECTION_BLURBS = Object.freeze({
+  overview: "How it appears in the library: its name, colour and the words on its card.",
+  assets: "The cover and the files the map is drawn from.",
+  music: "The hub's tracks it plays while a game opens, in the game, at war and in the war room.",
+  world: "Where play begins: the player's country, the date, the troops and the story so far.",
+  history: "The events that led to the start date.",
+  politics: "Governments, parties and institutions.",
+  fronts: "How its wars are fought, every country's military and the fronts it begins with.",
+  stats: "The national stats every country is measured by.",
+  features: "Which gameplay features are on.",
+  prompts: "The instructions the AI follows.",
+  bundles: "Download it as one file to share or keep.",
+});
+
+const EDITOR_PANEL = "#12141a";
+const EDITOR_NAV = "#0d0f14";
+const editorCardStyle = {
+  background: "#171a22",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "16px",
+  marginBottom: "0.95rem",
+  padding: "1rem 1.05rem",
+};
+const editorCardTitleStyle = { color: "#fff", fontSize: "0.92rem", fontWeight: 800, letterSpacing: "-0.01em", marginBottom: "0.75rem" };
+
+const EditorSectionIcon = ({ kind, size = 17 }) => {
+  const common = { fill: "none", height: size, stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: 1.8, viewBox: "0 0 24 24", width: size };
+  const paths = {
+    overview: <><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M7 9h10M7 13h6" /></>,
+    assets: <><rect x="3.5" y="5" width="17" height="14" rx="2.5" /><circle cx="9" cy="10" r="1.6" /><path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5" /></>,
+    music: <><path d="M9 17.5V6l10-2v11.5" /><circle cx="6.5" cy="17.5" r="2.5" /><circle cx="16.5" cy="15.5" r="2.5" /></>,
+    world: <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.3 2.3 3.5 5.2 3.5 8.5s-1.2 6.2-3.5 8.5c-2.3-2.3-3.5-5.2-3.5-8.5s1.2-6.2 3.5-8.5z" /></>,
+    history: <><path d="M5 4.5h11.5a2 2 0 0 1 2 2v13H7a2 2 0 0 1-2-2z" /><path d="M5 17.5a2 2 0 0 1 2-2h11.5M9 8.5h6" /></>,
+    politics: <><path d="M4 9.5 12 5l8 4.5M5.5 19.5h13M7 10.5v7M12 10.5v7M17 10.5v7" /></>,
+    fronts: <><path d="M5 5v15M5 5.5c4-2 7 2 11 0v8c-4 2-7-2-11 0" /></>,
+    stats: <><path d="M5 19.5V11M10 19.5V6M15 19.5v-6M20 19.5V9" /></>,
+    features: <><path d="M6 6.5h12M6 12h12M6 17.5h12" /><circle cx="9" cy="6.5" r="1.8" /><circle cx="15" cy="12" r="1.8" /><circle cx="10" cy="17.5" r="1.8" /></>,
+    prompts: <><path d="M5 5.5h14v10H9.5L5 19.5z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" /></>,
+    bundles: <><path d="M12 4.5v10M8 10.5l4 4 4-4" /><path d="M5 16.5v2a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-2" /></>,
+  };
+  return <svg aria-hidden="true" {...common}>{paths[kind] ?? <circle cx="12" cy="12" r="3" />}</svg>;
+};
+
+const editorNavButtonStyle = (active) => ({
+  ...themeButtonStyle,
+  background: active ? "rgba(255,255,255,0.1)" : "transparent",
+  border: `1px solid ${active ? "rgba(255,255,255,0.18)" : "transparent"}`,
+  color: active ? "#fff" : "rgba(236,236,240,0.72)",
+  fontWeight: active ? 700 : 600,
+  gap: "0.6rem",
+  justifyContent: "flex-start",
+  minHeight: "2.3rem",
+  padding: "0 0.7rem",
+  textAlign: "left",
+  width: "100%",
+});
+
+const SectionBadge = ({ text }) => (
+  <span style={{ background: "rgba(245,158,11,0.16)", border: "1px solid rgba(245,158,11,0.28)", borderRadius: "999px", color: "#fde68a", flexShrink: 0, fontSize: "0.57rem", fontWeight: 800, marginLeft: "auto", padding: "0.12rem 0.35rem" }}>
+    {text}
+  </span>
 );
 
 const EditorDrawer = ({
@@ -1779,12 +1964,8 @@ const EditorDrawer = ({
   setPromptSectionKey,
   statsValue,
   onStatsChange,
-  // The scenario's place on the community hub (ScenarioSuggestions.jsx), shown
-  // at the top of the Overview, and Suggest changes for a downloaded one.
   communityCard = null,
   onSuggestChanges = null,
-  // The countries this map offers (buildScenarioCountryOptions), for the
-  // Player Country field's suggestions and its check.
   countryOptions = [],
 }) => {
   const isMobile = useIsMobile();
@@ -1798,8 +1979,9 @@ const EditorDrawer = ({
     kind === "scenario"
       ? ["overview", "world", "history", "fronts", "politics", "stats", "features", "prompts", "assets", "music", "bundles"]
       : ["overview", "world", "features", "prompts", "assets"];
-  // Two fields to a row leave a phone under 140 px for each, too narrow for a
-  // date or a font name, so there the fields stack.
+  const groups = EDITOR_SECTION_GROUPS
+    .map((group) => ({ ...group, sections: group.sections.filter((key) => visibleSections.includes(key)) }))
+    .filter((group) => group.sections.length > 0);
   const formColumns = isMobile ? "minmax(0, 1fr)" : "repeat(2, minmax(0, 1fr))";
   const editorPoliticalWorld = kind === "scenario"
     ? politicalWorldCapability(details?.data?.world ?? {}, {
@@ -1811,199 +1993,373 @@ const EditorDrawer = ({
     : editorPoliticalWorld?.status === POLITICAL_WORLD_CAPABILITY.SPARSE
       ? { politics: "Partial" }
       : {};
+  const coverUrl = kind === "scenario"
+    ? details.scenario?.coverImageUrl
+    : details.game?.coverImageUrl || details.scenario?.coverImageUrl;
+  const accent = record.accentColor || "#a1a1aa";
+
+  const actions = (
+    <div style={{ display: "flex", flexDirection: isMobile ? "row" : "column", flexWrap: isMobile ? "wrap" : undefined, gap: "0.45rem" }}>
+      <button
+        className="oh-tap-row"
+        onClick={onSave}
+        style={touchFit({ ...themeButtonStyle, background: accent, borderColor: accent, borderRadius: "11px", boxShadow: `0 3px 12px ${accent}33`, color: "#fff", flex: isMobile ? "1 1 7rem" : undefined, fontWeight: 700, minHeight: "2.4rem", width: isMobile ? undefined : "100%" }, touch)}
+        type="button"
+      >
+        {isBusy ? "Saving..." : "Save"}
+      </button>
+      {kind === "scenario" && onOpenMapEditor && (
+        <button
+          className="oh-tap-row"
+          onClick={onOpenMapEditor}
+          style={touchFit({ ...themeButtonStyle, background: "rgba(255,255,255,0.08)", flex: isMobile ? "1 1 9rem" : undefined, width: isMobile ? undefined : "100%" }, touch)}
+          type="button"
+        >
+          🗺️ Open Map Editor
+        </button>
+      )}
+      {kind === "scenario" && onSuggestChanges && record.hubOrigin && (
+        <button
+          className="oh-tap-row"
+          onClick={onSuggestChanges}
+          title="Send your changes to this community scenario's author, who can accept or reject each one."
+          style={touchFit({ ...themeButtonStyle, background: "rgba(43,193,243,0.18)", borderColor: "rgba(43,193,243,0.45)", color: "#fff", flex: isMobile ? "1 1 9rem" : undefined, width: isMobile ? undefined : "100%" }, touch)}
+          type="button"
+        >
+          Suggest changes
+        </button>
+      )}
+      {record.canDelete && (
+        <button
+          className="oh-tap-row"
+          onClick={onDelete}
+          style={touchFit({ ...themeButtonStyle, background: "rgba(127,29,29,0.34)", borderColor: "rgba(248,113,113,0.28)", color: "#fecaca", flex: isMobile ? "1 1 6rem" : undefined, width: isMobile ? undefined : "100%" }, touch)}
+          type="button"
+        >
+          Delete
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div
       style={{
-        ...surfaceStyle,
-        borderRadius: "26px",
-        // Every edge keeps clear of the status bar, the home indicator and a
-        // notch at the side in landscape (the SAFE_* insets, 0 on a desktop);
-        // the top follows the main menu's bar, which grows by the same inset.
-        bottom: `calc(0.85rem + ${SAFE_BOTTOM})`,
-        color: "#fff",
-        maxHeight: `calc(${APP_HEIGHT} - ${BAR_HEIGHT + 32}px - ${SAFE_TOP} - ${SAFE_BOTTOM})`,
-        overflow: "auto",
-        padding: "1.05rem",
+        alignItems: "center",
+        background: "rgba(0,0,0,0.62)",
+        display: "flex",
+        inset: 0,
+        justifyContent: "center",
+        padding: isMobile ? 0 : `calc(1.25rem + ${SAFE_TOP}) calc(1.25rem + ${SAFE_RIGHT}) calc(1.25rem + ${SAFE_BOTTOM}) calc(1.25rem + ${SAFE_LEFT})`,
         position: "fixed",
-        right: `calc(0.85rem + ${SAFE_RIGHT})`,
-        top: `calc(${TOP_BAR_OFFSET} + 3.5rem)`,
-        width: `min(34rem, calc(100vw - 1.2rem - ${SAFE_LEFT} - ${SAFE_RIGHT}))`,
-        // Above the main menu (10046) — the menu's + tile and Edit buttons open
-        // this drawer, and it must land on top of the menu it came from.
         zIndex: 10048,
       }}
     >
-      <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
-        <div>
-          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            {kind === "scenario" ? "Scenario" : "Game"} Editor
-          </div>
-          <div style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", marginTop: "0.2rem" }}>
-            {record.name}
-          </div>
-        </div>
-        <button
-          aria-label={`Close the ${kind === "scenario" ? "scenario" : "game"} editor`}
-          className="oh-tap"
-          onClick={onClose}
-          style={touchFit({ ...actionButtonStyle, background: "rgba(255,255,255,0.04)", minWidth: "2.35rem", padding: 0 }, touch, { icon: true })}
-          type="button"
+      <div
+        role="dialog"
+        aria-label={`${kind === "scenario" ? "Scenario" : "Game"} Editor`}
+        style={{
+          background: EDITOR_PANEL,
+          border: isMobile ? "none" : "1px solid rgba(255,255,255,0.09)",
+          borderRadius: isMobile ? 0 : "22px",
+          boxShadow: "0 24px 70px rgba(0,0,0,0.55)",
+          color: "#fff",
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          height: isMobile ? APP_HEIGHT : `min(56rem, calc(${APP_HEIGHT} - 2.5rem - ${SAFE_TOP} - ${SAFE_BOTTOM}))`,
+          overflow: "hidden",
+          maxWidth: isMobile ? undefined : "76rem",
+          width: "100%",
+        }}
+      >
+        <nav
+          style={{
+            background: EDITOR_NAV,
+            borderBottom: isMobile ? "1px solid rgba(255,255,255,0.08)" : "none",
+            borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0,
+            gap: isMobile ? "0.6rem" : "1rem",
+            overflow: isMobile ? "visible" : "hidden",
+            padding: isMobile ? `calc(0.8rem + ${SAFE_TOP}) calc(0.8rem + ${SAFE_RIGHT}) 0.7rem calc(0.8rem + ${SAFE_LEFT})` : "1.1rem 0.9rem",
+            width: isMobile ? "100%" : "15.5rem",
+          }}
         >
-          X
-        </button>
-      </div>
+          <div style={{ alignItems: "center", display: "flex", gap: "0.7rem", minWidth: 0 }}>
+            <div
+              aria-hidden="true"
+              style={{
+                background: coverUrl ? `url("${coverUrl}") center/cover, #1c1f27` : "#1c1f27",
+                border: `2px solid ${accent}`,
+                borderRadius: "12px",
+                flexShrink: 0,
+                height: isMobile ? "2.6rem" : "3.1rem",
+                width: isMobile ? "2.6rem" : "3.1rem",
+              }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.66rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                {kind === "scenario" ? "Scenario" : "Game"} Editor
+              </div>
+              <div style={{ fontSize: "0.98rem", fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={record.name}>
+                {record.name}
+              </div>
+            </div>
+            {isMobile && (
+              <button
+                aria-label={`Close the ${kind === "scenario" ? "scenario" : "game"} editor`}
+                className="oh-tap"
+                onClick={onClose}
+                style={touchFit({ ...themeButtonStyle, minWidth: "2.35rem", padding: 0 }, touch, { icon: true })}
+                type="button"
+              >
+                <ButtonIcon kind="close" />
+              </button>
+            )}
+          </div>
 
-      <SectionTabs badges={sectionBadges} currentSection={editorSection} sections={visibleSections} setSection={setEditorSection} touch={touch} />
+          {isMobile ? (
+            <div style={{ display: "flex", gap: "0.4rem", overflowX: "auto", scrollbarWidth: "none" }}>
+              {groups.flatMap((group) => group.sections).map((sectionKey) => (
+                <button
+                  key={sectionKey}
+                  aria-current={editorSection === sectionKey ? "page" : undefined}
+                  className="oh-tap-row"
+                  onClick={() => setEditorSection(sectionKey)}
+                  style={touchFit({ ...editorNavButtonStyle(editorSection === sectionKey), border: `1px solid ${editorSection === sectionKey ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)"}`, flexShrink: 0, width: "auto" }, touch)}
+                  type="button"
+                >
+                  <EditorSectionIcon kind={sectionKey} size={15} />
+                  {editorSectionLabels[sectionKey] || sectionKey}
+                  {sectionBadges[sectionKey] && <SectionBadge text={sectionBadges[sectionKey]} />}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: "0.9rem", minHeight: 0, overflowY: "auto", scrollbarWidth: "thin" }}>
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.64rem", fontWeight: 700, letterSpacing: "0.09em", marginBottom: "0.35rem", padding: "0 0.7rem", textTransform: "uppercase" }}>
+                    {group.label}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                    {group.sections.map((sectionKey) => (
+                      <button
+                        key={sectionKey}
+                        aria-current={editorSection === sectionKey ? "page" : undefined}
+                        className="oh-tap-row"
+                        onClick={() => setEditorSection(sectionKey)}
+                        style={touchFit(editorNavButtonStyle(editorSection === sectionKey), touch)}
+                        type="button"
+                      >
+                        <EditorSectionIcon kind={sectionKey} />
+                        <span>{editorSectionLabels[sectionKey] || sectionKey}</span>
+                        {sectionBadges[sectionKey] && <SectionBadge text={sectionBadges[sectionKey]} />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!isMobile && actions}
+        </nav>
+
+        <div style={{ display: "flex", flex: 1, flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+          {!isMobile && (
+            <div style={{ alignItems: "flex-start", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", flexShrink: 0, gap: "1rem", justifyContent: "space-between", padding: "1.15rem 1.4rem 1rem" }}>
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ color: "#fff", fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", margin: 0 }}>
+                  {editorSectionLabels[editorSection] || editorSection}
+                </h2>
+                {EDITOR_SECTION_BLURBS[editorSection] && (
+                  <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.8rem", lineHeight: 1.45, marginTop: "0.25rem" }}>
+                    {EDITOR_SECTION_BLURBS[editorSection]}
+                  </div>
+                )}
+              </div>
+              <button
+                aria-label={`Close the ${kind === "scenario" ? "scenario" : "game"} editor`}
+                className="oh-tap"
+                onClick={onClose}
+                style={touchFit({ ...themeButtonStyle, flexShrink: 0, minWidth: "2.35rem", padding: 0 }, touch, { icon: true })}
+                type="button"
+              >
+                <ButtonIcon kind="close" />
+              </button>
+            </div>
+          )}
+
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: isMobile ? `1rem calc(0.9rem + ${SAFE_RIGHT}) 1rem calc(0.9rem + ${SAFE_LEFT})` : "1.2rem 1.4rem 1.6rem" }}>
       {editorSection === "overview" && kind === "scenario" && communityCard}
       {editorSection === "overview" && (
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "18px", marginBottom: "0.95rem", padding: "0.9rem" }}>
-          <div style={{ display: "grid", gap: "0.8rem", gridTemplateColumns: formColumns }}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>Name</label>
-              <input style={inputStyle} value={formState.name} onChange={(event) => onChange("name", event.target.value)} />
-            </div>
-            <div>
-              <label style={fieldLabelStyle}>Eyebrow</label>
-              <input style={inputStyle} value={formState.eyebrow} onChange={(event) => onChange("eyebrow", event.target.value)} />
-            </div>
-            <div>
-              <label style={fieldLabelStyle}>Accent</label>
-              <input style={{ ...inputStyle, height: "3.1rem", padding: "0.25rem 0.3rem" }} type="color" value={formState.accentColor} onChange={(event) => onChange("accentColor", event.target.value)} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>Subtitle</label>
-              <input style={inputStyle} value={formState.subtitle} onChange={(event) => onChange("subtitle", event.target.value)} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>Description</label>
-              <textarea style={{ ...textareaStyle, minHeight: "6rem" }} value={formState.description} onChange={(event) => onChange("description", event.target.value)} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>Hero Title</label>
-              <input style={inputStyle} value={formState.heroTitle} onChange={(event) => onChange("heroTitle", event.target.value)} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>Hero Subtitle</label>
-              <textarea style={{ ...textareaStyle, minHeight: "5rem" }} value={formState.heroSubtitle} onChange={(event) => onChange("heroSubtitle", event.target.value)} />
+        <>
+          <div style={editorCardStyle}>
+            <div style={editorCardTitleStyle}>On its card</div>
+            <div style={{ display: "grid", gap: "0.8rem", gridTemplateColumns: formColumns }}>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={fieldLabelStyle}>Name</label>
+                <input style={inputStyle} value={formState.name} onChange={(event) => onChange("name", event.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Eyebrow</label>
+                <input style={inputStyle} value={formState.eyebrow} onChange={(event) => onChange("eyebrow", event.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Accent</label>
+                <input style={{ ...inputStyle, height: "3.1rem", padding: "0.25rem 0.3rem" }} type="color" value={formState.accentColor} onChange={(event) => onChange("accentColor", event.target.value)} />
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={fieldLabelStyle}>Subtitle</label>
+                <input style={inputStyle} value={formState.subtitle} onChange={(event) => onChange("subtitle", event.target.value)} />
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={fieldLabelStyle}>Description</label>
+                <textarea style={{ ...textareaStyle, minHeight: "6rem" }} value={formState.description} onChange={(event) => onChange("description", event.target.value)} />
+              </div>
             </div>
           </div>
-        </div>
+          <div style={editorCardStyle}>
+            <div style={editorCardTitleStyle}>Its headline</div>
+            <div style={{ display: "grid", gap: "0.8rem" }}>
+              <div>
+                <label style={fieldLabelStyle}>Hero Title</label>
+                <input style={inputStyle} value={formState.heroTitle} onChange={(event) => onChange("heroTitle", event.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Hero Subtitle</label>
+                <textarea style={{ ...textareaStyle, minHeight: "5rem" }} value={formState.heroSubtitle} onChange={(event) => onChange("heroSubtitle", event.target.value)} />
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {editorSection === "world" && (
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "18px", marginBottom: "0.95rem", padding: "0.9rem" }}>
-          <div style={{ display: "grid", gap: "0.8rem", gridTemplateColumns: formColumns }}>
-            <div>
-              <label style={fieldLabelStyle}>Player Country</label>
-              <input list="oh-player-country-options" style={inputStyle} value={formState.country} onChange={(event) => onChange("country", event.target.value)} />
-              <datalist id="oh-player-country-options">
-                {countryOptions.map((option) => (
-                  <option key={option.code} value={option.code} label={option.name !== option.code ? option.name : undefined} />
-                ))}
-              </datalist>
-              {!isOfferedCountry(formState.country, countryOptions) && (
-                <div style={{ color: "#fde68a", fontSize: "0.72rem", lineHeight: 1.4, marginTop: "0.4rem" }}>
-                  No country or faction by this name is on this map, so the player would start with nothing. Pick one from the list.
-                </div>
-              )}
-            </div>
-            <div>
-              <label style={fieldLabelStyle}>Game Date</label>
-              <input
-                style={inputStyle}
-                value={formState.gameDate}
-                onChange={(event) => onChange("gameDate", event.target.value)}
-                placeholder="YYYY-MM-DD — before AD 1 use a minus: -0218-03-01 is 1 March 218 BC"
-                title="Dates are YYYY-MM-DD. A year before AD 1 carries a leading minus and counts backwards with no year zero: -0218-03-01 is 1 March 218 BC, -0001-12-31 the last day of 1 BC."
-              />
-            </div>
-            <div>
-              <label style={fieldLabelStyle}>Language</label>
-              <input style={inputStyle} value={formState.language} onChange={(event) => onChange("language", event.target.value)} />
-            </div>
-            {kind === "scenario" && (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <label style={fieldLabelStyle}>Deployable Troop Types</label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                  {UNIT_TYPES.map((unitType) => {
-                    const checked = (formState.allowedUnitTypes ?? []).includes(unitType);
-                    return (
-                      <button
-                        key={unitType}
-                        type="button"
-                        className="oh-tap-row"
-                        onClick={() => {
-                          const set = new Set(formState.allowedUnitTypes ?? []);
-                          if (set.has(unitType)) set.delete(unitType);
-                          else set.add(unitType);
-                          onChange("allowedUnitTypes", UNIT_TYPES.filter((t) => set.has(t)));
-                        }}
-                        style={touchFit({
-                          ...actionButtonStyle,
-                          background: checked ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.04)",
-                          borderColor: checked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
-                          minHeight: "2rem",
-                          padding: "0 0.7rem",
-                        }, touch)}
-                      >
-                        {checked ? "✓ " : ""}
-                        {UNIT_TYPE_LABELS[unitType] ?? unitType}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.72rem", marginTop: "0.4rem" }}>
-                  Uncheck types that don't fit the era — e.g. no Air Force in 1200. Players can only deploy the checked types.
-                </div>
+        <>
+          <div style={editorCardStyle}>
+            <div style={editorCardTitleStyle}>Where play begins</div>
+            <div style={{ display: "grid", gap: "0.8rem", gridTemplateColumns: formColumns }}>
+              <div>
+                <label style={fieldLabelStyle}>Player Country</label>
+                <input list="oh-player-country-options" style={inputStyle} value={formState.country} onChange={(event) => onChange("country", event.target.value)} />
+                <datalist id="oh-player-country-options">
+                  {countryOptions.map((option) => (
+                    <option key={option.code} value={option.code} label={option.name !== option.code ? option.name : undefined} />
+                  ))}
+                </datalist>
+                {!isOfferedCountry(formState.country, countryOptions) && (
+                  <div style={{ color: "#fde68a", fontSize: "0.72rem", lineHeight: 1.4, marginTop: "0.4rem" }}>
+                    No country or faction by this name is on this map, so the player would start with nothing. Pick one from the list.
+                  </div>
+                )}
               </div>
-            )}
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>World Before Round One</label>
-              <textarea style={{ ...textareaStyle, minHeight: "8rem" }} value={formState.startingTimelineText} onChange={(event) => onChange("startingTimelineText", event.target.value)} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabelStyle}>Simulation Rules</label>
-              <textarea style={{ ...textareaStyle, minHeight: "8rem" }} value={formState.simulationRules} onChange={(event) => onChange("simulationRules", event.target.value)} />
-            </div>
-            {/* Country-label styling. Labels rasterize from each player's LOCAL
-                fonts (the map has no glyph server), so any installed family
-                works — the list only suggests safe common ones. Empty = Georgia,
-                the map's default (Nations.jsx labelFontStack). */}
-            <div>
-              <label style={fieldLabelStyle}>Country Label Font</label>
-              <input
-                list="oh-label-font-options"
-                placeholder="Georgia (default)"
-                style={inputStyle}
-                value={formState.labelFont}
-                onChange={(event) => onChange("labelFont", event.target.value)}
-              />
-              <datalist id="oh-label-font-options">
-                {LABEL_FONT_SUGGESTIONS.map((font) => (
-                  <option key={font} value={font} />
-                ))}
-              </datalist>
-            </div>
-            <div>
-              <label style={fieldLabelStyle}>Label Letter Color</label>
-              <input
-                type="color"
-                style={{ ...inputStyle, height: "2.4rem", padding: "0.2rem" }}
-                value={/^#[0-9a-fA-F]{6}$/.test(formState.labelTextColor) ? formState.labelTextColor : "#ffffff"}
-                onChange={(event) => onChange("labelTextColor", event.target.value)}
-              />
-            </div>
-            <div>
-              <label style={fieldLabelStyle}>Label Border Color</label>
-              <input
-                type="color"
-                style={{ ...inputStyle, height: "2.4rem", padding: "0.2rem" }}
-                value={/^#[0-9a-fA-F]{6}$/.test(formState.labelHaloColor) ? formState.labelHaloColor : "#000000"}
-                onChange={(event) => onChange("labelHaloColor", event.target.value)}
-              />
+              <div>
+                <label style={fieldLabelStyle}>Game Date</label>
+                <input
+                  style={inputStyle}
+                  value={formState.gameDate}
+                  onChange={(event) => onChange("gameDate", event.target.value)}
+                  placeholder="YYYY-MM-DD — before AD 1 use a minus: -0218-03-01 is 1 March 218 BC"
+                  title="Dates are YYYY-MM-DD. A year before AD 1 carries a leading minus and counts backwards with no year zero: -0218-03-01 is 1 March 218 BC, -0001-12-31 the last day of 1 BC."
+                />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Language</label>
+                <input style={inputStyle} value={formState.language} onChange={(event) => onChange("language", event.target.value)} />
+              </div>
             </div>
           </div>
-        </div>
+          {kind === "scenario" && (
+            <div style={editorCardStyle}>
+              <div style={editorCardTitleStyle}>Deployable Troop Types</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                {UNIT_TYPES.map((unitType) => {
+                  const checked = (formState.allowedUnitTypes ?? []).includes(unitType);
+                  return (
+                    <button
+                      key={unitType}
+                      type="button"
+                      className="oh-tap-row"
+                      onClick={() => {
+                        const set = new Set(formState.allowedUnitTypes ?? []);
+                        if (set.has(unitType)) set.delete(unitType);
+                        else set.add(unitType);
+                        onChange("allowedUnitTypes", UNIT_TYPES.filter((t) => set.has(t)));
+                      }}
+                      style={touchFit({
+                        ...themeButtonStyle,
+                        background: checked ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
+                        borderColor: checked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
+                        minHeight: "2rem",
+                        padding: "0 0.7rem",
+                      }, touch)}
+                    >
+                      {checked ? "✓ " : ""}
+                      {UNIT_TYPE_LABELS[unitType] ?? unitType}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.72rem", marginTop: "0.5rem" }}>
+                Uncheck types that don't fit the era — e.g. no Air Force in 1200. Players can only deploy the checked types.
+              </div>
+            </div>
+          )}
+          <div style={editorCardStyle}>
+            <div style={editorCardTitleStyle}>The story so far</div>
+            <div style={{ display: "grid", gap: "0.8rem" }}>
+              <div>
+                <label style={fieldLabelStyle}>World Before Round One</label>
+                <textarea style={{ ...textareaStyle, minHeight: "8rem" }} value={formState.startingTimelineText} onChange={(event) => onChange("startingTimelineText", event.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Simulation Rules</label>
+                <textarea style={{ ...textareaStyle, minHeight: "8rem" }} value={formState.simulationRules} onChange={(event) => onChange("simulationRules", event.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div style={editorCardStyle}>
+            <div style={editorCardTitleStyle}>Country labels on the map</div>
+            <div style={{ display: "grid", gap: "0.8rem", gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)" }}>
+              <div>
+                <label style={fieldLabelStyle}>Country Label Font</label>
+                <input
+                  list="oh-label-font-options"
+                  placeholder="Georgia (default)"
+                  style={inputStyle}
+                  value={formState.labelFont}
+                  onChange={(event) => onChange("labelFont", event.target.value)}
+                />
+                <datalist id="oh-label-font-options">
+                  {LABEL_FONT_SUGGESTIONS.map((font) => (
+                    <option key={font} value={font} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Label Letter Color</label>
+                <input
+                  type="color"
+                  style={{ ...inputStyle, height: "2.4rem", padding: "0.2rem" }}
+                  value={/^#[0-9a-fA-F]{6}$/.test(formState.labelTextColor) ? formState.labelTextColor : "#ffffff"}
+                  onChange={(event) => onChange("labelTextColor", event.target.value)}
+                />
+              </div>
+              <div>
+                <label style={fieldLabelStyle}>Label Border Color</label>
+                <input
+                  type="color"
+                  style={{ ...inputStyle, height: "2.4rem", padding: "0.2rem" }}
+                  value={/^#[0-9a-fA-F]{6}$/.test(formState.labelHaloColor) ? formState.labelHaloColor : "#000000"}
+                  onChange={(event) => onChange("labelHaloColor", event.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {editorSection === "history" && kind === "scenario" && (
@@ -2093,7 +2449,7 @@ const EditorDrawer = ({
           scenarioFeatures={kind === "scenario" ? formState.features : formState.scenarioFeatures}
           world={details?.data?.world ?? {}}
           onChange={(next) => onChange("features", next)}
-          styles={{ actionButtonStyle, fieldLabelStyle, inputStyle }}
+          styles={{ actionButtonStyle: themeButtonStyle, fieldLabelStyle, inputStyle }}
           currentDate={formState.gameDate}
           firstSkipAhead={kind === "scenario" || !(details?.data?.world?.simulationHistory?.length > 0)}
         />
@@ -2162,14 +2518,14 @@ const EditorDrawer = ({
                     )}
                   </div>
                   <div style={{ display: "flex", gap: "0.45rem" }}>
-                    <button className="oh-tap-row" onClick={() => onOpenFileDialog(assetKey)} style={touchFit(actionButtonStyle, touch)} type="button">
+                    <button className="oh-tap-row" onClick={() => onOpenFileDialog(assetKey)} style={touchFit(themeButtonStyle, touch)} type="button">
                       Upload
                     </button>
                     <button
                       className="oh-tap-row"
                       onClick={() => onClearAsset(assetKey)}
                       style={touchFit({
-                        ...actionButtonStyle,
+                        ...themeButtonStyle,
                         background: "rgba(255,255,255,0.03)",
                         color: hasOwnAsset ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.35)",
                       }, touch)}
@@ -2215,10 +2571,10 @@ const EditorDrawer = ({
             <a href={SCENARIO_LICENSE_URL} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(255,255,255,0.88)" }}>About CC BY 4.0 ↗</a>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
-            <button className="oh-tap-row" onClick={() => onExportBundle("zip")} style={touchFit(actionButtonStyle, touch)} type="button">
+            <button className="oh-tap-row" onClick={() => onExportBundle("zip")} style={touchFit(themeButtonStyle, touch)} type="button">
               Download .zip
             </button>
-            <button className="oh-tap-row" onClick={() => onExportBundle("json")} style={touchFit(actionButtonStyle, touch)} type="button">
+            <button className="oh-tap-row" onClick={() => onExportBundle("json")} style={touchFit(themeButtonStyle, touch)} type="button">
               Download JSON
             </button>
           </div>
@@ -2226,51 +2582,18 @@ const EditorDrawer = ({
       )}
 
       {editorError && (
-        <div style={{ background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.34)", borderRadius: "14px", color: "#fecaca", marginBottom: "0.9rem", padding: "0.8rem 0.9rem" }}>
+        <div style={{ background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.34)", borderRadius: "14px", color: "#fecaca", marginTop: "0.4rem", padding: "0.8rem 0.9rem" }}>
           {editorError}
         </div>
       )}
+          </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.55rem" }}>
-        <button
-          className="oh-tap-row"
-          onClick={onSave}
-          style={touchFit({ ...actionButtonStyle, background: `${record.accentColor}cc`, borderColor: `${record.accentColor}dd`, color: "#fff", minWidth: "7.2rem" }, touch)}
-          type="button"
-        >
-          {isBusy ? "Saving..." : "Save"}
-        </button>
-        {kind === "scenario" && onOpenMapEditor && (
-          <button
-            className="oh-tap-row"
-            onClick={onOpenMapEditor}
-            style={touchFit({ ...actionButtonStyle, background: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.19)", color: "#fff", minWidth: "9rem" }, touch)}
-            type="button"
-          >
-            🗺️ Open Map Editor
-          </button>
-        )}
-        {kind === "scenario" && onSuggestChanges && record.hubOrigin && (
-          <button
-            className="oh-tap-row"
-            onClick={onSuggestChanges}
-            title="Send your changes to this community scenario's author, who can accept or reject each one."
-            style={touchFit({ ...actionButtonStyle, background: "rgba(43,193,243,0.18)", borderColor: "rgba(43,193,243,0.45)", color: "#fff" }, touch)}
-            type="button"
-          >
-            Suggest changes
-          </button>
-        )}
-        {record.canDelete && (
-          <button
-            className="oh-tap-row"
-            onClick={onDelete}
-            style={touchFit({ ...actionButtonStyle, background: "rgba(127,29,29,0.34)", borderColor: "rgba(248,113,113,0.28)", color: "#fecaca" }, touch)}
-            type="button"
-          >
-            Delete
-          </button>
-        )}
+          {isMobile && (
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", flexShrink: 0, padding: `0.7rem calc(0.9rem + ${SAFE_RIGHT}) calc(0.7rem + ${SAFE_BOTTOM}) calc(0.9rem + ${SAFE_LEFT})` }}>
+              {actions}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2292,9 +2615,14 @@ const LibraryTopBar = ({ onOpenSettings }) => {
   const [activeTab, setActiveTab] = useState("games");
   // The history of the game's updates, opened from the menu's mark (updates/UpdateHistory.jsx).
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [gameSearch, setGameSearch] = useState("");
-  const [gameSort, setGameSort] = useState("recent");
-  const [gameView, setGameView] = useState("active");
+  const [gameSearch, setGameSearch] = useState(() => gameShelfMemory.search);
+  const [gameSort, setGameSort] = useState(() => gameShelfMemory.sort);
+  const [gameView, setGameView] = useState(() => gameShelfMemory.view);
+  useEffect(() => {
+    gameShelfMemory.search = gameSearch;
+    gameShelfMemory.sort = gameSort;
+    gameShelfMemory.view = gameView;
+  }, [gameSearch, gameSort, gameView]);
   const [scenarioSearch, setScenarioSearch] = useState("");
   const [scenarioSort, setScenarioSort] = useState("recent");
   const [scenarioView, setScenarioView] = useState("all");
@@ -2496,7 +2824,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
   // the player chose in the two-step picker, and go straight into it.
   const startGameForCountry = async (scenario, countryCode, difficulty) => {
     setCountryPicker(null);
-    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerBackground(null);
+    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerColors(null); setPickerBackground(null);
     setEditorError(null);
     setIsBusy(true);
     // Before the await: createGame({setActive}) remounts the UI mid-flight and
@@ -2536,7 +2864,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
   // scenario only for what it doesn't set, so the scenario is never touched.
   const startGameForFaction = async (scenario, faction, difficulty) => {
     setCountryPicker(null);
-    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerBackground(null);
+    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerColors(null); setPickerBackground(null);
     setEditorError(null);
     setIsBusy(true);
     setMenuOpen(false);
@@ -2607,7 +2935,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
   // into the game's own world, like a faction, so the scenario is never touched.
   const startGameForGroup = async (scenario, group, difficulty) => {
     setCountryPicker(null);
-    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerBackground(null);
+    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerColors(null); setPickerBackground(null);
     setEditorError(null);
     setIsBusy(true);
     setMenuOpen(false);
@@ -2679,7 +3007,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
     const isCurrent = pickerRequest.begin();
     setCountryQuery("");
     setCountryOptions([]);
-    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerBackground(null);
+    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerColors(null); setPickerBackground(null);
     setPlayGameId(null);
     setPickerTab("country");
     setPickerGroups([]);
@@ -2701,6 +3029,9 @@ const LibraryTopBar = ({ onOpenSettings }) => {
         // stock seed is repainted in this scenario's owners, without it the picker
         // shows modern countries the scenario does not contain.
         setPickerOwnerOverrides(details?.data?.world?.regionOwnershipOverrides ?? null);
+        downloadScenarioJsonAsset(scenario.id, "colors")
+          .then((colors) => { if (colors && typeof colors === "object" && isCurrent()) setPickerColors(colors); })
+          .catch(() => {});
         setPickerGroups(scenarioGroupsFor(details?.data?.world));
         // Load custom region geometry so the map renders the scenario's actual
         // boundaries instead of the stock world seed.
@@ -3078,7 +3409,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
       : `Delete the game "${name}"? You can restore it from Recently deleted for ${trash.keepDays} days.`);
 
   const handleGameDelete = async (game) => {
-    if (!game?.canDelete || !window.confirm(gameDeleteQuestion(game.name))) return;
+    if (!game?.canDelete) return;
     setEditorError(null);
     setIsBusy(true);
     try {
@@ -3748,6 +4079,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
   // world seed with its GADM owners — present-day Europe inside a scenario that
   // has none of it. See applyOwnerOverrides in CountryPickerMap.
   const [pickerOwnerOverrides, setPickerOwnerOverrides] = useState(null);
+  const [pickerColors, setPickerColors] = useState(null);
   // The scenario's own basemap for the picker, when it has one (CountryPickerMap
   // customBackground); null draws the picker on ESRI as it always has.
   const [pickerBackground, setPickerBackground] = useState(null);
@@ -3774,6 +4106,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
     setDifficultyPick(null);
     setCustomRegionData(null);
     setPickerOwnerOverrides(null);
+    setPickerColors(null);
     setPickerBackground(null);
   };
 
@@ -4055,7 +4388,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
     setPlayGameId(gameId);
     setCountryQuery("");
     setCountryOptions([]);
-    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerBackground(null);
+    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerColors(null); setPickerBackground(null);
     setCountryPicker(scenario);
     loadCountryNames().catch(() => [])
       .then((allCountries) => {
@@ -4066,6 +4399,9 @@ const LibraryTopBar = ({ onOpenSettings }) => {
           scenario.countryNameOverrides,
         ));
         setPickerOwnerOverrides(seedWorld.regionOwnershipOverrides ?? null);
+        downloadScenarioJsonAsset(scenario.id, "colors")
+          .then((colors) => { if (colors && typeof colors === "object" && isCurrent()) setPickerColors(colors); })
+          .catch(() => {});
         // The map editor just saved custom region geometry — load it so the
         // country picker renders the scenario's actual map, not the stock seed.
         downloadScenarioJsonAsset(scenario.id, "regionsGeojson", { coarse: true })
@@ -4103,7 +4439,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
   const choosePlayCountry = async (countryCode, difficulty) => {
     const gid = playGameId;
     setCountryPicker(null);
-    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerBackground(null);
+    setCustomRegionData(null); setPickerOwnerOverrides(null); setPickerColors(null); setPickerBackground(null);
     setPlayGameId(null);
     if (!gid) return;
     setMenuOpen(false);
@@ -4427,7 +4763,8 @@ const LibraryTopBar = ({ onOpenSettings }) => {
         {(countryPicker) => (
         <div
           onClick={closeCountryPicker}
-          style={{ position: "fixed", inset: 0, zIndex: 10060, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center", padding: `${SAFE_TOP} ${SAFE_RIGHT} ${SAFE_BOTTOM} ${SAFE_LEFT}` }}        >
+          style={{ position: "fixed", inset: 0, zIndex: 10060, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center", padding: `${SAFE_TOP} ${SAFE_RIGHT} ${SAFE_BOTTOM} ${SAFE_LEFT}` }}
+        >
           {/* On a phone the card takes the whole screen height rather than 80%
               of it: the search, the map, the list and the buttons need every
               row a phone has. The SCREEN height, and pinned to the top: sized
@@ -4437,120 +4774,161 @@ const LibraryTopBar = ({ onOpenSettings }) => {
               (mobileUi.js SCREEN_HEIGHT). */}
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ ...surfaceStyle, borderRadius: 16, width: difficultyPick ? "min(440px, 92vw)" : "min(640px, 92vw)", maxHeight: isMobile ? `calc(${SCREEN_HEIGHT} - 1.5rem - ${SAFE_TOP} - ${SAFE_BOTTOM})` : "80vh", marginTop: isMobile ? "0.75rem" : undefined, display: "flex", flexDirection: "column", padding: "1rem", color: "#fff", fontFamily: "sans-serif", overflow: difficultyPick ? "visible" : "auto" }}
+            style={{
+              ...themeSurfaceStyle,
+              background: "#11141a",
+              border: "1px solid rgba(255,255,255,0.14)",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.06)",
+              borderRadius: 18,
+              width: difficultyPick ? "min(460px, 92vw)" : isMobile ? "min(640px, 94vw)" : "min(1120px, 95vw)",
+              maxHeight: isMobile ? `calc(${SCREEN_HEIGHT} - 1.5rem - ${SAFE_TOP} - ${SAFE_BOTTOM})` : "88vh",
+              height: isMobile || difficultyPick ? undefined : "min(720px, 86vh)",
+              marginTop: isMobile ? "0.75rem" : undefined,
+              display: "flex",
+              flexDirection: "column",
+              padding: isMobile ? "1rem" : "1.25rem 1.5rem",
+              color: "#fff",
+              fontFamily: "sans-serif",
+              overflow: difficultyPick ? "visible" : isMobile ? "auto" : "hidden",
+            }}
           >
             {difficultyPick ? (
               <>
-                <div style={{ fontWeight: 800, fontSize: "1rem" }}>Choose your difficulty</div>
-                <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.75rem", margin: "0.15rem 0 0.7rem" }}>
+                <div style={{ fontWeight: 800, fontSize: "1.2rem", letterSpacing: "-0.01em" }}>Choose your difficulty</div>
+                <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.8rem", margin: "0.2rem 0 0.85rem" }}>
                   How hard should the world fight back?
                 </div>
-                {selectedCountryOption && (
-                  <div style={{ alignItems: "center", display: "flex", fontSize: "0.9rem", fontWeight: 700, gap: "0.5rem", marginBottom: "0.7rem" }}>
-                    <span aria-hidden="true" style={{ fontSize: "1.35rem" }}>
-                      {flagEmojiFromGid(selectedCountryOption.code) || "🏳️"}
-                    </span>
-                    <span>{selectedCountryOption.name}</span>
-                  </div>
-                )}
+                {selectedCountryOption && (() => {
+                  const flagUrl = flagImageUrlFromGid(selectedCountryOption.code) || flagImageUrlFromGid(selectedCountryOption.name)
+                    || (gidToAlpha2(selectedCountryOption.code) ? bundledFlagUrl(`https://flagcdn.com/${gidToAlpha2(selectedCountryOption.code)}.svg`) : null);
+                  return (
+                    <div style={{ alignItems: "center", display: "flex", fontSize: "0.95rem", fontWeight: 700, gap: "0.6rem", marginBottom: "0.85rem", padding: "0.6rem 0.85rem", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10 }}>
+                      {flagUrl ? (
+                        <img
+                          src={bundledFlagUrl(flagUrl)}
+                          alt=""
+                          style={{ borderRadius: 3, boxShadow: "0 1px 3px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.2)", display: "block", flexShrink: 0, height: "1.2rem", objectFit: "cover", width: "1.75rem" }}
+                        />
+                      ) : (
+                        <span aria-hidden="true" style={{ background: "rgba(255,255,255,0.15)", borderRadius: 3, display: "inline-block", flexShrink: 0, height: "1.2rem", width: "1.75rem" }} />
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column" }}>
+                        <span>{selectedCountryOption.name}</span>
+                        <span style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.45)", fontWeight: 400 }}>Selected Nation</span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {difficultyPick?.group && (
-                  <div style={{ alignItems: "center", display: "flex", fontSize: "0.9rem", fontWeight: 700, gap: "0.5rem", marginBottom: "0.7rem" }}>
-                    <span aria-hidden="true" style={{ background: difficultyPick.group.color || "#a1a1aa", borderRadius: 4, display: "inline-block", height: 16, width: 16 }} />
-                    <span data-no-translate>{difficultyPick.group.name}</span>
+                  <div style={{ alignItems: "center", display: "flex", fontSize: "0.95rem", fontWeight: 700, gap: "0.6rem", marginBottom: "0.85rem", padding: "0.6rem 0.85rem", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10 }}>
+                    <span aria-hidden="true" style={{ background: difficultyPick.group.color || "#a1a1aa", borderRadius: 4, display: "inline-block", height: 20, width: 20 }} />
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span data-no-translate>{difficultyPick.group.name}</span>
+                      <span style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.45)", fontWeight: 400 }}>Selected Group</span>
+                    </div>
                   </div>
                 )}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", overflowY: "auto" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem", overflowY: "auto" }}>
                   {DIFFICULTY_LEVELS.map((level) => (
                     <button
                       key={level.id}
                       type="button"
                       onClick={() => pickDifficulty(level.id)}
                       style={{
-                        ...actionButtonStyle,
+                        ...themeButtonStyle,
                         alignItems: "center",
-                        background: "rgba(255,255,255,0.04)",
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 10,
                         display: "flex",
                         flexDirection: "column",
-                        gap: "0.2rem",
-                        padding: "0.75rem 0.5rem",
+                        gap: "0.3rem",
+                        padding: "0.9rem 0.6rem",
+                        transition: "background 0.15s ease, border-color 0.15s ease",
                       }}
                     >
-                      <span style={{ fontSize: "1.6rem", lineHeight: 1 }}>{level.emoji}</span>
-                      <span style={{ fontWeight: 700 }}>{level.label}</span>
-                      <span style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.68rem", textAlign: "center" }}>{level.blurb}</span>
+                      <span style={{ fontSize: "1.75rem", lineHeight: 1 }}>{level.emoji}</span>
+                      <span style={{ fontWeight: 700, fontSize: "0.92rem" }}>{level.label}</span>
+                      <span style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.7rem", textAlign: "center", lineHeight: 1.3 }}>{level.blurb}</span>
                     </button>
                   ))}
                 </div>
-                <button type="button" className="oh-tap-row" onClick={() => setDifficultyPick(null)} style={touchFit({ ...actionButtonStyle, marginTop: "0.6rem" }, touch)}>
+                <button type="button" className="oh-tap-row" onClick={() => setDifficultyPick(null)} style={touchFit({ ...themeButtonStyle, marginTop: "0.85rem", borderRadius: 8, padding: "0.6rem" }, touch)}>
                   Back
                 </button>
               </>
             ) : (
               <>
-                <div style={{ fontWeight: 800, fontSize: "1rem" }}>
-                  {pickerTab === "faction" ? "Create your faction" : pickerTab === "group" && pickerOffersGroups ? "Play as a group" : "Choose your country"}
-                </div>
-                <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.75rem", margin: "0.15rem 0 0.6rem" }}>
-                  Starting “{countryPicker.name}”
-                </div>
-                {/* Whose music the scenario plays, where it has tracks of its
-                    own from the community hub: their licences ask for it to be
-                    said, and this is where a player reads about a scenario
-                    before starting it. */}
-                <ScenarioMusicCredits music={countryPicker.music} style={{ flex: "0 0 auto", fontSize: "0.72rem", marginBottom: "0.6rem", maxHeight: "5.5rem", overflowY: "auto" }} />
-                {/* Refining an existing game (Apply-&-Play) only swaps the country;
-                    inventing a faction is a fresh-game concern, so the tabs show
-                    only for a true new game. */}
-                {!playGameId && (
-                  <div style={{ display: "flex", gap: "0.4rem", marginBottom: "0.7rem" }}>
-                    <button
-                      type="button"
-                      className="oh-tap-row"
-                      onClick={() => setPickerTab("country")}
-                      style={touchFit({
-                        ...actionButtonStyle,
-                        flex: 1,
-                        fontWeight: 700,
-                        background: pickerTab === "country" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "country" ? "rgba(255,255,255,0.28)" : undefined,
-                      }, touch)}
-                    >
-                      Pick a country
-                    </button>
-                    <button
-                      type="button"
-                      className="oh-tap-row"
-                      onClick={() => setPickerTab("faction")}
-                      style={touchFit({
-                        ...actionButtonStyle,
-                        flex: 1,
-                        fontWeight: 700,
-                        background: pickerTab === "faction" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "faction" ? "rgba(255,255,255,0.28)" : undefined,
-                      }, touch)}
-                    >
-                      Create a faction
-                    </button>
-                    {pickerOffersGroups && (
-                    <button
-                      type="button"
-                      className="oh-tap-row"
-                      onClick={() => setPickerTab("group")}
-                      style={touchFit({
-                        ...actionButtonStyle,
-                        flex: 1,
-                        fontWeight: 700,
-                        background: pickerTab === "group" ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
-                        borderColor: pickerTab === "group" ? "rgba(255,255,255,0.28)" : undefined,
-                      }, touch)}
-                    >
-                      Play as a group
-                    </button>
-                    )}
+                <div style={{ display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.6rem", marginBottom: "0.75rem", flexShrink: 0 }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                      <span style={{ fontSize: "0.65rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.55)", background: "rgba(255,255,255,0.08)", padding: "0.15rem 0.45rem", borderRadius: 4 }}>
+                        Scenario
+                      </span>
+                      <span style={{ color: "rgba(255,255,255,0.8)", fontSize: "0.82rem", fontWeight: 600 }}>
+                        {countryPicker.name}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: isMobile ? "1.1rem" : "1.3rem", marginTop: "0.2rem", letterSpacing: "-0.01em" }}>
+                      {pickerTab === "group" ? "Play as a group" : "Choose your country"}
+                    </div>
                   </div>
-                )}
+
+                  {/* Mode switcher tabs */}
+                  {!playGameId && (
+                    <div
+                      style={{
+                        display: "flex",
+                        background: "rgba(0,0,0,0.35)",
+                        padding: 3,
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        gap: 2,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="oh-tap-row"
+                        onClick={() => setPickerTab("country")}
+                        style={touchFit({
+                          ...themeButtonStyle,
+                          border: "none",
+                          borderRadius: 7,
+                          fontSize: "0.8rem",
+                          fontWeight: 700,
+                          background: pickerTab === "country" ? "rgba(255,255,255,0.14)" : "transparent",
+                          color: pickerTab === "country" ? "#fff" : "rgba(255,255,255,0.6)",
+                          padding: "0.4rem 0.85rem",
+                        }, touch)}
+                      >
+                        Pick a country
+                      </button>
+                      <button
+                        type="button"
+                        className="oh-tap-row"
+                        onClick={() => setPickerTab("group")}
+                        style={touchFit({
+                          ...themeButtonStyle,
+                          border: "none",
+                          borderRadius: 7,
+                          fontSize: "0.8rem",
+                          fontWeight: 700,
+                          background: pickerTab === "group" ? "rgba(255,255,255,0.14)" : "transparent",
+                          color: pickerTab === "group" ? "#fff" : "rgba(255,255,255,0.6)",
+                          padding: "0.4rem 0.85rem",
+                        }, touch)}
+                      >
+                        Play as a group
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Scenario Music Credits */}
+                <ScenarioMusicCredits music={countryPicker.music} style={{ flex: "0 0 auto", fontSize: "0.72rem", marginBottom: "0.6rem", maxHeight: "3.5rem", overflowY: "auto" }} />
+
                 {pickerTab === "group" && pickerOffersGroups && !playGameId ? (
-                  <>
+                  <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
                     {/* A group controls an area without owning it (runtime/groups.js):
                         lead one of the scenario's, or make one. */}
                     <div style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.76rem", lineHeight: 1.45, marginBottom: "0.6rem" }}>
@@ -4565,7 +4943,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                             type="button"
                             className="oh-tap-row"
                             onClick={() => pickGroup({ name: entry.name, color: entry.color, description: entry.description, existing: true })}
-                            style={touchFit({ ...actionButtonStyle, alignItems: "center", display: "flex", gap: "0.6rem", justifyContent: "flex-start", textAlign: "left" }, touch)}
+                            style={touchFit({ ...themeButtonStyle, alignItems: "center", display: "flex", gap: "0.6rem", justifyContent: "flex-start", textAlign: "left" }, touch)}
                           >
                             <span aria-hidden="true" style={{ background: entry.color, borderRadius: 4, flex: "0 0 auto", height: 16, width: 16 }} />
                             <span style={{ display: "flex", flexDirection: "column", gap: "0.1rem", minWidth: 0 }}>
@@ -4584,45 +4962,66 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     <FactionCreator
                       mode="group"
                       regionsGeojson={customRegionData}
+                      ownerOverrides={pickerOwnerOverrides}
+                      customBackground={pickerBackground}
+                      colors={pickerColors}
                       busy={isBusy}
                       onCreate={(created) => pickGroup({ ...created, existing: false })}
                       onCancel={() => { closeCountryPicker(); setPickerTab("country"); }}
                     />
-                  </>
-                ) : pickerTab === "faction" && !playGameId ? (
-                  <FactionCreator
-                    regionsGeojson={customRegionData}
-                    busy={isBusy}
-                    onCreate={(faction) => pickFaction(faction)}
-                    onCancel={() => { closeCountryPicker(); setPickerTab("country"); }}
-                  />
+                  </div>
+                ) : pickerTab === "group" && !playGameId ? (
+                  <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
+                    <FactionCreator
+                      mode="group"
+                      regionsGeojson={customRegionData}
+                      ownerOverrides={pickerOwnerOverrides}
+                      customBackground={pickerBackground}
+                      colors={pickerColors}
+                      busy={isBusy}
+                      onCreate={(faction) => pickFaction(faction)}
+                      onCancel={() => { closeCountryPicker(); setPickerTab("country"); }}
+                    />
+                  </div>
                 ) : (
                   <>
-                    <button
-                      type="button"
-                      className="oh-tap-row"
-                      onClick={() => pickCountry("")}
-                      style={touchFit({ ...actionButtonStyle, justifyContent: "flex-start", background: "rgba(255,255,255,0.06)", marginBottom: "0.4rem" }, touch)}
-                    >
-                      {playGameId ? "Keep scenario default" : "Scenario default"}
-                    </button>
-                    <Suspense
-                      fallback={
-                        <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.85rem", padding: "3rem 0", textAlign: "center" }}>
-                          Loading map…
-                        </div>
-                      }
-                    >
-                      <CountryPickerMap
-                        countryOptions={countryOptions}
-                        regionsGeojson={customRegionData}
-                        ownerOverrides={pickerOwnerOverrides}
-                        customBackground={pickerBackground}
-                        onPickCountry={(code) => pickCountry(code)}
-                      />
-                    </Suspense>
-                    <button type="button" className="oh-tap-row" onClick={closeCountryPicker} style={touchFit({ ...actionButtonStyle, marginTop: "0.6rem" }, touch)}>                      {playGameId ? "Done" : "Cancel"}
-                    </button>
+                    <div style={{ display: "flex", flex: 1, minHeight: 0, width: "100%" }}>
+                      <Suspense
+                        fallback={
+                          <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.85rem", padding: "4rem 0", textAlign: "center", width: "100%" }}>
+                            Loading map…
+                          </div>
+                        }
+                      >
+                        <CountryPickerMap
+                          countryOptions={countryOptions}
+                          regionsGeojson={customRegionData}
+                          ownerOverrides={pickerOwnerOverrides}
+                          customBackground={pickerBackground}
+                          colors={pickerColors}
+                          onPickCountry={(code) => pickCountry(code)}
+                          onPickDefault={() => pickCountry("")}
+                          playGameId={playGameId}
+                        />
+                      </Suspense>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: isMobile ? "0.6rem" : "0.75rem", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "0.6rem", flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="oh-tap-row"
+                        onClick={closeCountryPicker}
+                        style={touchFit({
+                          ...themeButtonStyle,
+                          background: "rgba(255,255,255,0.06)",
+                          borderRadius: 8,
+                          padding: "0.45rem 1.25rem",
+                          fontSize: "0.85rem",
+                          fontWeight: 600,
+                        }, touch)}
+                      >
+                        {playGameId ? "Done" : "Cancel"}
+                      </button>
+                    </div>
                   </>
                 )}
               </>
@@ -4643,7 +5042,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
           >
             <div
               onClick={(event) => event.stopPropagation()}
-              style={{ ...surfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
+              style={{ ...themeSurfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
             >
               <div style={{ fontSize: "1rem", fontWeight: 800 }}>This game's scenario isn't here</div>
               <div style={{ color: "rgba(255,255,255,0.62)", fontSize: "0.82rem", lineHeight: 1.5, margin: "0.5rem 0 1rem" }}>
@@ -4671,7 +5070,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     className="oh-tap-row"
                     disabled={isBusy}
                     onClick={() => handleMissingScenarioImport(pending)}
-                    style={touchFit({ ...actionButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.6rem" }, touch)}
+                    style={touchFit({ ...themeButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.6rem" }, touch)}
                     type="button"
                   >
                     {isBusy ? "Getting the scenario…" : "Import & play"}
@@ -4686,7 +5085,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     setMissingScenarioGame(null);
                     setActiveTab(pending.importedScenarioOrigin ? "community" : "scenarios");
                   }}
-                  style={touchFit({ ...actionButtonStyle, minHeight: "2.6rem" }, touch)}
+                  style={touchFit({ ...themeButtonStyle, minHeight: "2.6rem" }, touch)}
                   type="button"
                 >
                   {pending.importedScenarioOrigin ? "Browse the community hub" : "Go to scenarios"}
@@ -4694,7 +5093,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                 <button
                   className="oh-tap-row"
                   onClick={() => setMissingScenarioGame(null)}
-                  style={touchFit({ ...actionButtonStyle, minHeight: "2.6rem" }, touch)}
+                  style={touchFit({ ...themeButtonStyle, minHeight: "2.6rem" }, touch)}
                   type="button"
                 >
                   Not now
@@ -4719,7 +5118,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
               aria-modal="true"
               onClick={(event) => event.stopPropagation()}
               role="dialog"
-              style={{ ...surfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
+              style={{ ...themeSurfaceStyle, borderRadius: 16, color: "#fff", fontFamily: "sans-serif", padding: "1.1rem", width: "min(430px, 92vw)" }}
             >
               <div style={{ fontSize: "1rem", fontWeight: 800 }}>Replace your changes?</div>
               <div data-no-translate style={{ color: "rgba(255,255,255,0.86)", fontSize: "0.86rem", fontWeight: 700, marginTop: "0.35rem", overflowWrap: "anywhere" }}>
@@ -4735,7 +5134,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     setReplaceEditsTarget(null);
                     handleScenarioUpdate(pending.scenario, { post: pending.post, replaceEdits: true });
                   }}
-                  style={touchFit({ ...actionButtonStyle, background: "rgba(127,29,29,0.34)", borderColor: "rgba(248,113,113,0.28)", color: "#fecaca", minHeight: "2.6rem" }, touch)}
+                  style={touchFit({ ...themeButtonStyle, background: "rgba(127,29,29,0.34)", borderColor: "rgba(248,113,113,0.28)", color: "#fecaca", minHeight: "2.6rem" }, touch)}
                   type="button"
                 >
                   Update and replace my changes
@@ -4743,7 +5142,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                 <button
                   className="oh-tap-row"
                   onClick={() => setReplaceEditsTarget(null)}
-                  style={touchFit({ ...actionButtonStyle, minHeight: "2.6rem" }, touch)}
+                  style={touchFit({ ...themeButtonStyle, minHeight: "2.6rem" }, touch)}
                   type="button"
                 >
                   Not now
@@ -4816,7 +5215,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     className="oh-tap-row"
                     onClick={() => setActiveTab(tab.id)}
                     style={touchFit({
-                      ...actionButtonStyle,
+                      ...themeButtonStyle,
                       background: activeTab === tab.id ? "var(--oh-grey-selected)" : "rgba(255,255,255,0.05)",
                       borderColor: activeTab === tab.id ? "var(--oh-grey-border-strong)" : "rgba(255,255,255,0.08)",
                       minWidth: "0",
@@ -4854,7 +5253,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                 </h1>
                 <div style={{ alignItems: "center", display: "flex", flexShrink: 0, gap: "0.55rem", justifyContent: "flex-end" }}>
                   {tabActions.map(({ icon, label, run }) => (
-                    <button key={label} className="oh-tap-row" onClick={run} style={touchFit({ ...actionButtonStyle, flexShrink: 0 }, touch)} type="button">
+                    <button key={label} className="oh-tap-row" onClick={run} style={touchFit({ ...themeButtonStyle, flexShrink: 0 }, touch)} type="button">
                       <ButtonIcon kind={icon} /> {label}
                     </button>
                   ))}
@@ -4871,13 +5270,13 @@ const LibraryTopBar = ({ onOpenSettings }) => {
             {isMobile && (typeof onOpenSettings === "function" || tabActions.length > 0) && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1.1rem" }}>
                 {typeof onOpenSettings === "function" && (
-                  <button className="oh-tap-row" onClick={onOpenSettings} style={touchFit(actionButtonStyle, touch)} type="button">
+                  <button className="oh-tap-row" onClick={onOpenSettings} style={touchFit(themeButtonStyle, touch)} type="button">
                     <ButtonIcon kind="settings" />
                     Settings
                   </button>
                 )}
                 {tabActions.map(({ icon, label, phoneLabel, run }) => (
-                  <button key={label} className="oh-tap-row" onClick={run} style={touchFit(actionButtonStyle, touch)} type="button">
+                  <button key={label} className="oh-tap-row" onClick={run} style={touchFit(themeButtonStyle, touch)} type="button">
                     <ButtonIcon kind={icon} />
                     {phoneLabel || label}
                   </button>
@@ -4911,10 +5310,10 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     Start a new game from one of your scenarios, or grab new scenarios from the community first.
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", justifyContent: "center" }}>
-                    <button type="button" style={{ ...actionButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.8rem", padding: "0 1.4rem" }} onClick={() => setActiveTab("scenarios")}>
+                    <button type="button" style={{ ...themeButtonStyle, background: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.28)", minHeight: "2.8rem", padding: "0 1.4rem" }} onClick={() => setActiveTab("scenarios")}>
                       Start from a scenario
                     </button>
-                    <button type="button" style={{ ...actionButtonStyle, minHeight: "2.8rem", padding: "0 1.4rem" }} onClick={() => setActiveTab("community")}>
+                    <button type="button" style={{ ...themeButtonStyle, minHeight: "2.8rem", padding: "0 1.4rem" }} onClick={() => setActiveTab("community")}>
                       Browse community scenarios
                     </button>
                   </div>
@@ -4934,11 +5333,11 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                     emptyText={gameSearch ? "No games match your search." : "No games in this view."}
                     controls={(
                       <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.45rem", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                        <input aria-label="Search games" onChange={(event) => setGameSearch(event.target.value)} placeholder="Search games…" value={gameSearch} style={{ ...inputStyle, borderRadius: "999px", minHeight: "2.35rem", padding: "0 0.9rem", width: isMobile ? "100%" : "16rem" }} />
+                        <input aria-label="Search games" onChange={(event) => setGameSearch(event.target.value)} placeholder="Search games…" value={gameSearch} style={{ ...inputStyle, borderRadius: "9px", minHeight: "2.35rem", padding: "0 0.9rem", width: isMobile ? "100%" : "16rem" }} />
                         {[['active', 'Active'], ['all', 'All'], ['archived', 'Archived']].map(([value, label]) => (
                           <BrowsePill key={value} active={gameView === value} onClick={() => setGameView(value)}>{label}</BrowsePill>
                         ))}
-                        <select aria-label="Sort games" onChange={(event) => setGameSort(event.target.value)} value={gameSort} style={{ ...inputStyle, borderRadius: "999px", minHeight: "2.35rem", padding: "0 0.85rem", width: "auto" }}>
+                        <select aria-label="Sort games" onChange={(event) => setGameSort(event.target.value)} value={gameSort} style={{ ...inputStyle, borderRadius: "9px", minHeight: "2.35rem", padding: "0 0.85rem", width: "auto" }}>
                           <option value="recent">Recently played</option>
                           <option value="turns">Most turns</option>
                           <option value="played">Most played</option>
@@ -4986,11 +5385,11 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                   emptyText={scenarioSearch ? "No scenarios match your search." : "No scenarios in this view."}
                   controls={(
                     <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.45rem", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
-                      <input aria-label="Search scenarios" onChange={(event) => setScenarioSearch(event.target.value)} placeholder="Search scenarios…" value={scenarioSearch} style={{ ...inputStyle, borderRadius: "999px", minHeight: "2.35rem", padding: "0 0.9rem", width: isMobile ? "100%" : "16rem" }} />
+                      <input aria-label="Search scenarios" onChange={(event) => setScenarioSearch(event.target.value)} placeholder="Search scenarios…" value={scenarioSearch} style={{ ...inputStyle, borderRadius: "9px", minHeight: "2.35rem", padding: "0 0.9rem", width: isMobile ? "100%" : "16rem" }} />
                       {[['all', 'All'], ['yours', 'Yours'], ['community', 'Community'], ['updates', 'Updates']].map(([value, label]) => (
                         <BrowsePill key={value} active={scenarioView === value} onClick={() => setScenarioView(value)}>{label}</BrowsePill>
                       ))}
-                      <select aria-label="Sort scenarios" onChange={(event) => setScenarioSort(event.target.value)} value={scenarioSort} style={{ ...inputStyle, borderRadius: "999px", minHeight: "2.35rem", padding: "0 0.85rem", width: "auto" }}>
+                      <select aria-label="Sort scenarios" onChange={(event) => setScenarioSort(event.target.value)} value={scenarioSort} style={{ ...inputStyle, borderRadius: "9px", minHeight: "2.35rem", padding: "0 0.85rem", width: "auto" }}>
                         <option value="recent">Recently used</option>
                         <option value="updated">Recently updated</option>
                         <option value="played">Most played</option>
