@@ -42,7 +42,7 @@ import {
   withSingleLibraryRefresh,
   writeGameSnapshotsText,
 } from "../../runtime/library.js";
-import { enterGame, useGameEntered } from "../../runtime/gameEntry.js";
+import { enterGame, hasEnteredGame, leaveGame, useGameEntered } from "../../runtime/gameEntry.js";
 import { loadCountryNames, normalizeOwnBasemaps, readJson, writeJson, JSON_URLS } from "../../runtime/assets.js";
 import { ownBasemapsFromGame } from "../../Editor/ownBasemaps.js";
 import { LABEL_FONT_SUGGESTIONS } from "../../runtime/mapSettings.js";
@@ -1190,7 +1190,7 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
 // face of the card. Three verbs compete for width with Play, and Play is the one a
 // player came to press; the other three are occasional, and none of them is
 // destructive, which is why Archive stays out here on its own.
-const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, onExport }) => {
+const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onDelete = null, onEdit, onExport }) => {
   const cardImageUrl = game.coverImageUrl || DEFAULT_SCENARIO_COVER;
   const touch = useTouchPrimary();
   const [cardMenuOpen, setCardMenuOpen] = useState(false);
@@ -1477,12 +1477,23 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onEdit, 
             <button
               className="oh-tap-row"
               onClick={() => onArchive(game)}
-              style={touchFit({ ...actionButtonStyle, flexBasis: "100%" }, touch)}
+              style={touchFit({ ...actionButtonStyle, flex: 1 }, touch)}
               title={game.archived ? "Move back into your library" : "Hide from the library without deleting"}
               type="button"
             >
               <ButtonIcon kind="archive" /> {game.archived ? "Unarchive" : "Archive"}
             </button>
+            {game.archived && onDelete && game.canDelete && (
+              <button
+                className="oh-tap-row"
+                disabled={busy}
+                onClick={() => onDelete(game)}
+                style={touchFit({ ...actionButtonStyle, background: "rgba(127,29,29,0.34)", borderColor: "rgba(248,113,113,0.28)", color: "#fecaca", flex: 1 }, touch)}
+                type="button"
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -3056,8 +3067,29 @@ const LibraryTopBar = ({ onOpenSettings }) => {
     setEditorError(null);
     try {
       await saveGame(game.id, { archived: !game.archived });
+      if (!game.archived && game.id === activeGameId && hasEnteredGame()) leaveGame();
     } catch (nextError) {
       setEditorError(nextError.message);
+    }
+  };
+
+  const gameDeleteQuestion = (name) => (!trash ? `Delete the game "${name}"?`
+    : trash.keepCount ? `Delete the game "${name}"? You can restore it from Recently deleted for ${trash.keepDays} days, while it is among the last ${trash.keepCount} things you deleted.`
+      : `Delete the game "${name}"? You can restore it from Recently deleted for ${trash.keepDays} days.`);
+
+  const handleGameDelete = async (game) => {
+    if (!game?.canDelete || !window.confirm(gameDeleteQuestion(game.name))) return;
+    setEditorError(null);
+    setIsBusy(true);
+    try {
+      const wasOpen = game.id === activeGameId && hasEnteredGame();
+      await removeGame(game.id);
+      if (wasOpen) leaveGame();
+      refreshTrash();
+    } catch (nextError) {
+      setEditorError(nextError.message);
+    } finally {
+      setIsBusy(false);
     }
   };
 
@@ -3414,9 +3446,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
       ? (!trash ? `Delete the scenario "${record.name}"?`
         : trash.keepCount ? `Delete the scenario "${record.name}"? You can restore it from Recently deleted for ${trash.keepDays} days, while it is among the last ${trash.keepCount} things you deleted.`
           : `Delete the scenario "${record.name}"? You can restore it from Recently deleted for ${trash.keepDays} days.`)
-      : (!trash ? `Delete the game "${record.name}"?`
-        : trash.keepCount ? `Delete the game "${record.name}"? You can restore it from Recently deleted for ${trash.keepDays} days, while it is among the last ${trash.keepCount} things you deleted.`
-          : `Delete the game "${record.name}"? You can restore it from Recently deleted for ${trash.keepDays} days.`);
+      : gameDeleteQuestion(record.name);
     if (!window.confirm(question)) {
       return;
     }
@@ -3428,7 +3458,9 @@ const LibraryTopBar = ({ onOpenSettings }) => {
       if (editorKind === "scenario") {
         await removeScenario(record.id);
       } else {
+        const wasOpen = record.id === activeGameId && hasEnteredGame();
         await removeGame(record.id);
+        if (wasOpen) leaveGame();
       }
       resetEditor();
       refreshTrash();
@@ -4892,7 +4924,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                   {continueGames.length > 0 && (
                     <MenuRow description="Pick up exactly where you left off." icon="▶" title="Continue Playing">
                       {continueGames.map((game) => (
-                        <GameCard key={game.id} active={game.id === activeGameId} busy={isBusy} game={game} onActivate={handleGameActivate} onArchive={handleGameArchive} onClone={handleGameClone} onEdit={openGameEditor} onExport={handleGameExport} />
+                        <GameCard key={game.id} active={game.id === activeGameId} busy={isBusy} game={game} onActivate={handleGameActivate} onArchive={handleGameArchive} onClone={handleGameClone} onDelete={handleGameDelete} onEdit={openGameEditor} onExport={handleGameExport} />
                       ))}
                     </MenuRow>
                   )}
@@ -4919,7 +4951,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
                         child either way, so an empty view still says so. */}
                     {loaded
                       ? browsedGames.map((game) => (
-                        <GameCard key={game.id} active={game.id === activeGameId} busy={isBusy} game={game} onActivate={handleGameActivate} onArchive={handleGameArchive} onClone={handleGameClone} onEdit={openGameEditor} onExport={handleGameExport} />
+                        <GameCard key={game.id} active={game.id === activeGameId} busy={isBusy} game={game} onActivate={handleGameActivate} onArchive={handleGameArchive} onClone={handleGameClone} onDelete={handleGameDelete} onEdit={openGameEditor} onExport={handleGameExport} />
                       ))
                       : <MenuCardSkeletons count={isMobile ? 3 : 8} kind="game" width={SHELF_CARD_WIDTH} />}
                   </LibraryCollection>

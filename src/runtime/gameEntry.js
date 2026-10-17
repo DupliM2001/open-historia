@@ -30,8 +30,9 @@
 // is entered yet: the cover is up (main.jsx `awaitingGame`), and a flow that
 // fails opens the menu again.
 //
-// It is never unset. Leaving a game for the menu keeps that game loaded behind
-// the menu, as it always has: only the first game of a page waits for a Play.
+// It is unset only when the open game is archived or deleted (leaveGame): the
+// next game is not opened in its place, and waits for a Play like the first.
+// Leaving a game for the menu keeps that game loaded behind the menu.
 // It lives in this module and nowhere else (no storage), so every page load
 // starts on the menu again. Not to be confused with the website's entry screen
 // (web/homePage.js `markEntered`), which is about the site, not a game.
@@ -48,6 +49,11 @@ export const enterGame = () => {
   for (const listener of [...listeners]) listener();
 };
 
+export const leaveGame = () => {
+  if (!entered) return;
+  entered = false;
+  for (const listener of [...listeners]) listener();
+};
 export const subscribeGameEntry = (listener) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
