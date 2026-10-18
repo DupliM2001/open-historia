@@ -658,26 +658,6 @@ const promptPackFromImport = (value) => {
   return candidate;
 };
 
-const AssetBadgeRow = ({ badges }) =>
-  badges.length > 0 ? (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.85rem" }}>
-      {badges.map((badge) => (
-        <span
-          key={badge}
-          style={{
-            background: "rgba(255,255,255,0.14)",
-            borderRadius: "999px",
-            color: "rgba(255,255,255,0.9)",
-            fontSize: "0.7rem",
-            padding: "0.28rem 0.55rem",
-          }}
-        >
-          {badge}
-        </span>
-      ))}
-    </div>
-  ) : null;
-
 // The Prompts tab. Each prompt is a fixed technical template with a few
 // passages of guidance inside it (promptGuidance.js); only those passages are
 // shown and edited, one textarea each, and a blank or default-identical
@@ -954,9 +934,6 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
   const updateAvailable = Boolean(updateReason);
   const updateIsPrimary = updateAvailable && !scenario.hubOrigin?.editedAt;
   const isBuiltIn = scenario.id === "default";
-  const assetBadges = Object.entries(scenarioBadgeLabels)
-    .filter(([key]) => scenario.assetStatus?.[key])
-    .map(([, label]) => label.replace(" PMTiles", "").replace(" JSON", ""));
   const cardImageUrl = scenario.coverImageUrl || DEFAULT_SCENARIO_COVER;
   const touch = useTouchPrimary();
 
@@ -1145,7 +1122,6 @@ const ScenarioCard = ({ onClone, onEdit, onPlay, onSelect, onUpdate, scenario, s
               {scenario.subtitle}
             </div>
           )}
-          <AssetBadgeRow badges={assetBadges} />
 
           {/* Action Bar */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.6rem" }}>

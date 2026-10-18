@@ -63,7 +63,7 @@ const NEW_UPDATES = [
           "Archiving or deleting the game you have open takes you back to the menu, and an archived game can be deleted from its card.",
           "Create a faction is now part of Play as a group: name it, give it a colour, a flag and an area, or start with none.",
           "The map shows again when choosing a group's area, in the same colours as the country picker.",
-          "Emptying Recently deleted asks in the menu itself, so it works everywhere.",
+          "Emptying Recently deleted works everywhere, and a diplomacy message's copy button stays while you reach for it.",
           "The map editor is laid out anew in the menus' style, with its sidebar on the right or the left, quicker tools and zooming, and fewer notes in the way.",
           "The Community tab can show only the scenarios that begin between two dates.",
         ],

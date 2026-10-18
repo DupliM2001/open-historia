@@ -875,14 +875,15 @@ const MessageBubble = ({ msg, onRetry, compact = false, showTime = true }) => {
             {isPlayer ? msg.text : <Markdown className="chat-markdown">{msg.text}</Markdown>}
             </div>
             {!isError && hovered && (
-                <button type="button" className="oh-tap" onClick={copyMessage} title={copied ? "Copied" : "Copy message"} aria-label="Copy message" style={{
-                    position: "absolute", top: ".2rem", [isPlayer ? "right" : "left"]: "calc(100% + .35rem)",
-                    width: "1.6rem", height: "1.6rem", borderRadius: 7, border: "1px solid rgba(255,255,255,.09)",
-                    background: "rgba(24,24,27,.94)", color: copied ? "#86efac" : "rgba(255,255,255,.46)",
-                    display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,.2)",
-                }}>
-                    <CopyIcon />
-                </button>
+                <div style={{ position: "absolute", top: 0, bottom: 0, [isPlayer ? "right" : "left"]: "100%", [isPlayer ? "paddingRight" : "paddingLeft"]: ".35rem", paddingTop: ".2rem" }}>
+                    <button type="button" className="oh-tap" onClick={copyMessage} title={copied ? "Copied" : "Copy message"} aria-label="Copy message" style={{
+                        width: "1.6rem", height: "1.6rem", borderRadius: 7, border: "1px solid rgba(255,255,255,.09)",
+                        background: "rgba(24,24,27,.94)", color: copied ? "#86efac" : "rgba(255,255,255,.46)",
+                        display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,.2)",
+                    }}>
+                        <CopyIcon />
+                    </button>
+                </div>
             )}
         </div>
 

@@ -3526,7 +3526,7 @@
  "Empty uses the font the scenario author chose. Any font installed on this computer works; overrides apply immediately.",
  "Empty: 12, as every country had.",
  "Empty: the era's own, {{formatPopulationFigure}} men.",
- "Emptying Recently deleted asks in the menu itself, so it works everywhere.",
+ "Emptying Recently deleted works everywhere, and a diplomacy message's copy button stays while you reach for it.",
  "En Nahud",
  "En route to {{destination}} — about {{remaining}} km to go",
  "Enable diplomacy notification sound",
