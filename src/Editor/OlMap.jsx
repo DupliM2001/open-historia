@@ -20,6 +20,11 @@ import { editorBasemapById, esriXyzUrl } from "./basemaps.js";
 import { useBrowserOnline } from "../runtime/networkStatus.js";
 import VectorLayer from "ol/layer/Vector";
 import VectorImageLayer from "ol/layer/VectorImage";
+import WebGLVectorLayer from "ol/layer/WebGLVector";
+import WebGLVectorLayerRenderer from "ol/renderer/webgl/VectorLayer";
+import ViewHint from "ol/ViewHint";
+import { parseLiteralStyle } from "ol/render/webgl/style";
+import { packColor } from "ol/render/webgl/compileUtil";
 import VectorSource from "ol/source/Vector";
 import Style from "ol/style/Style";
 import Text from "ol/style/Text";
@@ -49,7 +54,7 @@ import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import { boundsFillSquare, normalizeImageBounds } from "../../server/mapProjection.js";
 import { vectorLayerToGeoJSON } from "./customBackground.js";
 import { defaults as defaultControls } from "ol/control/defaults";
-import { makeRegionStyle } from "./olStyle.js";
+import { makeRegionLook, makeRegionOverlayStyle, makeRegionStyle } from "./olStyle.js";
 import { buildPoliticalBoundaryTopology } from "../Game/Map/vnext/politicalBoundaryTopology.js";
 import { buildGroupAreaIndex, deriveGroupAreas } from "../Game/Map/vnext/groupAreas.js";
 import { getMarkerPresentation } from "../Game/Map/vnext/presentationPolicy.js";
@@ -455,6 +460,94 @@ const toTypesById = (types) => {
   return map;
 };
 
+const supportsWebGL = () => {
+  try {
+    if (typeof document === "undefined") return false;
+    const gl = document.createElement("canvas").getContext("webgl");
+    if (!gl) return false;
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const regionShaders = (look) => {
+  let memoFeature = null;
+  let memoLook = null;
+  let memoArmed = false;
+  const lookOnce = (feature) => {
+    if (feature === memoFeature) return memoLook;
+    memoFeature = feature;
+    memoLook = look(feature);
+    if (!memoArmed) {
+      memoArmed = true;
+      queueMicrotask(() => {
+        memoFeature = null;
+        memoLook = null;
+        memoArmed = false;
+      });
+    }
+    return memoLook;
+  };
+  const shaders = parseLiteralStyle({
+    "fill-color": ["get", "regionFill"],
+    "stroke-color": ["get", "regionStroke"],
+    "stroke-width": ["get", "regionStrokeWidth"],
+  }, {}, [">", ["get", "regionShown"], 0]);
+  shaders.attributes.prop_regionFill.callback = (feature) => packColor(lookOnce(feature).fill);
+  shaders.attributes.prop_regionStroke.callback = (feature) => packColor(lookOnce(feature).stroke);
+  shaders.attributes.prop_regionStrokeWidth.callback = (feature) => lookOnce(feature).width;
+  shaders.attributes.prop_regionShown.callback = (feature) => (lookOnce(feature).visible ? 1 : 0);
+  return [shaders];
+};
+
+const HIT_RING = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+class RegionGlRenderer extends WebGLVectorLayerRenderer {
+  prepareFrameInternal(frameState) {
+    const resolution = frameState.viewState.resolution;
+    const still = !frameState.viewHints[ViewHint.ANIMATING] && !frameState.viewHints[ViewHint.INTERACTING];
+    const current = this.buffers_ && this.sourceRevision_ >= this.getLayer().getSource().getRevision();
+    if (current && this.builtAt && Math.abs(Math.log2(resolution / this.builtAt)) < 4 && Array.isArray(this.previousExtent_)) {
+      this.previousExtent_ = frameState.extent.slice();
+    } else if (still) {
+      this.builtAt = resolution;
+    }
+    return super.prepareFrameInternal(frameState);
+  }
+
+  forEachFeatureAtCoordinate(coordinate, frameState, hitTolerance, callback) {
+    const layer = this.getLayer();
+    const source = layer.getSource();
+    const reach = (hitTolerance || 0) * frameState.viewState.resolution;
+    const seen = new Set();
+    for (const [dx, dy] of reach > 0 ? HIT_RING : HIT_RING.slice(0, 1)) {
+      for (const feature of source.getFeaturesAtCoordinate([coordinate[0] + dx * reach, coordinate[1] + dy * reach])) {
+        if (seen.has(feature)) continue;
+        seen.add(feature);
+        if (!layer.regionLook(feature).visible) continue;
+        const result = callback(feature, layer, feature.getGeometry());
+        if (result) return result;
+      }
+      if (seen.size) return undefined;
+    }
+    return undefined;
+  }
+}
+
+class RegionGlLayer extends WebGLVectorLayer {
+  constructor(options) {
+    super({ ...options, disableHitDetection: true });
+    this.regionStyle = options.style;
+    this.regionLook = options.look;
+  }
+
+  createRenderer() {
+    return new RegionGlRenderer(this, { style: this.regionStyle, variables: {}, disableHitDetection: true });
+  }
+}
+
 // A representative interior coordinate for a region (for lasso containment tests).
 const interiorPoint = (geom) => {
   const type = geom.getType();
@@ -530,6 +623,10 @@ const OlMap = ({
   const mapRef = useRef(null);
   const regionSourceRef = useRef(null);
   const regionLayerRef = useRef(null);
+  const regionOverlayLayerRef = useRef(null);
+  const restyleRegionsRef = useRef(null);
+  const restyleSelectionRef = useRef(null);
+  const isRegionLayer = (l) => l === regionLayerRef.current || (l != null && l === regionOverlayLayerRef.current);
   const labelLayerRef = useRef(null);
   const pointSourceRef = useRef(null);
   const pointLayerRef = useRef(null);
@@ -691,22 +788,90 @@ const OlMap = ({
     //
     // imageRatio 2 renders twice the viewport, so short pans stay inside the
     // existing image instead of triggering a fresh rasterisation.
-    const regionLayer = new VectorImageLayer({
-      source: regionSource,
-      imageRatio: 1.25,
+    const regionStyle = makeRegionStyle({
+      getTypesById: () => typesByIdRef.current,
+      getColors: () => colorsRef.current,
+      getSelectedIds: () => selectedIdsRef.current,
+      getZoom,
+      getGroupColors: () => groupColorsRef.current,
+    });
+    const regionLook = makeRegionLook({
+      getTypesById: () => typesByIdRef.current,
+      getColors: () => colorsRef.current,
+      getZoom: () => mapRef.current?.getView().getZoom() ?? 3,
+      getGroupColors: () => groupColorsRef.current,
+    });
+    const onGpu = supportsWebGL();
+    const regionLayer = onGpu
+      ? new RegionGlLayer({ source: regionSource, style: regionShaders(regionLook), look: regionLook })
+      : new VectorImageLayer({
+        source: regionSource,
+        imageRatio: 1.25,
+        wrapX: false,
+        style: regionStyle,
+        renderBuffer: 128,
+        updateWhileInteracting: false,
+        updateWhileAnimating: false,
+      });
+    regionLayer.setZIndex(10);
+
+    const regionOverlaySource = new VectorSource({ wrapX: false });
+    const regionOverlayLayer = new VectorLayer({
+      source: regionOverlaySource,
       wrapX: false,
-      style: makeRegionStyle({
-        getTypesById: () => typesByIdRef.current,
-        getColors: () => colorsRef.current,
-        getSelectedIds: () => selectedIdsRef.current,
-        getZoom,
-        getGroupColors: () => groupColorsRef.current,
-      }),
-      renderBuffer: 128,
+      visible: onGpu,
       updateWhileInteracting: false,
       updateWhileAnimating: false,
+      style: makeRegionOverlayStyle({ look: regionLook, canvasStyle: regionStyle, getSelectedIds: () => selectedIdsRef.current }),
     });
-    regionLayer.setZIndex(10);
+    regionOverlayLayer.setZIndex(11);
+    const overlayWants = (f) => selectedIdsRef.current.has(f.getId()) || regionLook(f).striped;
+    const syncOverlayFeature = (f) => {
+      if (!onGpu) return;
+      const wanted = regionSource.hasFeature(f) && overlayWants(f);
+      const present = regionOverlaySource.hasFeature(f);
+      if (wanted && !present) regionOverlaySource.addFeature(f);
+      else if (!wanted && present) regionOverlaySource.removeFeature(f);
+    };
+    const syncRegionOverlay = () => {
+      if (!onGpu) return;
+      const wanted = new Set();
+      for (const id of selectedIdsRef.current) {
+        const f = regionSource.getFeatureById(id);
+        if (f) wanted.add(f);
+      }
+      for (const f of regionSource.getFeatures()) {
+        const claimants = f.get("claimants");
+        if (Array.isArray(claimants) && claimants.length && regionLook(f).striped) wanted.add(f);
+      }
+      for (const f of regionOverlaySource.getFeatures()) {
+        if (!wanted.has(f)) regionOverlaySource.removeFeature(f);
+      }
+      const missing = [...wanted].filter((f) => !regionOverlaySource.hasFeature(f));
+      if (missing.length) regionOverlaySource.addFeatures(missing);
+      regionOverlayLayer.changed();
+    };
+    const restyleRegions = () => {
+      if (!onGpu) {
+        regionLayer.changed();
+        return;
+      }
+      regionSource.changed();
+      syncRegionOverlay();
+    };
+    const restyleSelection = () => {
+      if (onGpu) syncRegionOverlay();
+      else regionLayer.changed();
+    };
+    if (onGpu) {
+      regionSource.on("addfeature", (e) => syncOverlayFeature(e.feature));
+      regionSource.on("removefeature", (e) => {
+        if (regionOverlaySource.hasFeature(e.feature)) regionOverlaySource.removeFeature(e.feature);
+      });
+      regionSource.on("changefeature", (e) => syncOverlayFeature(e.feature));
+      regionSource.on("clear", () => regionOverlaySource.clear(true));
+      regionLayer.on("change:visible", () => regionOverlayLayer.setVisible(regionLayer.getVisible()));
+    }
 
     const labelLayer = new VectorLayer({
       source: regionSource,
@@ -888,12 +1053,15 @@ const OlMap = ({
     const map = new Map({
       target: containerRef.current,
       controls: defaultControls({ rotate: false }),
-      layers: [regionLayer, ...war.layers, groupOutlineLayer, labelLayer, pointLayer, unitLayer, importPreviewLayer, paintPreviewLayer, topologyLayer, borderAssistLayer],
+      layers: [regionLayer, regionOverlayLayer, ...war.layers, groupOutlineLayer, labelLayer, pointLayer, unitLayer, importPreviewLayer, paintPreviewLayer, topologyLayer, borderAssistLayer],
       view: new View({ center: fromLonLat([0, 20]), zoom: 2.1, minZoom: 1, maxZoom: 20 }),
     });
 
     regionSourceRef.current = regionSource;
     regionLayerRef.current = regionLayer;
+    regionOverlayLayerRef.current = regionOverlayLayer;
+    restyleRegionsRef.current = restyleRegions;
+    restyleSelectionRef.current = restyleSelection;
     labelLayerRef.current = labelLayer;
     pointSourceRef.current = pointSource;
     pointLayerRef.current = pointLayer;
@@ -967,7 +1135,7 @@ const OlMap = ({
           hit = feature;
           return true;
         },
-        { layerFilter: (l) => l === regionLayerRef.current, hitTolerance: 2 },
+        { layerFilter: isRegionLayer, hitTolerance: 2 },
       );
       if (tool === "delete") {
         // Deleting works on units and cities too — a point hit wins over the region under it.
@@ -1048,7 +1216,7 @@ const OlMap = ({
         let neighbor = null;
         for (const [dx, dy] of [[9, 0], [-9, 0], [0, 9], [0, -9], [7, 7], [-7, 7], [7, -7], [-7, -7], [14, 0], [-14, 0], [0, 14], [0, -14]]) {
           let f = null;
-          map.forEachFeatureAtPixel([px + dx, py + dy], (ff) => { f = ff; return true; }, { layerFilter: (l) => l === regionLayerRef.current, hitTolerance: 1 });
+          map.forEachFeatureAtPixel([px + dx, py + dy], (ff) => { f = ff; return true; }, { layerFilter: isRegionLayer, hitTolerance: 1 });
           if (f && f !== hit) { neighbor = f; break; }
         }
         if (!neighbor) return;
@@ -1063,7 +1231,7 @@ const OlMap = ({
             : "The border between these two regions could not be removed. Borders are repaired when the map is exported, so export the map and then try again.");
           return;
         }
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         onSelectionRef.current?.([hit.getId()]);
         notifyRegions();
@@ -1100,7 +1268,7 @@ const OlMap = ({
           hit = feature;
           return true;
         },
-        { layerFilter: (l) => l === regionLayerRef.current, hitTolerance: 2 },
+        { layerFilter: isRegionLayer, hitTolerance: 2 },
       );
       if (!hit) return undefined;
       const owner = hit.get("owner") || null;
@@ -1116,7 +1284,7 @@ const OlMap = ({
     map.on("pointermove", (evt) => {
       if (evt.dragging) return;
       const hit = map.hasFeatureAtPixel(evt.pixel, {
-        layerFilter: (l) => l === regionLayerRef.current,
+        layerFilter: isRegionLayer,
       });
       const tool = activeToolRef.current;
       if (tool === "lasso" || tool === "draw" || tool === "modify" || tool === "paint" || tool === "feature-box" || isWarTool(tool)) {
@@ -1140,7 +1308,7 @@ const OlMap = ({
       if (!c) return;
       c.undo();
       redoStackRef.current.push(c);
-      regionLayer.changed();
+      restyleRegions();
       labelLayer.changed();
       notifyRegions();
       emitHistory();
@@ -1150,7 +1318,7 @@ const OlMap = ({
       if (!c) return;
       c.redo();
       undoStackRef.current.push(c);
-      regionLayer.changed();
+      restyleRegions();
       labelLayer.changed();
       notifyRegions();
       emitHistory();
@@ -1599,7 +1767,7 @@ const OlMap = ({
           if (row.edited === undefined) row.feature.unset("edited", true);
           else row.feature.set("edited", row.edited);
         }
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
       };
       pushCmd({
@@ -1607,7 +1775,7 @@ const OlMap = ({
         redo: () => restore(after),
       });
       clearTopologyDiagnostics();
-      regionLayer.changed();
+      restyleRegions();
       labelLayer.changed();
       notifyRegions();
       return before.size;
@@ -2007,7 +2175,7 @@ const OlMap = ({
           if ("group" in patch) { before.group = f.get("group") || null; f.set("group", patch.group || null); }
           undos.push([f, before, claimants]);
         }
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         notifyRegions();
         if (undos.length) {
@@ -2044,7 +2212,7 @@ const OlMap = ({
         }
         if (!undos.length) return 0;
         const refresh = () => {
-          regionLayer.changed();
+          restyleRegions();
           labelLayer.changed();
           notifyRegions();
         };
@@ -2082,7 +2250,7 @@ const OlMap = ({
         }
         if (!undos.length) return { affectedRegions: 0, ownedRegions: 0, claimRefs: 0 };
         const refresh = () => {
-          regionLayer.changed();
+          restyleRegions();
           labelLayer.changed();
           notifyRegions();
         };
@@ -2121,7 +2289,7 @@ const OlMap = ({
             : "These regions could not be merged. Borders are repaired when the map is exported, so export the map and then try again.");
           return;
         }
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         onSelectionRef.current?.([feats[0].getId()]);
         notifyRegions();
@@ -2272,7 +2440,7 @@ const OlMap = ({
             entry.feature.set("edited", true);
           }
         };
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         if (select) onSelectionRef.current?.(added.map((f) => f.getId()));
         notifyRegions();
@@ -2280,13 +2448,13 @@ const OlMap = ({
           undo: () => {
             added.forEach((f) => regionSource.removeFeature(f));
             entries.forEach(restore);
-            regionLayer.changed();
+            restyleRegions();
             labelLayer.changed();
           },
           redo: () => {
             entries.forEach(reapply);
             added.forEach((f) => regionSource.addFeature(f));
-            regionLayer.changed();
+            restyleRegions();
             labelLayer.changed();
           },
         });
@@ -2363,7 +2531,7 @@ const OlMap = ({
         }
         if (!steps.length) return { changed: 0 };
         const refresh = () => {
-          regionLayer.changed();
+          restyleRegions();
           labelLayer.changed();
           notifyRegions();
         };
@@ -2447,7 +2615,7 @@ const OlMap = ({
         if (!touched.length && !record) return 0;
         const apply = (value) => {
           touched.forEach((f) => f.set("group", value || null));
-          regionLayer.changed();
+          restyleRegions();
           notifyRegions();
         };
         apply(to);
@@ -2633,7 +2801,7 @@ const OlMap = ({
         regionSource.clear();
         savedRegionHashes.clear();
         regionSource.addFeatures(feats);
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         notifyRegions();
         return { count: feats.length, inheritedOwners };
@@ -2719,7 +2887,7 @@ const OlMap = ({
           });
         }
         clearHistory();
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         notifyRegions();
         return features.length;
@@ -2754,7 +2922,7 @@ const OlMap = ({
         regionSource.clear();
         savedRegionHashes.clear();
         if (feats.length) regionSource.addFeatures(feats);
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
         notifyRegions({ loaded: true });
       },
@@ -2769,7 +2937,7 @@ const OlMap = ({
           regionSource.clear();
         savedRegionHashes.clear();
           regionSource.addFeatures(feats);
-          regionLayer.changed();
+          restyleRegions();
           labelLayer.changed();
           notifyRegions({ loaded: true });
           return true;
@@ -2792,7 +2960,7 @@ const OlMap = ({
             stampClaims(f);
           }
           regionSource.addFeatures(feats);
-          regionLayer.changed();
+          restyleRegions();
           labelLayer.changed();
           notifyRegions({ loaded: true });
           return true;
@@ -2807,7 +2975,7 @@ const OlMap = ({
         if (step) pushCmd(step);
       },
       restyle: () => {
-        regionLayer.changed();
+        restyleRegions();
         labelLayer.changed();
       },
     });
@@ -2821,6 +2989,10 @@ const OlMap = ({
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", onKeyDown);
       map.setTarget(null);
+      regionLayer.dispose();
+      regionOverlayLayerRef.current = null;
+      restyleRegionsRef.current = null;
+      restyleSelectionRef.current = null;
       analyzeTopologyRef.current = null;
       importPreviewLayerRef.current = null;
       paintPreviewSourceRef.current = null;
@@ -2975,7 +3147,7 @@ const OlMap = ({
           undo: () => restore(false),
           redo: () => restore(true),
         });
-        layer.changed();
+        restyleRegionsRef.current?.();
         labelLayerRef.current?.changed();
         notifyRegions();
       };
@@ -3127,7 +3299,7 @@ const OlMap = ({
           }
         }
         if (carved.length) {
-          layer.changed();
+          restyleRegionsRef.current?.();
           labelLayerRef.current?.changed();
         }
 
@@ -3140,7 +3312,7 @@ const OlMap = ({
               c.feature.setGeometry(c.before.clone());
               if (!c.after) source.addFeature(c.feature);
             }
-            layer.changed();
+            restyleRegionsRef.current?.();
           },
           redo: () => {
             source.addFeature(f);
@@ -3148,7 +3320,7 @@ const OlMap = ({
               if (!c.after) source.removeFeature(c.feature);
               else c.feature.setGeometry(c.after.clone());
             }
-            layer.changed();
+            restyleRegionsRef.current?.();
           },
         });
       });
@@ -3244,7 +3416,7 @@ const OlMap = ({
             if (row.edited === undefined) row.feature.unset("edited", true);
             else row.feature.set("edited", row.edited);
           }
-          layer.changed();
+          restyleRegionsRef.current?.();
           labelLayerRef.current?.changed();
         };
 
@@ -3291,7 +3463,7 @@ const OlMap = ({
             });
           }
 
-          layer.changed();
+          restyleRegionsRef.current?.();
           labelLayerRef.current?.changed();
           notifyRegions();
           assistSource?.clear();
@@ -3335,7 +3507,7 @@ const OlMap = ({
     } else if (activeTool === "move") {
       // A moved region is reshaped as far as the stock tiles know, so it is
       // marked edited, and the move is one undo step (shapeEdits.js).
-      const translate = new Translate({ layers: [layer], hitTolerance: 2 });
+      const translate = new Translate({ layers: [layer, regionOverlayLayerRef.current].filter(Boolean), hitTolerance: 2 });
       const move = trackMove();
       translate.on("translatestart", (e) => move.start(e.features.getArray(), e.startCoordinate));
       translate.on("translateend", (e) => {
@@ -3500,20 +3672,20 @@ const OlMap = ({
 
   useEffect(() => {
     selectedIdsRef.current = new Set(selectionIds || []);
-    regionLayerRef.current?.changed();
+    restyleSelectionRef.current?.();
   }, [selectionIds]);
 
   useEffect(() => {
     typesByIdRef.current = toTypesById(types);
     colorsRef.current = colors || {};
-    regionLayerRef.current?.changed();
+    restyleRegionsRef.current?.();
     labelLayerRef.current?.changed();
   }, [types, colors]);
 
   // A group created, recoloured or erased restyles its tint and redraws outlines.
   useEffect(() => {
     groupColorsRef.current = groupColors || {};
-    regionLayerRef.current?.changed();
+    restyleRegionsRef.current?.();
     rebuildGroupOutlinesRef.current?.();
   }, [groupColors]);
 
