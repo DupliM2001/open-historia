@@ -69,7 +69,7 @@ const DEFAULT_GAME_ID = "default";
 // ownership by GADM ids — downloaded by scripts/fetch-map-assets.mjs to
 // server/data/stock/regions.geojson.
 // ---------------------------------------------------------------------------
-const BUILT_IN_SEED_DIR = path.join(PROJECT_ROOT, "server", "seed", "default");
+const BUILT_IN_SEED_DIR = process.env.OH_BUILT_IN_SEED_DIR ? path.resolve(process.env.OH_BUILT_IN_SEED_DIR) : path.join(PROJECT_ROOT, "server", "seed", "default");
 const STOCK_DIR = path.join(SERVER_DATA_DIR, "stock");
 const STOCK_REGIONS_PATH = path.join(STOCK_DIR, "regions.geojson");
 const MAP_ASSETS_MANIFEST = path.join(PROJECT_ROOT, "scripts", "map-assets.json");
@@ -1579,7 +1579,7 @@ const seedRegionsBytes = () => {
 // The size the seed's map had in its earlier editions on this stamp: before
 // revision 3 cleaned its borders. An install's copy of one of these is this
 // map, where a size is all there is to tell it by (its record lost beside it).
-const BUILT_IN_EARLIER_REGIONS_BYTES = [5544501];
+const BUILT_IN_EARLIER_REGIONS_BYTES = [];
 
 // Once per process while the copy stays whole: the packaged seed cannot change
 // while the server runs, and ensure* runs on the read path (every poll), so the

@@ -102,7 +102,7 @@ const GENERATED = {
     colors: { Testland: [1, 2, 3] },
   })};`,
   // An empty regionsUrl keeps usesBuiltInMap false, so nothing is fetched.
-  "defaultScenarioMeta.js": `export const builtInMap = "test-map"; export const builtInRevision = 2; export const regionsUrl = "";`,
+  "defaultScenarioMeta.js": `export const builtInMap = "test-map"; export const builtInRevision = 2; export const regionsUrl = ""; export const earlierMaps = {};`,
   "fallbackColors.js": `export default { Palette: [9, 9, 9] };`,
 };
 const moduleUrl = (source) => `data:text/javascript,${encodeURIComponent(source)}`;

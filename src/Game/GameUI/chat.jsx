@@ -1673,6 +1673,7 @@ const ConversationView = ({ chat, playerCountry, gameDate, world = {}, onDelete,
             const campaignId = activeCampaignNow();
             try {
                 const outcome = await runChatActionBatch({
+                    agentKind: "diplomacy",
                     chat: { ...(chatOverride || chat), messages: nextMessages, actionFeedback: actionFeedbackRef.current },
                     playerMessage: text,
                     playerCountry,
@@ -3822,6 +3823,7 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
                 });
             adoptInstitutionalResult(materialized);
             const result = await runChatActionBatch({
+                agentKind: "diplomacy",
                 chat: materialized.channel,
                 playerMessage: mode === "amendment" ? comment : "",
                 playerCountry,

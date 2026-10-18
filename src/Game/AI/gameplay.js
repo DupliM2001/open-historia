@@ -439,6 +439,7 @@ import { AI_FIRST_BYTE_TIMEOUT_MS, AI_IDLE_TIMEOUT_MS, createIdleDeadline, runWi
 import { REPAIR_STOP_TIME_BUDGET, runBoundedRepairCall } from "./repairCall.js";
 import { isDebugLogVerbose, logDebugEvent } from "../../runtime/debugLog.js";
 import { isFallbackListConfigured } from "./providerConfig.js";
+import { agentClient } from "./agentConnection.js";
 import { assertCampaignUnchanged, campaignChanged } from "../../runtime/campaignGuard.js";
 import { HELD_TURN_STALE_NOTE, heldTurnOutdated, mergeActionsAtCommit, restorePointProblem, restorePointsFor, storedActionsForMerge } from "../../runtime/turnCommit.js";
 import { getLibraryState, readGameParkedTurn, removeGameParkedTurn, writeGameParkedTurn } from "../../runtime/library.js";
@@ -1681,6 +1682,10 @@ const abortableWait = (ms, signal) => new Promise((resolve, reject) => {
 // (requestBudget.js, runJsonTask below): two for an ordinary skip, so the skip
 // is three requests at most, and that function calling is the only thing that
 // makes it more than one.
+//
+//
+// The player's own Agent calls them as tools of the game's MCP server while it
+// answers (ADR 0008), so they are on for it exactly as for an API entry.
 const lookupFunctionsEnabled = () => !savingRequests() && getMapSettingDefaultOn(MAP_SETTING_KEYS.lookupFunctions);
 
 // audience: who is asking (audience.js). Every task that carries lookups today is
@@ -3517,6 +3522,11 @@ const runJsonTask = async (taskKey, {
   spender = "",
   requestKind,
   onRequest,
+  // What the player started, for their own Agent (providerConfig.js
+  // AGENT_KINDS): an advisor or diplomatic reply, a Game Master command, an
+  // interactive event, a skip's follow-up. A task that names none never waits
+  // on the player's Agent.
+  agentKind = "",
   // A task whose answer is worth a second request even while requests are being
   // saved: it keeps strict-then-retry. For something asked once per campaign and
   // built on for the rest of it, not for anything asked every turn.
@@ -3665,6 +3675,7 @@ const runJsonTask = async (taskKey, {
   // scope and leaves the `signal` this task was handed untouched, so without
   // this it is one more failed call and takes the fallback below.
   let cancelledAll = null;
+  let agentCancelled = null;
   // While requests are being saved (requestBudget.js) the FIRST answer is judged
   // the way the last one always was: the task validator repairs it in place
   // instead of sending it back, and a fault the schema names is cut out
@@ -3809,6 +3820,10 @@ const runJsonTask = async (taskKey, {
           __debugSink: attemptSink,
           ...(requestKind ? { requestKind } : {}),
           ...(typeof onRequest === "function" ? { onRequest } : {}),
+          // What the skip spends on, and what else the player started: what an
+          // Agent entry answers.
+          ...(budget || spender ? { spender: outputAttempt === 1 ? (spender || taskKey) : `${spender || taskKey}Retry` } : {}),
+          ...(agentKind ? { agentKind } : {}),
           // The arguments as they assemble (streamAssembly.js). A lookup round's
           // call is ignored by name, so only the answer itself is read.
           ...(eventReader ? {
@@ -4348,6 +4363,9 @@ const runJsonTask = async (taskKey, {
     connectionClosed = actualError?.connectionClosed === true;
     transportFailure = connectionClosed || isUnreachableError(actualError);
     if (isCancelAllAbort(actualError)) cancelledAll = actualError;
+    // The player cancelled a request waiting on their own Agent: a cancel,
+    // not a failure to cover with the task's canned answer (ADR 0008).
+    if (actualError?.agentCancelled === true) agentCancelled = actualError;
     const transportReason = normalizeString(actualError?.message || actualError);
     // The retry dying in transport used to ERASE why the first answer was
     // rejected, so the debug report the player copies out read "Internal server
@@ -4386,6 +4404,7 @@ const runJsonTask = async (taskKey, {
   // salvage below, too: an earlier answer is not a turn the player still wants.
   // Every other task keeps its harmless fallback, as with the two cases after
   // this one.
+  if (agentCancelled) throw agentCancelled;
   if (cancelledAll && ["jumpForward", "autoJumpForward"].includes(taskKey)) {
     throw cancelledAll;
   }
@@ -4938,7 +4957,7 @@ const prepareSkipHistoryFold = async (bundle, { campaignId = activeCampaignId() 
   };
 };
 
-const consolidateHistoryBatch = async (bundle, events, chats, actions = [], { onBatchResult, batchResume = null, onRequest, signal, campaignId = "" } = {}) => {
+const consolidateHistoryBatch = async (bundle, events, chats, actions = [], { onBatchResult, batchResume = null, onRequest, signal, campaignId = "", spender = "" } = {}) => {
   // The document this pass revises, and the revision it was read at: a pass
   // that lands against a different revision (a hand edit in the meantime)
   // appends rather than overwrites (applyHistoryDocumentUpdate).
@@ -4957,6 +4976,8 @@ const consolidateHistoryBatch = async (bundle, events, chats, actions = [], { on
     }),
     userMessage: "Consolidate the supplied campaign history with the required tool.",
     ...(typeof onRequest === "function" ? { onRequest } : {}),
+    // Inside a time skip: the skip's own task, which the player's Agent answers.
+    ...(spender ? { spender } : {}),
     ...(signal ? { signal } : {}),
     variables,
     // Off the critical path when the caller supplies an applier: the summary
@@ -5127,6 +5148,7 @@ const compactHistoryIfNeeded = async (bundle, { force = false, requests = null, 
       actionsToConsolidate,
       {
         onRequest: jumpTaskOptions(requests, "history").onRequest,
+        ...(requests ? { spender: "history" } : {}),
         signal,
         campaignId,
         // The jump that asked for it carries on with the events unconsolidated
@@ -12281,7 +12303,9 @@ const askTrackedStats = (replay, requests, due, ask) => replayAnswer(replay, "tr
 const requestTrackedBaseline = (pending, game) => {
   const player = normalizeString(game?.country).toLowerCase();
   const waiting = player ? normalizeArray(pending).find((polity) => normalizeString(polity).toLowerCase() === player) : "";
-  if (waiting) void ensureCountryStatSheet(waiting, { reason: "historical tracking", needBackend: true });
+  // Asked as the skip lands, so it is the skip's follow-up: the player's Agent
+  // answers it in the same /answer, which waits for it (ADR 0008).
+  if (waiting) agentClient.holdSkip(ensureCountryStatSheet(waiting, { reason: "historical tracking", needBackend: true, agentKind: "skip" }));
 };
 
 // "Stats should be generated for countries you're going into conflict with,
@@ -12927,7 +12951,7 @@ export const generateCountryStats = async ({ code, name } = {}) => {
   // per-task model picks, and no stat-sheet temperature on prose.
   const raw = await callAIWithTaskLimit(system, [
     { role: "user", parts: [{ text: `Give me the intelligence briefing on ${target}.` }] },
-  ], { taskKey: "countryBriefing" });
+  ], { taskKey: "countryBriefing", agentKind: "advisor" });
   return String(raw || "").trim();
 };
 
@@ -13944,7 +13968,7 @@ export const ensureMilitaryFigures = (targets, { reason = "" } = {}) => {
 //   needBackend   the sheet is wanted for what the war reads (runtime/statsBackend.js): a
 //                 scenario's own sheet that is complete but was written before it kept a
 //                 backend is written again, once, with one
-export const ensureCountryStatSheet = (target, { reason = "", rateIntelligence = false, needBackend = false } = {}) =>
+export const ensureCountryStatSheet = (target, { reason = "", rateIntelligence = false, needBackend = false, agentKind = "" } = {}) =>
   firstReading("stat sheet", target, reason, async (name) => {
     const [world, definition] = await Promise.all([
       readWorldState({ force: false }).then(normalizeWorldState),
@@ -13965,6 +13989,7 @@ export const ensureCountryStatSheet = (target, { reason = "", rateIntelligence =
       code: name,
       name,
       requestKind: BACKGROUND_REQUEST,
+      ...(agentKind ? { agentKind } : {}),
       ...(rate ? { rateIntelligence: true, onIntelligenceRating: (value) => { assessment = value; } } : {}),
     });
     // After the sheet is written, so the two writes never race. A missing or
@@ -14046,6 +14071,7 @@ const generateScenarioCustomStatSheet = async ({
   // As generateCountryStatSheet's: a first reading nobody asked for is
   // BACKGROUND_REQUEST, and a skip's refresh asks its budget.
   requestKind,
+  agentKind = "",
   budget = null,
   onRequest,
   rateIntelligence = false,
@@ -14066,6 +14092,7 @@ const generateScenarioCustomStatSheet = async ({
     lookups: buildTaskLookups(bundle),
     signal,
     ...(requestKind ? { requestKind } : {}),
+    ...(agentKind ? { agentKind } : {}),
     ...(budget ? { budget, spender: "stats" } : {}),
     ...(typeof onRequest === "function" ? { onRequest } : {}),
     userMessage: [
@@ -14161,7 +14188,7 @@ ${JSON.stringify(previousValues)}`
 // campaign context as the intelligence briefing.
 // `rateIntelligence` asks for the polity's intelligence rating in the same
 // request, handed to `onIntelligenceRating` (ensureCountryStatSheet writes it).
-export const generateCountryStatSheet = async ({ code, name, forceReassess = false, signal, requestKind, budget = null, onRequest, rateIntelligence = false, onIntelligenceRating = null } = {}) => {
+export const generateCountryStatSheet = async ({ code, name, forceReassess = false, signal, requestKind, agentKind = "", budget = null, onRequest, rateIntelligence = false, onIntelligenceRating = null } = {}) => {
   // Issue #724: wait out any running simulation before reading the world.
   // The Stats pane calls this directly, not through ensureCountryStatSheet, so
   // it skipped the idle wait every other out-of-turn writer takes — on a fresh
@@ -14197,6 +14224,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
       signal,
       campaign,
       requestKind,
+      agentKind,
       budget,
       onRequest,
       rateIntelligence,
@@ -14576,6 +14604,7 @@ export const generateCountryStatSheet = async ({ code, name, forceReassess = fal
     lookups: buildTaskLookups(bundle),
     signal,
     ...(requestKind ? { requestKind } : {}),
+    ...(agentKind ? { agentKind } : {}),
     ...(budget ? { budget, spender: "stats" } : {}),
     ...(typeof onRequest === "function" ? { onRequest } : {}),
     userMessage: [
@@ -14928,6 +14957,7 @@ const institutionGovernancePrompt = (world, institutionId, playerCountry = "") =
 };
 
 export const runChatActionBatch = async ({
+  agentKind = "",
   chat,
   playerMessage = "",
   playerCountry = "",
@@ -15182,6 +15212,7 @@ export const runChatActionBatch = async ({
   const { payload, generation } = await runJsonTask("chatActions", {
     fallback: () => ({ actions: [] }),
     signal,
+    ...(agentKind ? { agentKind } : {}),
     userMessage: [
       normalizeString(catchUp),
       playerMessage
@@ -15497,6 +15528,8 @@ export const checkDemandReply = async ({ chat, speaker, reply, answering = "", m
   const { payload } = await runJsonTask("demandCheck", {
     fallback: () => ({ outcome: "none", summary: "" }),
     signal,
+    // Checks the reply to the player's own message.
+    agentKind: "diplomacy",
     userMessage: demandCheckPrompt({ context, reply, openDemand, answering, demands: stored.demands }),
     variables: {},
     // A player request, not background: it is the direct result of a message
@@ -15609,6 +15642,7 @@ export const createInteractive = async ({ eventId = "", angle = "", force = true
     const asked = normalizeString(angle).slice(0, 1200);
     const variables = await buildTemplateVariables(bundle, { taskKey: "interactiveCreation", lookups: true });
     const { generation, payload } = await runJsonTask("interactiveCreation", {
+      agentKind: "interactive",
       lookups: buildTaskLookups(bundle),
       fallback: () => ({ choices: [], opening: "", premise: "", title: "" }),
       userMessage: [offeredSceneDirective(event, asked), "Design the scene as JSON only."].join("\n\n"),
@@ -15737,6 +15771,7 @@ const resolveInteractiveScene = async ({ bundle, baseColors, campaignId, interac
       interactivePremise: interactive.premise || interactive.title || "",
     });
     ({ generation: summaryGeneration, payload: summaryPayload } = await runJsonTask("interactiveSummary", {
+      agentKind: "interactive",
       fallback: () => ({ description: "", importance: "major", title: "" }),
       userMessage: "Summarize the finished interactive event into one campaign event as JSON only.",
       variables: summaryVariables,
@@ -15840,6 +15875,8 @@ const sceneMapConsequences = async ({ bundle, outcome, generation }) => {
       signal: null,
       state: { requests: null, generation, hiddenEvents: [] },
       sections: SCENE_REVIEW_SECTIONS,
+      // The scene's own map check: part of the interactive event the player plays.
+      agentKind: "interactive",
     });
   } catch (error) {
     logDebugEvent("turn", "Scene outcome: the map check failed; the Scene stands as written.", error, { problem: true });
@@ -15935,6 +15972,7 @@ export const advanceActiveInteractive = async (choiceText) => {
   });
 
   const { generation, payload } = await runJsonTask("interactiveExecutor", {
+    agentKind: "interactive",
     lookups: buildTaskLookups(bundle),
     fallback: () => ({ nextChoices: [], resolved: false, summary: "" }),
     // A move that ends the scene also writes its record, so the scene does not
@@ -17376,7 +17414,7 @@ const BOARD_HIDDEN_NOTE = "\n\nEvents marked (kept off the timeline) happened, b
 // structures and the board; never the timeline, agents or order attribution).
 // A Scene has no time skip's request budget (`state.requests` is null) and is
 // simply one request when anything qualifies.
-const runTurnReview = async ({ context, merged, signal, state, sections = null }) => {
+const runTurnReview = async ({ context, merged, signal, state, sections = null, agentKind = "" }) => {
   const { bundle, mode } = context;
   const requests = state.requests;
   // `failure` is the error when the request itself failed; `missing` names the
@@ -17609,6 +17647,8 @@ const runTurnReview = async ({ context, merged, signal, state, sections = null }
       taskKey: TURN_REVIEW_TASK,
       __debug: { taskKey: TURN_REVIEW_TASK, attempt: 1, maxAttempts: 1, simulatedDays: null },
       onRequest: jumpTaskOptions(requests, "review").onRequest,
+      ...(requests ? { spender: "review" } : {}),
+      ...(agentKind ? { agentKind } : {}),
     });
     const rawText = typeof response === "string" ? response : normalizeString(response?.rawText);
     answer = response?.toolInput ?? unwrapMimickedToolCall(extractJsonPayload(rawText), tool.name);
@@ -19073,6 +19113,7 @@ export const previewGameMasterCommand = async (requestText, { mode = "world-inte
     };
 
     const { generation, payload } = await runJsonTask("gameMaster", {
+      agentKind: "gameMaster",
       lookups: buildTaskLookups(bundle),
       userMessage: `Generate a ${selectedMode} GM transaction preview for the administrator request. Do not apply anything.`,
       validatePayload: (candidate) => validateGameMasterPreviewPayload(candidate, {

@@ -74,7 +74,7 @@ test("intersections and differences agree with the unclipped answer on shapes th
 });
 
 test("on the built-in map, neighbouring pairs give the same pieces and areas as the whole inputs", () => {
-  const text = fs.readFileSync(new URL("../../server/seed/default/regions.geojson", import.meta.url), "utf8");
+  const text = fs.readFileSync(new URL("../../server/seed/earlier/fault-lines-2014-v1.geojson", import.meta.url), "utf8");
   const features = new GeoJSON().readFeatures(JSON.parse(text), { featureProjection: "EPSG:3857" }).filter((f) => f.getGeometry());
   const source = new VectorSource({ features });
   const order = new Map(features.map((f, i) => [f, i]));

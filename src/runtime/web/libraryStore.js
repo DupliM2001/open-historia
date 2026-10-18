@@ -15,7 +15,7 @@ import {
   parseJsonValue, serializeJsonValue,
 } from "./util.js";
 import FALLBACK_COLORS from "./generated/fallbackColors.js";
-import { builtInMap as BUILT_IN_MAP, builtInRevision as BUILT_IN_REVISION, regionsUrl as BUILT_IN_REGIONS_URL } from "./generated/defaultScenarioMeta.js";
+import { builtInMap as BUILT_IN_MAP, builtInRevision as BUILT_IN_REVISION, earlierMaps as EARLIER_BUILT_IN_MAPS, regionsUrl as BUILT_IN_REGIONS_URL } from "./generated/defaultScenarioMeta.js";
 import { worldFileUrl } from "../worldFiles.js";
 import {
   DEFAULT_SCENARIO_ID, DEFAULT_GAME_ID, EMPTY_FEATURE_COLLECTION, COVER_IMAGE_ASSET_KEY,
@@ -622,38 +622,43 @@ const getActiveRuntimeScenarioRecord = async (known) => {
 // `builtInMap` stamp: the built-in itself, a clone of it, a scenario created
 // from scratch (all copy world.json). Everything else without a map of its own
 // renders on the STOCK world from the content origin below, as before.
-const usesBuiltInMap = (record) =>
-  Boolean(BUILT_IN_MAP && BUILT_IN_REGIONS_URL) && record?.json?.world?.builtInMap === BUILT_IN_MAP;
-let builtInRegionsPromise = null;
-const fetchBuiltInRegionsBytes = () => {
-  if (!builtInRegionsPromise) {
-    builtInRegionsPromise = fetch(BUILT_IN_REGIONS_URL, { cache: "force-cache" })
+const bundledMapUrlOf = (record) => {
+  const stamp = record?.json?.world?.builtInMap;
+  if (!stamp) return null;
+  if (stamp === BUILT_IN_MAP) return BUILT_IN_REGIONS_URL || null;
+  return EARLIER_BUILT_IN_MAPS?.[stamp] || null;
+};
+const usesBuiltInMap = (record) => Boolean(bundledMapUrlOf(record));
+const builtInRegionsPromises = new Map();
+const fetchBuiltInRegionsBytes = (url) => {
+  if (!builtInRegionsPromises.has(url)) {
+    builtInRegionsPromises.set(url, fetch(url, { cache: "force-cache" })
       .then((response) => (response.ok ? response.arrayBuffer() : null))
       .catch(() => null)
       .then((bytes) => {
-        if (!bytes || bytes.byteLength === 0) { builtInRegionsPromise = null; return null; }
+        if (!bytes || bytes.byteLength === 0) { builtInRegionsPromises.delete(url); return null; }
         return bytes;
-      });
+      }));
   }
-  return builtInRegionsPromise;
+  return builtInRegionsPromises.get(url);
 };
-let builtInRegionsTextPromise = null;
-const fetchBuiltInRegionsText = () => {
-  if (!builtInRegionsTextPromise) {
-    builtInRegionsTextPromise = fetchBuiltInRegionsBytes().then((bytes) => (bytes ? new TextDecoder().decode(bytes) : null));
+const builtInRegionsTextPromises = new Map();
+const fetchBuiltInRegionsText = (url) => {
+  if (!builtInRegionsTextPromises.has(url)) {
+    builtInRegionsTextPromises.set(url, fetchBuiltInRegionsBytes(url).then((bytes) => (bytes ? new TextDecoder().decode(bytes) : null)));
   }
-  return builtInRegionsTextPromise;
+  return builtInRegionsTextPromises.get(url);
 };
-const fetchBuiltInRegionsGeojson = async () => {
-  const text = await fetchBuiltInRegionsText();
+const fetchBuiltInRegionsGeojson = async (url) => {
+  const text = await fetchBuiltInRegionsText(url);
   return text ? parseJsonValue(text, null) : null;
 };
-let builtInCoarseTextPromise = null;
-const builtInCoarseRegionsText = () => {
-  if (!builtInCoarseTextPromise) {
-    builtInCoarseTextPromise = fetchBuiltInRegionsGeojson().then((data) => (data ? serializeJsonValue(coarsenFeatureCollection(data)) : null));
+const builtInCoarseTextPromises = new Map();
+const builtInCoarseRegionsText = (url) => {
+  if (!builtInCoarseTextPromises.has(url)) {
+    builtInCoarseTextPromises.set(url, fetchBuiltInRegionsGeojson(url).then((data) => (data ? serializeJsonValue(coarsenFeatureCollection(data)) : null)));
   }
-  return builtInCoarseTextPromise;
+  return builtInCoarseTextPromises.get(url);
 };
 
 // The STOCK world (the GADM regions the hub's re-ownership presets key their
@@ -875,7 +880,7 @@ const readRuntimeJsonAsset = async (assetKey, known) => {
     if (scenario) await migrateOwnerSchema(scenario, "scenario");
     let value = scenario?.geojson?.[assetKey];
     if (value === undefined && assetKey === "regionsGeojson" && scenario && usesBuiltInMap(scenario)) {
-      value = await fetchBuiltInRegionsGeojson();
+      value = await fetchBuiltInRegionsGeojson(bundledMapUrlOf(scenario));
     }
     if (value === undefined && assetKey === "regionsGeojson" && scenario && scenario.id !== DEFAULT_SCENARIO_ID) {
       // Borrowing the stock world's record. Migrate it as DEFAULT'S record, never this
@@ -1713,7 +1718,7 @@ const scenarioAssetResponse = async (record, key, rangeHeader, { coarse = false 
       // The built-in map is not stored in the record (it is a bundled asset), but
       // the Workshop and the country picker open a scenario's map through this
       // route, and this scenario's map is that one.
-      const text = coarse ? await builtInCoarseRegionsText() : await fetchBuiltInRegionsText();
+      const text = coarse ? await builtInCoarseRegionsText(bundledMapUrlOf(record)) : await fetchBuiltInRegionsText(bundledMapUrlOf(record));
       if (!text) throw new Error("Asset not found");
       return new Response(text, { status: 200, headers: jsonHeaders });
     }

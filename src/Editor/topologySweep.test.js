@@ -569,7 +569,7 @@ test("the built-in map: exactly the holes the one-union sweep found, and within 
   // Magadan, and the staged search has to find those as one union does.
   const tolerances = { maxWidth: 20_000, minWidth: BORDER_CLEANUP.minWidth };
   const before = enclosedGapsOfUnion(whole, tolerances).map(key);
-  assert.equal(before.length, 4, `the map's holes up to 20 km wide (${before.length})`);
+  assert.equal(before.length, 15, `the map's holes up to 20 km wide (${before.length})`);
   const options = {
     plan,
     geometryOf: (f) => f.getGeometry(),
@@ -592,7 +592,7 @@ test("the built-in map: exactly the holes the one-union sweep found, and within 
     onRefused: () => { refusals += 1; },
   });
   whole250.withinBudget();
-  assert.equal(now.parts, 1, "235,996 vertices fit the budget: one union, as always");
+  assert.equal(now.parts, 1, "the map fits the budget: one union, as always");
   assert.deepEqual(now.holes.map(key), before, "and the very same holes, hole by hole");
   assert.deepEqual([refusals, welds, now.welded, now.apart], [0, 0, false, 0], "no union is refused, nothing is welded, nothing is left apart");
 
@@ -628,10 +628,10 @@ test("the built-in map is shipped deep-cleaned: a save finds nothing within 1.5 
   const left = holes.filter((hole) => hole.width > maxWidth);
   assert.equal(within.length, 0, "no crack a deep clean would fill, and so none a quick one would");
   const narrowestLeft = Math.min(...left.map((hole) => hole.width));
-  assert.ok(narrowestLeft > 4000, `the narrowest hole left alone is ${Math.round(narrowestLeft)} m`);
+  assert.ok(narrowestLeft > BORDER_CLEANUP.maxWidth, `the narrowest hole left alone is ${Math.round(narrowestLeft)} m`);
   const water = left.filter((hole) => vertexCountOf(hole.geom) > 4);
   assert.ok(water.length >= 10, "the lakes, lagoons and the Caspian are holes, and stay");
-  assert.ok(Math.min(...water.map((hole) => hole.width)) > 7000, "the narrowest of them is over 7 km");
+  assert.ok(Math.min(...water.map((hole) => hole.width)) > BORDER_CLEANUP.maxWidth, "the narrowest of them is beyond a save's reach");
 
   // The overlaps: every piece two neighbouring regions share that is not
   // rounding noise, however wide.
@@ -1058,7 +1058,7 @@ test("the built-in map has no value to weld, and welded all the same its search 
   const asItIs = await findEnclosedGaps(features, options);
   const forced = await findEnclosedGaps(features, { ...options, weld: (geom) => ofRegion.get(geom) || weldedGeometry(geom, welded.tables), welded: true });
   assert.deepEqual([asItIs.welded, forced.welded, forced.parts, forced.apart], [false, true, 1, 0]);
-  assert.equal(asItIs.holes.length, 4);
+  assert.equal(asItIs.holes.length, 15);
   assert.deepEqual(forced.holes.map((hole) => hole.geom.getCoordinates()), asItIs.holes.map((hole) => hole.geom.getCoordinates()), "the same holes, coordinate for coordinate");
 });
 
