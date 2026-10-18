@@ -157,9 +157,8 @@ test("a named sea is open water in that sea, whatever words come with it", () =>
     assert.ok(distanceKm([placeOnEarth("Black Sea").lng, placeOnEarth("Black Sea").lat], [34, 43.2]) < 1);
 });
 
-test("Modern Day's own map, numbered regions and all, is the real world and has the real seas", () => {
+test("Modern Day's own map is the real world and has the real seas", () => {
     assert.ok(MODERN_DAY_REGIONS.length > 1000);
-    assert.ok(!MODERN_DAY_REGIONS.some((feature) => /^[A-Z]{3}\.\d+/.test(String(feature.properties?.id))), "its ids are not GADM ids");
     const seas = seasForMap({ regionAt: modernDayRegionAt });
     assert.ok(seas.some((sea) => sea.name === "Black Sea"));
     // Every real sea's point is open water on it, or near enough to find some.

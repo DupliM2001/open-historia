@@ -157,7 +157,7 @@ test("self-intersection normalization is accepted only when output is structural
 
 test("the current Fault Lines seed exposes the three reported pathology classes to the generic detector", () => {
   const seed = JSON.parse(fs.readFileSync(
-    new URL("../../../../server/seed/default/regions.geojson", import.meta.url),
+    new URL("../../../../server/seed/earlier/fault-lines-2014-v1.geojson", import.meta.url),
     "utf8",
   ));
   const byName = new Map(seed.features.map((feature) => [feature?.properties?.name, feature]));

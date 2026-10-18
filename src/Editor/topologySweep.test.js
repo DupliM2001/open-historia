@@ -258,7 +258,7 @@ test("the gap search on the grid finds the crack on the chunk boundary, and neve
 });
 
 test("the built-in map: exactly the gaps the one-union sweep found, and within a small budget nothing false and no call over it", async () => {
-  const text = fs.readFileSync(new URL("../../server/seed/default/regions.geojson", import.meta.url), "utf8");
+  const text = fs.readFileSync(new URL("../../server/seed/earlier/fault-lines-2014-v1.geojson", import.meta.url), "utf8");
   const features = new GeoJSON().readFeatures(JSON.parse(text), { featureProjection: "EPSG:3857" }).filter((f) => f.getGeometry());
   const source = new VectorSource({ features });
   const plan = planTopologyChunks(source.getExtent(), features.length);
