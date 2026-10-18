@@ -58,7 +58,7 @@ const DEFAULT_GAME_ID = "default";
 // ownership by GADM ids — downloaded by scripts/fetch-map-assets.mjs to
 // server/data/stock/regions.geojson.
 // ---------------------------------------------------------------------------
-const BUILT_IN_SEED_DIR = path.join(PROJECT_ROOT, "server", "seed", "default");
+const BUILT_IN_SEED_DIR = process.env.OH_BUILT_IN_SEED_DIR ? path.resolve(process.env.OH_BUILT_IN_SEED_DIR) : path.join(PROJECT_ROOT, "server", "seed", "default");
 const STOCK_DIR = path.join(SERVER_DATA_DIR, "stock");
 const STOCK_REGIONS_PATH = path.join(STOCK_DIR, "regions.geojson");
 const MAP_ASSETS_MANIFEST = path.join(PROJECT_ROOT, "scripts", "map-assets.json");
