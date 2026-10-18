@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import "ol/ol.css";
 import OlMap from "./OlMap.jsx";
 import EditorSidebar, { SIDEBAR_WIDTH } from "./EditorSidebar.jsx";
+
+const SIDEBAR_SIDE_KEY = "oh-map-editor-sidebar-side";
 import TypeManager from "./TypeManager.jsx";
 import RegionsPanel from "./RegionsPanel.jsx";
 import PolitiesPanel from "./PolitiesPanel.jsx";
@@ -133,12 +135,29 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarSide, setSidebarSideState] = useState(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_SIDE_KEY) === "left" ? "left" : "right";
+    } catch {
+      return "right";
+    }
+  });
+  const setSidebarSide = (next) => {
+    setSidebarSideState(next);
+    try {
+      window.localStorage.setItem(SIDEBAR_SIDE_KEY, next);
+    } catch {
+      return;
+    }
+  };
   const [exitAsk, setExitAsk] = useState(false);
   const dock = isMobile || sidebarHidden ? 0 : SIDEBAR_WIDTH;
+  const dockLeft = sidebarSide === "left" ? dock : 0;
+  const dockRight = sidebarSide === "left" ? 0 : dock;
   useEffect(() => {
     const frame = requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
     return () => cancelAnimationFrame(frame);
-  }, [dock]);
+  }, [dock, sidebarSide]);
   // Opened from a scenario: the scenario's own map (regions/cities/colors) is
   // loaded once it arrives, so never auto-seed the default world underneath it.
   const scenarioMode = Boolean(onApplyToScenario);
@@ -1426,6 +1445,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
     </div>
   ) : isWarTool(d.activeTool) ? (
     <div style={{ color: "rgba(255,255,255,0.7)" }}>{WAR_TOOL_HINTS[d.activeTool]}</div>
+  ) : d.activeTool === "select" ? (
+    <div style={{ color: "rgba(255,255,255,0.7)" }}>Click a region to select it, Shift-click to add more, and double-click to select its whole country.</div>
   ) : null;
 
   return (
@@ -1437,12 +1458,13 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         overflow: "hidden",
         fontFamily: "sans-serif",
         color: "white",
-        "--editor-dock": `${dock}px`,
+        "--editor-dock-left": `${dockLeft}px`,
+        "--editor-dock-right": `${dockRight}px`,
         "--editor-top": "12px",
         "--editor-bottom": isMobile ? "68px" : "12px",
       }}
     >
-      <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: dock }}>
+      <div style={{ position: "absolute", top: 0, right: dockRight, bottom: 0, left: dockLeft }}>
       <OlMap
         basemap={d.basemap}
         types={d.types}
@@ -1910,6 +1932,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         onMobileOpenChange={setSidebarOpen}
         hidden={sidebarHidden}
         onHiddenChange={setSidebarHidden}
+        side={sidebarSide}
+        onSideChange={setSidebarSide}
       />
 
       <FlagPicker

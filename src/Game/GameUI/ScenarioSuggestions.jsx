@@ -974,7 +974,9 @@ export const ScenarioCommunityCard = ({ scenario, busy, onSuggest, onUnlink, onR
               : "Your copy is the same as the post. Change it, and you can suggest your changes to the author."}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
-            <button type="button" className="oh-tap-row" disabled={busy} onClick={onSuggest} style={tapFit(origin.editedAt ? primaryButtonStyle : buttonStyle, touch)}>Suggest changes</button>
+            {origin.editedAt && (
+              <button type="button" className="oh-tap-row" disabled={busy} onClick={onSuggest} style={tapFit(primaryButtonStyle, touch)}>Suggest changes</button>
+            )}
             <a href={hubPostUrl(origin.postId)} target="_blank" rel="noopener noreferrer" className="oh-tap-row" style={{ ...tapFit(buttonStyle, touch), textDecoration: "none" }}>View the post ↗</a>
             <button
               type="button"

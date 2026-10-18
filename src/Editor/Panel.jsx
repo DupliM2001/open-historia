@@ -14,9 +14,9 @@ const Panel = ({ title, icon, onClose, side = "left", width = 340, footer, child
       ...panelSurface,
       position: "fixed",
       top: "var(--editor-top, 12px)",
-      [side]: side === "left" ? "calc(var(--editor-dock, 0px) + 12px)" : 12,
+      [side]: `calc(var(--editor-dock-${side === "right" ? "right" : "left"}, 0px) + 12px)`,
       // Never wider than the screen (phones).
-      width: `min(${width}px, calc(100vw - var(--editor-dock, 0px) - 24px))`,
+      width: `min(${width}px, calc(100vw - var(--editor-dock-left, 0px) - var(--editor-dock-right, 0px) - 24px))`,
       maxHeight: "calc(100vh - var(--editor-top, 12px) - var(--editor-bottom, 12px))",
       display: "flex",
       flexDirection: "column",

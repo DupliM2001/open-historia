@@ -29,25 +29,38 @@ const menuItem = {
 const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExport, onExportGame, onOpen }) => {
   const [open, setOpen] = useState(false);
   const [docs, setDocs] = useState([]);
+  const [armed, setArmed] = useState(null);
+  const [removeError, setRemoveError] = useState("");
 
   const refresh = async () => setDocs(await listDocuments());
   const toggle = async () => {
     const next = !open;
     setOpen(next);
+    setArmed(null);
+    setRemoveError("");
     if (next) refresh();
   };
-  const close = () => setOpen(false);
+  const close = () => {
+    setOpen(false);
+    setArmed(null);
+    setRemoveError("");
+  };
 
   // A saved map is deleted for good (the desktop store removes its file), so
   // the trash icon asks first and says when the delete fails. The map that is
   // open cannot be deleted from here: the Workshop kept saving to the deleted
   // id, and every save after it failed.
   const remove = async (doc) => {
-    if (!window.confirm(`Delete “${doc.name || "Untitled Map"}” for good? This cannot be undone.`)) return;
+    if (armed !== doc.id) {
+      setArmed(doc.id);
+      setRemoveError("");
+      return;
+    }
+    setArmed(null);
     try {
       await deleteDocument(doc.id);
     } catch (e) {
-      window.alert(`Could not delete this map: ${e?.message || e}`);
+      setRemoveError(`Could not delete this map: ${e?.message || e}`);
     }
     refresh();
   };
@@ -66,7 +79,7 @@ const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExp
       </button>
 
       {open && (
-        <div style={{ ...panelSurface, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 60, width: 270, padding: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ ...panelSurface, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 60, width: 244, boxSizing: "border-box", padding: 6, display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={{ padding: "4px 8px 6px" }}>
             <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>
               Made by
@@ -99,6 +112,11 @@ const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExp
           <div style={{ padding: "2px 10px", fontSize: 10.5, color: "rgba(255,255,255,0.45)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
             Saved maps
           </div>
+          {removeError && (
+            <div style={{ margin: "2px 8px 4px", padding: "6px 8px", borderRadius: 8, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", color: "#fecaca", fontSize: 11.5 }}>
+              {removeError}
+            </div>
+          )}
           <div style={{ maxHeight: 240, overflowY: "auto" }}>
             {docs.length === 0 && (
               <div style={{ padding: "6px 10px", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>No saved maps yet</div>
@@ -115,19 +133,28 @@ const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExp
                   </span>
                 </button>
                 <button
-                  title={doc.id === currentId ? "This map is open. Open or start another map to delete it." : "Delete"}
-                  aria-label={doc.id === currentId ? "This map is open. Open or start another map to delete it." : "Delete"}
+                  title={doc.id === currentId ? "This map is open. Open or start another map to delete it." : armed === doc.id ? `Delete “${doc.name || "Untitled Map"}” for good? This cannot be undone.` : "Delete"}
+                  aria-label={doc.id === currentId ? "This map is open. Open or start another map to delete it." : armed === doc.id ? `Delete “${doc.name || "Untitled Map"}” for good? This cannot be undone.` : "Delete"}
                   disabled={doc.id === currentId}
                   onClick={() => { void remove(doc); }}
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "#f87171",
+                    alignItems: "center",
+                    background: armed === doc.id ? "rgba(185,28,28,0.72)" : "transparent",
+                    border: armed === doc.id ? "1px solid rgba(248,113,113,0.4)" : "1px solid transparent",
+                    borderRadius: 8,
+                    color: armed === doc.id ? "#fff" : "#f87171",
                     cursor: doc.id === currentId ? "default" : "pointer",
+                    display: "flex",
+                    flexShrink: 0,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    gap: 4,
                     opacity: doc.id === currentId ? 0.3 : 1,
+                    padding: armed === doc.id ? "3px 7px" : "3px 4px",
                   }}
                 >
                   <Icon name="trash" size={13} />
+                  {armed === doc.id && "Delete?"}
                 </button>
               </div>
             ))}

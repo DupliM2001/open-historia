@@ -100,12 +100,7 @@ const ReferencePanel = ({ refImage, setRefImage, onRecenter, onClose }) => {
             draw and edit through the image.
           </div>
         </>
-      ) : (
-        <div style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(255,255,255,0.55)" }}>
-          Upload a map or sketch to trace borders from. It shows at 50%
-          opacity above the regions and is never saved with the map.
-        </div>
-      )}
+      ) : null}
     </Panel>
   );
 };

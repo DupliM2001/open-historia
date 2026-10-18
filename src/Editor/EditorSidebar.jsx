@@ -3,6 +3,7 @@
  * Copyright (c) 2026 Nicholas Krol - AGPL-3.0-or-later (see LICENSE).
  */
 
+import { useState } from "react";
 import Icon from "./Icon.jsx";
 import { EDITOR_CARD, EDITOR_NAV, inputStyle, navButton, panelSurface, sectionLabel, toolButton } from "./editorStyles.js";
 import { editorBasemapById } from "./basemaps.js";
@@ -118,8 +119,12 @@ const EditorSidebar = ({
   onMobileOpenChange,
   hidden = false,
   onHiddenChange,
+  side = "right",
+  onSideChange,
 }) => {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useBackToClose(isMobile && mobileOpen, () => onMobileOpenChange?.(false));
+  const onRight = side !== "left";
   const save = SAVE[saveStatus] || SAVE.saved;
   const basemapLabel = hasCustomBackground ? "Custom" : editorBasemapById(basemap)?.label || "";
   const tool = TOOLS.find((t) => t.id === activeTool) || null;
@@ -148,14 +153,6 @@ const EditorSidebar = ({
       ],
     },
     {
-      label: "Import",
-      items: [
-        ...(suggestionCount !== null ? [{ id: "suggestions", icon: "review", label: "Suggested changes", count: suggestionCount }] : []),
-        { id: "province-import", icon: "upload", label: "Import Map" },
-        { id: "clipboard", icon: "copy", label: "Clipboard", count: clipboardCount },
-      ],
-    },
-    {
       label: "View",
       items: [
         { id: "basemap", icon: "map", label: "Basemap", value: basemapLabel, run: () => onOpenBasemaps?.() },
@@ -165,6 +162,14 @@ const EditorSidebar = ({
         { id: "projection", icon: "globe", label: "Projection" },
       ],
     },
+    {
+      label: "Import",
+      items: [
+        ...(suggestionCount !== null ? [{ id: "suggestions", icon: "review", label: "Suggested changes", count: suggestionCount }] : []),
+        { id: "province-import", icon: "upload", label: "Import Map" },
+        { id: "clipboard", icon: "copy", label: "Clipboard", count: clipboardCount },
+      ],
+    },
   ];
 
   const sidebar = (
@@ -172,13 +177,13 @@ const EditorSidebar = ({
       style={{
         position: "fixed",
         top: 0,
-        left: 0,
+        [onRight ? "right" : "left"]: 0,
         bottom: 0,
         width: isMobile ? "min(300px, 88vw)" : SIDEBAR_WIDTH,
         display: "flex",
         flexDirection: "column",
         background: EDITOR_NAV,
-        borderRight: "1px solid rgba(255,255,255,0.08)",
+        [onRight ? "borderLeft" : "borderRight"]: "1px solid rgba(255,255,255,0.08)",
         boxShadow: isMobile ? "0 24px 70px rgba(0,0,0,0.55)" : "none",
         color: "white",
         fontFamily: "sans-serif",
@@ -198,6 +203,39 @@ const EditorSidebar = ({
               placeholder="Untitled Map"
               style={{ ...inputStyle, padding: "4px 7px", borderRadius: 8, fontSize: 14, fontWeight: 800, letterSpacing: "-0.01em" }}
             />
+          </div>
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((was) => !was)}
+              title="Settings"
+              aria-label="Settings"
+              aria-expanded={settingsOpen}
+              style={{ ...toolButton(settingsOpen, false), height: 32, minWidth: 32, padding: 0, borderRadius: 9 }}
+            >
+              <Icon name="settings" size={16} />
+            </button>
+            {settingsOpen && (
+              <div style={{ ...panelSurface, position: "absolute", top: "calc(100% + 6px)", [onRight ? "right" : "left"]: 0, zIndex: 60, width: 200, padding: 10, display: "flex", flexDirection: "column", gap: 7 }}>
+                <span style={{ ...sectionLabel, fontSize: 10 }}>Side</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                  {[["left", "Left"], ["right", "Right"]].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={(value === "right") === onRight}
+                      onClick={() => {
+                        onSideChange?.(value);
+                        setSettingsOpen(false);
+                      }}
+                      style={{ ...toolButton((value === "right") === onRight, false), height: 32, fontSize: 12.5 }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -327,7 +365,7 @@ const EditorSidebar = ({
       style={{
         position: "fixed",
         top: "50%",
-        left: hidden ? 0 : SIDEBAR_WIDTH - 1,
+        [onRight ? "right" : "left"]: hidden ? 0 : SIDEBAR_WIDTH - 1,
         transform: "translateY(-50%)",
         zIndex: 34,
         display: "flex",
@@ -338,14 +376,14 @@ const EditorSidebar = ({
         padding: 0,
         background: EDITOR_NAV,
         border: "1px solid rgba(255,255,255,0.1)",
-        borderLeft: "none",
-        borderRadius: "0 10px 10px 0",
-        boxShadow: "6px 0 18px rgba(0,0,0,0.3)",
+        [onRight ? "borderRight" : "borderLeft"]: "none",
+        borderRadius: onRight ? "10px 0 0 10px" : "0 10px 10px 0",
+        boxShadow: onRight ? "-6px 0 18px rgba(0,0,0,0.3)" : "6px 0 18px rgba(0,0,0,0.3)",
         color: "rgba(255,255,255,0.75)",
         cursor: "pointer",
       }}
     >
-      <Icon name={hidden ? "chevronRight" : "chevronLeft"} size={15} />
+      <Icon name={hidden === onRight ? "chevronLeft" : "chevronRight"} size={15} />
     </button>
   );
 
@@ -359,7 +397,7 @@ const EditorSidebar = ({
   }
   return (
     <>
-      <div style={{ position: "fixed", bottom: 16, left: 12, zIndex: 40, display: "flex", gap: 6 }}>
+      <div style={{ position: "fixed", bottom: 16, [onRight ? "right" : "left"]: 12, zIndex: 40, display: "flex", flexDirection: onRight ? "row-reverse" : "row", gap: 6 }}>
         <button
           type="button"
           onClick={() => onMobileOpenChange?.(true)}

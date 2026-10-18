@@ -5471,7 +5471,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
             onUnblockContributor={handleUnblockContributor}
           />
         ) : null}
-        onSuggestChanges={drawerScenario?.hubOrigin ? () => handleSuggestChanges(drawerScenario) : null}
+        onSuggestChanges={drawerScenario?.hubOrigin?.editedAt ? () => handleSuggestChanges(drawerScenario) : null}
         countryOptions={editorCountryOptions}
         onFileSelect={handleEditorAssetSelect}
         onOpenFileDialog={(assetKey) => assetFileInputsRef.current[assetKey]?.click()}

@@ -50,6 +50,7 @@ import TiledBasemapOffer from "../Map/TiledBasemapOffer.jsx";
 import DetailedMapsInstallOffer from "../Map/DetailedMapsInstallOffer.jsx";
 import { detailedMapOffers, lookUpDetailedMaps } from "../Map/detailedMapOffers.js";
 import { scenarioMapsOfWorld } from "../../runtime/basemapPick.js";
+import { dateRangeBound, startsBetween } from "../../runtime/scenarioDateRange.js";
 
 // Reading the hub (the post list, a post's bundle, a post's comments) lives in
 // src/runtime/hubPosts.js, so the library can use it without this tab. The
@@ -581,6 +582,10 @@ const CommunityPanel = ({ fullPage = false, onPlay }) => {
   // description. No extra network calls; the hub is only ever read by load().
   const [searchQuery, setSearchQuery] = useState("");
   const [browseSort, setBrowseSort] = useState("installs");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const fromBound = dateRangeBound(dateFrom);
+  const toBound = dateRangeBound(dateTo, { end: true });
 
   // handleImport is async (network + import can take several seconds); by the
   // time it resolves the user may have navigated to a different post or back
@@ -637,13 +642,14 @@ const CommunityPanel = ({ fullPage = false, onPlay }) => {
   const filteredPosts = useMemo(() => {
     if (!posts) return null;
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return posts;
-    return posts.filter((post) =>
+    const dated = fromBound || toBound ? posts.filter((post) => startsBetween(post.startDate, fromBound, toBound)) : posts;
+    if (!query) return dated;
+    return dated.filter((post) =>
       post.title.toLowerCase().includes(query) ||
       post.author.toLowerCase().includes(query) ||
       post.description.toLowerCase().includes(query),
     );
-  }, [posts, searchQuery]);
+  }, [posts, searchQuery, fromBound, toBound]);
 
   // Search bar
   const searchResults = useMemo(() => {
@@ -928,6 +934,30 @@ const CommunityPanel = ({ fullPage = false, onPlay }) => {
               aria-label="Search community scenarios"
               style={searchInputStyle}
             />
+            <span style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.78rem", fontWeight: 600 }}>Start date</span>
+            <input
+              type="text"
+              className="oh-tap-row"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              placeholder="From"
+              aria-label="From"
+              style={{ ...searchInputStyle, minWidth: 0, width: "6.5rem", borderColor: dateFrom && !fromBound ? "rgba(248,113,113,0.6)" : "rgba(255,255,255,0.12)" }}
+            />
+            <input
+              type="text"
+              className="oh-tap-row"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              placeholder="To"
+              aria-label="To"
+              style={{ ...searchInputStyle, minWidth: 0, width: "6.5rem", borderColor: dateTo && !toBound ? "rgba(248,113,113,0.6)" : "rgba(255,255,255,0.12)" }}
+            />
+            {(dateFrom || dateTo) && (
+              <button type="button" className="oh-tap-row" onClick={() => { setDateFrom(""); setDateTo(""); }} style={touchFit(pillButton, touch)}>
+                Clear
+              </button>
+            )}
             <button type="button" className="oh-tap-row" onClick={() => load(true)} style={touchFit(pillButton, touch)}>Refresh</button>
             <button
               type="button"

@@ -247,11 +247,11 @@ const FeatureManager = ({ features, setFeatures, api, selection = [], setSelecti
             Clear
           </button>
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>
-          {selectedCount
-            ? `${selectedCount} selected — tag them or delete them together.`
-            : "Tick features below, or drag-select them on the map, to tag or delete many at once."}
-        </div>
+        {selectedCount > 0 && (
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>
+            {`${selectedCount} selected — tag them or delete them together.`}
+          </div>
+        )}
         {selectedCount > 0 && (
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <input

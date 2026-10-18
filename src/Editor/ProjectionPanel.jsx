@@ -56,9 +56,6 @@ const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false,
 
   return (
     <Panel title="Projection" icon="layers" onClose={onClose} width={320}>
-      <p style={note}>
-        How the map is laid on the screen, here and in the game. Mercator is what every map starts as. Freeform is a flat sheet of any shape, with no globe behind it.
-      </p>
       <Row label="Projection">
         <SelectField
           value={type}
@@ -85,9 +82,6 @@ const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false,
           <Row label="The picture is already drawn for it">
             <Toggle value={keepPicture} onChange={setKeepPicture} />
           </Row>
-          <p style={note}>
-            Off: the basemap picture is redrawn in the new projection. On: the picture is kept as it is, and only the regions, cities and units are moved.
-          </p>
         </>
       )}
       <p style={note}>
@@ -109,9 +103,6 @@ const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false,
       <Row label="Disable map looping">
         <Toggle value={current.wrap === false} onChange={(off) => onView?.({ wrap: !off })} />
       </Row>
-      <p style={note}>
-        Both are for the game. With the globe disabled, players cannot switch this map to the 3D globe. With looping disabled, the map ends at its edges instead of repeating sideways.
-      </p>
     </Panel>
   );
 };

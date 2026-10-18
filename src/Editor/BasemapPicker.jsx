@@ -195,10 +195,6 @@ const DetailedMaps = ({ list, loading, download, onDownload, onCancel }) => {
   const available = list.basemaps.filter((entry) => entry.versions.length > 0);
   return (
     <div>
-      <div style={dim}>
-        Large terrain maps, drawn on top of a scenario&apos;s basemap, that stay sharp up close. Each downloads once, and every scenario on it shares it.
-        To share your own, use the ⤴ button on its card in My Maps → Your detailed maps.
-      </div>
       {list.error && (
         <div style={{ ...dim, color: "#fecaca" }}>
           {available.length ? `Showing the last list this game saw (${list.error}).` : list.error}
@@ -278,9 +274,6 @@ const ScenarioMapsList = ({ maps, onMakeStarting, onRemove, onShownOver, onSaveT
   return (
     <div style={box}>
       <div style={{ ...rowTitle, marginBottom: "0.3rem" }}>This scenario&apos;s maps</div>
-      <div style={{ ...dim, padding: "0 0 0.6rem" }}>
-        Players start on the ★ starting map and can switch to any other map here in Settings → Map. Click a map below to add it. Every map must fit your regions: they stay where they are on each one.
-      </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
         {maps.map((map) => (
           <div key={map.key} style={mapRow}>

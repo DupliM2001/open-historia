@@ -172,9 +172,6 @@ const CityPopup = ({ feature, x, y, isNew, onChange, onDelete, onClose }) => {
           style={{ ...inputStyle, padding: "5px 7px", resize: "vertical", fontFamily: "inherit", fontSize: 12 }}
           aria-label="Population by year"
         />
-        <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", lineHeight: 1.35 }}>
-          One year a line. The game reads the population for its date from these, until the AI changes this city's population itself.
-        </span>
       </label>
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>

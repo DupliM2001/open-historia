@@ -130,6 +130,7 @@ export const parsePost = (issue, hubIndex) => {
     releaseUrl: releaseCopyOf(hubIndex, bundleUrl),
     installs,
     coverImageUrl,
+    startDate: typeof issue.scenario_date === "string" ? issue.scenario_date.slice(0, 40) : "",
     scenarioKey: normalizeHubKey(body.match(SCENARIO_KEY_PATTERN)?.[1]),
     // { comment id -> its .zip }: the comments on this post that the hub has
     // checked as suggestions (refreshPublishedRecord offers no others).

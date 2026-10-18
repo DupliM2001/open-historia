@@ -288,7 +288,7 @@ export const BorderCleanupNote = ({ lines, top = 56 }) => {
       style={{
         position: "fixed",
         top,
-        right: 12,
+        right: "calc(var(--editor-dock-right, 0px) + 12px)",
         zIndex: 41,
         maxWidth: 380,
         padding: "8px 12px",

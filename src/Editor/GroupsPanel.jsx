@@ -133,9 +133,6 @@ const GroupsPanel = ({ api, groups = {}, setGroups, selection = [], regionEpoch 
 
   return (
     <Panel title="Groups" icon="list" onClose={onClose} width={340}>
-      <div style={{ fontSize: 12, lineHeight: 1.45, color: "rgba(255,255,255,0.7)" }}>
-        A group — a cartel, a militia, a zombie outbreak — controls an area without owning it. The regions stay their countries'; the game outlines the group's area and tints it in the group's colour, and the AI is told what the group is.
-      </div>
 
       {!current && (
         <>

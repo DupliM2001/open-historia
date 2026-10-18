@@ -32,6 +32,7 @@ import Draw from "ol/interaction/Draw";
 import Modify from "ol/interaction/Modify";
 import Translate from "ol/interaction/Translate";
 import Snap from "ol/interaction/Snap";
+import RegionSnap from "./regionSnap.js";
 import PointerInteraction from "ol/interaction/Pointer";
 import DragBox from "ol/interaction/DragBox";
 import { primaryAction } from "ol/events/condition";
@@ -73,6 +74,7 @@ import {
   weldRegions,
   weldedGeometry,
 } from "./geometry.js";
+
 
 const BASEMAP_BG = {
   dark: "#131315",
@@ -555,6 +557,7 @@ const OlMap = ({
   const refImageExtentRef = useRef(null);
   const refImageFrameSourceRef = useRef(null);
   const interactionsRef = useRef([]);
+  const regionSnapRef = useRef(null);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
   // The live Draw interaction and the points the map-maker has actually CLICKED
@@ -690,7 +693,7 @@ const OlMap = ({
     // existing image instead of triggering a fresh rasterisation.
     const regionLayer = new VectorImageLayer({
       source: regionSource,
-      imageRatio: 2,
+      imageRatio: 1.25,
       wrapX: false,
       style: makeRegionStyle({
         getTypesById: () => typesByIdRef.current,
@@ -1247,6 +1250,10 @@ const OlMap = ({
     };
     const startLoad = () => {
       clearHistory();
+      if (regionSnapRef.current) {
+        map.removeInteraction(regionSnapRef.current);
+        regionSnapRef.current = null;
+      }
       loadToken += 1;
       return loadToken;
     };
@@ -2878,6 +2885,7 @@ const OlMap = ({
     };
 
     const added = [];
+    let snapTolerance = 0;
     if (activeTool === "paint") {
       // High-speed polity authoring. One pointer stroke may cross hundreds of
       // imported provinces, but it is committed as ONE history command.
@@ -3144,7 +3152,8 @@ const OlMap = ({
           },
         });
       });
-      added.push(draw, new Snap({ source })); // Snap last so it sees events first
+      added.push(draw);
+      snapTolerance = 10;
     } else if (activeTool === "modify" && (selectionIds || []).some((id) => source.getFeatureById(id))) {
       // Manual override mode, on the selected regions only — never the entire
       // 3,500-region world, whose handles on every border bury the one being
@@ -3202,7 +3211,8 @@ const OlMap = ({
       });
       // High-tolerance magnet against the complete region source. The selected
       // polygon is what moves; its neighbour is the reference target.
-      added.push(modify, new Snap({ source, pixelTolerance: 18 }));
+      added.push(modify);
+      snapTolerance = 18;
     } else if (activeTool === "border") {
       // Shared-border precision mode is deliberately pair-scoped. A human picks
       // the two neighbouring regions that define the border; every released
@@ -3311,8 +3321,8 @@ const OlMap = ({
         };
         map.on("pointermove", onPointerMove);
 
-        const snap = new Snap({ source, pixelTolerance: 24 });
-        added.push(modify, snap);
+        added.push(modify);
+        snapTolerance = 24;
         // Store a tiny pseudo-interaction cleanup hook alongside real OL
         // interactions; the cleanup below recognises it.
         added.push({
@@ -3453,12 +3463,26 @@ const OlMap = ({
       added.push(box);
     }
 
+    let regionSnap = regionSnapRef.current;
+    if (snapTolerance) {
+      if (!regionSnap || regionSnap.getMap() !== map) {
+        regionSnap = new RegionSnap({ source, pixelTolerance: snapTolerance });
+        map.addInteraction(regionSnap);
+        regionSnapRef.current = regionSnap;
+      }
+      regionSnap.pixelTolerance_ = snapTolerance;
+      regionSnap.setActive(true);
+    }
+    const interactions = map.getInteractions();
     added.forEach((i) => {
       if (i?.__continuumCleanup) return;
-      map.addInteraction(i);
+      const at = regionSnap ? interactions.getArray().indexOf(regionSnap) : -1;
+      if (at >= 0) interactions.insertAt(at, i);
+      else map.addInteraction(i);
     });
     interactionsRef.current = added.filter((i) => !i?.__continuumCleanup);
     return () => {
+      if (snapTolerance) regionSnap?.setActive(false);
       added.forEach((i) => {
         if (i?.__continuumCleanup) i.__continuumCleanup();
         else map.removeInteraction(i);

@@ -9,7 +9,7 @@
 // the document only on save/export. Ephemeral UI state (active tool, selection,
 // save status, live region count) also lives here for the panels to read.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { migrateDocumentOwners, OWNER_SCHEMA } from "./documentMigration.js";
 import { normalizeTagList } from "../runtime/countryTags.js";
 import { findPolityKey, renamePolityInDocument } from "../../server/polityRename.js";
@@ -428,13 +428,15 @@ export const useMapDocument = (initial) => {
     setSaveStatus("dirty");
   }, [setSaveStatus]);
 
+  const paintColors = useMemo(() => ({ ...colors, ...(doc.colorOverrides || {}) }), [colors, doc.colorOverrides]);
+
   return {
     doc,
     setDoc,
     // What the editor should PAINT with: the map-maker's choices layered over the
     // fetched palette. Everything that renders an owner colour uses this, so an
     // edit shows up immediately, exactly as it will in the game.
-    colors: { ...colors, ...(doc.colorOverrides || {}) },
+    colors: paintColors,
     // The fetched palette alone — for telling "you changed this" from "this is the
     // stock colour", so the UI can offer a Reset.
     basePalette: colors,

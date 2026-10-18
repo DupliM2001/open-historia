@@ -109,9 +109,6 @@ const MilitaryFields = ({ recordKey = "", value, defaults = null, onChange, onRa
         {kept && <span style={{ color: "rgba(255,255,255,0.5)", fontWeight: 500 }}> · its own figures</span>}
       </summary>
       <div key={recordKey} style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 7 }}>
-        <div style={hintStyle}>
-          Leave a field empty for what every country has. 50 is how every country fought before; an arm at 0 is none at all: no army, no navy or no air force.
-        </div>
 
         <div style={groupLabelStyle}>Its soldiers</div>
         <div style={{ display: "grid", gap: "5px 12px", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
@@ -147,9 +144,6 @@ const MilitaryFields = ({ recordKey = "", value, defaults = null, onChange, onRa
         </div>
 
         <div style={groupLabelStyle}>Mustering</div>
-        <div style={hintStyle}>
-          How long calling up its army takes: the curve runs from nothing on the first day through the two points. Without points of its own it musters as the scenario says.
-        </div>
         <MusterChart
           points={kept?.muster ?? null}
           fallback={defaults?.muster ?? DEFAULT_MUSTER}

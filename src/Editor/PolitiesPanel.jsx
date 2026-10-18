@@ -418,9 +418,6 @@ const PolitiesPanel = ({
 
   return (
     <Panel title="Countries" icon="list" onClose={onClose} width={390}>
-      <div style={{ fontSize: 12, lineHeight: 1.45, color: "rgba(255,255,255,0.62)" }}>
-        Every country on the map is listed — it owns a region or a region is disputed in its name — and so is every country registered here, with regions or not; a registered country stays until it is removed. Click one to select its whole territory. A country is <b>keyed by its name</b>: renaming it re-keys everything that carried the old name.
-      </div>
 
       <input
         value={query}
@@ -556,11 +553,7 @@ const PolitiesPanel = ({
             <summary style={{ cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>
               Regions ({ownedRegions.length}){current.claimantCount ? ` · ${current.claimantCount} claimed` : ""}
             </summary>
-            {ownedRegions.length === 0 ? (
-              <div style={{ fontSize: 10.8, color: "rgba(255,255,255,0.5)", marginTop: 6 }}>
-                No regions yet — this country is registered and ships to the game without land until it is painted or assigned some.
-              </div>
-            ) : (
+            {ownedRegions.length === 0 ? null : (
               <div style={{ display: "grid", gap: 3, marginTop: 6, maxHeight: 200, overflowY: "auto" }}>
                 {ownedRegions.map((region) => (
                   <button
@@ -694,10 +687,6 @@ const PolitiesPanel = ({
           />
         </div>
 
-        <div style={{ fontSize: 10.8, lineHeight: 1.45, color: "rgba(255,255,255,0.5)" }}>
-          <b>Fill standard flags</b> stores Open Historia&apos;s built-in country flags in this scenario for safely recognized polities that are currently missing a flag; custom/historical flags are never overwritten. Roster import creates or updates polity records in bulk. Territory is untouched. Supports
-          <code> {"{ polities: [...] }"}</code>, a direct array, or an object keyed by polity name.
-        </div>
 
         {rosterPreview && (
           <div style={{ padding: "8px 9px", borderRadius: 8, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.1)", display: "grid", gap: 6 }}>

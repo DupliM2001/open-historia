@@ -75,9 +75,6 @@ const TypeManager = ({ types, setTypes, usage = {}, onClose }) => {
           <Icon name="plus" size={14} /> Add
         </button>
       </div>
-      <div style={{ fontSize: 11, lineHeight: 1.45, color: "rgba(255,255,255,0.5)" }}>
-        The game draws each type's override colour, opacity, stroke and zoom range as well. Z-Index and Included In Labels only style this Workshop map.
-      </div>
 
       {types.map((t) => {
         const open = expanded.has(t.id);
@@ -126,9 +123,6 @@ const TypeManager = ({ types, setTypes, usage = {}, onClose }) => {
                     {t.overrideColor && <ColorField value={t.overrideColor} onChange={(v) => update(t.id, { overrideColor: v })} />}
                   </span>
                 </Row>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 3 }}>
-                  When the AI moves units and places structures, it is told which regions are impassable, slower or faster to cross, or not in play.
-                </div>
                 <Row label="Pathfinding Speed" title="1 is the usual speed. Below 1 is slower, above 1 is faster, and 0 is impassable.">
                   <NumberField value={t.pathfindingSpeed} step={0.1} min={0} onChange={(v) => update(t.id, { pathfindingSpeed: v })} />
                 </Row>
