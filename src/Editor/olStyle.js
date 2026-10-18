@@ -261,13 +261,14 @@ export const makeRegionLook = ({ getTypesById, getColors, getZoom, getGroupColor
   };
 };
 
-export const makeRegionOverlayStyle = ({ look, canvasStyle, getSelectedIds }) => {
+export const makeRegionOverlayStyle = ({ look, canvasStyle, getSelectedIds, originalOf = (feature) => feature }) => {
   const cache = new Map();
   return (feature, resolution) => {
-    const seen = look(feature);
+    const original = originalOf(feature);
+    const seen = look(original);
     if (!seen.visible) return null;
-    if (seen.striped) return canvasStyle(feature, resolution);
-    if (!getSelectedIds().has(feature.getId())) return null;
+    if (seen.striped) return canvasStyle(original, resolution);
+    if (!getSelectedIds().has(original.getId())) return null;
     const key = `${seen.baseRgb.join("_")}|${seen.baseAlpha}|${seen.width}|${seen.strokeOpacity}`;
     const hit = cache.get(key);
     if (hit) return hit;

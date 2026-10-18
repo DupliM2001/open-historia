@@ -55,6 +55,7 @@ import { boundsFillSquare, normalizeImageBounds } from "../../server/mapProjecti
 import { vectorLayerToGeoJSON } from "./customBackground.js";
 import { defaults as defaultControls } from "ol/control/defaults";
 import { makeRegionLook, makeRegionOverlayStyle, makeRegionStyle } from "./olStyle.js";
+import { createRegionDisplay } from "./regionDisplay.js";
 import { buildPoliticalBoundaryTopology } from "../Game/Map/vnext/politicalBoundaryTopology.js";
 import { buildGroupAreaIndex, deriveGroupAreas } from "../Game/Map/vnext/groupAreas.js";
 import { getMarkerPresentation } from "../Game/Map/vnext/presentationPolicy.js";
@@ -506,6 +507,7 @@ const HIT_RING = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1
 
 class RegionGlRenderer extends WebGLVectorLayerRenderer {
   prepareFrameInternal(frameState) {
+    if (!this.ready && this.buffers_) return true;
     const resolution = frameState.viewState.resolution;
     const still = !frameState.viewHints[ViewHint.ANIMATING] && !frameState.viewHints[ViewHint.INTERACTING];
     const current = this.buffers_ && this.sourceRevision_ >= this.getLayer().getSource().getRevision();
@@ -519,7 +521,7 @@ class RegionGlRenderer extends WebGLVectorLayerRenderer {
 
   forEachFeatureAtCoordinate(coordinate, frameState, hitTolerance, callback) {
     const layer = this.getLayer();
-    const source = layer.getSource();
+    const source = layer.hitSource ?? layer.getSource();
     const reach = (hitTolerance || 0) * frameState.viewState.resolution;
     const seen = new Set();
     for (const [dx, dy] of reach > 0 ? HIT_RING : HIT_RING.slice(0, 1)) {
@@ -541,6 +543,7 @@ class RegionGlLayer extends WebGLVectorLayer {
     super({ ...options, disableHitDetection: true });
     this.regionStyle = options.style;
     this.regionLook = options.look;
+    this.hitSource = options.hitSource ?? null;
   }
 
   createRenderer() {
@@ -626,7 +629,7 @@ const OlMap = ({
   const regionOverlayLayerRef = useRef(null);
   const restyleRegionsRef = useRef(null);
   const restyleSelectionRef = useRef(null);
-  const isRegionLayer = (l) => l === regionLayerRef.current || (l != null && l === regionOverlayLayerRef.current);
+  const isRegionLayer = (l) => l === regionLayerRef.current;
   const labelLayerRef = useRef(null);
   const pointSourceRef = useRef(null);
   const pointLayerRef = useRef(null);
@@ -802,8 +805,9 @@ const OlMap = ({
       getGroupColors: () => groupColorsRef.current,
     });
     const onGpu = supportsWebGL();
+    const regionDisplay = onGpu ? createRegionDisplay({ regionSource, pixelRatio: typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1 }) : null;
     const regionLayer = onGpu
-      ? new RegionGlLayer({ source: regionSource, style: regionShaders(regionLook), look: regionLook })
+      ? new RegionGlLayer({ source: regionDisplay.source, hitSource: regionSource, style: regionShaders((feature) => regionLook(regionDisplay.originalOf(feature))), look: regionLook })
       : new VectorImageLayer({
         source: regionSource,
         imageRatio: 1.25,
@@ -822,27 +826,31 @@ const OlMap = ({
       visible: onGpu,
       updateWhileInteracting: false,
       updateWhileAnimating: false,
-      style: makeRegionOverlayStyle({ look: regionLook, canvasStyle: regionStyle, getSelectedIds: () => selectedIdsRef.current }),
+      style: makeRegionOverlayStyle({ look: regionLook, canvasStyle: regionStyle, getSelectedIds: () => selectedIdsRef.current, originalOf: (feature) => (regionDisplay ? regionDisplay.originalOf(feature) : feature) }),
     });
     regionOverlayLayer.setZIndex(11);
     const overlayWants = (f) => selectedIdsRef.current.has(f.getId()) || regionLook(f).striped;
     const syncOverlayFeature = (f) => {
       if (!onGpu) return;
+      const copy = regionDisplay.copyOf(f);
+      if (!copy) return;
       const wanted = regionSource.hasFeature(f) && overlayWants(f);
-      const present = regionOverlaySource.hasFeature(f);
-      if (wanted && !present) regionOverlaySource.addFeature(f);
-      else if (!wanted && present) regionOverlaySource.removeFeature(f);
+      const present = regionOverlaySource.hasFeature(copy);
+      if (wanted && !present) regionOverlaySource.addFeature(copy);
+      else if (!wanted && present) regionOverlaySource.removeFeature(copy);
     };
     const syncRegionOverlay = () => {
       if (!onGpu) return;
       const wanted = new Set();
       for (const id of selectedIdsRef.current) {
-        const f = regionSource.getFeatureById(id);
-        if (f) wanted.add(f);
+        const copy = regionDisplay.copyOf(regionSource.getFeatureById(id));
+        if (copy) wanted.add(copy);
       }
       for (const f of regionSource.getFeatures()) {
         const claimants = f.get("claimants");
-        if (Array.isArray(claimants) && claimants.length && regionLook(f).striped) wanted.add(f);
+        if (!Array.isArray(claimants) || !claimants.length || !regionLook(f).striped) continue;
+        const copy = regionDisplay.copyOf(f);
+        if (copy) wanted.add(copy);
       }
       for (const f of regionOverlaySource.getFeatures()) {
         if (!wanted.has(f)) regionOverlaySource.removeFeature(f);
@@ -856,7 +864,7 @@ const OlMap = ({
         regionLayer.changed();
         return;
       }
-      regionSource.changed();
+      regionDisplay.source.changed();
       syncRegionOverlay();
     };
     const restyleSelection = () => {
@@ -866,7 +874,9 @@ const OlMap = ({
     if (onGpu) {
       regionSource.on("addfeature", (e) => syncOverlayFeature(e.feature));
       regionSource.on("removefeature", (e) => {
-        if (regionOverlaySource.hasFeature(e.feature)) regionOverlaySource.removeFeature(e.feature);
+        for (const copy of regionOverlaySource.getFeatures()) {
+          if (regionDisplay.originalOf(copy) === e.feature) regionOverlaySource.removeFeature(copy);
+        }
       });
       regionSource.on("changefeature", (e) => syncOverlayFeature(e.feature));
       regionSource.on("clear", () => regionOverlaySource.clear(true));
@@ -1059,6 +1069,14 @@ const OlMap = ({
 
     regionSourceRef.current = regionSource;
     regionLayerRef.current = regionLayer;
+    if (regionDisplay) {
+      const showDetail = () => {
+        const size = map.getSize();
+        if (size && size[0] > 0 && size[1] > 0) regionDisplay.setView(map.getView().getResolution(), map.getView().calculateExtent(size));
+      };
+      map.on("moveend", showDetail);
+      showDetail();
+    }
     regionOverlayLayerRef.current = regionOverlayLayer;
     restyleRegionsRef.current = restyleRegions;
     restyleSelectionRef.current = restyleSelection;
@@ -3507,7 +3525,7 @@ const OlMap = ({
     } else if (activeTool === "move") {
       // A moved region is reshaped as far as the stock tiles know, so it is
       // marked edited, and the move is one undo step (shapeEdits.js).
-      const translate = new Translate({ layers: [layer, regionOverlayLayerRef.current].filter(Boolean), hitTolerance: 2 });
+      const translate = new Translate({ layers: [layer], hitTolerance: 2 });
       const move = trackMove();
       translate.on("translatestart", (e) => move.start(e.features.getArray(), e.startCoordinate));
       translate.on("translateend", (e) => {
