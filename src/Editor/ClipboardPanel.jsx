@@ -25,7 +25,7 @@ const ago = (iso) => {
   return formatCopiedDay(then);
 };
 
-const ClipboardPanel = ({ clipboard, selectionCount = 0, result = null, onCopySelection, onPaste, onClear, onClose }) => {
+const ClipboardPanel = ({ clipboard, selectionCount = 0, result = null, simplify = true, onSimplifyChange, onCopySelection, onPaste, onClear, onClose }) => {
   const summary = describeClipboard(clipboard);
   return (
     <Panel
@@ -81,6 +81,10 @@ const ClipboardPanel = ({ clipboard, selectionCount = 0, result = null, onCopySe
           >
             <Icon name="paint" size={14} /> Paste into this map
           </button>
+          <label style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={simplify} onChange={(e) => onSimplifyChange?.(e.target.checked)} />
+            Simplify to this map's detail
+          </label>
         </>
       ) : (
         <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.5)", padding: "6px 2px" }}>

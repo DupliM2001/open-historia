@@ -52,6 +52,8 @@ import { detailedMapOffers, lookUpDetailedMaps } from "../Map/detailedMapOffers.
 import { scenarioMapsOfWorld } from "../../runtime/basemapPick.js";
 import { dateRangeBound, startsBetween } from "../../runtime/scenarioDateRange.js";
 
+const GITHUB_ATTACHMENT_LIMIT = 25 * 1000 * 1000;
+
 // Reading the hub (the post list, a post's bundle, a post's comments) lives in
 // src/runtime/hubPosts.js, so the library can use it without this tab. The
 // post list, which the translator has always imported from here, stays
@@ -827,7 +829,8 @@ const CommunityPanel = ({ fullPage = false, onPlay }) => {
       // Said in the file too, for whoever it reaches (scenarioLicense.js).
       files[SCENARIO_LICENSE_FILE] = SCENARIO_LICENSE_TEXT;
       const fileName = `${scenario.id}-scenario.zip`;
-      saveBlobToDisk(await zipBundle(files), fileName);
+      const zipped = await zipBundle(files);
+      saveBlobToDisk(zipped, fileName);
       if (coverBlob && coverDownloadName) saveBlobToDisk(coverBlob, coverDownloadName);
       // When the scenario carries a basemap, tag the post with the basemap hash so
       // the community Basemaps browser (which surfaces scenario-carried basemaps) can
@@ -874,6 +877,9 @@ const CommunityPanel = ({ fullPage = false, onPlay }) => {
           " If that page did not open, use the Open the GitHub post button." +
           `${hasCover ? " The cover image becomes the card's preview in the hub." : ""}${extra}`,
       );
+      if (zipped.size > GITHUB_ATTACHMENT_LIMIT) {
+        setError(`"${fileName}" is ${(zipped.size / 1e6).toFixed(1)} MB, and GitHub takes files of up to 25 MB, so the post will refuse it. In the map editor select the scenario's most detailed regions, press Simplify, save, and publish again.`);
+      }
     } catch (nextError) {
       setError(`Publish failed: ${nextError.message}`);
     }

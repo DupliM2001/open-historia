@@ -35,7 +35,7 @@ import { deployCells } from "./deploy.js";
 import { linesChanged } from "./walls.js";
 import { AIR_MISSIONS, wingChanges } from "./air.js";
 import { MILITARY_NEUTRAL, airWorth, landWorth, mixOf, readMilitary, seaWorth } from "./military.js";
-import { absorbUnit, holderOf, keepStart, lineLength, loadBattle, memberIndex, memberWeights, openBattle, paintGround, raiseTroops, readRegion, reconcile, releaseNamed, saveBattle, setHandicap, setRadii, sideOfName } from "./battle.js";
+import { absorbUnit, holderOf, isLandFormation, keepStart, lineLength, loadBattle, memberIndex, memberWeights, openBattle, paintGround, raiseTroops, readRegion, reconcile, releaseNamed, saveBattle, setHandicap, setRadii, sideOfName } from "./battle.js";
 import { buildBrief } from "./brief.js";
 import { assignCommands } from "./command.js";
 import { hashKey } from "./codec.js";
@@ -382,9 +382,41 @@ const contactKey = (run, war) => {
 // and none covers it. A war already looked at as it stands is not looked at
 // again: that answer is kept with the arenas, so an overseas war does not ask
 // for the map's shapes turn after turn.
+const STANDING_REACH_KM = 300;
+const landWhereTroopsStand = (run, war, day) => {
+  if (run.battles.some((battle) => battle.warId === war.id && battle.status !== "closed")) return;
+  const standing = [];
+  for (const unit of Array.isArray(run.input?.units) ? run.input.units : []) {
+    const owner = clean(unit?.ownerCode ?? unit?.owner);
+    const side = warSide(war, owner);
+    const region = clean(unit?.regionId);
+    const lng = Number(unit?.lng);
+    const lat = Number(unit?.lat);
+    if (side < 0 || !region || unit?.covert === true || clean(unit?.committedTo) || !isLandFormation(unit) || !Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+    if (warSide(war, holderIn(run, war, region)) !== 1 - side) continue;
+    standing.push({ owner, lng, lat });
+  }
+  if (standing.length === 0) return;
+  const map = run.input.map;
+  const near = (a, b) => kmBetween(a.lng, a.lat, b.lng, b.lat, { flat: map?.flat === true, scale: map?.scale }) <= STANDING_REACH_KM;
+  let best = null;
+  let most = 0;
+  for (const entry of standing) {
+    const count = standing.filter((other) => near(entry, other)).length;
+    if (count > most) {
+      best = entry;
+      most = count;
+    }
+  }
+  const tried = `standing|${clean(map?.key)}|${war.id}|${best.owner}|${best.lng}|${best.lat}`;
+  if (run.cache?.get(tried) === true) return;
+  if (!openLandingAt(run, { war, sideName: best.owner, lng: best.lng, lat: best.lat, day }) && run.cache) run.cache.set(tried, true);
+};
+
 const examineWar = (run, war, day) => {
   if (war.status !== "active" || war.sides[0].length === 0 || war.sides[1].length === 0) return;
   adoptStanding(run, war);
+  landWhereTroopsStand(run, war, day);
   const key = contactKey(run, war);
   if (key && run.cache?.get(key) === true) return;
   const regions = landRegionsOf(run);

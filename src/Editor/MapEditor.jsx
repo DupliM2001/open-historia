@@ -321,6 +321,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
   }, []);
   const clipboardCount = clipboard?.regions?.features?.length ?? 0;
   const [clipboardResult, setClipboardResult] = useState(null);
+  const [pasteSimplified, setPasteSimplified] = useState(true);
   const copySelectionToClipboard = (ids = d.selection) => {
     if (!api || !ids?.length) return false;
     const regions = api.exportRegions(ids);
@@ -340,7 +341,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
     for (const [key, rgb] of Object.entries(plan.colorOverrides)) d.setColorOverride(key, rgb);
     for (const [key, flag] of Object.entries(plan.flags)) d.setFlag(key, flag);
     for (const [key, list] of Object.entries(plan.tags)) d.setTags(key, list);
-    const result = api.pasteRegions(clipboard.regions);
+    const result = api.pasteRegions(clipboard.regions, { simplify: pasteSimplified });
     if (result.added.length) {
       d.setSaveStatus("dirty");
       api.zoomToSelection(result.added);
@@ -1771,6 +1772,8 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
           clipboard={clipboard}
           selectionCount={d.selection.length}
           result={clipboardResult}
+          simplify={pasteSimplified}
+          onSimplifyChange={setPasteSimplified}
           onCopySelection={() => copySelectionToClipboard()}
           onPaste={pasteClipboard}
           onClear={() => {

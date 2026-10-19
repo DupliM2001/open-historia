@@ -573,6 +573,7 @@ export const raiseTroops = (battle, run, only = -1) => {
 // ---- named formations ----------------------------------------------------------
 
 const KIND_OF_TYPE = { infantry: KIND_INFANTRY, armor: KIND_ARMOUR, artillery: KIND_ARTILLERY };
+export const isLandFormation = (unit) => KIND_OF_TYPE[String(unit?.type ?? "")] !== undefined;
 
 // Takes a formation of the world's into a battle as a named troop, at its own
 // place and strength. false when it does not belong here: not a land

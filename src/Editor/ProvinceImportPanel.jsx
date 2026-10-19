@@ -715,6 +715,7 @@ const ProvinceImportPanel = ({ api, polities = {}, flags = {}, importPolityRoste
   const [landOnly, setLandOnly] = useState(true);
   const [ignoreBlack, setIgnoreBlack] = useState(true);
   const [inheritOwners, setInheritOwners] = useState(true);
+  const [simplifyOutlines, setSimplifyOutlines] = useState(true);
   const [materializeStandardFlags, setMaterializeStandardFlags] = useState(true);
   const [importCities, setImportCities] = useState(true);
   const [replaceExistingCities, setReplaceExistingCities] = useState(false);
@@ -1043,7 +1044,7 @@ const ProvinceImportPanel = ({ api, polities = {}, flags = {}, importPolityRoste
 
       setProgress({ fraction: 0.45, message: "Replacing region geometry…" });
       api.clearProvinceImportPreview?.();
-      const applied = api.replaceRegionsFromImport?.(result, { inheritOwners });
+      const applied = api.replaceRegionsFromImport?.(result, { inheritOwners, simplifyMeters: mode === "geojson" && simplifyOutlines ? 100 : 0 });
       if (!applied?.count) throw new Error("The map rejected the imported region collection.");
 
       const polityImport = Array.isArray(result.importPolityRows) && result.importPolityRows.length
@@ -1241,6 +1242,11 @@ const ProvinceImportPanel = ({ api, polities = {}, flags = {}, importPolityRoste
                 </label>
               </div>
             )}
+
+            <label style={{ fontSize: 11.5, lineHeight: 1.4 }}>
+              <input type="checkbox" checked={simplifyOutlines} onChange={(e) => setSimplifyOutlines(e.target.checked)} />{" "}
+              <b>Simplify outlines to about 100 m</b>
+            </label>
 
             <div style={{ display: "grid", gap: 6, padding: "9px 10px", borderRadius: 9, background: "rgba(234,179,8,0.06)", border: "1px solid rgba(234,179,8,0.18)" }}>
               <label style={{ fontSize: 11.2, lineHeight: 1.4 }}>

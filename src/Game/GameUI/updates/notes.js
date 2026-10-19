@@ -62,9 +62,9 @@ const NEW_UPDATES = [
         items: [
           "Archiving or deleting the game you have open takes you back to the menu, and an archived game can be deleted from its card.",
           "Create a faction is now part of Play as a group, and choosing a group's area shows the country picker's map.",
-          "Emptying Recently deleted works everywhere, and a diplomacy message's copy button stays while you reach for it.",
-          "The map editor is laid out anew in the menus' style, with its sidebar on the right or the left, quicker tools and zooming, and fewer notes in the way.",
-          "The Community tab can show only the scenarios that begin between two dates.",
+          "Emptying Recently deleted works everywhere, a diplomacy message's copy button stays while you reach for it, and a war fought overseas opens a battlefield where your troops stand on the enemy's land.",
+          "The map editor is laid out anew in the menus' style, with its sidebar on the right or the left, quicker tools, smooth zooming even on very detailed maps, pasted regions kept to the map's own detail, a Simplify button, and fewer notes in the way.",
+          "The Community tab can show only the scenarios that begin between two dates, and publishing says when a scenario's file is too large for GitHub.",
           "Modern Day is played on the real world's provinces again, and campaigns begun on the hand-drawn map keep it as Modern Day (classic map); the Northern Forests climate zone is redrawn.",
         ],
       },

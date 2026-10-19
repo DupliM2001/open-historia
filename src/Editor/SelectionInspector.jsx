@@ -401,6 +401,9 @@ const SelectionInspector = ({ api, selection, types, colors, colorOverrides, set
               <Icon name="merge" size={13} /> Merge
             </button>
           )}
+          <button onClick={() => api?.simplifyRegions(selection)} style={actionButton} title="Lighten these outlines to this map's own detail">
+            <Icon name="modify" size={13} /> Simplify
+          </button>
           <button
             onClick={() => api?.copyRegions(selection)}
             style={actionButton}

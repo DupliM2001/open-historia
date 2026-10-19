@@ -56,6 +56,8 @@ import { vectorLayerToGeoJSON } from "./customBackground.js";
 import { defaults as defaultControls } from "ol/control/defaults";
 import { makeRegionLook, makeRegionOverlayStyle, makeRegionStyle } from "./olStyle.js";
 import { createRegionDisplay } from "./regionDisplay.js";
+import { detailToleranceMeters, simplifyShared, toleranceAtLatitude } from "./simplifyRegions.js";
+import { createEmpty as emptyExtent, extend as extendExtent } from "ol/extent";
 import { buildPoliticalBoundaryTopology } from "../Game/Map/vnext/politicalBoundaryTopology.js";
 import { buildGroupAreaIndex, deriveGroupAreas } from "../Game/Map/vnext/groupAreas.js";
 import { getMarkerPresentation } from "../Game/Map/vnext/presentationPolicy.js";
@@ -2313,6 +2315,47 @@ const OlMap = ({
         notifyRegions();
         pushCmd(cmd);
       },
+      simplifyRegions: (ids) => {
+        const isArea = (f) => /Polygon$/.test(f?.getGeometry()?.getType() || "");
+        const chosen = (ids || []).map((id) => regionSource.getFeatureById(id)).filter(isArea);
+        if (!chosen.length) return 0;
+        const picked = new Set(chosen);
+        const box = emptyExtent();
+        for (const f of chosen) extendExtent(box, f.getGeometry().getExtent());
+        const nearby = [];
+        regionSource.forEachFeatureIntersectingExtent(box, (f) => {
+          if (!picked.has(f) && isArea(f)) nearby.push(f);
+        });
+        const meters = detailToleranceMeters(regionSource.getFeatures().filter((f) => !picked.has(f)).map((f) => f.getGeometry()));
+        const all = [...chosen, ...nearby];
+        const lighter = simplifyShared(all.map((f) => f.getGeometry()), { toleranceAt: toleranceAtLatitude(meters), movable: all.map((_, at) => at < chosen.length) });
+        const same = (a, b) => {
+          const x = a.getFlatCoordinates();
+          const y = b.getFlatCoordinates();
+          if (x.length !== y.length) return false;
+          for (let i = 0; i < x.length; i += 1) if (x[i] !== y[i]) return false;
+          return true;
+        };
+        const changes = [];
+        all.forEach((f, at) => {
+          const before = f.getGeometry();
+          if (!lighter[at] || lighter[at] === before || same(before, lighter[at])) return;
+          changes.push({ feature: f, before, after: lighter[at], edited: f.get("edited") });
+        });
+        if (!changes.length) return 0;
+        const apply = (forward) => {
+          for (const change of changes) {
+            change.feature.setGeometry(forward ? change.after : change.before);
+            change.feature.set("edited", forward ? true : change.edited);
+          }
+          restyleRegions();
+          labelLayer.changed();
+          notifyRegions();
+        };
+        apply(true);
+        pushCmd({ undo: () => apply(false), redo: () => apply(true) });
+        return changes.length;
+      },
       copyRegions: (ids) => {
         const res = map.getView().getResolution() || 1;
         const off = res * 24;
@@ -2366,12 +2409,17 @@ const OlMap = ({
       // linkage), otherwise it gets a fresh one; it is always marked edited,
       // since its shape is this map's own now whatever tiles it came from. The
       // whole paste is one undo step.
-      pasteRegions: (fc, { select = true } = {}) => {
+      pasteRegions: (fc, { select = true, simplify = false } = {}) => {
         const incoming = fc && Array.isArray(fc.features)
           ? new GeoJSON().readFeatures(fc, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })
           : [];
         const pasted = incoming.filter((f) => /Polygon$/.test(f.getGeometry()?.getType() || ""));
         if (!pasted.length) return { added: [], trimmed: 0, removed: 0 };
+        if (simplify) {
+          const meters = detailToleranceMeters(regionSource.getFeatures().map((f) => f.getGeometry()));
+          const lighter = simplifyShared(pasted.map((f) => f.getGeometry()), { toleranceAt: toleranceAtLatitude(meters) });
+          pasted.forEach((f, at) => f.setGeometry(lighter[at]));
+        }
 
         // Carve first, against the map as it is; the pasted regions join the
         // source afterwards, so they never cut each other. A region beneath
@@ -2743,7 +2791,7 @@ const OlMap = ({
       // stack: a 10k+ province import can already be large, and keeping two
       // complete worlds alive at once is an avoidable tab-killer. The panel
       // downloads the old FeatureCollection before calling this method.
-      replaceRegionsFromImport: (fc, { inheritOwners = true } = {}) => {
+      replaceRegionsFromImport: (fc, { inheritOwners = true, simplifyMeters = 0 } = {}) => {
         if (!fc || !Array.isArray(fc.features)) return { count: 0, inheritedOwners: 0 };
         const fmt = new GeoJSON();
         let feats;
@@ -2761,6 +2809,10 @@ const OlMap = ({
           return type === "Polygon" || type === "MultiPolygon";
         });
         if (!feats.length) return { count: 0, inheritedOwners: 0 };
+        if (simplifyMeters > 0) {
+          const lighter = simplifyShared(feats.map((f) => f.getGeometry()), { toleranceAt: toleranceAtLatitude(simplifyMeters) });
+          feats.forEach((f, at) => f.setGeometry(lighter[at]));
+        }
 
         const usedIds = new Set();
         let inheritedOwners = 0;
