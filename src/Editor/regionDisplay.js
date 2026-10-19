@@ -5,7 +5,7 @@
 
 import Feature from "ol/Feature.js";
 import MultiPolygon from "ol/geom/MultiPolygon.js";
-import Polygon, { fromExtent as polygonFromExtent } from "ol/geom/Polygon.js";
+import Polygon from "ol/geom/Polygon.js";
 import VectorSource from "ol/source/Vector.js";
 import { buffer as bufferExtent, containsExtent, getCenter, getHeight, getWidth, intersects } from "ol/extent.js";
 import { douglasPeucker } from "ol/geom/flat/simplify.js";
@@ -16,6 +16,21 @@ export const FAR_DETAIL = 0;
 export const detailOf = (resolution) => Math.max(0, Math.floor(Math.log2(ZOOM0_RESOLUTION / resolution) + 1e-9));
 export const toleranceOf = (detail, pixelRatio = 1) => ZOOM0_RESOLUTION / 2 ** (detail + 1) / Math.max(1, pixelRatio);
 
+const ringBox = (flat, start, end, out) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = start; i < end; i += 2) {
+    minX = Math.min(minX, flat[i]);
+    maxX = Math.max(maxX, flat[i]);
+    minY = Math.min(minY, flat[i + 1]);
+    maxY = Math.max(maxY, flat[i + 1]);
+  }
+  out.push(minX, minY, maxX, minY, maxX, maxY, minX, maxY, minX, minY);
+  return out.length;
+};
+
 const simplifyRings = (flat, offset, ends, squared, out) => {
   const kept = [];
   let start = offset;
@@ -24,11 +39,11 @@ const simplifyRings = (flat, offset, ends, squared, out) => {
     const before = out.length;
     const after = douglasPeucker(flat, start, end, 2, squared, out, before);
     out.length = after;
-    if (after - before < 8) {
+    if (after - before >= 8) {
+      kept.push(after);
+    } else {
       out.length = before;
       if (i === 0) return null;
-    } else {
-      kept.push(after);
     }
     start = end;
   }
@@ -42,8 +57,10 @@ export const simplifyRegion = (geometry, tolerance) => {
   const flat = geometry.getFlatCoordinates();
   const out = [];
   if (type === "Polygon") {
-    const ends = simplifyRings(flat, 0, geometry.getEnds(), squared, out);
-    return ends ? new Polygon(out, "XY", ends) : polygonFromExtent(geometry.getExtent());
+    const ends = geometry.getEnds();
+    const kept = simplifyRings(flat, 0, ends, squared, out);
+    if (kept) return new Polygon(out, "XY", kept);
+    return new Polygon(out, "XY", [ringBox(flat, 0, ends[0], out)]);
   }
   const endss = [];
   let offset = 0;
@@ -54,7 +71,9 @@ export const simplifyRegion = (geometry, tolerance) => {
     else out.length = before;
     offset = ends[ends.length - 1];
   }
-  return endss.length ? new MultiPolygon(out, "XY", endss) : polygonFromExtent(geometry.getExtent());
+  if (endss.length) return new MultiPolygon(out, "XY", endss);
+  const first = geometry.getEndss()[0];
+  return new MultiPolygon(out, "XY", [[ringBox(flat, 0, first[0], out)]]);
 };
 
 const nextFrame = (fn) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, 0));

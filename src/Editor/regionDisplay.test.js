@@ -37,11 +37,19 @@ test("a region is simplified within the tolerance, its specks are dropped, and o
 
   const islands = new MultiPolygon([square(0, 0, 1000), square(5000, 5000, 1)]);
   const kept = simplifyRegion(islands, 5);
-  assert.equal(kept.getPolygons().length, 1);
+  assert.deepEqual(kept.getPolygons().map((polygon) => polygon.getExtent()), [[0, 0, 1000, 1000]]);
 
   const speck = simplifyRegion(new Polygon(square(10, 10, 1)), 5);
   assert.equal(speck.getType(), "Polygon");
   assert.deepEqual(speck.getExtent(), [10, 10, 11, 11]);
+});
+
+test("islands too small to draw leave one speck where the first lies, never a box over the sea between them", () => {
+  const scattered = new MultiPolygon([square(-20000000, -2000000, 3), square(0, -2100000, 2), square(19000000, -1900000, 4)]);
+  const drawn = simplifyRegion(scattered, 1000);
+  assert.deepEqual(drawn.getPolygons().map((polygon) => polygon.getExtent()), [[-20000000, -2000000, -19999997, -1999997]]);
+  const lone = simplifyRegion(new Polygon(square(170, 20, 3)), 1000);
+  assert.deepEqual(lone.getExtent(), [170, 20, 173, 23]);
 });
 
 test("every region has a drawn copy; near the view it is detailed, far away it is coarse", async () => {
