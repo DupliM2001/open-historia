@@ -144,3 +144,23 @@ test("the turn's powers lead on a map named in Cyrillic, as on any other", () =>
   assert.ok(ranked.find((entry) => entry.label === "Республика Беларусь").reasons.includes("named in recent events"));
   assert.equal(ranked.find((entry) => entry.label === "Китайская Народная Республика").reasons.length, 0);
 });
+
+test("a pending action that names a region lifts the power holding it", () => {
+  const regions = [
+    { id: "r1", name: "Kharkiv" },
+    { id: "r2", name: "Gilan" },
+    { id: "r3", name: "Ost" },
+  ];
+  const holders = { r1: "Ukraine", r2: "Islamic Republic of Iran", r3: "Republic of India" };
+  const ranked = selectFocusPowers({
+    owners,
+    player: "United States of America",
+    actions: [{ title: "Annex Gilan", description: "Send the marines into Gilan and the Ost.", status: "planned" }],
+    regions,
+    ownerOfRegion: (id) => holders[id] ?? "",
+  });
+  assert.equal(ranked[1].label, "Islamic Republic of Iran");
+  assert.deepEqual(ranked[1].reasons, ["holds land the player's actions name"]);
+  assert.equal(ranked.find((entry) => entry.label === "Ukraine").reasons.length, 0, "a region the actions do not name lifts nobody");
+  assert.equal(ranked.find((entry) => entry.label === "Republic of India").reasons.length, 0, "a name under four letters is too loose to count");
+});

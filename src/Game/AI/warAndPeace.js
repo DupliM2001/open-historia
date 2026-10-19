@@ -68,6 +68,7 @@ const figure = (value) => {
 };
 const sidesOf = (war) => [list(war?.sideA).map((name) => clean(name)).filter(Boolean), list(war?.sideB).map((name) => clean(name)).filter(Boolean)];
 const active = (war) => fold(war?.status || "active") === "active";
+const settleable = (war) => ["active", "ceasefire"].includes(fold(war?.status || "active"));
 
 // ---- who holds what -----------------------------------------------------------------------
 
@@ -215,7 +216,7 @@ export const peaceImpacts = (world, war, territory) => {
 // The same world when the war is not being fought.
 export const makePeace = (world, { warId = "", from = "", to = "", terms = null, date = "", round = 0, by = "offer" } = {}) => {
   const war = list(world?.wars).find((entry) => clean(entry?.id) === clean(warId));
-  if (!war || !active(war)) return world;
+  if (!war || !settleable(war)) return world;
   const read = normalizeTerms(terms);
   const turn = Math.max(0, Math.round(figure(round)));
   let next = world;
@@ -419,7 +420,7 @@ export const declinePeaceOffer = (world, offerId, { round = 0 } = {}) => {
 // Returns { world, accepted, to, reason }: `reason` says why nothing happened ("" when the terms were put).
 export const proposePeace = (world, { warId = "", from = "", terms = null, players = [], date = "", round = 0, held = null } = {}) => {
   const war = list(world?.wars).find((entry) => clean(entry?.id) === clean(warId));
-  if (!war || !active(war)) return { world, accepted: false, to: "", reason: "no-war" };
+  if (!war || !settleable(war)) return { world, accepted: false, to: "", reason: "no-war" };
   const sides = sidesOf(war);
   const mine = sides.findIndex((members) => members.some((member) => fold(member) === fold(from)));
   if (mine < 0) return { world, accepted: false, to: "", reason: "not-in-war" };

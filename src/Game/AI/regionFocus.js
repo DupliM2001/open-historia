@@ -133,6 +133,7 @@ export const selectFocusPowers = ({
   wars = [],
   claimants = {},
   ownerOfRegion = () => "",
+  regions = [],
   recentEvents = 12,
   weights = FOCUS_WEIGHTS,
 } = {}) => {
@@ -167,10 +168,20 @@ export const selectFocusPowers = ({
   const playerEntry = findExact(player);
   credit(playerEntry, weights.player, "player");
 
+  const actionTexts = [];
   for (const action of Array.isArray(actions) ? actions : []) {
     if (!isPendingAction(action)) continue;
     const text = [action.title, action.description, action.rawInput, action.text].filter(Boolean).join(" ");
     creditMentions(text, weights.action, "player action", weights.action);
+    const folded = foldName(text);
+    if (folded) actionTexts.push(` ${folded} `);
+  }
+  if (actionTexts.length) {
+    for (const region of Array.isArray(regions) ? regions : []) {
+      const name = foldName(region?.name);
+      if (name.length < 4 || !actionTexts.some((text) => text.includes(` ${name} `))) continue;
+      credit(findExact(ownerOfRegion(region?.id)), weights.action, "holds land the player's actions name");
+    }
   }
 
   for (const war of Array.isArray(wars) ? wars : []) {

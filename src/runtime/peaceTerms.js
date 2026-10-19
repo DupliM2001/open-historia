@@ -193,6 +193,7 @@ export const openOffersFor = (offers, country = "") => normalizePeaceOffers(offe
 
 const sidesOf = (war) => [list(war?.sideA).map((name) => clean(name)).filter(Boolean), list(war?.sideB).map((name) => clean(name)).filter(Boolean)];
 const active = (war) => fold(war?.status || "active") === "active";
+const settleable = (war) => ["active", "ceasefire"].includes(fold(war?.status || "active"));
 
 // The offers a turn brings: for every active war with a played country on one
 // side and none on the other, the first country of the other side offers
@@ -213,13 +214,13 @@ export const withTurnPeaceOffers = (offers, { wars = [], players = [], weariness
   const kept = normalizePeaceOffers(offers).map((offer) => {
     if (offer.status !== "open") return offer;
     const war = warsById.get(offer.warId);
-    const stale = !war || !active(war) || now - offer.round >= PEACE_OFFER_STANDS_ROUNDS;
+    const stale = !war || !settleable(war) || now - offer.round >= PEACE_OFFER_STANDS_ROUNDS;
     return stale ? { ...offer, status: "lapsed", answeredRound: now } : offer;
   });
   const next = [...kept];
   for (const war of list(wars)) {
     const warId = clean(war?.id);
-    if (!warId || !active(war)) continue;
+    if (!warId || !settleable(war)) continue;
     const sides = sidesOf(war);
     const has = sides.map((members) => members.some((member) => played.has(fold(member))));
     // (A war with people on both sides is theirs to end between themselves; one with none is settled below.)

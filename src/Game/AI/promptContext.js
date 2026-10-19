@@ -1563,7 +1563,7 @@ export const filterToRenderedRegions = (regions, world) => {
   if (!world?.customRegions) return list;
   const overrides = world.regionOwnershipOverrides ?? {};
   if (!list.some((region) => !isStockRegionId(region?.id))) return list;
-  return list.filter((region) => !isStockRegionId(region?.id) || overrides[String(region?.id)] !== undefined);
+  return list.filter((region) => !isStockRegionId(region?.id) || region?.custom === true || overrides[String(region?.id)] !== undefined);
 };
 
 const recentEventList = (events, count = 12) => {
@@ -1610,6 +1610,7 @@ export const rankFocusPowers = (regions, world, bundle, { playerName, actorNames
     wars: normalizeArray(world.wars),
     claimants: world.regionClaimants ?? {},
     ownerOfRegion: (regionId) => ownerById.get(String(regionId)) ?? "",
+    regions,
   });
   const labels = ranked.map((entry) => entry.label);
   for (const name of actorNames) {

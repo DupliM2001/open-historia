@@ -81,8 +81,9 @@ export const displayNameMigrations = (world, { isReserved = () => false } = {}) 
 const renamedRecord = (record, fromKey, to) => {
   const previous = unique([fromKey, record.name]).filter((name) => !samePolityName(name, to));
   const notNew = (name) => !samePolityName(name, to);
+  const { mapLabel, mapDistinctLabel, ...rest } = record;
   return {
-    ...record,
+    ...rest,
     code: to,
     name: to,
     aliases: unique([...(Array.isArray(record.aliases) ? record.aliases : []), ...previous]).filter(notNew),

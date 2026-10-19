@@ -213,7 +213,7 @@ export const PeaceControls = ({ war, world, viewer }) => {
   const leads = [clean(sides[0][0]), clean(sides[1][0])].filter(Boolean);
   const weary = leads.map((name) => ({ name, value: Math.round(wearinessOf(world?.warWeariness, name)) })).filter((entry) => entry.value > 0);
   const theirs = mine >= 0 ? clean(sides[1 - mine][0]) : "";
-  const fought = fold(war?.status || "active") === "active";
+  const fought = ["active", "ceasefire"].includes(fold(war?.status || "active"));
   const propose = async () => {
     if (busy) return;
     setBusy(true);

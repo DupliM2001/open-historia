@@ -319,3 +319,13 @@ test("a rename carries the country's fortified lines, in play and in the Worksho
   const doc = { polities: { Aland: { name: "Aland" } }, fortifications: world.fortifications };
   assert.deepEqual(renamePolityInDocument(doc, "Aland", "New Aland").fortifications.map((line) => line.owner), ["New Aland", "Borea"]);
 });
+
+test("a country renamed in play no longer shows the label its old name had on the map", () => {
+  const labelled = world();
+  labelled.polityOverrides.Borduria = { ...labelled.polityOverrides.Borduria, mapLabel: "Old Borduria", mapDistinctLabel: "Kingdom of Borduria" };
+  const { world: next } = renamePolityInWorld(labelled, "Borduria", "Bordurian Republic");
+  const record = next.polityOverrides["Bordurian Republic"];
+  assert.equal(record.name, "Bordurian Republic");
+  assert.equal(record.mapLabel, undefined);
+  assert.equal(record.mapDistinctLabel, undefined);
+});

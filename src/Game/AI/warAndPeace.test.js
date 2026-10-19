@@ -275,3 +275,13 @@ test("the world keeps all of it, every player is shown it, and the turn and a pe
   // A country weary of its war keeps its armies up no better than one cut off.
   assert.ok(read("frontTurn.js").includes("if (weary > 0) short.set(fold(entry.country), shortagesTogether(short.get(fold(entry.country)) ?? 0, weary));"));
 });
+
+test("a war under an armistice can still be settled, and the ground it leaves each side passes in law", () => {
+  const truce = world({ wars: [{ ...WAR, status: "ceasefire" }] });
+  const ceded = makePeace(truce, { warId: "war-1", from: "Borduria", to: "Aland", terms: { territory: TERRITORY_AS_HELD }, date: "1915-01-10", round: 9, by: "offer" });
+  assert.equal(war(ceded).status, "ended");
+  for (const id of ["b8", "b9", "b10"]) assert.deepEqual([holder(ceded, id), sovereign(ceded, id)], ["Aland", "Aland"], id);
+  const put = proposePeace(truce, { warId: "war-1", from: "Aland", terms: { territory: TERRITORY_AS_HELD }, players: ["Aland"], date: "1915-01-10", round: 8 });
+  assert.notEqual(put.reason, "no-war");
+  assert.equal(proposePeace(world({ wars: [{ ...WAR, status: "ended" }] }), { warId: "war-1", from: "Aland", terms: { territory: TERRITORY_AS_HELD } }).reason, "no-war");
+});

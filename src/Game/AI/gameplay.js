@@ -75,6 +75,8 @@ import {
   trimWorldForFocus,
 } from "./playerFocus.js";
 import { expandWholeCountryTransfer, wholeCountrySourceToken } from "./territoryTransferScope.js";
+import { successorTransfers } from "./polityTransitions.js";
+import { hasAnnexOrders, orderedAnnexations } from "./orderedAnnexations.js";
 import {
   detectExplicitBaseTerritoryScope,
   requestDemandsExhaustiveTerritorialScope,
@@ -6606,6 +6608,7 @@ const resolveRegionTransfers = async (containers, world, {
           continue;
         }
 
+        if (canonicalOwnerKey(resolveOwnerName(sourceToken)) && canonicalOwnerKey(resolveOwnerName(sourceToken)) === canonicalOwnerKey(transfer?.toCode)) continue;
         // Never degrade a failed whole-country request into one exact province.
         // That is how a malformed payload such as wholeCountry=true +
         // regionId="Guangzhouwan" turned "all of France" into one overseas
@@ -7709,6 +7712,32 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
     for (const action of screened.actions) {
       noteReceipt(receipt, "adjusted", describeBasisAction(action, { eventTitle: titleAt(path) }), basisActionNote(action, { eventTitle: titleAt(path) }));
       console.info(`[ai] ${path}.${action.family}: basis "${action.basis}" on ${action.region} — ${action.outcome === "claimed" ? "recorded as a claim" : "not applied"}.`);
+    }
+  }
+  for (const { impacts, path } of containers) {
+    if (!impacts || typeof impacts !== "object") continue;
+    const successions = successorTransfers(impacts);
+    if (successions.length === 0) continue;
+    impacts.regionTransfers = [...normalizeArray(impacts.regionTransfers), ...successions];
+    for (const transfer of successions) {
+      noteReceipt(receipt, "adjusted", `${titleAt(path) ? `Event "${titleAt(path)}": ` : ""}${transfer.toCode} takes over the land of ${transfer.fromCode}, which the event dissolves.`);
+      console.info(`[ai] ${path}.regionTransfers: ${transfer.toCode} succeeds ${transfer.fromCode}; its whole country passes with it.`);
+    }
+  }
+  if (Array.isArray(candidate?.events) && normalizeString(playerCountry) && hasAnnexOrders(actions)) {
+    const catalog = filterToRenderedRegions(await loadRegionCatalog().catch(() => []), world);
+    const overrides = world?.regionOwnershipOverrides ?? {};
+    const rowOwner = new Map(catalog.map((region) => [normalizeString(region?.id), normalizeString(region?.country)]));
+    const ownerOf = (id) => normalizeString(overrides[id]) || rowOwner.get(normalizeString(id)) || "";
+    const polities = [...new Set([...Object.keys(world?.polityOverrides ?? {}), ...Object.values(overrides), ...rowOwner.values()].map(normalizeString).filter(Boolean))];
+    for (const { index, transfers } of orderedAnnexations({ events: candidate.events, actions, playerCountry, regions: catalog, ownerOf, polities })) {
+      const { impacts, path } = containers[index];
+      if (!impacts || typeof impacts !== "object") continue;
+      impacts.regionTransfers = [...normalizeArray(impacts.regionTransfers), ...transfers];
+      for (const transfer of transfers) {
+        noteReceipt(receipt, "adjusted", `${titleAt(path) ? `Event "${titleAt(path)}": ` : ""}it carries out the order to annex ${transfer.regionName} but moved no land, so ${transfer.regionName} passes to ${transfer.toCode}.`);
+        console.info(`[ai] ${path}.regionTransfers: the player's annexation of ${transfer.regionName} added; the event told it and moved nothing.`);
+      }
     }
   }
   // Groups switched off for this game (server/gameFeatures.js): what the model

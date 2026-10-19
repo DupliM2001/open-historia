@@ -1960,11 +1960,13 @@ const mergeCustomRegionEntries = (seen, customEntries) => {
       if (entry.name) existing.name = String(entry.name);
       if (entry.country) existing.country = String(entry.country);
       if (entry.countryCode) existing.countryCode = String(entry.countryCode);
+      existing.custom = true;
       continue;
     }
     seen.set(id, {
       country: entry.country ? String(entry.country) : "",
       countryCode: entry.countryCode ? String(entry.countryCode) : "",
+      custom: true,
       id,
       name: entry.name ? String(entry.name) : id,
     });
