@@ -254,6 +254,32 @@ const ActionItem = ({ action, onDelete, locked = false }) => {
     );
 };
 
+const SectionHeader = ({ title, count, open, onToggle }) => (
+    <button
+    type="button"
+    className="oh-tap-row"
+    aria-expanded={open}
+    onClick={onToggle}
+    style={{
+        alignItems: "center",
+        background: "none",
+        border: "none",
+        color: "rgba(255,255,255,0.9)",
+        cursor: "pointer",
+        display: "flex",
+        flexShrink: 0,
+        gap: "0.5rem",
+        padding: "0.3rem 0",
+        textAlign: "left",
+        width: "100%",
+    }}
+    >
+    <span aria-hidden="true" style={{ color: "rgba(255,255,255,0.5)", display: "inline-block", fontSize: "0.7rem", transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>{"\u25B6"}</span>
+    <span style={{ flex: 1, fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>{title}</span>
+    <span data-no-translate style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem" }}>{count}</span>
+    </button>
+);
+
 const SuggestionCard = ({ topic, onQueue, queuedIds }) => (
     <div
     style={{
@@ -530,6 +556,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
     // the same shape as the timeline jump's cancel (time.jsx jumpAbortRef).
     const improveAbortRef = React.useRef(null);
     const [isSuggesting, setIsSuggesting] = React.useState(false);
+    const [openSection, setOpenSection] = React.useState("submitted");
     const inputRef = React.useRef(null);
     const lastRoundRef = React.useRef(null);
     const isMobile = useIsMobile();
@@ -616,6 +643,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         if (!trimmed || isSubmitting || isImproving) {
             return;
         }
+        setOpenSection("submitted");
 
         const nextAction = createManualAction(trimmed);
         if (!nextAction) {
@@ -744,6 +772,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         }
 
         setHasRequestedSuggestions(true);
+        setOpenSection("suggested");
         setIsSuggesting(true);
         setSuggestionError("");
         try {
@@ -914,71 +943,85 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         </button>
         </div>
 
-        {(hasRequestedSuggestions || isSuggesting || suggestions.length > 0) && (
-            <div
-            style={{
+        {(() => {
+            const showSuggested = hasRequestedSuggestions || isSuggesting || suggestions.length > 0;
+            const suggestedOpen = showSuggested && openSection === "suggested";
+            const submittedOpen = !suggestedOpen;
+            const sectionStyle = (open) => ({
                 display: "flex",
                 flexDirection: "column",
-                gap: "0.5rem",
-                // Uncapped when the whole body scrolls: a box that scrolls on
-                // its own inside one that scrolls catches the thumb halfway.
-                ...(scrollAsOne ? { flexShrink: 0 } : { maxHeight: "9rem", overflowY: "auto" }),
-                scrollbarWidth: "none",
-            }}
-            >
-            {suggestionError && !isSuggesting && (
-                <AiFailureNote incident={aiFailureIncident("suggestions-error", "AI suggestions failed", { reason: suggestionError })}>
-                {`The AI suggestions could not be generated: ${suggestionError}`}
-                </AiFailureNote>
-            )}
-            {!suggestionError && hasRequestedSuggestions && !isSuggesting && suggestions.length === 0 && (
-                <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.78rem", fontStyle: "italic", margin: 0 }}>
-                No AI suggestions generated yet.
-                </p>
-            )}
-            {suggestionsFellBack(suggestions) && !isSuggesting && (
-                <AiFailureNote incident={suggestionFallback ? aiFailureIncident("suggestions-fallback", "AI suggestions fell back", suggestionFallback) : null}>
-                The AI gave no usable suggestions, so these are generic ones.
-                </AiFailureNote>
-            )}
-            {suggestions.map((topic) => (
-                <SuggestionCard key={topic.id} topic={topic} onQueue={handleQueueSuggestion} queuedIds={queuedSuggestionIds} />
-            ))}
-            </div>
-        )}
+                minHeight: 0,
+                ...(scrollAsOne ? { flexShrink: 0 } : open ? { flex: 1, overflow: "hidden" } : { flexShrink: 0 }),
+            });
+            const listStyle = {
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.4rem",
+                ...(scrollAsOne ? null : { flex: 1, minHeight: 0, overflowY: "auto", scrollbarWidth: "none" }),
+            };
+            return (
+                <>
+                {showSuggested && (
+                    <div style={sectionStyle(suggestedOpen)}>
+                    <SectionHeader title="Suggested Actions" count={suggestions.length} open={suggestedOpen} onToggle={() => setOpenSection(suggestedOpen ? "submitted" : "suggested")} />
+                    {suggestedOpen && (
+                        <div style={{ ...listStyle, gap: "0.5rem" }}>
+                        {suggestionError && !isSuggesting && (
+                            <AiFailureNote incident={aiFailureIncident("suggestions-error", "AI suggestions failed", { reason: suggestionError })}>
+                            {`The AI suggestions could not be generated: ${suggestionError}`}
+                            </AiFailureNote>
+                        )}
+                        {!suggestionError && hasRequestedSuggestions && !isSuggesting && suggestions.length === 0 && (
+                            <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.78rem", fontStyle: "italic", margin: 0 }}>
+                            No AI suggestions generated yet.
+                            </p>
+                        )}
+                        {suggestionsFellBack(suggestions) && !isSuggesting && (
+                            <AiFailureNote incident={suggestionFallback ? aiFailureIncident("suggestions-fallback", "AI suggestions fell back", suggestionFallback) : null}>
+                            The AI gave no usable suggestions, so these are generic ones.
+                            </AiFailureNote>
+                        )}
+                        {suggestions.map((topic) => (
+                            <SuggestionCard key={topic.id} topic={topic} onQueue={handleQueueSuggestion} queuedIds={queuedSuggestionIds} />
+                        ))}
+                        </div>
+                    )}
+                    </div>
+                )}
 
-        <div style={{ display: "flex", flexDirection: "column", ...(scrollAsOne ? { flexShrink: 0 } : { flex: 1, minHeight: "12rem", overflow: "hidden" }) }}>
-        <p
-        style={{
-            color: "rgba(255,255,255,0.9)",
-            fontSize: "0.78rem",
-            fontWeight: 700,
-            letterSpacing: "0.06em",
-            margin: "0 0 0.5rem 0",
-            textTransform: "uppercase",
-        }}
-        >
-        Your Submitted Actions
-        </p>
-
-        <div
-        style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.4rem",
-            ...(scrollAsOne ? null : { flex: 1, overflowY: "auto", scrollbarWidth: "none" }),
-        }}
-        >
-        {submittedActions.length === 0 && (
-            <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.8rem", fontStyle: "italic", margin: 0 }}>
-            No actions submitted yet.
-            </p>
-        )}
-        {submittedActions.map(({ normalized, originalIndex }) => (
-            <ActionItem key={normalized.id || originalIndex} action={normalized} locked={turnRunning && movesUnit(normalized)} onDelete={() => handleDelete(originalIndex)} />
-        ))}
-        </div>
-        </div>
+                <div style={sectionStyle(submittedOpen)}>
+                {showSuggested ? (
+                    <SectionHeader title="Your Submitted Actions" count={submittedActions.length} open={submittedOpen} onToggle={() => setOpenSection(submittedOpen ? "suggested" : "submitted")} />
+                ) : (
+                    <p
+                    style={{
+                        color: "rgba(255,255,255,0.9)",
+                        fontSize: "0.78rem",
+                        fontWeight: 700,
+                        letterSpacing: "0.06em",
+                        margin: "0 0 0.5rem 0",
+                        textTransform: "uppercase",
+                    }}
+                    >
+                    Your Submitted Actions
+                    </p>
+                )}
+                {submittedOpen && (
+                    <div style={listStyle}>
+                    {submittedActions.length === 0 && (
+                        <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.8rem", fontStyle: "italic", margin: 0 }}>
+                        No actions submitted yet.
+                        </p>
+                    )}
+                    {submittedActions.map(({ normalized, originalIndex }) => (
+                        <ActionItem key={normalized.id || originalIndex} action={normalized} locked={turnRunning && movesUnit(normalized)} onDelete={() => handleDelete(originalIndex)} />
+                    ))}
+                    </div>
+                )}
+                </div>
+                </>
+            );
+        })()}
         </div>
 
         {improveFailure && (
