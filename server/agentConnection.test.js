@@ -145,9 +145,21 @@ describe("Agent folder", () => {
       assert.doesNotMatch(subAgent, /^effort:/m, name);
     }
 
+    // OpenCode: the same server in its own settings, the same commands, and the sub-agents as its own.
+    const openCode = JSON.parse(readFileSync(path.join(folder, "opencode.json"), "utf8")).mcp["open-historia"];
+    assert.equal(openCode.type, "remote");
+    assert.equal(openCode.enabled, true);
+    for (const name of ["answer", "skip"]) assert.match(readFileSync(path.join(folder, ".opencode", "command", `${name}.md`), "utf8"), /list_requests/, name);
+    for (const name of ["skip-writer", "skip-quick", "chat-writer"]) {
+      const subAgent = readFileSync(path.join(folder, ".opencode", "agent", `${name}.md`), "utf8");
+      assert.match(subAgent, /^---\ndescription: .+\nmode: subagent\n---\n/, name);
+      assert.match(subAgent, /read_request/, name);
+    }
+
     const firstServer = mcpSettings(dataDir);
     assert.equal(firstServer.url, `http://127.0.0.1:${first.port}/api/agent/mcp`);
     const firstToken = firstServer.headers.Authorization;
+    assert.deepEqual([openCode.url, openCode.headers.Authorization], [firstServer.url, firstToken]);
     assert.match(firstToken, /^Bearer [A-Za-z0-9_-]{32,}$/);
 
     const reported = await game(first.port).folder();
@@ -156,6 +168,8 @@ describe("Agent folder", () => {
     await stopServer(first.child);
     const second = await startServer(dataDir);
     const secondServer = mcpSettings(dataDir);
+    const secondOpenCode = JSON.parse(readFileSync(path.join(folder, "opencode.json"), "utf8")).mcp["open-historia"];
+    assert.deepEqual([secondOpenCode.url, secondOpenCode.headers.Authorization], [secondServer.url, secondServer.headers.Authorization]);
     assert.equal(secondServer.url, `http://127.0.0.1:${second.port}/api/agent/mcp`);
     assert.notEqual(secondServer.headers.Authorization, firstToken);
   });

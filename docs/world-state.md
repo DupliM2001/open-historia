@@ -153,7 +153,7 @@ A Connection answered by an Agent on the player's own subscription rather than b
 _Avoid_: Subscription mode, bridge (for the Connection itself)
 
 **Agent**:
-The program that answers an Agent Connection: Claude Code, Codex or Antigravity CLI, started and signed in by the player, never by the game. It returns answers; it never writes the save.
+The program that answers an Agent Connection: Claude Code, Codex, OpenCode or Antigravity CLI, started and signed in by the player, never by the game. It returns answers; it never writes the save.
 _Avoid_: Bot, AI player
 
 **Agent queue**:

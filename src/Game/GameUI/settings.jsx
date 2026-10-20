@@ -1009,6 +1009,7 @@ const ensureConnectionId = (connections) => connections[0]?.id ?? addConnection(
 const AGENT_COMMANDS = [
     { name: "Claude Code", command: "claude" },
     { name: "Codex", command: "codex" },
+    { name: "OpenCode", command: "opencode" },
     { name: "Antigravity CLI", command: "agy" },
 ];
 
@@ -1039,7 +1040,7 @@ const AgentConnectionHelp = ({ connection = null }) => {
         <div style={fieldGroupStyle}>
         <div style={helperStyle}>
         <p style={{ margin: "0 0 0.5rem" }}>What you start (the kinds ticked below) waits for your own Agent, on your own subscription. No API key is used.</p>
-        <p style={{ margin: "0 0 0.5rem" }}>Open a terminal in the Agent folder, start Claude Code, Codex or Antigravity CLI there, signed in with your own account, and type /answer whenever something is waiting. One /answer answers all of it, a whole time skip included.</p>
+        <p style={{ margin: "0 0 0.5rem" }}>Open a terminal in the Agent folder, start Claude Code, Codex, OpenCode or Antigravity CLI there, signed in with your own account, and type /answer whenever something is waiting. One /answer answers all of it, a whole time skip included.</p>
         <p style={{ margin: "0 0 0.5rem" }}>The first /answer asks which models to use for Open Historia. The game never starts your Agent and never reads its sign-in.</p>
         <p style={{ margin: "0 0 0.5rem" }}>Anything unticked, and what the game starts by itself (background diplomacy, idle chats, automatic stat tracking), goes to the entry below it.</p>
         <p style={{ margin: 0 }}>With nothing below it, those don't run. Add an entry below it, such as a free Gemini key, to keep them.</p>

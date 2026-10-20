@@ -1187,7 +1187,7 @@ const REQUEST_ACTIVITY_TEXTS = {
     thinking: "The model is thinking…",
     writing: "The model is writing its answer…",
     // In the Agent queue (ADR 0008): nothing happens until the player answers.
-    agent: "Waiting for your Agent. Type /answer in your Claude Code, Codex or Antigravity CLI, opened in the Agent folder.",
+    agent: "Waiting for your Agent. Type /answer in your Claude Code, Codex, OpenCode or Antigravity CLI, opened in the Agent folder.",
 };
 // Added once the request has been open a minute: by then a player who does not
 // know a thinking model can take ten is reaching for Cancel.

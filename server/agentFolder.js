@@ -1,7 +1,7 @@
 /*! Open Historia — the Agent folder © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 
-// The folder the player opens their own Agent in (Claude Code, Codex or
-// Antigravity CLI) to answer time skips through `/skip`
+// The folder the player opens their own Agent in (Claude Code, Codex, OpenCode
+// or Antigravity CLI) to answer time skips through `/skip`
 // (docs/adr/0008-subscription-agents-answer-through-the-game.md).
 //
 // It lives in the data folder, so an update does not remove it, and everything
@@ -44,7 +44,7 @@ export const roleForTask = (task) => {
 const AGENTS_MD = `# Open Historia: answering what the player starts
 
 This folder belongs to the Open Historia game. The player plays in the game and
-opens their own Agent here (Claude Code, Codex or Antigravity CLI). When the
+opens their own Agent here (Claude Code, Codex, OpenCode or Antigravity CLI). When the
 game shows something waiting (a time skip, an advisor message, a foreign
 leader's reply, a Game Master command, an interactive event), the player types
 \`/answer\` (or \`/skip\`, the same command under its first name). The game writes
@@ -210,6 +210,17 @@ export const writeAgentSubagents = (folder) => {
   }
 };
 
+const openCodeCommand = ({ name, firstName = false }) => `---
+description: Answer what the Open Historia game is waiting on (time skips, chats, Game Master, events).${firstName ? " The same command as /answer, under its first name." : ""}
+---
+
+${ANSWER_STEPS}
+The player typed /${name} $ARGUMENTS
+`;
+
+const openCodeSubagent = ({ description }) => subagentDefinition({ name: "", description, model: "" })
+  .replace(/^---\nname: \n(description: [^\n]*\n)tools: [^\n]*\n---/, "---\n$1mode: subagent\n---");
+
 const writeIfChanged = (file, text) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   try {
@@ -250,6 +261,17 @@ export const writeAgentFolder = (folder, { url, token }) => {
   );
   writeIfChanged(path.join(folder, ".agents", "skills", "answer", "SKILL.md"), skillFile({ name: "answer", playerOnly: false }));
   writeIfChanged(path.join(folder, ".agents", "skills", "skip", "SKILL.md"), skillFile({ name: "skip", playerOnly: false, firstName: true }));
+
+  // OpenCode
+  writeIfChanged(
+    path.join(folder, "opencode.json"),
+    `${JSON.stringify({ $schema: "https://opencode.ai/config.json", mcp: { [AGENT_MCP_SERVER_NAME]: { type: "remote", url, enabled: true, headers: { Authorization: authorization } } } }, null, 2)}\n`,
+  );
+  writeIfChanged(path.join(folder, ".opencode", "command", "answer.md"), openCodeCommand({ name: "answer" }));
+  writeIfChanged(path.join(folder, ".opencode", "command", "skip.md"), openCodeCommand({ name: "skip", firstName: true }));
+  for (const [role, { subagent }] of Object.entries(AGENT_ROLES)) {
+    writeIfChanged(path.join(folder, ".opencode", "agent", `${subagent}.md`), openCodeSubagent({ description: SUBAGENT_DESCRIPTIONS[role] }));
+  }
 
   // Prompt files of an earlier run: its queue is gone, and so are they.
   const requests = path.join(folder, AGENT_REQUESTS_DIR);

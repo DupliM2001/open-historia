@@ -32,7 +32,7 @@ const FORMER_GEMINI_DEFAULT = "gemini-3.5-flash-lite";
 export const OPENAI_DEFAULT_MODEL = "gpt-6-luna";
 
 // An Agent Connection (docs/adr/0008-subscription-agents-answer-through-the-game.md):
-// answered by the player's own Claude Code, Codex or Antigravity CLI through
+// answered by the player's own Claude Code, Codex, OpenCode or Antigravity CLI through
 // the local server's Agent queue, never by a provider's API. Desktop only,
 // since the queue lives on the local server.
 export const AGENT_PROVIDER = "agent";
@@ -77,8 +77,8 @@ export const PROVIDER_OPTIONS = [
         value: AGENT_PROVIDER,
         label: "Your own Agent",
         group: "Your subscription",
-        description: "Claude Code, Codex or Antigravity CLI answers what you start when you type /answer",
-        searchTerms: ["claude code", "codex", "antigravity", "subscription", "pro", "max", "plus", "/answer", "/skip", "agent"],
+        description: "Claude Code, Codex, OpenCode or Antigravity CLI answers what you start when you type /answer",
+        searchTerms: ["claude code", "codex", "opencode", "open code", "antigravity", "subscription", "pro", "max", "plus", "/answer", "/skip", "agent"],
     },
 ];
 
