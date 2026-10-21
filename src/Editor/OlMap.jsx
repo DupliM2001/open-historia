@@ -61,7 +61,7 @@ import { createEmpty as emptyExtent, extend as extendExtent } from "ol/extent";
 import { buildPoliticalBoundaryTopology } from "../Game/Map/vnext/politicalBoundaryTopology.js";
 import { buildGroupAreaIndex, deriveGroupAreas } from "../Game/Map/vnext/groupAreas.js";
 import { getMarkerPresentation } from "../Game/Map/vnext/presentationPolicy.js";
-import { loadSeedFeatures } from "./regionImport.js";
+import { LEGACY_MAP_KIND, loadSeedFeatures, seedUrlOf } from "./regionImport.js";
 import { ownersMatchingQuery, regionMatchesQuery } from "./regionSearch.js";
 import { newId } from "./useMapDocument.js";
 import { mergeRegionFeatures, trackMove } from "./shapeEdits.js";
@@ -1447,11 +1447,11 @@ const OlMap = ({
     };
 
     let alive = true;
-    if (seedKind === "import-world") {
+    if (seedKind === "import-world" || seedKind === LEGACY_MAP_KIND) {
       // A map opened or started before the world arrives wins: the seed used
       // to be added on top of it.
       const token = loadToken;
-      loadSeedFeatures().then((features) => {
+      loadSeedFeatures({ url: seedUrlOf(seedKind) }).then((features) => {
         if (!alive || !regionSourceRef.current || token !== loadToken) return;
         regionSourceRef.current.addFeatures(features);
         onRegionCount?.(regionSourceRef.current.getFeatures().length);
@@ -2999,9 +2999,9 @@ const OlMap = ({
       // Both reseeds resolve once the world is on the map, so the Workshop can
       // wait for it (MapEditor's hydration keeps Save disabled until then): true
       // when it landed, false when a newer load had replaced it first.
-      reseedWorld: () => {
+      reseedWorld: (kind = "import-world") => {
         const token = startLoad();
-        return loadSeedFeatures().then((feats) => {
+        return loadSeedFeatures({ url: seedUrlOf(kind) }).then((feats) => {
           if (!alive || token !== loadToken) return false;
           clearHistory();
           regionSource.clear();

@@ -112,7 +112,7 @@ const normalizeRegionsForGame = (regionsFC) => {
 // a merged region, or is a from-scratch (blank) document — anything the stock
 // pmtiles cannot reproduce. Pure re-ownership world maps stay tier 1.
 const detectCustomGeometry = (regionsFC, kind) => {
-  if (kind === "blank") return true;
+  if (kind === "blank" || kind === "modern-day") return true;
   for (const f of regionsFC?.features || []) {
     const props = f.properties || {};
     const id = props.id != null ? String(props.id) : f.id != null ? String(f.id) : "";

@@ -95,6 +95,9 @@ const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExp
           <button style={menuItem} onClick={() => { onNew("import-world"); close(); }}>
             <Icon name="layers" size={15} /> New — world map
           </button>
+          <button style={menuItem} onClick={() => { onNew("modern-day"); close(); }}>
+            <Icon name="layers" size={15} /> New — legacy world map
+          </button>
           <button style={menuItem} onClick={() => { onNew("blank"); close(); }}>
             <Icon name="draw" size={15} /> New — blank map
           </button>

@@ -1010,9 +1010,9 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
 
   const newDoc = async (kind) => {
     if (!(await settleBeforeReplacing("This map has changes that could not be saved. Start a new map and lose them?"))) return;
-    d.setDoc(createDocument({ name: kind === "blank" ? "Untitled Map" : "World Map", kind }));
+    d.setDoc(createDocument({ name: kind === "blank" ? "Untitled Map" : kind === "modern-day" ? "Legacy World Map" : "World Map", kind }));
     if (kind === "blank") api?.loadRegions({ type: "FeatureCollection", features: [] });
-    else writeAgainOnceLoaded(api?.reseedWorld());
+    else writeAgainOnceLoaded(api?.reseedWorld(kind));
     setCustomBg(null);
     markLoaded(null);
   };

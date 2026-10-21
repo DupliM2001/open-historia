@@ -23,19 +23,23 @@ import { worldFileUrl } from "../runtime/worldFiles.js";
 // fallback page, which parses to zero regions.
 export const SEED_URL = worldFileUrl("seed");
 
+export const LEGACY_MAP_KIND = "modern-day";
+export const LEGACY_MAP_URL = "/api/scenarios/default/assets/regionsGeojson";
+export const seedUrlOf = (kind) => (kind === LEGACY_MAP_KIND ? LEGACY_MAP_URL : SEED_URL);
+
 // Fetch + parse the seed FeatureCollection into OL features (EPSG:3857).
 // Returns [] and warns if the seed asset is missing (run the extract script).
-export const loadSeedFeatures = async ({ signal } = {}) => {
+export const loadSeedFeatures = async ({ signal, url = SEED_URL } = {}) => {
   let res;
   try {
-    res = await fetch(SEED_URL, { signal });
+    res = await fetch(url, { signal });
   } catch (err) {
     console.warn("[editor] failed to fetch region seed:", err);
     return [];
   }
   if (!res.ok) {
     console.warn(
-      `[editor] ${SEED_URL} not found (${res.status}). ` +
+      `[editor] ${url} not found (${res.status}). ` +
         "Run: node scripts/extract-regions.mjs",
     );
     return [];
