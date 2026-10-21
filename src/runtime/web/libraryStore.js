@@ -629,6 +629,7 @@ const bundledMapUrlOf = (record) => {
   return EARLIER_BUILT_IN_MAPS?.[stamp] || null;
 };
 const usesBuiltInMap = (record) => Boolean(bundledMapUrlOf(record));
+export const earlierBuiltInMapUrl = (stamp) => (Object.prototype.hasOwnProperty.call(EARLIER_BUILT_IN_MAPS || {}, stamp) ? EARLIER_BUILT_IN_MAPS[stamp] : null);
 const builtInRegionsPromises = new Map();
 const fetchBuiltInRegionsBytes = (url) => {
   if (!builtInRegionsPromises.has(url)) {

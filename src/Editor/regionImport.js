@@ -23,9 +23,14 @@ import { worldFileUrl } from "../runtime/worldFiles.js";
 // fallback page, which parses to zero regions.
 export const SEED_URL = worldFileUrl("seed");
 
+export const WORLD_MAP_KIND = "fault-lines";
 export const LEGACY_MAP_KIND = "modern-day";
-export const LEGACY_MAP_URL = "/api/scenarios/default/assets/regionsGeojson";
-export const seedUrlOf = (kind) => (kind === LEGACY_MAP_KIND ? LEGACY_MAP_URL : SEED_URL);
+const SEED_URLS = {
+  [WORLD_MAP_KIND]: "/api/runtime/earlier-maps/fault-lines-2014-v1",
+  [LEGACY_MAP_KIND]: "/api/scenarios/default/assets/regionsGeojson",
+};
+export const SEEDED_KINDS = ["import-world", WORLD_MAP_KIND, LEGACY_MAP_KIND];
+export const seedUrlOf = (kind) => SEED_URLS[kind] || SEED_URL;
 
 // Fetch + parse the seed FeatureCollection into OL features (EPSG:3857).
 // Returns [] and warns if the seed asset is missing (run the extract script).

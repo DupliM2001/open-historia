@@ -1581,6 +1581,14 @@ const seedRegionsBytes = () => {
 // map, where a size is all there is to tell it by (its record lost beside it).
 const BUILT_IN_EARLIER_REGIONS_BYTES = [];
 
+const EARLIER_BUILT_IN_MAPS_DIR = path.join(PROJECT_ROOT, "server", "seed", "earlier");
+export const resolveEarlierBuiltInMap = (stamp) => {
+  const name = String(stamp || "");
+  const sourcePath = path.join(EARLIER_BUILT_IN_MAPS_DIR, `${name}.geojson`);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name) || !fs.existsSync(sourcePath)) throw new Error("There is no such map.");
+  return sourcePath;
+};
+
 // Once per process while the copy stays whole: the packaged seed cannot change
 // while the server runs, and ensure* runs on the read path (every poll), so the
 // stamp is compared once. A copy that loses its world.json underneath a running

@@ -46,6 +46,7 @@ import {
   resolveScenarioCoarseRegionsAsset,
   resolveScenarioUploadAsset,
   resolveRuntimeBinaryAsset,
+  resolveEarlierBuiltInMap,
   setActiveGame,
   setActiveGameHold,
   setSelectedScenario,
@@ -1176,6 +1177,14 @@ app.put("/api/runtime/json/:assetKey", jsonParser, (req, res) => {
     res.send(JSON.stringify(asset.data));
   } catch (error) {
     sendError(res, 400, error);
+  }
+});
+
+app.get("/api/runtime/earlier-maps/:stamp", (req, res) => {
+  try {
+    streamBinaryFile(req, res, resolveEarlierBuiltInMap(req.params.stamp), "application/geo+json");
+  } catch (error) {
+    sendError(res, 404, error);
   }
 });
 

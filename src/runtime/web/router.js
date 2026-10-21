@@ -10,7 +10,7 @@ import { errorResponse, jsonResponse } from "./util.js";
 import { handleMapEditor } from "./editorStore.js";
 import { handleBasemaps } from "./basemapStore.js";
 import { handleFlags } from "./flagStore.js";
-import { handleLibrary, handleScenarios, handleGames, handleTrash, handleRuntimeJson, handleRuntimeSnapshot, handleRuntimeTurnCommit, handleScenarioInstitutionLogo, handleRuntimeInstitutionLogo, getScenarioPmtilesOverride } from "./libraryStore.js";
+import { handleLibrary, handleScenarios, handleGames, handleTrash, handleRuntimeJson, handleRuntimeSnapshot, handleRuntimeTurnCommit, handleScenarioInstitutionLogo, handleRuntimeInstitutionLogo, getScenarioPmtilesOverride, earlierBuiltInMapUrl } from "./libraryStore.js";
 import { handleLang, handleUiSettings } from "./settingsStore.js";
 import { mapArchiveUrl } from "../worldFiles.js";
 
@@ -87,6 +87,12 @@ const route = async (request, url) => {
       method: method === "HEAD" ? "HEAD" : "GET",
       headers: request.headers,
     }));
+  }
+
+  if (domain === "runtime" && segments[0] === "earlier-maps") {
+    const mapUrl = earlierBuiltInMapUrl(segments[1]);
+    if (!mapUrl) return errorResponse("There is no such map.", 404);
+    return fetch(mapUrl, { cache: "force-cache" });
   }
 
   const ctx = { method, url, segments, query: url.searchParams, rangeHeader, prefer: request.headers.get("Prefer"), ...(await readBody(request, isAssetUpload(domain, segments, method))) };

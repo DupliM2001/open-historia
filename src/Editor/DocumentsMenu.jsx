@@ -92,7 +92,7 @@ const DocumentsMenu = ({ currentId, author, onAuthorChange, onNew, onSave, onExp
             />
           </div>
           <div style={{ height: 1, background: "rgba(255,255,255,0.1)", margin: "2px 0 4px" }} />
-          <button style={menuItem} onClick={() => { onNew("import-world"); close(); }}>
+          <button style={menuItem} onClick={() => { onNew("fault-lines"); close(); }}>
             <Icon name="layers" size={15} /> New — world map
           </button>
           <button style={menuItem} onClick={() => { onNew("modern-day"); close(); }}>

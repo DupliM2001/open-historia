@@ -125,11 +125,12 @@ test("a Mercator map that only disables the globe or the looping still saves tha
   assert.deepEqual(seed.world.projection, { type: "mercator", globe: false, wrap: false, laidOut: true });
 });
 
-test("a map started from the legacy world map saves its own regions, the world map only its owners", () => {
+test("a map started from the world map or the legacy world map saves its own regions, the stock world only its owners", () => {
   const regions = { type: "FeatureCollection", features: [{ type: "Feature", properties: { id: "MNG.18_1", owner: "Mongolia", typeId: "land" }, geometry: { type: "Polygon", coordinates: [[[106, 50], [107, 50], [107, 51], [106, 50]]] } }] };
-  const legacy = buildGameSeed({ ...doc([]), metadata: { ...doc([]).metadata, kind: "modern-day" } }, regions);
-  assert.equal(legacy.world.customRegions, true);
-  const world = buildGameSeed(doc([]), regions);
-  assert.equal(world.world.customRegions, false);
-  assert.equal(world.world.regionOwnershipOverrides["MNG.18_1"], "Mongolia");
+  for (const kind of ["fault-lines", "modern-day"]) {
+    assert.equal(buildGameSeed({ ...doc([]), metadata: { ...doc([]).metadata, kind } }, regions).world.customRegions, true, kind);
+  }
+  const stock = buildGameSeed(doc([]), regions);
+  assert.equal(stock.world.customRegions, false);
+  assert.equal(stock.world.regionOwnershipOverrides["MNG.18_1"], "Mongolia");
 });

@@ -165,7 +165,7 @@ export const openStoredDocument = (stored) => {
 
 export const useMapDocument = (initial) => {
   const [doc, setDoc] = useState(
-    () => initial || createDocument({ name: "2025 World", kind: "import-world" }),
+    () => initial || createDocument({ name: "2025 World", kind: "fault-lines" }),
   );
   const [colors, setColors] = useState({});
   const [activeTool, setActiveTool] = useState("select");

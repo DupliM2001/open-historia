@@ -61,7 +61,7 @@ import { createEmpty as emptyExtent, extend as extendExtent } from "ol/extent";
 import { buildPoliticalBoundaryTopology } from "../Game/Map/vnext/politicalBoundaryTopology.js";
 import { buildGroupAreaIndex, deriveGroupAreas } from "../Game/Map/vnext/groupAreas.js";
 import { getMarkerPresentation } from "../Game/Map/vnext/presentationPolicy.js";
-import { LEGACY_MAP_KIND, loadSeedFeatures, seedUrlOf } from "./regionImport.js";
+import { loadSeedFeatures, SEEDED_KINDS, seedUrlOf } from "./regionImport.js";
 import { ownersMatchingQuery, regionMatchesQuery } from "./regionSearch.js";
 import { newId } from "./useMapDocument.js";
 import { mergeRegionFeatures, trackMove } from "./shapeEdits.js";
@@ -1447,7 +1447,7 @@ const OlMap = ({
     };
 
     let alive = true;
-    if (seedKind === "import-world" || seedKind === LEGACY_MAP_KIND) {
+    if (SEEDED_KINDS.includes(seedKind)) {
       // A map opened or started before the world arrives wins: the seed used
       // to be added on top of it.
       const token = loadToken;
