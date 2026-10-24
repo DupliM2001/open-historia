@@ -53,6 +53,23 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // "there is a report that on the android version during a time skip it just completely freezes permenantly and
+    // you cant click any buttons or do anything" (the owner, 2026-10-23).
+    id: "2026-10-skip-freeze",
+    kind: "minor",
+    date: "2026-10-24",
+    banners: [
+      {
+        title: "Time skips no longer freeze",
+        items: [
+          "A time skip no longer freezes the game on phones in scenarios with many countries, vassals and treaties, such as 1836: The Victorian Era.",
+          "The game works out who is who in the world's treaties and vassals once per check instead of once for every entry, so skips start much sooner everywhere.",
+          "Nothing in your games changes: the same countries, treaties and vassals, worked out faster.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-games-and-groups",
     kind: "minor",
     date: "2026-10-17",
