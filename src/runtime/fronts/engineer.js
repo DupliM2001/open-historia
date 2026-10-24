@@ -26,7 +26,7 @@ import { applyFortifyOp } from "./fortifyOps.js";
 import { projectorOf } from "./frame.js";
 import { holderAt } from "./record.js";
 import { standsOn } from "./walls.js";
-import { fortifyCostFor } from "../fortifyCost.js";
+import { fortifyCostReckoner } from "../fortifyCost.js";
 import { normalizeFortifications } from "../warGeography.js";
 
 export const ENGINEER_OUTMATCHED = 0.8;
@@ -135,21 +135,23 @@ export const engineerLines = (world, { players = [], date = "", chart = null } =
       if (!owner || played.has(fold(list(record.sides?.[side])[0])) || building(owner)) continue;
       let points = frontLineFor(record, side);
       let placed = false;
+      // (The country's part of the cost, read once: `next` stays as it is until a line is placed.)
+      const costOf = fortifyCostReckoner(next, owner);
       while (!placed && points.length >= 2) {
         let fits = 0;
         for (let level = ENGINEER_LEVEL_MOST; level >= 3; level -= 1) {
-          if (fortifyCostFor(next, owner, points, level).days <= ENGINEER_DAYS_MOST) {
+          if (costOf(points, level).days <= ENGINEER_DAYS_MOST) {
             fits = level;
             break;
           }
         }
         if (fits === 0) {
           // (Too long to build in time at any level: shorter, about the same middle.)
-          if (points.length <= 2 || fortifyCostFor(next, owner, points, 3).km <= ENGINEER_KM_LEAST) break;
+          if (points.length <= 2 || costOf(points, 3).km <= ENGINEER_KM_LEAST) break;
           points = points.slice(1, -1);
           continue;
         }
-        const cost = fortifyCostFor(next, owner, points, fits);
+        const cost = costOf(points, fits);
         const done = applyFortifyOp(next, { op: "fortify", points, level: fits, name: `${clean(owner)} line before ${clean(record.name)}` }, { player: owner, date, chart });
         if (!done.error) {
           next = done.world;

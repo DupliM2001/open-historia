@@ -170,10 +170,10 @@ const legacyPowerTier = (world, polity) => {
   return "";
 };
 
-const institutionPowerContribution = (world, polity) => {
+const institutionPowerContribution = (world, polity, identityIndex = null) => {
   let score = 0;
   const reasons = [];
-  for (const { institution, member } of institutionsForPolity(world, polity, { includeSuspended: false })) {
+  for (const { institution, member } of institutionsForPolity(world, polity, { includeSuspended: false, identityIndex })) {
     const priority = institutionStrategicPriority(institution);
     if (member.status !== "member") continue;
     const roleBoost = member.role === "leader" ? 8 : member.role === "leading-member" ? 5 : 0;
@@ -207,7 +207,9 @@ const baselinePowerScore = (world, polity) => {
   return isFinitePowerScore(value) ? round1(clamp(value, 0, 100)) : null;
 };
 
-export const estimateNativePowerScore = (world, polityInput, referenceInput = null) => {
+// `identityIndex`: the polity identity index of this same world, when the caller
+// scores many polities of it in turn (refreshPowerStatus); otherwise built as needed.
+export const estimateNativePowerScore = (world, polityInput, referenceInput = null, identityIndex = null) => {
   const polity = canonicalPolity(polityInput, world);
   if (!polity) {
     return {
@@ -383,6 +385,10 @@ export const refreshPowerStatus = (worldLike, { date = "", round = 0, immediate 
   const powerStatus = normalizePowerStatus(world.powerStatus, world);
   const polities = activePowerPolities(world);
   const reference = buildPowerReference(world);
+  // Every polity is scored against this one copy of the world, whose polities and
+  // map this loop does not change: one identity index serves them all, where
+  // each built its own (221 in one time skip of a big scenario, 2026-10-24).
+  const identityIndex = buildPolityIdentityIndex(world);
 
   for (const rawPolity of polities) {
     const polity = canonicalPolity(rawPolity, world);
@@ -392,7 +398,7 @@ export const refreshPowerStatus = (worldLike, { date = "", round = 0, immediate 
       delete powerStatus.byPolity[polity];
       continue;
     }
-    const native = estimateNativePowerScore({ ...world, powerStatus }, polity, reference);
+    const native = estimateNativePowerScore({ ...world, powerStatus }, polity, reference, identityIndex);
     const prior = powerStatus.byPolity[polity];
     if (!isFinitePowerScore(native.score)) {
       if (!prior) {

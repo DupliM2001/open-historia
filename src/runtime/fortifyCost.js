@@ -139,21 +139,30 @@ export const fundingOf = (world, country) => {
 //   { km, level, funding, people, men, days }
 // `people` and `men` are 0 where its people are not known; it is then reckoned
 // as a country of REFERENCE_MEN.
-export const fortifyCostFor = (world, country, points, level) => {
-  const km = lineKm(points);
+//
+// fortifyCostReckoner(world, country) works out the country's part once and
+// prices any line and level with it: (points, level) => the same answer. The
+// engineers price up to seven heights of a line, shortening it as they go, and
+// read the country's sheets, people and figures each time (2026-10-24).
+export const fortifyCostReckoner = (world, country) => {
   const funding = fundingOf(world, country);
   const people = peopleOf(world, country);
   const men = people > 0 ? Math.round(people * manpowerShareOf(world, country)) : 0;
-  const height = fortifyLevelOf(level);
-  return {
-    km: Math.round(km * 10) / 10,
-    level: height,
-    funding: Math.round(funding * 100) / 100,
-    people,
-    men,
-    days: buildDays({ km, level: height, funding, men }),
+  return (points, level) => {
+    const km = lineKm(points);
+    const height = fortifyLevelOf(level);
+    return {
+      km: Math.round(km * 10) / 10,
+      level: height,
+      funding: Math.round(funding * 100) / 100,
+      people,
+      men,
+      days: buildDays({ km, level: height, funding, men }),
+    };
   };
 };
+
+export const fortifyCostFor = (world, country, points, level) => fortifyCostReckoner(world, country)(points, level);
 
 // How a build time is said: { count, unit }, the unit "day" under a fortnight,
 // "week" under two months, "month" under two years and "year" beyond.

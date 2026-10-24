@@ -30,10 +30,65 @@ export const POLITICAL_REGIME_CHARACTERS = Object.freeze([
 ]);
 const POLITICAL_REGIME_CHARACTER_SET = new Set(POLITICAL_REGIME_CHARACTERS);
 
-const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+// Every string of every political record is cleaned on every world check, and
+// a time skip makes dozens of checks over the same records: the same strings,
+// cleaned the same way each time. A string's answer is kept (only strings: a
+// number or an object is cleaned as it comes), and the store is emptied when
+// it passes TEXT_MEMO_LIMIT entries (2026-10-24).
+const TEXT_MEMO_LIMIT = 50000;
+const rememberedText = (fold) => {
+    const memo = new Map();
+    return (value) => {
+        if (typeof value !== "string") return fold(value);
+        let answer = memo.get(value);
+        if (answer === undefined) {
+            answer = fold(value);
+            if (memo.size >= TEXT_MEMO_LIMIT) memo.clear();
+            memo.set(value, answer);
+        }
+        return answer;
+    };
+};
+
+const clean = rememberedText((value) => String(value ?? "").replace(/\s+/g, " ").trim());
+const lowerKey = rememberedText((text) => text.toLocaleLowerCase());
+
+// A political record is plain data (objects, arrays, strings, numbers), and
+// copying it by hand is several times quicker than structuredClone, whose
+// cost is mostly fixed per call: a time skip copies every party, bloc and
+// office of every country many times over, and on a phone that was the largest
+// cost of each world check (2026-10-24). The copy is the same: holes in arrays
+// stay holes, a key holding undefined stays. Anything that is not plain data
+// (a Date, a Map, a cycle) is left to structuredClone, as before.
+const NOT_PLAIN = Symbol("not plain data");
+const copyPlainData = (value, depth) => {
+    if (value === null || typeof value !== "object") return typeof value === "function" ? NOT_PLAIN : value;
+    if (depth > 64) return NOT_PLAIN;
+    if (Array.isArray(value)) {
+        const out = new Array(value.length);
+        for (let index = 0; index < value.length; index += 1) {
+            if (!(index in value)) continue;
+            const item = copyPlainData(value[index], depth + 1);
+            if (item === NOT_PLAIN) return NOT_PLAIN;
+            out[index] = item;
+        }
+        return out;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return NOT_PLAIN;
+    const out = {};
+    for (const key of Object.keys(value)) {
+        const item = copyPlainData(value[key], depth + 1);
+        if (item === NOT_PLAIN) return NOT_PLAIN;
+        out[key] = item;
+    }
+    return out;
+};
 
 const cloneActorValue = (value) => {
     if (!value || typeof value !== "object") return value;
+    const copy = copyPlainData(value, 0);
+    if (copy !== NOT_PLAIN) return copy;
     if (typeof structuredClone === "function") return structuredClone(value);
     return JSON.parse(JSON.stringify(value));
 };
@@ -159,7 +214,7 @@ const cleanStringArray = (value, limit = 32) => {
     const seen = new Set();
     for (const entry of source) {
         const text = clean(entry);
-        const key = text.toLocaleLowerCase();
+        const key = lowerKey(text);
         if (!text || seen.has(key)) continue;
         seen.add(key);
         out.push(text);
@@ -718,9 +773,25 @@ export const derivePoliticalDecisionAuthority = (actorLike) => {
     };
 };
 
+// The fields normalizePoliticalActorRecord builds again from the input (each
+// is assigned or deleted below), so copying them first was wasted work: the
+// whole record was deep-copied, then each of these copied again from the
+// input. In a time skip on a phone that doubled copy was the largest single
+// cost of every world check (2026-10-24).
+const REBUILT_ACTOR_FIELDS = new Set([
+    "government", "parties", "powerBlocs", "politicalSystem", "leader",
+    "goals", "fears", "ambitions", "domesticPressures", "tags",
+    "traits", "perceptions", "behavioralDisposition", "politicalPressures",
+    "name", "ideology",
+]);
+
 export const normalizePoliticalActorRecord = (value, fallbackPolityKey = "") => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const out = cloneActorValue(value);
+    // Every other field is copied; a rebuilt one keeps its place in the record
+    // (null until it is assigned below, or deleted), so the key order is as
+    // it always was.
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = REBUILT_ACTOR_FIELDS.has(key) ? null : cloneActorValue(value[key]);
     const polityKey = clean(value.polityKey || fallbackPolityKey);
     if (polityKey) out.polityKey = polityKey;
 

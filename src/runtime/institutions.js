@@ -966,14 +966,15 @@ export const normalizeInstitutionRecord = (value, fallbackId = "", world = {}, i
   };
 };
 
-export const normalizeInstitutions = (input, world = {}) => {
+export const normalizeInstitutions = (input, world = {}, givenIdentityIndex = null) => {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const byIdSource = source.byId && typeof source.byId === "object" && !Array.isArray(source.byId)
     ? source.byId
     : source;
   // Institution ledgers can contain hundreds of memberships. Build save identity
   // metadata at most once per normalization instead of once per member.
-  const identityIndex = buildPolityIdentityIndex(world || {});
+  // (A caller that holds one for this same world hands it in: normalizeWorldState.)
+  const identityIndex = givenIdentityIndex || buildPolityIdentityIndex(world || {});
   const byId = {};
   for (const [rawId, rawInstitution] of Object.entries(byIdSource)) {
     if (rawId === "schemaVersion" || rawId === "ledgerVersion") continue;
@@ -1424,7 +1425,7 @@ export const removePolityFromInstitutions = (institutionsInput, polityInput, wor
   return institutions;
 };
 
-export const institutionsForPolity = (world, polityInput, { includeSuspended = true, includeDissolved = false } = {}) => {
+export const institutionsForPolity = (world, polityInput, { includeSuspended = true, includeDissolved = false, identityIndex: givenIdentityIndex = null } = {}) => {
   const polity = canonicalPolity(polityInput, world);
   if (!polity) return [];
   const wanted = lower(polity);
@@ -1433,7 +1434,9 @@ export const institutionsForPolity = (world, polityInput, { includeSuspended = t
     ? source.byId
     : source;
   const out = [];
-  let identityIndex = null;
+  // A caller asking for every polity of one world in turn hands in the index it
+  // built once for that world (powerStatus.js refreshPowerStatus).
+  let identityIndex = givenIdentityIndex;
 
   // Hot read path: the applied ledger is already canonical. Do not normalize the
   // entire institution ledger for every country badge / prompt-summary lookup.

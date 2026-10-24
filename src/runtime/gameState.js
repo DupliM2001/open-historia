@@ -4352,7 +4352,7 @@ export const normalizeWorldState = (world) => {
     countryStats,
     politicalActors: normalizePoliticalActors(nextWorld.politicalActors),
     politicalSimulation: normalizePoliticalSimulationClock(nextWorld.politicalSimulation),
-    institutions: normalizeInstitutions(nextWorld.institutions, diplomaticIdentityWorld),
+    institutions: normalizeInstitutions(nextWorld.institutions, diplomaticIdentityWorld, diplomaticIdentityIndexOf(diplomaticIdentityWorld)),
     powerStatus: normalizePowerStatus(nextWorld.powerStatus, diplomaticIdentityWorld),
     actionSuggestions: normalizeActionSuggestions(nextWorld.actionSuggestions),
     activeInteractive: normalizeInteractive(nextWorld.activeInteractive),

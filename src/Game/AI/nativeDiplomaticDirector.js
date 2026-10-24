@@ -13,7 +13,7 @@
 import { normalizeEvents, normalizeWorldState } from "../../runtime/gameState.js";
 import { MAX_PUPPETS, PUPPET_COUP_LOYALTY, PUPPET_KINDS } from "../../runtime/puppets.js";
 import { toCountryName } from "../../runtime/ownerNames.js";
-import { resolvePolityIdentity } from "../../runtime/polityIdentity.js";
+import { resolvePolityIdentity, buildPolityIdentityIndex } from "../../runtime/polityIdentity.js";
 import { compareGameDates, isGameDate } from "../../runtime/gameDates.js";
 import { receiptPlayerNote } from "../../runtime/receiptPlayerNotes.js";
 
@@ -126,7 +126,9 @@ const pregameSourceIdsContain = (superset, required) => {
   return array(required).map(clean).filter(Boolean).every((id) => values.has(id));
 };
 
-export const canonicalDiplomaticPolity = (token, world, { allowUnknown = false } = {}) => {
+// `identityIndex`: the polity identity index of this same world, for a caller
+// resolving many names against it (buildBoundedDiplomaticContext).
+export const canonicalDiplomaticPolity = (token, world, { allowUnknown = false, identityIndex = null } = {}) => {
   const raw = clean(token);
   if (!raw) return "";
   const resolved = resolvePolityIdentity(raw, world, {
@@ -134,6 +136,7 @@ export const canonicalDiplomaticPolity = (token, world, { allowUnknown = false }
     requireActive: false,
     allowCoreMatch: true,
     allowStockBase: true,
+    identityIndex,
   });
   if (resolved?.resolved) return clean(resolved.resolved);
   if (!allowUnknown) return "";
@@ -2472,16 +2475,19 @@ export const buildBoundedDiplomaticContext = (
   } = {},
 ) => {
   const world = normalizeWorldState(worldLike);
+  // Its own copy of the world, only read here: one identity index for every name
+  // below, where each name built the index again (2026-10-24).
+  const identityIndex = buildPolityIdentityIndex(world);
   const requested = [
     playerPolity,
     ...array(focusActors),
     ...array(selectedStorylines).flatMap((storyline) => array(storyline?.participants)),
-  ].map((actor) => canonicalDiplomaticPolity(actor, world)).filter(Boolean);
+  ].map((actor) => canonicalDiplomaticPolity(actor, world, { identityIndex })).filter(Boolean);
 
   const actorKeys = new Set();
   const actors = [];
   const pushActor = (actor) => {
-    const canonical = canonicalDiplomaticPolity(actor, world);
+    const canonical = canonicalDiplomaticPolity(actor, world, { identityIndex });
     const key = politySetKey(canonical);
     if (!canonical || actorKeys.has(key) || actors.length >= maxActors) return;
     actorKeys.add(key);
@@ -2502,8 +2508,8 @@ export const buildBoundedDiplomaticContext = (
   // actor-relative chat/Advisor surfaces continue to use runtime/puppets.js.
   for (const row of array(world.puppets)) {
     if (lower(row?.status || "active") !== "active") continue;
-    const overlord = canonicalDiplomaticPolity(row?.overlord, world);
-    const puppet = canonicalDiplomaticPolity(row?.puppet, world);
+    const overlord = canonicalDiplomaticPolity(row?.overlord, world, { identityIndex });
+    const puppet = canonicalDiplomaticPolity(row?.puppet, world, { identityIndex });
     if (!overlord || !puppet) continue;
     const overlordSeed = seedActorKeys.has(politySetKey(overlord));
     const puppetSeed = seedActorKeys.has(politySetKey(puppet));
@@ -2524,7 +2530,7 @@ export const buildBoundedDiplomaticContext = (
   for (const war of array(world.wars)) {
     if (!["active", "ceasefire"].includes(lower(war?.status))) continue;
     const parties = [...array(war?.sideA), ...array(war?.sideB)]
-      .map((party) => canonicalDiplomaticPolity(party, world))
+      .map((party) => canonicalDiplomaticPolity(party, world, { identityIndex }))
       .filter(Boolean);
     if (!parties.some((party) => seedActorKeys.has(politySetKey(party)))) continue;
     parties.forEach(pushActor);
