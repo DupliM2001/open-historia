@@ -53,6 +53,66 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-espionage-part-2",
+    kind: "major",
+    date: "2026-10-24",
+    banners: [
+      {
+        theme: "espionage2",
+        scene: "orders",
+        title: "Espionage, Part 2",
+        subtitle: "Orders in the dark",
+        lead: "Your agents now take orders. Send them after a country's army or its science, or have them sabotage, recruit and assassinate: the world feels what they do, and unless one is caught and made to talk, never learns it was you.",
+        sections: [
+          {
+            heading: "Orders",
+            icon: "chess",
+            items: [
+              "Tell each network what to collect on: diplomacy, the military, research and technology, economic policy or internal politics.",
+              "Order an operation: sabotage, recruit a source, assassinate, or anything else you can put in words.",
+              "Each order shows its odds of success and its risk of capture before you give it.",
+            ],
+          },
+          {
+            heading: "In the world",
+            icon: "eye",
+            items: [
+              "An operation is carried out during the next time skip, and the world reacts to what it did.",
+              "An operation that is never traced is never tied to you: the world only sees what happened.",
+              "A recruited source makes its network harder to catch, and its reports draw on what the source knows.",
+            ],
+          },
+        ],
+      },
+      {
+        theme: "espionage2",
+        scene: "custody",
+        title: "Not Every Agent Talks",
+        subtitle: "Caught is not the same as identified",
+        lead: "A captured agent is not always made to say who sent them. One who never talks dies under interrogation, and the trail ends there.",
+        sections: [
+          {
+            heading: "Your agents",
+            icon: "people",
+            items: [
+              "An agent of yours who is caught may die in custody without giving you away, and the country that caught them never learns who sent them.",
+              "The Operations log in the Intelligence tab keeps what every operation came to.",
+            ],
+          },
+          {
+            heading: "Theirs",
+            icon: "wall",
+            items: [
+              "A foreign agent your service catches is not always identified either: when they die under interrogation, there is no one to expel or turn.",
+              "When your service does learn who sent them, you decide as before: expel them, or turn them.",
+            ],
+          },
+        ],
+        button: "To the field",
+      },
+    ],
+  },
+  {
     // "the deployment tool in the war room doesnt seem to work. it does draw the line, but the troops are never actually
     // deployed" (the owner, 2026-10-24).
     id: "2026-10-deploy-calls-up",

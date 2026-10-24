@@ -66,7 +66,69 @@ export const draw = (key) => {
 //   exposed     caught and expelled. Finished.
 //   recalled    withdrawn by its owner. Finished.
 
-export const SPY_STATUSES = ["active", "discovered", "turned", "exposed", "recalled"];
+export const SPY_STATUSES = ["active", "discovered", "turned", "exposed", "recalled", "dead"];
+
+export const COLLECTION_FOCI = ["diplomacy", "military", "research", "economy", "politics"];
+export const OPERATION_KINDS = ["sabotage", "recruit", "assassinate", "operation"];
+export const OPERATION_OUTCOMES = ["success", "failure", "foiled"];
+export const OPERATION_INSTRUCTIONS_MAX = 300;
+export const MAX_ASSETS = 3;
+export const MAX_OPERATIONS_KEPT = 8;
+
+const oneLine = (value, max = OPERATION_INSTRUCTIONS_MAX) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+
+const normalizeMission = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const kind = String(value.kind ?? "").trim().toLowerCase();
+  const instructions = oneLine(value.instructions);
+  if (!OPERATION_KINDS.includes(kind) || !instructions) return null;
+  return { kind, instructions, orderedAt: String(value.orderedAt ?? "").trim() };
+};
+
+const normalizeAssets = (list) => (Array.isArray(list) ? list : [])
+  .map((entry) => {
+    const who = oneLine(entry?.who ?? entry);
+    return who ? { who, recruitedAt: String(entry?.recruitedAt ?? "").trim() } : null;
+  })
+  .filter(Boolean)
+  .slice(-MAX_ASSETS);
+
+const normalizeOperationRecord = (entry) => {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const kind = String(entry.kind ?? "").trim().toLowerCase();
+  const outcome = String(entry.outcome ?? "").trim().toLowerCase();
+  if (!OPERATION_KINDS.includes(kind) || !OPERATION_OUTCOMES.includes(outcome)) return null;
+  const caught = entry.caught === true;
+  return {
+    id: String(entry.id ?? "").trim(),
+    kind,
+    instructions: oneLine(entry.instructions),
+    date: String(entry.date ?? "").trim(),
+    round: Number.isFinite(Number(entry.round)) ? Number(entry.round) : 0,
+    outcome,
+    caught,
+    identified: caught && entry.identified === true,
+  };
+};
+
+const normalizeOperationRecords = (list) => (Array.isArray(list) ? list : [])
+  .map(normalizeOperationRecord)
+  .filter(Boolean)
+  .slice(-MAX_OPERATIONS_KEPT);
+
+export const spyTasking = (entry) => {
+  const focus = COLLECTION_FOCI.includes(entry?.focus) ? entry.focus : "diplomacy";
+  const mission = normalizeMission(entry?.mission);
+  const assets = normalizeAssets(entry?.assets);
+  const operations = normalizeOperationRecords(entry?.operations);
+  return {
+    ...(focus !== "diplomacy" ? { focus } : {}),
+    ...(mission ? { mission } : {}),
+    ...(assets.length ? { assets } : {}),
+    ...(operations.length ? { operations } : {}),
+    ...(entry?.identified === false ? { identified: false } : {}),
+  };
+};
 
 const normalizeSpy = (entry, index) => {
   const target = String(entry?.target ?? entry?.polity ?? "").trim();
@@ -82,6 +144,7 @@ const normalizeSpy = (entry, index) => {
     exposedAt: String(entry?.exposedAt ?? "").trim(),
     coverStory: String(entry?.coverStory ?? "").trim(),
     suspected: entry?.suspected === true,
+    ...spyTasking(entry),
   };
 };
 
@@ -137,6 +200,33 @@ export const expelSpy = (world, id, { date = "" } = {}) => setStatus(world, id, 
 export const turnSpy = (world, id, { date = "", coverStory = "" } = {}) =>
   setStatus(world, id, { status: "turned", turnedAt: date, coverStory: String(coverStory ?? "").trim() });
 export const setCoverStory = (world, id, coverStory) => setStatus(world, id, { coverStory: String(coverStory ?? "").trim() });
+
+const liveAgent = (world, id) => {
+  const spy = normalizeSpies(world?.spies).find((entry) => entry.id === id);
+  if (!spy || !isLive(spy)) throw new Error("That agent is no longer in the field.");
+  return spy;
+};
+
+export const setSpyFocus = (world, id, focus) => {
+  const sector = String(focus ?? "").trim().toLowerCase();
+  if (!COLLECTION_FOCI.includes(sector)) throw new Error("Choose what the agent should collect on.");
+  liveAgent(world, id);
+  return setStatus(world, id, { focus: sector });
+};
+
+export const orderOperation = (world, id, { kind = "", instructions = "", date = "" } = {}) => {
+  const operation = String(kind ?? "").trim().toLowerCase();
+  if (!OPERATION_KINDS.includes(operation)) throw new Error("Choose an operation.");
+  const orders = oneLine(instructions);
+  if (!orders) throw new Error("Say what the agent should do.");
+  liveAgent(world, id);
+  return setStatus(world, id, { mission: { kind: operation, instructions: orders, orderedAt: String(date ?? "").trim() } });
+};
+
+export const cancelOperation = (world, id) => {
+  liveAgent(world, id);
+  return setStatus(world, id, { mission: null });
+};
 
 // ---- orders from the turn ----------------------------------------------------
 // The player's espionage orders as a jump carried them (an event's
@@ -239,6 +329,61 @@ export const foreignDeployChance = (polityIntelligence, { hostile = false, hosti
   return clamp01(clampPct(polityIntelligence) / 100 * 0.12 + h * 0.2, 0, 0.4);
 };
 
+const OPERATION_PROFILE = {
+  sabotage: { base: 0.5, risk: 2.2 },
+  recruit: { base: 0.45, risk: 1.6 },
+  assassinate: { base: 0.3, risk: 3 },
+  operation: { base: 0.5, risk: 1.8 },
+};
+const profileOf = (kind) => OPERATION_PROFILE[kind] ?? OPERATION_PROFILE.operation;
+const assetCount = (assets) => Math.max(0, Math.min(MAX_ASSETS, Math.round(Number(assets) || 0)));
+
+export const operationSuccessChance = (kind, ownerIntelligence, targetIntelligence, { assets = 0 } = {}) => {
+  const o = clampPct(ownerIntelligence) / 100;
+  const t = clampPct(targetIntelligence) / 100;
+  return clamp01(profileOf(kind).base + (o - t) * 0.6 + assetCount(assets) * 0.05, 0.05, 0.9);
+};
+
+export const operationCaptureChance = (kind, ownerIntelligence, targetIntelligence, { succeeded = true, assets = 0 } = {}) =>
+  clamp01(detectionChance(targetIntelligence, ownerIntelligence) * profileOf(kind).risk + (succeeded ? 0 : 0.15) - assetCount(assets) * 0.03, 0.04, 0.85);
+
+export const identifyChance = (targetIntelligence, ownerIntelligence) => {
+  const t = clampPct(targetIntelligence) / 100;
+  const o = clampPct(ownerIntelligence) / 100;
+  return clamp01(0.6 + (t - o) * 0.5, 0.2, 0.9);
+};
+
+const routineDetectionChance = (spy, targetIntelligence, ownerIntelligence) =>
+  detectionChance(targetIntelligence, ownerIntelligence) * (1 - assetCount(spy?.assets?.length) * 0.1);
+
+export const planCovertOperations = (world, { round = 0, playerPolity = "" } = {}) => {
+  const roll = (key) => draw(`${round}:${key}`);
+  const intel = (polity) => intelligenceOf(world, polity);
+  const player = String(playerPolity ?? "").trim();
+  return normalizeSpies(world?.spies)
+    .filter((spy) => isLive(spy) && spy.mission)
+    .map((spy) => {
+      const { kind, instructions, orderedAt } = spy.mission;
+      const owner = spy.owner || player;
+      const plan = { id: `op-${round}-${spy.id}`, spyId: spy.id, owner, target: spy.target, kind, instructions };
+      if (spy.status === "turned") return { ...plan, outcome: "foiled", caught: false, identified: true };
+      const key = `${spy.id}:op:${orderedAt}:${kind}`;
+      const assets = spy.assets?.length ?? 0;
+      const ownerIntel = intel(owner);
+      const targetIntel = intel(spy.target);
+      const succeeded = roll(`${key}:success`) < operationSuccessChance(kind, ownerIntel, targetIntel, { assets });
+      const caught = roll(`${key}:capture`) < operationCaptureChance(kind, ownerIntel, targetIntel, { succeeded, assets });
+      const identified = caught && roll(`${key}:identify`) < identifyChance(targetIntel, ownerIntel);
+      return { ...plan, outcome: succeeded ? "success" : "failure", caught, identified };
+    });
+};
+
+const normalizePlannedOperation = (entry) => {
+  const record = normalizeOperationRecord(entry);
+  const spyId = String(entry?.spyId ?? "").trim();
+  return record && spyId ? { ...record, spyId } : null;
+};
+
 // ---- the per-jump resolution ------------------------------------------------
 //
 // Runs once per jump, after the AI's events have been applied and before the
@@ -260,7 +405,7 @@ export const foreignDeployChance = (polityIntelligence, { hostile = false, hosti
 // one's candidates; without it only the player's own are known). What one
 // government alone has found out is marked for it alone (`audience`): with
 // one player there is nobody to keep it from, and nothing is marked.
-export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "", playerPolities = [], candidates = [], candidatesFor = null } = {}) => {
+export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "", playerPolities = [], candidates = [], candidatesFor = null, operations = [] } = {}) => {
   const player = String(playerPolity ?? "").trim();
   const people = [...new Set([player, ...(Array.isArray(playerPolities) ? playerPolities : []).map((name) => String(name ?? "").trim())].filter(Boolean))];
   const shared = people.length > 1;
@@ -271,14 +416,59 @@ export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "
   const notices = [];
   const roll = (key) => draw(`${round}:${key}`);
   const intel = (polity) => intelligenceOf(world, polity);
+  const planned = new Map((Array.isArray(operations) ? operations : [])
+    .map(normalizePlannedOperation)
+    .filter(Boolean)
+    .map((operation) => [operation.spyId, operation]));
+  const carriedOut = [];
 
   spies = spies.map((spy) => {
     if (!isLive(spy)) return spy;
     const targetIntel = intel(spy.target);
     const ownerIntel = intel(spy.owner);
 
+    const operation = planned.get(spy.id);
+    if (operation) {
+      const record = {
+        id: operation.id || `op-${round}-${spy.id}`,
+        kind: operation.kind,
+        instructions: operation.instructions,
+        date,
+        round,
+        outcome: operation.outcome,
+        caught: operation.caught,
+        identified: operation.identified,
+      };
+      carriedOut.push({ ...record, spyId: spy.id, owner: spy.owner, target: spy.target });
+      const { mission: _carriedOut, ...rest } = spy;
+      let next = { ...rest, operations: [...(spy.operations ?? []), record].slice(-MAX_OPERATIONS_KEPT) };
+      if (operation.kind === "recruit" && operation.outcome === "success" && !operation.caught) {
+        next = { ...next, assets: [...(spy.assets ?? []), { who: operation.instructions, recruitedAt: date }].slice(-MAX_ASSETS) };
+      }
+      if (!operation.caught) return next;
+      if (!operation.identified) return { ...next, status: "dead", identified: false, exposedAt: date };
+      if (isPerson(spy.target)) return { ...next, status: "discovered" };
+      return { ...next, status: "exposed", exposedAt: date };
+    }
+
     if (spy.status === "active") {
-      if (roll(`${spy.id}:detect`) < detectionChance(targetIntel, ownerIntel)) {
+      if (roll(`${spy.id}:detect`) < routineDetectionChance(spy, targetIntel, ownerIntel)) {
+        if (roll(`${spy.id}:identify`) >= identifyChance(targetIntel, ownerIntel)) {
+          events.push(isPerson(spy.target)
+            ? {
+              date, kind: "world", source: "espionage",
+              title: "A captured agent dies under interrogation",
+              description: `${spy.target}'s counter-intelligence caught a foreign agent, who died under interrogation without revealing who they worked for. Who sent them was never learned.`,
+              ...onlyFor(spy.target),
+            }
+            : {
+              date, kind: "world", source: "espionage",
+              title: `Foreign agent dies in custody in ${spy.target}`,
+              description: `${spy.target}'s security service arrested a foreign agent, who died under interrogation without revealing who sent them. ${spy.target} does not know which country was behind it.`,
+            });
+          notices.push({ kind: "lost", spyId: spy.id, target: spy.target });
+          return { ...spy, status: "dead", identified: false, exposedAt: date };
+        }
         if (isPerson(spy.target)) {
           // A person decides: expel or turn. It stops reporting meanwhile.
           notices.push({ kind: "discovered", spyId: spy.id, owner: spy.owner });
@@ -342,7 +532,7 @@ export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "
     }
   }
 
-  return { spies, events, notices };
+  return { spies, events, notices, operations: carriedOut };
 };
 
 // ---- redaction ----------------------------------------------------------------
@@ -472,11 +662,12 @@ export const normalizeIntercepts = (raw) => {
 // rival with a live agent acts on what it stole, a planted story is believed.
 // `intercepts` here are already DECRYPTED by the caller (the simulator knows
 // the truth; only the player is kept in the dark).
-export const espionageBrief = (world, intercepts, { playerPolity = "" } = {}) => {
+export const espionageBrief = (world, intercepts, { playerPolity = "", hiddenTargets = [] } = {}) => {
   const player = String(playerPolity ?? "").trim();
   const spies = normalizeSpies(world?.spies);
   const lines = [];
-  const mine = spies.filter((spy) => spy.owner === player && isLive(spy));
+  const hidden = new Set((Array.isArray(hiddenTargets) ? hiddenTargets : []).map((name) => String(name ?? "").trim().toLowerCase()).filter(Boolean));
+  const mine = spies.filter((spy) => spy.owner === player && isLive(spy) && !hidden.has(spy.target.toLowerCase()));
   const theirs = spies.filter((spy) => spy.target === player && (isLive(spy) || spy.status === "discovered"));
   const finished = spies.filter((spy) => spy.status === "exposed").slice(-4);
 
@@ -501,7 +692,7 @@ export const espionageBrief = (world, intercepts, { playerPolity = "" } = {}) =>
   // why it went dark. Saying so lets it be marked unconfirmed instead.
   const lost = [];
   for (const [target, entry] of Object.entries(intercepts || {})) {
-    if (mine.some((s) => s.target === target)) continue;
+    if (mine.some((s) => s.target === target) || hidden.has(target.toLowerCase())) continue;
     lost.push(`${target} (last read ${entry.gatheredAt || "an earlier period"})`);
   }
   if (lost.length) {

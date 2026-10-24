@@ -15,8 +15,9 @@ import { logForNextStep, startChatReveal } from "./chatReveal.js";
 import { campaignChanged } from "../../runtime/campaignGuard.js";
 import { assertNoTurnRunning, isChatGenerationLikely, subscribeChatGeneration } from "../AI/simulationStatus.js";
 import {
-    MAX_ACTIVE_SPIES, activeSpies, deploySpy, expelSpy, foreignSpies, intelligenceOf, normalizeIntercepts, normalizeSpies,
-    recallSpy, redactExchange, setCoverStory, signalClarity, turnSpy,
+    COLLECTION_FOCI, MAX_ACTIVE_SPIES, OPERATION_INSTRUCTIONS_MAX, OPERATION_KINDS, activeSpies, cancelOperation, deploySpy, expelSpy,
+    foreignSpies, intelligenceOf, normalizeIntercepts, normalizeSpies, operationCaptureChance, operationSuccessChance, orderOperation,
+    recallSpy, redactExchange, setCoverStory, setSpyFocus, signalClarity, turnSpy,
 } from "../../runtime/spycraft.js";
 import { isSeal, newSeal, openExchange, openPoliticalAssessment } from "../../runtime/spySeal.js";
 import { useActiveFeatures } from "../../runtime/gameFeatures.js";
@@ -3012,6 +3013,103 @@ const WorkspaceTabIcon = ({ type, size = 14 }) => {
 // on every render is a dependency no list can name.
 const sameCountry = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 
+const FOCUS_LABELS = Object.freeze({
+    diplomacy: "Diplomacy",
+    military: "Military",
+    research: "Research and technology",
+    economy: "Economic policy",
+    politics: "Internal politics",
+});
+
+const OPERATION_LABELS = Object.freeze({
+    sabotage: "Sabotage",
+    recruit: "Recruit",
+    assassinate: "Assassinate",
+    operation: "Other operation",
+});
+
+const OPERATION_PLACEHOLDERS = Object.freeze({
+    sabotage: "What to sabotage, e.g. the naval yards at Kiel",
+    recruit: "Whom to recruit, e.g. a senior rocket engineer",
+    assassinate: "Who is the target",
+    operation: "What the agent should do",
+});
+
+const successLabel = (chance) => (chance >= 0.7 ? "Good" : chance >= 0.45 ? "Even" : chance >= 0.25 ? "Poor" : "Slim");
+const captureLabel = (chance) => (chance >= 0.45 ? "High" : chance >= 0.2 ? "Moderate" : "Low");
+
+const operationOutcomeText = (record) => {
+    if (record.outcome === "foiled") return "Failed: the agent reports it could not be done";
+    if (!record.caught) return record.outcome === "success" ? "Succeeded, and was never traced" : "Failed, and nobody noticed";
+    if (!record.identified) {
+        return record.outcome === "success"
+            ? "Succeeded, but the agent was caught and died in custody without giving you away"
+            : "Failed: the agent was caught and died in custody without giving you away";
+    }
+    return record.outcome === "success" ? "Succeeded, but the agent was caught and identified" : "Failed: the agent was caught and identified";
+};
+
+const operationTone = (record) => {
+    if (record.outcome === "success" && !record.caught) return "#86efac";
+    if (record.caught) return "#fca5a5";
+    return "rgba(255,255,255,.55)";
+};
+
+const NetworkOrders = ({ spy, myIntel, targetIntel, draft, onDraft, onFocus, onOrder, onCancel, inputStyle }) => {
+    const kind = draft?.kind || "sabotage";
+    const text = draft?.text || "";
+    const assets = spy.assets?.length ?? 0;
+    const success = operationSuccessChance(kind, myIntel, targetIntel, { assets });
+    const capture = operationCaptureChance(kind, myIntel, targetIntel, { succeeded: true, assets });
+    const selectStyle = { ...inputStyle, width: "auto", flexShrink: 0, cursor: "pointer" };
+    return (
+        <div style={{ marginTop: ".5rem", paddingTop: ".5rem", borderTop: "1px solid rgba(255,255,255,.06)", display: "flex", flexDirection: "column", gap: ".42rem" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: ".45rem", fontSize: ".62rem", color: "rgba(255,255,255,.5)" }}>
+                <span style={{ flexShrink: 0 }}>Collect on</span>
+                <select value={spy.focus || "diplomacy"} onChange={(e) => onFocus(e.target.value)} style={selectStyle}>
+                    {COLLECTION_FOCI.map((focus) => <option key={focus} value={focus}>{FOCUS_LABELS[focus]}</option>)}
+                </select>
+            </label>
+            {assets > 0 && (
+                <div style={{ fontSize: ".6rem", color: "rgba(255,255,255,.45)" }}>
+                    Recruited sources: <span data-no-translate>{spy.assets.map((asset) => asset.who).join(" · ")}</span>
+                </div>
+            )}
+            {spy.mission ? (
+                <div style={{ display: "flex", alignItems: "center", gap: ".5rem", padding: ".42rem .5rem", borderRadius: 7, background: "rgba(245,158,11,.07)", border: "1px solid rgba(245,158,11,.22)" }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: ".62rem", lineHeight: 1.45, color: "rgba(255,255,255,.7)" }}>
+                        <strong style={{ color: "#fde68a" }}>{OPERATION_LABELS[spy.mission.kind]}</strong>{" — "}<span data-no-translate>{spy.mission.instructions}</span>
+                        <div style={{ color: "rgba(255,255,255,.4)" }}>Carried out during the next time skip.</div>
+                    </div>
+                    <button className="oh-tap-row" onClick={onCancel} style={spyBtn(false)}>Cancel order</button>
+                </div>
+            ) : (
+                <>
+                    <div style={{ display: "flex", gap: ".4rem", alignItems: "center", flexWrap: "wrap" }}>
+                        <select aria-label="Operation" value={kind} onChange={(e) => onDraft({ kind: e.target.value, text })} style={selectStyle}>
+                            {OPERATION_KINDS.map((option) => <option key={option} value={option}>{OPERATION_LABELS[option]}</option>)}
+                        </select>
+                        <input
+                            value={text}
+                            maxLength={OPERATION_INSTRUCTIONS_MAX}
+                            onChange={(e) => onDraft({ kind, text: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { e.preventDefault(); onOrder(); } }}
+                            placeholder={OPERATION_PLACEHOLDERS[kind]}
+                            style={{ ...inputStyle, flex: "1 1 10rem", width: "auto", minWidth: 0 }}
+                        />
+                        <button className="oh-tap-row" onClick={onOrder} disabled={!text.trim()} style={{ ...spyBtn(true), ...(text.trim() ? {} : { opacity: .45, cursor: "default" }) }}>Give the order</button>
+                    </div>
+                    <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", fontSize: ".58rem", color: "rgba(255,255,255,.38)" }}>
+                        <span>Odds of success:</span><strong style={{ color: "rgba(255,255,255,.62)" }}>{successLabel(success)}</strong>
+                        <span>·</span>
+                        <span>Risk of capture:</span><strong style={{ color: "rgba(255,255,255,.62)" }}>{captureLabel(capture)}</strong>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
+
 const SpyView = ({ playerCountry, gameDate, countries, loadingCountries, panelOpen = true }) => {
     const world                       = useRuntimeState("world");
     const filedIntercepts             = useRuntimeState("intercepts", normalizeIntercepts);
@@ -3058,9 +3156,16 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries, panelOp
     const spies = activeSpies(world).filter((spy) => !spy.owner || spy.owner === playerCountry);
     const foreign = foreignSpies(world, playerCountry);
     const visibleForeign = foreign.filter((spy) => spy.status !== "active");
-    const history = normalizeSpies(world?.spies).filter((spy) => (!spy.owner || spy.owner === playerCountry) && spy.status === "exposed").slice(-3);
+    const history = normalizeSpies(world?.spies).filter((spy) => (!spy.owner || spy.owner === playerCountry) && (spy.status === "exposed" || spy.status === "dead")).slice(-3);
+    const caughtUnknown = normalizeSpies(world?.spies).filter((spy) => sameCountry(spy.target, playerCountry) && spy.status === "dead").slice(-3);
+    const operationLog = normalizeSpies(world?.spies)
+        .filter((spy) => !spy.owner || spy.owner === playerCountry)
+        .flatMap((spy) => (spy.operations || []).map((record) => ({ ...record, target: spy.target, spyId: spy.id })))
+        .sort((a, b) => (b.round - a.round) || String(b.date).localeCompare(String(a.date)))
+        .slice(0, 8);
     const readableReports = useMemo(() => documentsReadableBy(world?.reports, playerCountry).slice(0, 36), [world?.reports, playerCountry]);
     const [storyDraft, setStoryDraft] = useState({});
+    const [orderDraft, setOrderDraft] = useState({});
     const [savedFlash, setSavedFlash] = useState("");
 
     const countryByName = (name) => countries.find((country) => sameCountry(country.name, name)) || { name };
@@ -3138,6 +3243,31 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries, panelOp
             else await commitSpies(recallSpy(world, spy.id));
         } catch (err) { setError(err?.message || String(err)); }
     };
+    const handleFocus = async (spy, focus) => {
+        setError("");
+        try {
+            if (inSharedGame()) await askHostForAgent({ op: "focus", spy: spy.id, target: focus });
+            else await commitSpies(setSpyFocus(world, spy.id, focus));
+        } catch (err) { setError(err?.message || String(err)); }
+    };
+    const handleOrder = async (spy) => {
+        setError("");
+        const draft = orderDraft[spy.id] || {};
+        const kind = draft.kind || "sabotage";
+        const instructions = String(draft.text || "").trim().slice(0, OPERATION_INSTRUCTIONS_MAX);
+        try {
+            if (inSharedGame()) await askHostForAgent({ op: "mission", spy: spy.id, target: kind, story: instructions });
+            else await commitSpies(orderOperation(world, spy.id, { kind, instructions, date: gameDate }));
+            setOrderDraft((current) => ({ ...current, [spy.id]: { kind, text: "" } }));
+        } catch (err) { setError(err?.message || String(err)); }
+    };
+    const handleCancelOrder = async (spy) => {
+        setError("");
+        try {
+            if (inSharedGame()) await askHostForAgent({ op: "mission", spy: spy.id, target: "" });
+            else await commitSpies(cancelOperation(world, spy.id));
+        } catch (err) { setError(err?.message || String(err)); }
+    };
 
     if (open) {
         const clarity = signalClarity(myIntel, intelligenceOf(world, open.target));
@@ -3167,6 +3297,7 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries, panelOp
         }
     }
     readableReports.slice(0, 4).forEach((report) => recentItems.push({ kind: "document", report, title: report.title, meta: report.dateline || report.createdDate || "", text: report.from ? `Document from ${report.from}` : "Document on file" }));
+    operationLog.slice(0, 3).forEach((record) => recentItems.push({ kind: "operation", title: `${OPERATION_LABELS[record.kind]} · ${record.target}`, meta: record.date || "", text: operationOutcomeText(record) }));
     recentItems.sort((a, b) => String(b.meta || "").localeCompare(String(a.meta || "")));
 
     const filteredCountries = countryRows.filter((country) => String(country.name || "").toLowerCase().includes(countryQuery.trim().toLowerCase()));
@@ -3244,7 +3375,7 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries, panelOp
                             <div style={{ fontSize: ".75rem", fontWeight: 750 }}>Recent intelligence</div>
                             <div style={{ marginTop: ".45rem", display: "flex", flexDirection: "column", gap: ".38rem" }}>
                                 {recentItems.length ? recentItems.slice(0, 4).map((item, index) => (
-                                    <button key={`${item.kind}-${item.title}-${index}`} className="oh-tap-row" onClick={() => { if (item.kind === "intercept") setOpen({ target: item.target, exchange: item.exchange }); else if (item.kind === "assessment") { setSelectedCountry(item.target); setSection("countries"); } else { setExpandedReport(item.report?.id || ""); setSection("reports"); } }} style={{ padding: ".42rem .5rem", borderRadius: 7, border: "1px solid rgba(255,255,255,.06)", background: "rgba(255,255,255,.02)", color: "white", cursor: "pointer", textAlign: "left", fontFamily: "sans-serif" }}>
+                                    <button key={`${item.kind}-${item.title}-${index}`} className="oh-tap-row" onClick={() => { if (item.kind === "intercept") setOpen({ target: item.target, exchange: item.exchange }); else if (item.kind === "assessment") { setSelectedCountry(item.target); setSection("countries"); } else if (item.kind === "operation") setSection("operations"); else { setExpandedReport(item.report?.id || ""); setSection("reports"); } }} style={{ padding: ".42rem .5rem", borderRadius: 7, border: "1px solid rgba(255,255,255,.06)", background: "rgba(255,255,255,.02)", color: "white", cursor: "pointer", textAlign: "left", fontFamily: "sans-serif" }}>
                                         <div style={{ display: "flex", gap: ".45rem", alignItems: "baseline" }}><strong style={{ fontSize: ".65rem", flex: 1 }}>{item.title}</strong>{item.meta && <span style={{ fontSize: ".55rem", color: "rgba(255,255,255,.3)" }}>{item.meta}</span>}</div>
                                         <div style={{ marginTop: ".15rem", fontSize: ".59rem", color: "rgba(255,255,255,.4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.text}</div>
                                     </button>
@@ -3312,15 +3443,54 @@ const SpyView = ({ playerCountry, gameDate, countries, loadingCountries, panelOp
                         <div style={{ fontSize: ".7rem", fontWeight: 800 }}>{spies.length}/{MAX_ACTIVE_SPIES}</div>
                     </div>
                     {spies.length === 0 ? <div style={{ fontSize: ".68rem", color: "rgba(255,255,255,.34)", padding: ".25rem" }}>No networks are currently in the field.</div> : spies.map((spy) => (
-                        <div key={spy.id} style={{ ...panel, padding: ".55rem .7rem", display: "flex", alignItems: "center", gap: ".5rem" }}>
-                            <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: ".76rem", fontWeight: 750 }}>{spy.target}</div><div style={{ marginTop: ".12rem", fontSize: ".59rem", color: "rgba(255,255,255,.4)" }}>since {spy.deployedAt || "an earlier date"} · network {networkQualityLabel(signalClarity(myIntel, intelligenceOf(world, spy.target)), true).toLowerCase()}{spy.suspected ? " · source integrity concern" : ""}</div></div>
-                            <button className="oh-tap-row" onClick={() => { setSelectedCountry(spy.target); setSection("countries"); }} style={spyBtn(false)}>Dossier</button>
-                            <button className="oh-tap-row" onClick={() => handleRecall(spy)} style={spyBtn(false)}>Recall</button>
+                        <div key={spy.id} style={{ ...panel, padding: ".55rem .7rem" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: ".5rem" }}>
+                                <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: ".76rem", fontWeight: 750 }}>{spy.target}</div><div style={{ marginTop: ".12rem", fontSize: ".59rem", color: "rgba(255,255,255,.4)" }}>since {spy.deployedAt || "an earlier date"} · network {networkQualityLabel(signalClarity(myIntel, intelligenceOf(world, spy.target)), true).toLowerCase()}{spy.suspected ? " · source integrity concern" : ""}</div></div>
+                                <button className="oh-tap-row" onClick={() => { setSelectedCountry(spy.target); setSection("countries"); }} style={spyBtn(false)}>Dossier</button>
+                                <button className="oh-tap-row" onClick={() => handleRecall(spy)} style={spyBtn(false)}>Recall</button>
+                            </div>
+                            <NetworkOrders
+                                spy={spy}
+                                myIntel={myIntel}
+                                targetIntel={intelligenceOf(world, spy.target)}
+                                draft={orderDraft[spy.id]}
+                                onDraft={(next) => setOrderDraft((current) => ({ ...current, [spy.id]: next }))}
+                                onFocus={(focus) => handleFocus(spy, focus)}
+                                onOrder={() => handleOrder(spy)}
+                                onCancel={() => handleCancelOrder(spy)}
+                                inputStyle={inputStyle}
+                            />
                         </div>
                     ))}
-                    {history.length > 0 && <div style={{ fontSize: ".61rem", color: "rgba(255,255,255,.34)", fontStyle: "italic" }}>{history.map((spy) => `Agent expelled by ${spy.target}${spy.exposedAt ? ` on ${spy.exposedAt}` : ""}`).join(" · ")}</div>}
+                    {history.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: ".2rem", fontSize: ".61rem", color: "rgba(255,255,255,.34)", fontStyle: "italic" }}>
+                            {history.map((spy) => (
+                                <div key={spy.id}>
+                                    {spy.status === "dead"
+                                        ? `Agent lost in ${spy.target}${spy.exposedAt ? ` on ${spy.exposedAt}` : ""}: caught, and died in custody without giving you away`
+                                        : `Agent expelled by ${spy.target}${spy.exposedAt ? ` on ${spy.exposedAt}` : ""}`}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div style={{ ...subhead, marginTop: ".15rem" }}>Operations log</div>
+                    {operationLog.length ? operationLog.map((record) => (
+                        <div key={`${record.spyId}-${record.id}-${record.round}`} style={{ ...panel, padding: ".5rem .65rem" }}>
+                            <div style={{ display: "flex", gap: ".5rem", alignItems: "baseline" }}>
+                                <strong style={{ flex: 1, minWidth: 0, fontSize: ".66rem" }}>{OPERATION_LABELS[record.kind]} · {record.target}</strong>
+                                {record.date && <span style={{ fontSize: ".55rem", color: "rgba(255,255,255,.3)" }}>{record.date}</span>}
+                            </div>
+                            {record.instructions && <div data-no-translate style={{ marginTop: ".12rem", fontSize: ".6rem", color: "rgba(255,255,255,.45)" }}>{record.instructions}</div>}
+                            <div style={{ marginTop: ".18rem", fontSize: ".6rem", color: operationTone(record) }}>{operationOutcomeText(record)}</div>
+                        </div>
+                    )) : <div style={{ ...panel, padding: ".7rem", fontSize: ".66rem", color: "rgba(255,255,255,.34)" }}>No operations have been carried out yet. Give a network an order and it acts during the next time skip.</div>}
                     <div style={{ ...subhead, marginTop: ".15rem" }}>Counterintelligence cases</div>
                     {visibleForeign.length ? visibleForeign.map(renderCounterintelCase) : <div style={{ ...panel, padding: ".7rem", fontSize: ".66rem", color: "rgba(255,255,255,.34)" }}>No detected foreign agents currently require action.</div>}
+                    {caughtUnknown.map((spy) => (
+                        <div key={spy.id} style={{ fontSize: ".61rem", color: "rgba(255,255,255,.34)", fontStyle: "italic" }}>
+                            {`A foreign agent caught${spy.exposedAt ? ` on ${spy.exposedAt}` : ""} died under interrogation. Who sent them was never learned.`}
+                        </div>
+                    ))}
                     {error && <div style={{ fontSize: ".66rem", color: "#fca5a5" }}>{error}</div>}
                     <button className="oh-tap-row" onClick={() => setChoosing(true)} disabled={full} style={{ width: "100%", marginTop: ".1rem", padding: ".65rem", borderRadius: 8, border: "1px solid var(--oh-grey-border-strong)", background: "var(--oh-grey-raised)", color: "var(--oh-grey-text)", fontSize: ".72rem", fontWeight: 750, cursor: full ? "not-allowed" : "pointer", fontFamily: "sans-serif", opacity: full ? .5 : 1 }}>♟ Deploy a network</button>
                 </div>

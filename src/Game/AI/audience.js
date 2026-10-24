@@ -151,7 +151,7 @@ export const audienceStoleReport = (audience, report) =>
  * exposed. An undetected agent is invisible to everyone but its owner and the
  * narrator.
  */
-const KNOWN_TO_TARGET = new Set(["discovered", "turned", "exposed"]);
+const KNOWN_TO_TARGET = new Set(["discovered", "turned", "exposed", "dead"]);
 export const spyAsSeenBy = (audience, spy) => {
   if (!spy || typeof spy !== "object") return null;
   if (isSimulationAudience(audience)) return spy;
@@ -161,6 +161,9 @@ export const spyAsSeenBy = (audience, spy) => {
     const { coverStory: _coverStory, turnedAt: _turnedAt, ...own } = spy;
     return { ...own, status: compromised ? "active" : status, suspected: spy.suspected === true };
   }
-  if (audienceIncludes(audience, spy.target) && KNOWN_TO_TARGET.has(status)) return spy;
+  if (audienceIncludes(audience, spy.target) && KNOWN_TO_TARGET.has(status)) {
+    const { focus: _focus, mission: _mission, assets: _assets, operations: _operations, ...caught } = spy;
+    return spy.identified === false ? { ...caught, owner: "" } : caught;
+  }
   return null;
 };

@@ -91,7 +91,7 @@ export const PLAYER_REQUESTS = Object.freeze({
   // The player's agents: place one in `target`, call `spy` home, send a
   // caught one home or turn it, and say what a turned one reports.
   agent: obj({
-    t: literal("agent"), id: REQUEST_ID, op: str(8, { enum: ["deploy", "recall", "expel", "turn", "story"] }),
+    t: literal("agent"), id: REQUEST_ID, op: str(8, { enum: ["deploy", "recall", "expel", "turn", "story", "focus", "mission"] }),
     target: str(80), spy: str(160), story: str(300),
   }),
   // A country's stat sheet, for the host to write when the player's Stats pane

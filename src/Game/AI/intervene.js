@@ -40,6 +40,7 @@ export const journalTurn = ({
     clearActions = true,
     mode = "jump",
     receipt = null,
+    covertOperations = [],
 } = {}) => {
     const excluded = new Set(asArray(excludeEventIds).map(asText).filter(Boolean));
     return {
@@ -60,6 +61,7 @@ export const journalTurn = ({
         // What the turn's answer lost on its way in (runtime/applicationReceipt.js):
         // still true of the kept prefix, and told again with the intervention.
         receipt: receipt && typeof receipt === "object" ? receipt : null,
+        covertOperations: asArray(covertOperations),
     };
 };
 
@@ -120,6 +122,7 @@ export const truncateTurn = (journal, keptCount, { originDate = "", minimumDate 
             outreach: asArray(journal?.outreach),
             clearActions: journal?.clearActions !== false,
             mode: asText(journal?.mode) || "jump",
+            covertOperations: asArray(journal?.covertOperations),
         },
         kept,
         dropped,

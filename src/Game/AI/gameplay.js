@@ -267,8 +267,9 @@ import {
   spyProvenanceOps,
   unassessedHighPriorityEntries,
 } from "../../runtime/projects.js";
-import { activeSpies, applySpyOps, espionageBrief, intelligenceOf, isIntelligenceRated, normalizeIntelligenceRating, normalizeIntercepts, normalizeSpies, redactText, resolveEspionage, signalClarity } from "../../runtime/spycraft.js";
+import { activeSpies, applySpyOps, espionageBrief, intelligenceOf, isIntelligenceRated, normalizeIntelligenceRating, normalizeIntercepts, normalizeSpies, planCovertOperations, redactText, resolveEspionage, signalClarity } from "../../runtime/spycraft.js";
 import { buildSpyOrdersDirective } from "./spyOrdersDirective.js";
+import { collectionOrders, covertOperationsBlock, untracedTargets } from "./covertOperationsDirective.js";
 import { AGENT_REPORT_EVERY_ROUNDS, agentsDueToReport, agentsReportingWithSkip } from "./agentReports.js";
 import { assignAgentReports, boardOpsOf, liftBoardOps, providerRefusedContract, withoutBoardOps } from "./foldedSkip.js";
 import { renderOpenChatsForPrompt } from "../../runtime/chatEcho.js";
@@ -2820,7 +2821,10 @@ ${describeTravelPace(game?.gameDate, eraSettingOf(world))}`);
 
   if (isActiveFeatureEnabled("espionage")) {
     try {
-      const brief = espionageBrief(world, await readOpenedIntercepts(), { playerPolity: normalizeString(game?.country) });
+      const brief = espionageBrief(world, await readOpenedIntercepts(), {
+        playerPolity: normalizeString(game?.country),
+        hiddenTargets: normalizeArray(variables.covertHiddenTargets),
+      });
       if (brief) {
         blocks.push(`[Espionage]
 Known to you, not to the player, whose service sees only what it can decode. Let it shape events: a polity with an agent inside another acts on what it stole, a polity fed a planted story believes it, an expulsion sours relations. Never reveal in an event that an agent has been turned until it is discovered.
@@ -2829,6 +2833,8 @@ ${brief}`);
     } catch {
       /* no espionage context this turn */
     }
+    const covert = normalizeString(variables.covertOperations);
+    if (covert) blocks.push(covert);
   }
 
   try {
@@ -9346,8 +9352,9 @@ const applySimulationResult = async ({
       // one player the list is the player alone, and nothing changes.
       playerPolities: humanCountriesOf(baseGame),
       candidatesFor: espionageCandidatesFor,
+      operations: normalizeArray(result.covertOperations),
     })
-    : { spies: normalizeArray(worldWithImpacts.spies), events: [], notices: [] };
+    : { spies: normalizeArray(worldWithImpacts.spies), events: [], notices: [], operations: [] };
   worldWithImpacts.spies = espionage.spies;
   // A spy in the world needs a seal for what it will report under.
   if (!isSeal(worldWithImpacts.spySeal) && espionage.spies.length) worldWithImpacts.spySeal = newSeal();
@@ -10037,6 +10044,7 @@ const applySimulationResult = async ({
         clearActions: result.clearActions,
         mode: result.mode,
         receipt,
+        covertOperations: result.covertOperations,
       })
       : null,
   });
@@ -13426,6 +13434,7 @@ const prepareSpyReport = async (bundle, spy, { sharedVariables = null } = {}) =>
     `TARGET DOSSIER:\n${dossier || "(nothing recorded)"}`,
     politicalAssessmentOrder,
     orders,
+    collectionOrders(spy, name),
   ].filter(Boolean).join("\n\n");
   return {
     name,
@@ -16435,6 +16444,13 @@ const runJumpSegments = async ({ context, onEvents, onProgress, signal, state })
   // written under it.
   if (state.folded === undefined) state.folded = !foldedSkipRefused;
   if (state.folded && !state.foldedPrep) state.foldedPrep = await prepareFoldedSkip({ bundle, originDate, variables, campaignId: context.campaignId });
+  if (!Array.isArray(state.covertOperations)) {
+    state.covertOperations = isActiveFeatureEnabled("espionage")
+      ? planCovertOperations(normalizeWorldState(bundle.world), { round: (bundle.game?.round || 1) + 1, playerPolity: normalizeString(bundle.game?.country) })
+      : [];
+  }
+  const covertBrief = covertOperationsBlock(state.covertOperations);
+  const covertHiddenTargets = untracedTargets(state.covertOperations);
 
   // Starts at 0 on a fresh jump, and at the failed segment on a retry.
   let segmentIndex = state.nextSegment;
@@ -16530,6 +16546,8 @@ const runJumpSegments = async ({ context, onEvents, onProgress, signal, state })
       const segmentShares = combinedShares({ focus: focusContext.focus, worldShare: direction?.worldShare });
       const segmentVariables = {
         ...variables,
+        covertOperations: segmentIndex === 0 ? covertBrief : "",
+        covertHiddenTargets,
         playerFocusWorldShare: segmentShares.world,
         playerFocusDirective: buildPlayerFocusDirective({
           focus: focusContext.focus,
@@ -17896,6 +17914,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
     filedEvents: state.filedEvents,
     boardProvisionalEventIds: state.boardProvisionalEventIds,
     receipt: state.receipt,
+    covertOperations: normalizeString(state.generation?.source) === "fallback" ? [] : normalizeArray(state.covertOperations),
     scriptedEventState: state.scriptedEventState,
     // A canned turn is never held: the fallback page already says the model is
     // not answering. Nor once the player chose to keep the turn as it is.

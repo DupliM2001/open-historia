@@ -1409,9 +1409,10 @@ export const executeLookup = (context, name, args = {}) => {
       // or discovered one still reading as active, because that is what its
       // service believes — and only the foreign agents it has actually caught
       // (audience.js spyAsSeenBy).
-      const spies = isSimulationAudience(audience)
+      const spies = (isSimulationAudience(audience)
         ? array(world.spies)
-        : array(world.spies).map((spy) => spyAsSeenBy(audience, spy)).filter(Boolean);
+        : array(world.spies).map((spy) => spyAsSeenBy(audience, spy)).filter(Boolean))
+        .map((spy) => (spy?.identified === false ? { ...spy, owner: "" } : spy));
       if (clean(a.owner)) {
         const owner = context.resolveOwner(a.owner);
         if (!owner) return unknownPower(context, a.owner);

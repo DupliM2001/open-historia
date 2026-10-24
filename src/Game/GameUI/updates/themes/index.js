@@ -17,12 +17,14 @@
 import { lazy } from "react";
 
 import { CHRONICLE_CHROME } from "./chronicleChrome.js";
+import { ESPIONAGE_2_CHROME } from "./espionage2Chrome.js";
 import { MUSIC_CHROME } from "./musicChrome.js";
 import { SEASONS_CHROME } from "./seasonsChrome.js";
 import { SWARMS_CHROME } from "./swarmsChrome.js";
 import { WARS_AND_FRONTS_2_CHROME } from "./warsAndFronts2Chrome.js";
 
 export const THEMES = Object.freeze({
+  espionage2: { Page: lazy(() => import("./Espionage2.jsx")), chrome: ESPIONAGE_2_CHROME },
   swarms: { Page: lazy(() => import("./Swarms.jsx")), chrome: SWARMS_CHROME },
   warsAndFronts2: { Page: lazy(() => import("./WarsAndFronts2.jsx")), chrome: WARS_AND_FRONTS_2_CHROME },
   seasonsAndWeather: { Page: lazy(() => import("./SeasonsAndWeather.jsx")), chrome: SEASONS_CHROME },

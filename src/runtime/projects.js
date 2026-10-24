@@ -479,13 +479,16 @@ export const spyOperationOps = (spies, projects, { date = "", playerPolity = "" 
 
     if (!live && project && isProjectOpen(project)) {
       const exposed = asText(spy?.status) === "exposed";
+      const silent = asText(spy?.status) === "dead";
       ops.push({
-        op: exposed ? "fail" : "cancel",
+        op: exposed || silent ? "fail" : "cancel",
         id: asText(project.id),
         name: asText(project.name),
         note: exposed
           ? `Our agent in ${target} was caught and the operation is over.`
-          : `Our agent in ${target} was withdrawn.`,
+          : silent
+            ? `Our agent in ${target} has gone silent and the operation is over.`
+            : `Our agent in ${target} was withdrawn.`,
       });
     }
   }

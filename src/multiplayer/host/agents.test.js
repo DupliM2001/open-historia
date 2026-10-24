@@ -61,3 +61,17 @@ test("calling an agent home closes its entry on its owner's board, and touches n
   assert.equal(entry.status, "cancelled");
   assert.equal(recalled.board.find((project) => project.name === "Rail programme").status, "active");
 });
+
+test("a player tasks its own agent: what it collects on, and an operation for the next time skip", () => {
+  const world = { spies: [spy("s-ru", RUSSIA, ESTONIA), spy("s-lv", LATVIA, ESTONIA), spy("s-gone", RUSSIA, LATVIA, "exposed")] };
+  assert.match(order(world, [], LATVIA, { op: "focus", spy: "s-ru", target: "military" }).error, /not one of your agents/);
+  assert.match(order(world, [], RUSSIA, { op: "mission", spy: "s-gone", target: "sabotage", story: "the port" }).error, /not one of your agents/);
+  assert.match(order(world, [], RUSSIA, { op: "focus", spy: "s-ru", target: "gossip" }).error, /collect on/);
+  assert.match(order(world, [], RUSSIA, { op: "mission", spy: "s-ru", target: "sabotage", story: "  " }).error, /Say what the agent should do/);
+  const focused = order(world, [], RUSSIA, { op: "focus", spy: "s-ru", target: "research" });
+  assert.equal(focused.world.spies[0].focus, "research");
+  const ordered = order(focused.world, focused.board, RUSSIA, { op: "mission", spy: "s-ru", target: "recruit", story: "a port engineer" });
+  assert.deepEqual(ordered.world.spies[0].mission, { kind: "recruit", instructions: "a port engineer", orderedAt: "2014-04-01" });
+  const cancelled = order(ordered.world, ordered.board, RUSSIA, { op: "mission", spy: "s-ru", target: "" });
+  assert.equal(cancelled.world.spies[0].mission ?? null, null);
+});

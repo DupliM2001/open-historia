@@ -15,12 +15,12 @@
 //
 // Plain data in, plain data out: { world, board } or { error }.
 
-import { deploySpy, expelSpy, normalizeSpies, recallSpy, setCoverStory, turnSpy } from "../../runtime/spycraft.js";
+import { cancelOperation, deploySpy, expelSpy, normalizeSpies, orderOperation, recallSpy, setCoverStory, setSpyFocus, turnSpy } from "../../runtime/spycraft.js";
 import { spyOperationOps } from "../../runtime/projects.js";
 import { applyProjectOpsToWorld } from "../../runtime/gameState.js";
 import { isSeal, newSeal } from "../../runtime/spySeal.js";
 
-export const AGENT_OPS = Object.freeze(["deploy", "recall", "expel", "turn", "story"]);
+export const AGENT_OPS = Object.freeze(["deploy", "recall", "expel", "turn", "story", "focus", "mission"]);
 export const COVER_STORY_MAX_CHARS = 300;
 
 const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -53,6 +53,11 @@ export const agentOrderFor = (world, board, seat, { op, target, spy, story } = {
     } else if (op === "story") {
       if (!agent || !same(agent.target, me) || agent.status !== "turned") return { error: "That is not an agent your service has turned." };
       next = setCoverStory({ ...world, spies }, agent.id, clean(story).slice(0, COVER_STORY_MAX_CHARS));
+    } else if (op === "focus" || op === "mission") {
+      if (!agent || !mine(agent) || !["active", "turned"].includes(agent.status)) return { error: "That is not one of your agents in place." };
+      if (op === "focus") next = setSpyFocus({ ...world, spies }, agent.id, clean(target));
+      else if (!clean(target)) next = cancelOperation({ ...world, spies }, agent.id);
+      else next = orderOperation({ ...world, spies }, agent.id, { kind: clean(target), instructions: clean(story), date });
     } else {
       return { error: "Unknown order." };
     }

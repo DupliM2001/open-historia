@@ -33,7 +33,7 @@ import { applyReportOps, normalizeReportOp, normalizeReports } from "./reports.j
 import { normalizeGmChanges, normalizeReminders } from "./gmChanges.js";
 import { normalizePlayerGoals } from "./playerGoal.js";
 import { normalizeInteractiveOffer } from "./interactiveOffer.js";
-import { normalizeSpyOp } from "./spycraft.js";
+import { normalizeSpyOp, spyTasking } from "./spycraft.js";
 import { eventsFromLegacyChat, normalizeChatEvents, projectChatThread, withUnloggedMessages } from "./chatThreads.js";
 import { latestTurnEventIds, unseenEvents, withoutUnseenChats, withoutUnseenEvents, withoutUnseenReports } from "./unseenEvents.js";
 import { COUNTRY_STATS_EVENT_RESCALE_LIMIT, mergeCountryStatPatch, normalizeCountryStatSheet } from "./countryStats.js";
@@ -4295,7 +4295,7 @@ export const normalizeWorldState = (world) => {
       .filter(([polityCode, value]) => polityCode && Number.isFinite(value))
       .map(([polityCode, value]) => [polityCode, Math.max(0, Math.min(100, Math.round(value)))]),
   );
-  const SPY_STATUSES = ["active", "discovered", "turned", "exposed", "recalled"];
+  const SPY_STATUSES = ["active", "discovered", "turned", "exposed", "recalled", "dead"];
   const spies = normalizeArray(nextWorld.spies)
     .map((spy, index) => {
       const target = normalizeOptionalString(spy?.target || spy?.polity);
@@ -4313,6 +4313,7 @@ export const normalizeWorldState = (world) => {
         exposedAt: normalizeOptionalString(spy?.exposedAt),
         coverStory: normalizeOptionalString(spy?.coverStory),
         suspected: spy?.suspected === true,
+        ...spyTasking(spy),
       };
     })
     .filter(Boolean);

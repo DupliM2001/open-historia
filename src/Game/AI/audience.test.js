@@ -147,3 +147,17 @@ test("a country knows only the foreign agents it has caught", () => {
   assert.equal(spyAsSeenBy(viewerAudience(["Spain"]), { ...base, status: "exposed" }), null);
   assert.equal(spyAsSeenBy(portugal, null), null);
 });
+
+test("a country that caught an agent sees none of its orders, and not its owner when it never learned it", () => {
+  const portugal = viewerAudience(["Portugal"]);
+  const tasked = { id: "s9", owner: "Angola", target: "Portugal", status: "dead", identified: false, focus: "military", assets: [{ who: "a clerk" }], operations: [{ id: "op", kind: "sabotage", outcome: "success", caught: true, identified: false }] };
+  const seen = spyAsSeenBy(portugal, tasked);
+  assert.equal(seen.owner, "");
+  assert.equal(seen.status, "dead");
+  for (const key of ["focus", "mission", "assets", "operations"]) assert.equal(key in seen, false, key);
+  assert.equal(spyAsSeenBy(portugal, { ...tasked, status: "exposed", identified: undefined }).owner, "Angola");
+  const own = spyAsSeenBy(angola, tasked);
+  assert.equal(own.owner, "Angola");
+  assert.equal(own.status, "dead");
+  assert.deepEqual(own.operations, tasked.operations);
+});

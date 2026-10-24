@@ -40,6 +40,13 @@ test("an agent caught in a second person's country waits for that person, and on
     assert.equal(solo.spies[0].status !== "active", shared.spies[0].status !== "active");
     if (shared.spies[0].status === "active") continue;
     caught += 1;
+    if (shared.spies[0].status === "dead") {
+      assert.equal(solo.spies[0].status, "dead");
+      assert.equal(shared.spies[0].identified, false);
+      assert.deepEqual(shared.events.map((event) => [event.title, event.audience]), [["A captured agent dies under interrogation", [GERMANY]]]);
+      assert.doesNotMatch(shared.events[0].description, /Italy/);
+      continue;
+    }
     // Single player: Germany is the AI's and settles it on the spot. Shared: Germany's player decides.
     assert.notEqual(solo.spies[0].status, "discovered");
     assert.equal(shared.spies[0].status, "discovered");

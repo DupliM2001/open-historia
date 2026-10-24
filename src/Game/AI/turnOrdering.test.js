@@ -115,3 +115,13 @@ test("the Hidden events ride in the turn's result, so a held board Retry sees th
   assert.match(body, /hiddenEvents: state.hiddenEvents/, "the segments' Hidden events must be carried in result");
   assert.match(body, /boardProvisionalEventIds: state.boardProvisionalEventIds/, "the provisional event ids must be carried in result");
 });
+
+test("the agents' operations are decided once a skip, told to its first part alone, and carried out from the turn's result", () => {
+  const planned = source.indexOf("state.covertOperations = isActiveFeatureEnabled(\"espionage\")");
+  assert.notEqual(planned, -1, "the skip no longer plans the operations once");
+  assert.ok(source.indexOf("if (!Array.isArray(state.covertOperations))") !== -1 && source.indexOf("if (!Array.isArray(state.covertOperations))") < planned, "a held skip's retry would roll its operations again");
+  assert.ok(source.includes('covertOperations: segmentIndex === 0 ? covertBrief : ""'), "a skip in several parts would write each operation once a part");
+  assert.ok(source.includes('covertOperations: normalizeString(state.generation?.source) === "fallback" ? [] : normalizeArray(state.covertOperations)'), "a canned turn would carry out operations nobody wrote");
+  at("operations: normalizeArray(result.covertOperations)", "the operations handed to resolveEspionage");
+  at("covertOperations: result.covertOperations", "the operations kept in the turn's journal for Intervene");
+});
