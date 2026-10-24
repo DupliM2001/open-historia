@@ -17,7 +17,26 @@ import { toCountryName } from "./ownerNames.js";
 
 const normalizeString = (value) => String(value ?? "").trim();
 
-const normalizeIdentityText = (value) =>
+// The same few hundred names are folded thousands of times in one time skip,
+// and a fold depends on nothing but the text, so each answer is kept. The
+// store is emptied when it passes MEMO_LIMIT names, so a long session cannot
+// fill memory with names it no longer uses.
+const MEMO_LIMIT = 20000;
+const memoizedFold = (fold) => {
+  const memo = new Map();
+  return (value) => {
+    const key = typeof value === "string" ? value : String(value ?? "");
+    let answer = memo.get(key);
+    if (answer === undefined) {
+      answer = fold(key);
+      if (memo.size >= MEMO_LIMIT) memo.clear();
+      memo.set(key, answer);
+    }
+    return answer;
+  };
+};
+
+const foldIdentityText = (value) =>
   normalizeString(value)
     .toLowerCase()
     .normalize("NFKD")
@@ -26,6 +45,8 @@ const normalizeIdentityText = (value) =>
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+const normalizeIdentityText = memoizedFold(foldIdentityText);
 
 const STOCK_COUNTRY_NAMES = new Set(
   Object.values(COUNTRY_NAMES)
@@ -103,7 +124,7 @@ export const resolveStockCountryCode = (value) => {
 
 // strip regime wrappers only. do NOT try to turn "german" into "germany",
 // "ottoman" into "turkey", etc. that way lies a whole new pile of bullshit.
-const polityCore = (value) => {
+const foldPolityCore = (value) => {
   let text = normalizeIdentityText(value);
   if (!text) return "";
 
@@ -169,6 +190,8 @@ const polityCore = (value) => {
 
   return text;
 };
+
+const polityCore = memoizedFold(foldPolityCore);
 
 const normalizeAliases = (value) =>
   Array.isArray(value)
