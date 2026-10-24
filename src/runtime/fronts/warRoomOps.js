@@ -20,10 +20,13 @@
 //                                                                 (again) sent once more after it was
 //                                                                 carried out
 //   { op: "unplan",    battlefield, id }                          a diversion taken off
-//   { op: "deploy",    battlefield, way, form? }                  where the asker's new troops there are to
+//   { op: "deploy",    battlefield, way, form?, count? }          where the asker's new troops there are to
 //                                                                 come in (deploy.js): along a line, or with
 //                                                                 form "swarm" as a swarm at the way's one
-//                                                                 place (swarms.js); an empty way takes it off
+//                                                                 place (swarms.js); an empty way takes it off.
+//                                                                 It calls up `count` fresh formations there
+//                                                                 when time next passes: as many as a draft
+//                                                                 usually brings without one, none with 0
 //
 // Nothing here moves a troop: orders are put to the troops when time next
 // passes (engine.js assignStanding).
@@ -34,10 +37,10 @@ import { gameDateYear } from "../gameDates.js";
 import { yearInEra } from "../unitMotion.js";
 import { decodeTroops } from "./codec.js";
 import { generalsOf, nameGenerals, orderTroops, ownTroopsOf, readTalk, releaseTroops, returnTroops, withTalk } from "./command.js";
-import { HOLDER_SIDE_A, HOLDER_SIDE_B, MAX_COMMANDS, MAX_TROOPS_PER_SIDE, MAX_WAY_POINTS, TALK_TEXT_MAX, WAR_ROOM_ORDERS } from "./constants.js";
+import { HOLDER_SIDE_A, HOLDER_SIDE_B, MAX_COMMANDS, MAX_TROOPS_PER_SIDE, MAX_WAY_POINTS, REINFORCE_MOST, TALK_TEXT_MAX, WAR_ROOM_ORDERS } from "./constants.js";
 import { pointInFrame, projectorOf } from "./frame.js";
 import { withDiversion, withProjectPlan, withoutPlan } from "./plans.js";
-import { withDeployLine } from "./deploy.js";
+import { DEPLOY_USUAL, withDeployLine } from "./deploy.js";
 import { DEPLOY_FORMS, SWARM_FORM } from "./swarms.js";
 import { battlefieldSideOf, foldBattlefieldName, isOpenBattlefield, normalizeBattlefield } from "./record.js";
 import { TRANSPORT_LOAD_MOST, TRANSPORT_MEDIA, cancelTransport, huntTransport, isUnderWay, normalizeTransports, orderTransport } from "./transports.js";
@@ -233,7 +236,9 @@ const applyTo = (record, side, op, { player, date }) => {
     const drawn = list(op.way);
     const way = drawn.length > 0 ? wayOn(record, form ? drawn.slice(0, 1) : drawn) : [];
     if (drawn.length > 0 && way.length < (form ? 1 : 2)) return { error: REFUSED.way };
-    return { record: withDeployLine(record, side, { country: player, way, form }) };
+    // And the troops it calls up there: "it does draw the line, but the troops are never actually deployed" (the owner, 2026-10-24).
+    const count = op.count === undefined || op.count === null || op.count === "" ? DEPLOY_USUAL : Math.max(0, Math.round(Number(op.count) || 0));
+    return { record: withDeployLine(record, side, { country: player, way, form, call: count }) };
   }
   return { error: REFUSED.nothing };
 };
@@ -291,8 +296,9 @@ export const cleanWarRoomOp = (op) => {
   if (op.id !== undefined) sent.id = clean(op.id, 180);
   // A transporter: what it goes by, and where to (and what the place is called, if anything is near).
   if (op.medium !== undefined) sent.medium = TRANSPORT_MEDIA.includes(op.medium) ? op.medium : "";
-  // A deployment's form (swarms.js).
+  // A deployment's form (swarms.js), and how many formations it calls up (deploy.js).
   if (op.form !== undefined) sent.form = DEPLOY_FORMS.includes(op.form) ? op.form : "";
+  if (op.count !== undefined && op.count !== null && op.count !== "") sent.count = Math.max(0, Math.min(REINFORCE_MOST, Math.round(Number(op.count) || 0)));
   if (op.to !== undefined) sent.to = [Math.round(Number(op.to?.[0]) * 10000) / 10000, Math.round(Number(op.to?.[1]) * 10000) / 10000];
   if (op.name !== undefined) sent.name = clean(op.name, 120);
   return sent;

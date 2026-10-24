@@ -15,6 +15,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { setWarRoom } from "../Map/warRoomStore.js";
 import { SAFE_BOTTOM, SAFE_LEFT, SAFE_TOP } from "../../runtime/mobileUi.js";
+import { REINFORCE_MOST } from "../../runtime/fronts/constants.js";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
 import { BONE, BONE_FAINT, BONE_SOFT, BRASS, RED, RED_BRIGHT, STEEL, STENCIL, linkStyle, plateStyle, rivetStyle, stencilStyle } from "./warRoomTheme.js";
 
@@ -128,11 +129,13 @@ const Rule = () => <div aria-hidden="true" style={{ background: STEEL.seam, boxS
 //   fleets       how many fleets the player has; fleetsOut, the fleets' plate is out (warRoomFleets.jsx)
 //   onFleets     the fleets' plate is put out, or away
 //   station      what a click orders for the fleet picked out, while the fleet tool is in hand
+//   deployCount  how many fresh formations it calls up as typed, "" for a usual draft (runtime/fronts/deploy.js);
+//                onDeployCount, typed
 //   deployForm   what the Deploy tool deploys, "front" or "swarm" (runtime/fronts/swarms.js); onDeployForm, chosen
 //   supply       the map shades how well supplied the ground is (Map/warRoomCells.js); onSupply, shown or not;
 //                supplyAreas, how much of it is stretched and cut off, in km²
 //   foot         how much of the screen's foot the drawer covers, in px (a phone's folded drawer): the rail ends above it
-const WarRoomRail = ({ shown, top, isMobile, tool, selected, locked, turnRunning, notice, carriers = [], own = 0, away = false, onTool, onOrder, onRelease, onClear, onCarrier, onWithdraw, onReturn, canFortify = false, drafted = false, fleets = 0, fleetsOut = false, onFleets = () => {}, station = "", deployForm = "front", onDeployForm = () => {}, supply = false, onSupply = () => {}, supplyAreas = null, foot = 0 }) => {
+const WarRoomRail = ({ shown, top, isMobile, tool, selected, locked, turnRunning, notice, carriers = [], own = 0, away = false, onTool, onOrder, onRelease, onClear, onCarrier, onWithdraw, onReturn, canFortify = false, drafted = false, fleets = 0, fleetsOut = false, onFleets = () => {}, station = "", deployForm = "front", onDeployForm = () => {}, deployCount = "", onDeployCount = () => {}, supply = false, onSupply = () => {}, supplyAreas = null, foot = 0 }) => {
   const none = selected.length === 0;
   const drawing = tool !== "pan";
   // The choice of carrier, open beside the rail.
@@ -384,9 +387,27 @@ const WarRoomRail = ({ shown, top, isMobile, tool, selected, locked, turnRunning
                   >{form === "swarm" ? <>Swarm</> : <>Front</>}</button>
                 ))}
               </div>
+              {/* The fresh formations it calls up when time next passes (runtime/fronts/deploy.js): "it does draw the
+                  line, but the troops are never actually deployed" (the owner, 2026-10-24). */}
+              <label style={{ alignItems: "center", display: "flex", gap: "0.45rem", marginBottom: "0.2rem" }}>
+                <span>Formations to call up</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={REINFORCE_MOST}
+                  step={1}
+                  inputMode="numeric"
+                  value={deployCount}
+                  placeholder="Usual"
+                  data-oh-war-room-deploy-count=""
+                  onChange={(event) => onDeployCount(event.target.value)}
+                  style={{ backgroundColor: "rgba(0,0,0,0.5)", border: `1px solid ${STEEL.sunkLine}`, borderRadius: "3px", boxSizing: "border-box", color: BONE, fontFamily: "inherit", fontSize: "0.78rem", outline: "none", padding: "0.2rem 0.4rem", width: "4.5rem" }}
+                />
+              </label>
+              <div style={{ color: BONE_FAINT, marginBottom: "0.35rem" }}>Empty calls up as many as a usual draft; 0 calls up none.</div>
               {deployForm === "swarm"
-                ? <>Click the place your new troops here are to gather at: levies, drafts and reinforcements come in there as a swarm, under one general of their own, and each moves and fights as troops on a front do. Drag to move the map.</>
-                : <>Draw the line your new troops here are to come in on: levies, drafts and reinforcements. They stand on ground your side holds along it.</>}
+                ? <>Click the place your new troops here are to gather at. Those called up come in there as a swarm when time next passes, under one general of their own, and so do later levies, drafts and reinforcements. Each moves and fights as troops on a front do. Drag to move the map.</>
+                : <>Draw the line your new troops here are to come in on. Those called up come in on it when time next passes, and so do later levies, drafts and reinforcements. They stand on ground your side holds along it.</>}
             </>
           )}
           {!turnRunning && tool === "replan" && <>Draw the operation’s way anew.</>}

@@ -14,7 +14,9 @@ import assert from "node:assert/strict";
 
 import { MAX_UNITS_PER_POLITY, applyEventImpactsToWorld, enforceUnitVolume, normalizeEvents } from "../../runtime/gameState.js";
 import { WEIGHT_UNKNOWN } from "../../runtime/countryWeight.js";
+import { deployLinesOf } from "../../runtime/fronts/deploy.js";
 import { createFrontRun } from "../../runtime/fronts/engine.js";
+import { applyWarRoomOp } from "../../runtime/fronts/warRoomOps.js";
 import { holderAt } from "../../runtime/fronts/record.js";
 import { enlarge, syntheticMap } from "../../runtime/fronts/syntheticMap.js";
 import { diffGameDays } from "../../runtime/gameDates.js";
@@ -442,6 +444,29 @@ test("the wars are told a record at a time, each change on its own day", () => {
   // Read off the first and the last alone, both would fall on the day of the later.
   assert.deepEqual(planFrontMoments({ warsBefore: before, warsAfter: frozen, fromDate: FROM, days: 30 }).map((moment) => moment.day), [19, 19]);
   assert.deepEqual(planFrontMoments({ warStages: [before], fromDate: FROM, days: 30 }), [], "no record, nothing told");
+});
+
+// "the deployment tool in the war room doesnt seem to work. it does draw the line, but the troops are never actually
+// deployed" (the owner, 2026-10-24).
+test("a deployment drawn in the war room calls up its troops on the next time skip, and the world keeps what came of it", async () => {
+  const map = sheet();
+  const world = worldOn(map);
+  const opened = await runTurnFronts(turn(map, world, { events: fiveEvents(), frontOrders: [advance] }));
+  const first = applied(world, opened.events, opened.battlefields);
+  const [record] = first.battlefields;
+  const side = record.sides.findIndex((members) => members.includes("Aland"));
+  // Far back in Aland, from north to south, calling up five.
+  const drawn = applyWarRoomOp(first.battlefields, { op: "deploy", battlefield: record.name, way: [[20.2, 51.9], [20.2, 51.2]], count: 5 }, { player: "Aland" });
+  assert.equal(drawn.error, undefined);
+  const before = { ...first, battlefields: drawn.battlefields };
+  const april = normalizeEvents([event("f1", "2024-04-05"), event("f2", "2024-04-15"), event("f3", "2024-04-28")]);
+  const next = await runTurnFronts(turn(map, before, { events: april, fromDate: TO, toDate: "2024-04-30", seed: "campaign|3|2024-03-31" }));
+  const after = applied(before, next.events, next.battlefields);
+  const [kept] = after.battlefields;
+  const [line] = deployLinesOf(kept, side);
+  assert.equal(line.call, undefined, "called up once");
+  assert.deepEqual([line.last.n, line.last.why, line.last.d], [5, "", TO]);
+  assert.deepEqual(next.notes.filter((note) => /^reinforce|side-not/.test(note.kind)), []);
 });
 
 test("with no war, no battlefield and no order there is nothing to run, and a map that cannot be read leaves the battlefields as they were", async () => {

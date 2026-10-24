@@ -236,6 +236,8 @@ export const TROOPS_FACTOR_MOST = 4;
 // when it says none). A side is never brought past REINFORCED_SIZE_MOST times
 // the number its own strength raises, nor past REINFORCED_LINE_MOST times what
 // its line has room for: a draft doubles an army, it does not stack a short front.
+// (The troops a deployment drawn in the war room calls up are held only by the
+// men there are and the line's room: engine.js callUpDeployed.)
 export const REINFORCE_ORDER = "reinforce";
 // THE MEN TROOPS ARE RAISED FROM (manpower.js). A formation at full strength
 // is this many men, by era (before 1500, 1500 to 1849, 1850 to 1944, from

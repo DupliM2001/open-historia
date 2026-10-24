@@ -220,6 +220,7 @@ const WarRoomPanel = ({ open, onClose, width, onResize, onResizeEnd }) => {
   const pickedFleet = useWarRoom((state) => state.fleet);
   const station = useWarRoom((state) => state.station);
   const deployForm = useWarRoom((state) => state.deployForm);
+  const deployCount = useWarRoom((state) => state.deployCount);
 
   // ---- which battlefield ---------------------------------------------------------------
   const fronts = useMemo(() => playerFronts(world?.battlefields, game.country), [world?.battlefields, game.country]);
@@ -337,6 +338,11 @@ const WarRoomPanel = ({ open, onClose, width, onResize, onResizeEnd }) => {
     const country = String(game?.country ?? "").trim().toLowerCase();
     return record && country ? deployLinesOf(record, side).find((line) => line.country.toLowerCase() === country) ?? null : null;
   }, [record, side, game]);
+  // What the deployment calls up when time next passes, and what came of the last it called up (deploy.js).
+  const calling = deployLine?.call;
+  const called = deployLine?.last?.n ?? 0;
+  const calledWhy = deployLine?.last?.why ?? "";
+  const calledOn = deployLine?.last ? formatGameDateReadable(deployLine.last.d) || deployLine.last.d : "";
   useEffect(() => {
     if (open) setWarRoom({ plans: deployLine ? [...plans, { id: "deploy", kind: "deploy", form: deployLine.form ?? "front", ways: [deployLine.way], picked: [], troops: 0 }] : plans, known: intel.plans });
   }, [open, plans, intel, deployLine]);
@@ -483,8 +489,11 @@ const WarRoomPanel = ({ open, onClose, width, onResize, onResizeEnd }) => {
       } else if (drawn === "diversion") {
         await act({ op: "diversion", battlefield: name, way, troops: selectedRef.current.length || THRUST_TROOPS.spearhead });
       } else if (drawn === "deploy") {
-        // Where the player's new troops here come in: one line, drawn again over the last; or a swarm's place.
-        if (await act({ op: "deploy", battlefield: name, way, ...(extra?.form === "swarm" ? { form: "swarm" } : {}) })) setWarRoom({ tool: "pan" });
+        // Where the player's new troops here come in: one line, drawn again over the last; or a swarm's place. And the
+        // fresh formations it calls up there when time next passes, as many as typed (none typed, a usual draft).
+        const count = String(getWarRoom().deployCount ?? "").trim();
+        const calls = count !== "" && Number.isFinite(Number(count)) ? { count: Number(count) } : {};
+        if (await act({ op: "deploy", battlefield: name, way, ...(extra?.form === "swarm" ? { form: "swarm" } : {}), ...calls })) setWarRoom({ tool: "pan" });
       } else if (drawn === "replan" && extra?.replan) {
         await act({ op: "plan", battlefield: name, project: extra.replan, way });
       } else if (drawn === "transport" && extra?.medium && way[0]) {
@@ -734,6 +743,8 @@ const WarRoomPanel = ({ open, onClose, width, onResize, onResizeEnd }) => {
         station={station}
         deployForm={deployForm}
         onDeployForm={(form) => setWarRoom({ deployForm: form === "swarm" ? "swarm" : "front" })}
+        deployCount={deployCount}
+        onDeployCount={(value) => setWarRoom({ deployCount: value })}
         supply={supplyOn}
         onSupply={() => setWarRoom({ supply: !getWarRoom().supply })}
         supplyAreas={supplyShade?.areas ?? null}
@@ -984,6 +995,33 @@ const WarRoomPanel = ({ open, onClose, width, onResize, onResizeEnd }) => {
                             <div style={{ fontSize: "0.8rem", fontWeight: 700 }}>Deployment line</div>
                             <div style={softText}>Your new troops here come in along it: levies, drafts and reinforcements.</div>
                           </>}
+                        {/* The formations it calls up when time next passes, or what came of the last it called up. */}
+                        {calling !== undefined && (
+                          <div data-oh-war-room-deploy-call="" style={{ ...softText, color: BONE, marginTop: "0.15rem" }}>
+                            {calling === "usual"
+                              ? <>Fresh formations come in here when time next passes: as many as a draft usually brings.</>
+                              : calling === 1
+                                ? <>1 fresh formation comes in here when time next passes.</>
+                                : <>{calling} fresh formations come in here when time next passes.</>}
+                          </div>
+                        )}
+                        {calling === undefined && deployLine.last && (
+                          <div data-oh-war-room-deploy-call="" style={{ ...softText, color: called > 0 ? BONE_SOFT : AMBER, marginTop: "0.15rem" }}>
+                            {called === 1
+                              ? <>1 fresh formation came in here on {calledOn}.</>
+                              : called > 0
+                                ? <>{called} fresh formations came in here on {calledOn}.</>
+                                : calledWhy === "men"
+                                  ? <>None could be called up on {calledOn}: your country has no more men fit to serve.</>
+                                  : calledWhy === "full"
+                                    ? <>None could be called up on {calledOn}: this battlefield holds as many of your troops as it can.</>
+                                    : calledWhy === "ground"
+                                      ? <>None could be called up on {calledOn}: your side holds no ground along it.</>
+                                      : calledWhy === "halted"
+                                        ? <>None could be called up on {calledOn}: the fighting here has halted.</>
+                                        : <>None could be called up on {calledOn}.</>}
+                          </div>
+                        )}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginTop: "0.1rem" }}>
                           <button type="button" disabled={locked} onClick={() => takeTool("deploy")} style={linkStyle}>{tool === "deploy" ? <>Cancel</> : <>Redraw</>}</button>
                           <button type="button" disabled={locked} onClick={() => act({ op: "deploy", battlefield: name, way: [] })} style={linkStyle}>Remove</button>

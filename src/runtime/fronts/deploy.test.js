@@ -2,14 +2,16 @@
 // Run: node --test src/runtime/fronts/deploy.test.js
 //
 // "make it so you can draw a line of where reinforcements are to get deployed
-// in the war room"
+// in the war room"; "the deployment tool in the war room doesnt seem to work.
+// it does draw the line, but the troops are never actually deployed" (the
+// owner, 2026-10-24).
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { decodeTroops } from "./codec.js";
-import { REINFORCE_ORDER } from "./constants.js";
-import { deployLinesOf } from "./deploy.js";
+import { REINFORCE_MOST, REINFORCE_ORDER } from "./constants.js";
+import { DEPLOY_USUAL, deployLinesOf } from "./deploy.js";
 import { runFronts } from "./engine.js";
 import { projectorOf } from "./frame.js";
 import { frontInput, syntheticMap } from "./syntheticMap.js";
@@ -29,7 +31,8 @@ const BACK = [[20.4, 52.7], [20.4, 50.3]];
 test("a country's new troops come in on the line drawn for them, and on the front where none was drawn", () => {
   const [record] = run().battlefields;
   const side = record.sides.findIndex((members) => members.includes("Aland"));
-  const drawn = applyWarRoomOp([record], { op: "deploy", battlefield: record.name, way: BACK }, { player: "Aland", date: "2024-03-01" });
+  // (Drawn to call up nobody itself: here it is the order's troops that come in on it.)
+  const drawn = applyWarRoomOp([record], { op: "deploy", battlefield: record.name, way: BACK, count: 0 }, { player: "Aland", date: "2024-03-01" });
   assert.equal(drawn.error, undefined);
   assert.deepEqual(deployLinesOf(drawn.record, side).map((line) => line.country), ["Aland"]);
   const order = [{ day: 1, type: "order", battlefield: record.name, side: "Aland", order: REINFORCE_ORDER, sector: "all", count: 4, given: true, ref: 1 }];
@@ -59,6 +62,70 @@ test("a deployment line is its side's own, and an empty way takes it off", () =>
   // A line nowhere near the battlefield is refused; nobody draws one for a battlefield they are not on.
   assert.ok(applyWarRoomOp([record], { op: "deploy", battlefield: record.name, way: [[100, 10], [101, 10]] }, { player: "Aland" }).error);
   assert.ok(applyWarRoomOp([record], { op: "deploy", battlefield: record.name, way: BACK }, { player: "Neutralia" }).error);
-  // It crosses to a host as a way and nothing else.
+  // It crosses to a host as a way and nothing else, and the formations it calls up, held to the most a call brings.
   assert.deepEqual(cleanWarRoomOp({ op: "deploy", battlefield: record.name, way: BACK, extra: 1 }), { op: "deploy", battlefield: record.name, way: BACK });
+  assert.equal(cleanWarRoomOp({ op: "deploy", battlefield: record.name, way: BACK, count: 4 }).count, 4);
+  assert.equal(cleanWarRoomOp({ op: "deploy", battlefield: record.name, way: BACK, count: 900 }).count, REINFORCE_MOST);
+  assert.equal(cleanWarRoomOp({ op: "deploy", battlefield: record.name, way: BACK, count: -3 }).count, 0);
+});
+
+test("a deployment drawn calls up fresh formations on it when time next passes, and only once", () => {
+  const [record] = run().battlefields;
+  const side = record.sides.findIndex((members) => members.includes("Aland"));
+  const before = troopsAt(record, side).length;
+  const drawn = applyWarRoomOp([record], { op: "deploy", battlefield: record.name, way: BACK, count: 4 }, { player: "Aland" }).record;
+  assert.equal(deployLinesOf(drawn, side)[0].call, 4);
+  // No order, no event of the story's: the deployment alone brings them, on its line.
+  const after = run({ battlefields: [drawn], days: 2 }).battlefields[0];
+  const fresh = troopsAt(after, side).slice(before);
+  assert.equal(fresh.length, 4);
+  for (const troop of fresh) assert.ok(troop.lng < 21.5, `came in at ${troop.lng.toFixed(2)}, by the line at 20.4`);
+  assert.ok(after.log.some((entry) => entry.k === "drafted" && entry.at === "4 fresh formations on its deployment line"));
+  // The call is spent, and the deployment says what came of it.
+  const [line] = deployLinesOf(after, side);
+  assert.equal(line.call, undefined);
+  assert.deepEqual([line.last.n, line.last.why], [4, ""]);
+  assert.match(line.last.d, /^2024-/);
+  const again = run({ battlefields: [after], days: 2 }).battlefields[0];
+  assert.equal(troopsAt(again, side).length, troopsAt(after, side).length, "no more come of it");
+  assert.equal(deployLinesOf(again, side)[0].last.n, 4);
+  // Drawn again, it calls up again: as many as a draft usually brings, without a number; none, with 0.
+  const usual = applyWarRoomOp([again], { op: "deploy", battlefield: record.name, way: BACK }, { player: "Aland" }).record;
+  assert.equal(deployLinesOf(usual, side)[0].call, DEPLOY_USUAL);
+  assert.equal(deployLinesOf(usual, side)[0].last, undefined, "a deployment drawn anew has called nobody up yet");
+  const more = run({ battlefields: [usual], days: 2 }).battlefields[0];
+  assert.ok(troopsAt(more, side).length >= troopsAt(again, side).length + 2);
+  const quiet = applyWarRoomOp([again], { op: "deploy", battlefield: record.name, way: BACK, count: 0 }, { player: "Aland" }).record;
+  assert.equal(deployLinesOf(quiet, side)[0].call, undefined);
+  const none = run({ battlefields: [quiet], days: 2 }).battlefields[0];
+  assert.equal(troopsAt(none, side).length, troopsAt(again, side).length);
+  assert.equal(deployLinesOf(none, side)[0].last, undefined);
+});
+
+test("a deployment calls up past what a draft may bring an army that is large already, up to the line's room", () => {
+  const [opened] = run().battlefields;
+  const side = opened.sides.findIndex((members) => members.includes("Aland"));
+  // Drafts until no more may come: the army three times what its strength usually raises.
+  let record = opened;
+  for (let round = 0; round < 6; round += 1) record = run({ battlefields: [record], moments: [{ day: 1, type: "order", battlefield: record.name, side: "Aland", order: REINFORCE_ORDER, sector: "all", count: REINFORCE_MOST, given: true, ref: round }], days: 1 }).battlefields[0];
+  const full = run({ battlefields: [record], moments: [{ day: 1, type: "order", battlefield: record.name, side: "Aland", order: REINFORCE_ORDER, sector: "all", count: 5, given: true, ref: 9 }], days: 1 });
+  assert.deepEqual(full.notes.filter((note) => note.kind === "reinforce-full").map((note) => note.side), ["Aland"], "a draft may bring no more");
+  const before = troopsAt(full.battlefields[0], side).length;
+  const drawn = applyWarRoomOp([full.battlefields[0]], { op: "deploy", battlefield: record.name, way: BACK, count: 5 }, { player: "Aland" }).record;
+  const after = run({ battlefields: [drawn], days: 1 }).battlefields[0];
+  assert.equal(troopsAt(after, side).length, before + 5, "the deployment still brings its five");
+  assert.equal(deployLinesOf(after, side)[0].last.n, 5);
+});
+
+test("a deployment calls up only the men there are, and says so when there are none", () => {
+  const peopleOf = (name) => ({ Aland: 300000, Borduria: 60e6 })[name] ?? 0;
+  // Three hundred thousand people: three formations, all under arms from the first day.
+  const [record] = run({ peopleOf }).battlefields;
+  const side = record.sides.findIndex((members) => members.includes("Aland"));
+  const drawn = applyWarRoomOp([record], { op: "deploy", battlefield: record.name, way: BACK, count: 4 }, { player: "Aland" }).record;
+  const result = run({ peopleOf, battlefields: [drawn], days: 2 });
+  const after = result.battlefields[0];
+  assert.equal(troopsAt(after, side).length, troopsAt(record, side).length);
+  assert.deepEqual([deployLinesOf(after, side)[0].last.n, deployLinesOf(after, side)[0].last.why], [0, "men"]);
+  assert.deepEqual(result.notes.filter((note) => note.kind === "reinforce-no-men").map((note) => note.side), ["Aland"]);
 });

@@ -53,6 +53,25 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // "the deployment tool in the war room doesnt seem to work. it does draw the line, but the troops are never actually
+    // deployed" (the owner, 2026-10-24).
+    id: "2026-10-deploy-calls-up",
+    kind: "minor",
+    date: "2026-10-24",
+    banners: [
+      {
+        title: "The Deploy tool deploys troops",
+        items: [
+          "In the War Room, drawing a deployment line or placing a swarm now calls up fresh troops there. They come in when time next passes.",
+          "Choose how many formations to call up as you draw it. Leave it empty for as many as a usual draft, or put 0 to only move where new troops arrive.",
+          "It works where your army is already large: only the men your country has left and the room along the front limit it.",
+          "The deployment's card says how many are coming, how many came, or why none could be called up, such as no men left to serve.",
+          "Levies, drafts and reinforcements still come in on the line or at the swarm's place afterwards.",
+        ],
+      },
+    ],
+  },
+  {
     // "there is a report that on the android version during a time skip it just completely freezes permenantly and
     // you cant click any buttons or do anything" (the owner, 2026-10-23).
     id: "2026-10-skip-freeze",

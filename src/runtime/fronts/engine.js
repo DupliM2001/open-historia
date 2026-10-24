@@ -31,7 +31,7 @@ import { arenaFor } from "./arena.js";
 import { dawn } from "./dawn.js";
 import { anyMechanic, readMechanics } from "./mechanics.js";
 import { levyOwed, musterShare } from "./muster.js";
-import { deployCells } from "./deploy.js";
+import { DEPLOY_USUAL, DEPLOY_WHY, deployCells } from "./deploy.js";
 import { linesChanged } from "./walls.js";
 import { AIR_MISSIONS, wingChanges } from "./air.js";
 import { MILITARY_NEUTRAL, airWorth, landWorth, mixOf, readMilitary, seaWorth } from "./military.js";
@@ -997,9 +997,11 @@ const reinforceOnFront = (run, battle, moment, day) => {
   // What its own strength raises here: the number a draft is judged against.
   const usual = Math.max(troopsLeast(run.troops), Math.round(troopsWanted(strength, battle.effort[side], run.troops)));
   const live = liveCount(battle.troops[side]);
+  // (A call-up of a deployment drawn in the war room is a player's own: it is held by the men there are and the room
+  // the line has, never by what its strength usually raises, which knows nothing of the army it already fields.)
   const room = Math.min(
     MAX_TROOPS_PER_SIDE - battle.troops[side].length,
-    REINFORCED_SIZE_MOST * usual - live,
+    moment.deployed ? MAX_TROOPS_PER_SIDE : REINFORCED_SIZE_MOST * usual - live,
     REINFORCED_LINE_MOST * troopsCap(battle.lineKm, run.troops) - live,
   );
   // And the men have to be there to call up (manpower.js): weighing military figures, a country's last men too, as a
@@ -1038,7 +1040,9 @@ const reinforceOnFront = (run, battle, moment, day) => {
   if (home.length > 0) cells = home;
   if (cells.length === 0 && battle.field.holders.indexOf(side) >= 0) cells = [battle.field.holders.indexOf(side)];
   // (On the line its commander drew for its new troops, where it drew one: deploy.js.)
+  const along = cells;
   cells = deployCells(battle, side, drafted, cells);
+  const onLine = cells !== along;
   if (cells.length === 0) {
     run.notes.push({ ...note, kind: "reinforce-no-ground" });
     return;
@@ -1054,14 +1058,47 @@ const reinforceOnFront = (run, battle, moment, day) => {
   draw(run, drafted, military ? called : count * run.menEach);
   battle.pool[side] += count * POOL_PER_TROOP * battle.edge[side].reserves;
   // (Where they come as a swarm they stand as one first: swarms.js.)
-  gatherNewcomers(battle, side, owner, first, run.warfare);
+  const swarmed = gatherNewcomers(battle, side, owner, first, run.warfare);
   putUnderStanding(run, battle, side, first, today, day);
   // (Troops come back to a battlefield their side had left.)
   if (battle.away[side]) comeBack(run, battle, day);
-  battle.log.push({ d: run.dateOf(day), k: "drafted", s: side, at: `${count} fresh formations ${whole ? "along its whole line" : `in the ${sector.word ?? clean(moment.sector)}`}`, n: count });
+  // (Called up on a deployment, where they came in is where it was drawn: callUpDeployed.)
+  const where = moment.deployed && swarmed > 0 ? "where its swarm gathers"
+    : moment.deployed && onLine ? "on its deployment line"
+      : whole ? "along its whole line" : `in the ${sector.word ?? clean(moment.sector)}`;
+  battle.log.push({ d: run.dateOf(day), k: "drafted", s: side, at: `${count} fresh formations ${where}`, n: count });
   battle.quiet = 0;
   battle.touched = true;
   battle.planKey = "";
+};
+
+// TROOPS CALLED UP ON A DEPLOYMENT. "the deployment tool in the war room
+// doesnt seem to work. it does draw the line, but the troops are never
+// actually deployed" (the owner, 2026-10-24). A deployment drawn in the war
+// room calls up fresh formations of its country's there (deploy.js `call`):
+// on the first day of the run after it was drawn they are drafted as for an
+// order for more troops of the whole line (reinforceOnFront), and so come in
+// on the line or at the swarm's place, with the men it has left and the room
+// the battlefield has. The call is then spent, and `last` on the deployment
+// says what came of it, kept with it as it is handed on (battle.js).
+const callUpDeployed = (run) => {
+  for (const battle of run.battles) {
+    if (battle.status === "closed" || battle.closing || !Array.isArray(battle.deploy)) continue;
+    battle.deploy.forEach((entries, side) => {
+      entries.forEach((entry, at) => {
+        if (entry.call === undefined) return;
+        const before = battle.troops[side].length;
+        const noted = run.notes.length;
+        const moment = { side: entry.country, sector: "all", given: true, deployed: true, ...(entry.call === DEPLOY_USUAL ? {} : { count: entry.call }) };
+        reinforceOnFront(run, battle, moment, 0);
+        const n = battle.troops[side].length - before;
+        const said = run.notes.slice(noted).map((note) => note.kind).filter((kind) => DEPLOY_WHY[kind]);
+        const spent = { ...entry };
+        delete spent.call;
+        entries[at] = { ...spent, last: { n, why: n > 0 ? "" : DEPLOY_WHY[said[said.length - 1]] ?? "", d: run.dateOf(0) } };
+      });
+    });
+  }
 };
 
 // A CITY BEYOND THE BATTLEFIELD'S EDGE AS AN OBJECTIVE. "Why do they not see
@@ -1991,6 +2028,8 @@ const begin = (run) => {
   beginTransports(run);
 
   for (const battle of run.battles) battle.touched = false;
+  // The troops a deployment drawn in the war room calls up come in first, as the run begins.
+  callUpDeployed(run);
   applyMoments(run, 0);
   // What a moment of the first day did is part of the state the run begins from.
   for (const battle of run.battles) {

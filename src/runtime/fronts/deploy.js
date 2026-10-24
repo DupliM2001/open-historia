@@ -20,9 +20,21 @@
 // in there as a swarm under a general of their own, and join the swarm that
 // gathered there before while it is still near (swarms.js gatherNewcomers).
 //
+// "the deployment tool in the war room doesnt seem to work. it does draw the
+// line, but the troops are never actually deployed" (the owner, 2026-10-24).
+// A deployment drawn also CALLS UP fresh formations there: `call` on it, as
+// many as the player asked for, or DEPLOY_USUAL for as many as a draft of its
+// country's usually brings. When time next passes they are drafted as for an
+// order for more troops (engine.js callUpDeployed, reinforceOnFront), with the
+// men it has left and the room its line has (never held to what its strength
+// usually raises, as the story's drafts are), and `last` on it says what came
+// of it: { n, why, d }, how
+// many came in, why none did (DEPLOY_WHY), and on what day. A deployment drawn
+// with a call of 0 only moves where new troops come in.
+//
 // Only + - * / and comparisons.
 
-import { HOLDER_SIDE_A, HOLDER_SIDE_B, MAX_WAY_POINTS } from "./constants.js";
+import { HOLDER_SIDE_A, HOLDER_SIDE_B, MAX_WAY_POINTS, REINFORCE_MOST } from "./constants.js";
 
 // (A deployment's form, as swarms.js names it: a line unless it says a swarm.)
 const SWARM = "swarm";
@@ -30,6 +42,39 @@ const SWARM = "swarm";
 // How far from the line drawn a new troop may stand, and the most points a line keeps.
 export const DEPLOY_REACH_KM = 40;
 export const DEPLOY_WAY_MOST = MAX_WAY_POINTS * 4;
+
+// A call-up of as many formations as a draft of its country's usually brings (engine.js reinforceOnFront).
+export const DEPLOY_USUAL = "usual";
+// Why a call-up brought nobody, by what the engine noted: no men left to call up, no room on the battlefield, none of
+// its side's ground to stand on, the fighting halted, its country no longer on the battlefield.
+export const DEPLOY_WHY = Object.freeze({
+  "reinforce-no-men": "men",
+  "reinforce-full": "full",
+  "reinforce-no-ground": "ground",
+  "reinforce-halted": "halted",
+  "side-not-fighting": "side",
+});
+const WHY_WORDS = Object.values(DEPLOY_WHY);
+
+// A call-up as it is kept: DEPLOY_USUAL, a number of formations 1 to REINFORCE_MOST, or undefined for none.
+export const readCall = (value) => {
+  if (value === DEPLOY_USUAL) return DEPLOY_USUAL;
+  const count = Math.round(Number(value));
+  if (!Number.isFinite(count) || count < 1) return undefined;
+  return count > REINFORCE_MOST ? REINFORCE_MOST : count;
+};
+
+// What came of the last call-up, as it is kept, or undefined.
+const readLast = (value) => {
+  if (!value || typeof value !== "object") return undefined;
+  const n = Math.round(Number(value.n));
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  const why = WHY_WORDS.includes(value.why) ? value.why : "";
+  return { n, why, d: clean(value.d, 40) };
+};
+
+// An entry with its call-up and what came of the last, where it has them.
+const withCall = (entry, call, last) => ({ ...entry, ...(call !== undefined ? { call } : {}), ...(last ? { last } : {}) });
 
 const clean = (value, most = 200) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, most).trim();
 const fold = (value) => clean(value).toLowerCase();
@@ -61,7 +106,7 @@ export const readDeploy = (value) => [HOLDER_SIDE_A, HOLDER_SIDE_B].map((side) =
     const way = swarm ? readWay(raw?.way).slice(0, 1) : readWay(raw?.way);
     if (!country || seen.has(fold(country)) || way.length < (swarm ? 1 : 2)) continue;
     seen.add(fold(country));
-    kept.push(swarm ? { country, way, form: SWARM } : { country, way });
+    kept.push(withCall(swarm ? { country, way, form: SWARM } : { country, way }, readCall(raw?.call), readLast(raw?.last)));
   }
   return kept;
 });
@@ -75,15 +120,17 @@ const carryOf = (record) => (record?.brief && typeof record.brief.carry === "obj
 export const deployLinesOf = (record, side) => (isSide(side) ? readDeploy(carryOf(record).deploy)[side] : []);
 
 // A record with a country's deployment line drawn (or, with a way of fewer than two points, taken off). With
-// `form: "swarm"`, its swarm's place: the first point of the way (none takes it off).
-export const withDeployLine = (record, side, { country, way, form = "" } = {}) => {
+// `form: "swarm"`, its swarm's place: the first point of the way (none takes it off). It calls up `call`
+// formations there when time next passes (readCall: DEPLOY_USUAL, a number, or none).
+export const withDeployLine = (record, side, { country, way, form = "", call } = {}) => {
   const name = clean(country, 120);
   if (!record || !isSide(side) || !name) return record;
   const deploy = readDeploy(carryOf(record).deploy);
   const swarm = form === SWARM;
   const line = swarm ? readWay(way).slice(0, 1) : readWay(way);
   const others = deploy[side].filter((entry) => fold(entry.country) !== fold(name));
-  deploy[side] = line.length >= (swarm ? 1 : 2) ? [...others, swarm ? { country: name, way: line, form: SWARM } : { country: name, way: line }] : others;
+  const drawn = swarm ? { country: name, way: line, form: SWARM } : { country: name, way: line };
+  deploy[side] = line.length >= (swarm ? 1 : 2) ? [...others, withCall(drawn, readCall(call))] : others;
   const carry = { ...carryOf(record) };
   if (hasDeploy(deploy)) carry.deploy = deploy;
   else delete carry.deploy;
