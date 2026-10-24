@@ -65,6 +65,7 @@ const NEW_UPDATES = [
           "A time skip no longer freezes the game on phones in scenarios with many countries, vassals and treaties, such as 1836: The Victorian Era.",
           "Time skips are faster everywhere: the game works out who is who in the world's treaties and vassals once per check, and copies each country's politics far less often.",
           "Nothing in your games changes: the same countries, treaties and vassals, worked out faster.",
+          "On a computer, an update found as the game opens no longer leaves its screen not responding.",
         ],
       },
     ],
