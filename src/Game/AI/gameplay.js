@@ -9747,6 +9747,7 @@ const applySimulationResult = async ({
       events: freshEvents,
       round: nextGame.round,
       lastOfferRound: baseWorld?.lastInteractiveOfferRound,
+      history: baseWorld?.simulationHistory,
     });
     worldWithImpacts = {
       ...worldWithImpacts,

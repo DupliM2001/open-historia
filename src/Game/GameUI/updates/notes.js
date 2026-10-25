@@ -53,6 +53,21 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-interactive-offers",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Interactive events, less often",
+        items: [
+          "A time skip now offers an interactive event about one skip in five: one in four when it has an event worth playing out, and never on the skip right after the last offer.",
+          "A scene you play out no longer shortens the wait for the next offer.",
+          "Campaigns that start on the same date no longer get their offers on the same skips.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-faster-updates",
     kind: "minor",
     date: "2026-10-25",
