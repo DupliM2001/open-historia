@@ -19,7 +19,7 @@
 
 const nodeFs = require("node:fs");
 const nodePath = require("node:path");
-const { chunkAssetName, chunksOfFile, planUpdate, readHead, readManifest, sha256 } = require("./payloadChunks.cjs");
+const { LARGE_FILE_BYTES, chunkAssetName, chunksOfFile, planUpdate, readHead, readManifest, sha256 } = require("./payloadChunks.cjs");
 const { CURRENT_FILE, MANIFEST_FILE, compareBuilds, readState, sameShell, writeJsonAtomically } = require("./payloadBoot.cjs");
 
 const CHUNK_ATTEMPTS = 3;
@@ -84,6 +84,44 @@ const indexLocal = async (root, { fs = nodeFs, signal = null, onFile = null, sli
       if (!chunks.has(chunk.id)) chunks.set(chunk.id, { file, offset: chunk.offset, size: chunk.size });
     }
     onFile?.(index + 1, names.length);
+  }
+  return { files, chunks };
+};
+
+const indexFromManifest = async (root, { fs = nodeFs, signal = null, onFile = null, sliceMs = SLICE_MS } = {}) => {
+  let manifest = null;
+  try {
+    manifest = readManifest(JSON.parse(fs.readFileSync(nodePath.join(root, MANIFEST_FILE), "utf8"))).manifest;
+  } catch {
+    return null;
+  }
+  if (!manifest) return null;
+  const files = new Map();
+  const chunks = new Map();
+  const breathe = slicer(sliceMs);
+  for (let index = 0; index < manifest.files.length; index += 1) {
+    await breathe();
+    throwIfAborted(signal);
+    const entry = manifest.files[index];
+    const file = nodePath.join(root, ...entry.path.split("/"));
+    let size = -1;
+    try {
+      size = fs.statSync(file).size;
+    } catch {
+      size = -1;
+    }
+    if (size === entry.size) {
+      if (!files.has(entry.sha256)) files.set(entry.sha256, file);
+      const whole = entry.size >= LARGE_FILE_BYTES && entry.parts.every((part) => part.at === 0 && part.size === manifest.chunks[part.chunk]);
+      if (whole) {
+        let offset = 0;
+        for (const part of entry.parts) {
+          if (!chunks.has(part.chunk)) chunks.set(part.chunk, { file, offset, size: part.size });
+          offset += part.size;
+        }
+      }
+    }
+    onFile?.(index + 1, manifest.files.length);
   }
   return { files, chunks };
 };
@@ -288,13 +326,14 @@ const createPayloadUpdater = ({
     fs.mkdirSync(cacheDir, { recursive: true });
 
     onProgress({ phase: "reading", percent: 0 });
-    const local = await indexLocal(currentRoot, {
+    const reading = {
       fs,
       signal,
       onFile: (read, total) => {
         if (read % 100 === 0 || read === total) onProgress({ phase: "reading", percent: Math.floor((read / total) * 100) });
       },
-    });
+    };
+    const local = (await indexFromManifest(currentRoot, reading)) ?? await indexLocal(currentRoot, reading);
     const plan = planUpdate(manifest, local);
     log("info", `update ${build}: ${plan.copy.length} file(s) kept, ${plan.build.length} to put together, ${plan.fetch.length} chunk(s) to fetch (${plan.fetchBytes} of ${plan.totalBytes} bytes)`);
 
@@ -409,4 +448,4 @@ const createPayloadUpdater = ({
   return { check, apply };
 };
 
-module.exports = { CHUNKS_AT_ONCE, CHUNK_ATTEMPTS, createPayloadUpdater, indexLocal, listFiles };
+module.exports = { CHUNKS_AT_ONCE, CHUNK_ATTEMPTS, createPayloadUpdater, indexFromManifest, indexLocal, listFiles };

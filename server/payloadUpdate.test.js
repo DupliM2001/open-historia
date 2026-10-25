@@ -17,7 +17,7 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const { chunkAssetName, headOf, planPayload, sha256 } = require("../electron/payloadChunks.cjs");
 const boot = require("../electron/payloadBoot.cjs");
-const { createPayloadUpdater, indexLocal, listFiles } = require("../electron/payloadUpdate.cjs");
+const { createPayloadUpdater, indexFromManifest, indexLocal, listFiles } = require("../electron/payloadUpdate.cjs");
 const { createLayeredUpdater } = require("../electron/layeredUpdate.cjs");
 
 const noise = (bytes, seed = 1) => {
@@ -481,4 +481,43 @@ test("reading the files that are running lets the app answer in between", async 
   clearInterval(timer);
   assert.equal(local.files.size, 300);
   assert.ok(ticksBeforeEnd > 0, "a timer ran while the files were read");
+});
+
+test("an update made over an earlier one reads that one's list instead of every file", async (t) => {
+  const place = install(t);
+  const first = await publish(t, newer());
+  const done = await updaterFor(place, first).apply((await updaterFor(place, first).check()).manifest);
+
+  const fromList = await indexFromManifest(done.root);
+  const fromFiles = await indexLocal(done.root);
+  const kept = (index) => [...index.files.keys()].filter((key) => key !== sha256(fs.readFileSync(path.join(done.root, boot.MANIFEST_FILE)))).sort();
+  assert.deepEqual([...fromList.files.keys()].sort(), kept(fromFiles));
+  for (const [id, at] of fromList.chunks) {
+    const read = fromFiles.chunks.get(id);
+    assert.ok(read, `chunk ${id} is found by reading too`);
+    assert.equal(read.size, at.size);
+    if (read.file === at.file) assert.equal(read.offset, at.offset);
+  }
+  assert.equal(await indexFromManifest(place.app), null, "a copy as installed has no list, and is read file by file");
+
+  const third = newer().map((entry) => (entry.path === "electron/build-id.json" ? { ...entry, data: Buffer.from('{"build":"300"}') } : entry));
+  const second = await publish(t, third, { build: "300", version: "0.0.300" });
+  const reads = [];
+  const counting = { ...fs, readFileSync: (target, ...rest) => {
+    const name = String(target);
+    if (name.startsWith(done.root) && !name.endsWith(boot.MANIFEST_FILE)) reads.push(name);
+    return fs.readFileSync(target, ...rest);
+  } };
+  const updater = updaterFor({ ...place, app: done.root }, second, { currentBuild: "200", fs: counting });
+  const found = await updater.check();
+  const next = await updater.apply(found.manifest);
+  assert.deepEqual(reads, [], "no file of the running set was read whole");
+  const want = new Map(third.map((entry) => [entry.path, sha256(entry.data)]));
+  want.set(boot.MANIFEST_FILE, sha256(Buffer.from(JSON.stringify(second.manifest))));
+  assert.deepEqual([...readTree(next.root)].sort(), [...want].sort());
+  assert.ok(second.asked.filter((name) => name.startsWith("c-")).length <= 2, "only what changed came down");
+
+  fs.writeFileSync(path.join(done.root, "server", "server.js"), "short");
+  const damaged = await indexFromManifest(done.root);
+  assert.equal(damaged.files.size, fromList.files.size - 1, "a file whose size is wrong is not reused");
 });

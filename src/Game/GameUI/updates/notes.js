@@ -53,6 +53,21 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-faster-updates",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Faster updates",
+        items: [
+          "An update found as the game opens no longer spends minutes going through every file you already have: it checks them against the list the last update left, in a second or two.",
+          "Only what changed is downloaded, as before, and the game restarts on the new version.",
+          "The first update after installing the game from its installer still goes through every file once.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-espionage-part-2",
     kind: "major",
     date: "2026-10-24",
