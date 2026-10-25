@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/" class="on" aria-current="page">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/" class="on" aria-current="page">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -112,7 +112,7 @@
     <h1>Relations, Treaties and War</h1>
     <p class="tagline">The four ledgers that decide who is at war with whom, how much they like each other, and what they have signed.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#wars">Wars</a></li><li class="d3"><a href="#combat-requires-a-war">Combat requires a war</a></li><li class="d2"><a href="#relations">Relations</a></li><li class="d2"><a href="#agreements">Agreements</a></li><li class="d2"><a href="#storylines">Storylines</a></li><li class="d2"><a href="#what-this-changes-to-play">What this changes to play</a></li><li class="d2"><a href="#puppets-and-overlords">Puppets and overlords</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#wars">Wars</a></li><li class="d3"><a href="#combat-requires-a-war">Combat requires a war</a></li><li class="d2"><a href="#relations">Relations</a></li><li class="d2"><a href="#agreements">Agreements</a></li><li class="d2"><a href="#alliances-that-bind">Alliances that bind</a></li><li class="d2"><a href="#war-weariness">War weariness</a></li><li class="d2"><a href="#ending-a-war-peace-on-terms">Ending a war: peace on terms</a></li><li class="d2"><a href="#storylines">Storylines</a></li><li class="d2"><a href="#what-this-changes-to-play">What this changes to play</a></li><li class="d2"><a href="#puppets-and-overlords">Puppets and overlords</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Who is at war with whom is not just a matter of what the events say. It is a matter of record:
 four <strong>ledgers</strong> that the engine owns, validates and enforces.</p>
 <p>The model does not write these directly. It emits compact updates, the engine checks them
@@ -160,7 +160,12 @@ log.</p>
 <p>The practical effect: fighting cannot quietly appear out of nowhere. Someone has to have started
 a war, and the record says who and when — but a single unbindable record no longer costs you the
 whole turn.</p>
-<h2 id="relations">Relations</h2>
+<p class="beta-note"><b>On beta, the battlefields write to the ledger too.</b> Where a land war is
+fought on a <a href="/wiki/war-room/">battlefield</a>, an attack across a border two countries are
+at peace on opens a war between them only when it is a real offensive (a major or total effort),
+or when the story opens that war itself; a border clash or a minor incident opens nothing. An order
+a player gives always counts. A route you draw in the War Room into a country that is not in the
+war is an attack on it: when your troops reach its border, it joins the war against you.</p><h2 id="relations">Relations</h2>
 <p>One score per pair of countries, from <strong>−100 to +100</strong>, sorted into bands:</p>
 <div class="table-scroll"><table>
 <thead>
@@ -273,6 +278,74 @@ a note in the diagnostics log, and the rest of the turn stands. It would rather 
 than end the wrong treaty.</p>
 <p>This is what turns &quot;we agreed to an alliance in a conversation twelve turns ago&quot; into something
 the world still knows about and can be held to.</p>
+<h2 id="alliances-that-bind">Alliances that bind</h2>
+<p>On the stable build an alliance is a record, not a trigger. The ledger is told that an alliance
+does not by itself put anyone at war, so an ally fights beside you only if the story has it join.</p>
+<p class="beta-note"><b>Beta channel only.</b></p><p>On beta, treaties call their members in. When a war <strong>begins</strong> and a country is attacked, every
+country bound to defend it is called: partners in an <strong>alliance</strong> or a <strong>defensive pact</strong>, a
+country that gave it a <strong>guarantee</strong>, and full members of an institution that is a security
+alliance or a defence pact with it. Only the country attacked calls, and only in a war that began
+that turn, so an old save is not swept into wars that were already being fought. A country bound
+to both sides stands aside and breaks nothing.</p>
+<ul>
+<li><strong>A country nobody plays</strong> comes in on the defender&#39;s side, strongest first, unless its
+relations with the defender are below −30 or its own war weariness is 70 or more. Then it breaks
+the treaty instead.</li>
+<li><strong>You</strong> are asked. A <strong>Call to arms</strong> card appears over the map: <strong>Honour the alliance</strong> puts you
+at war; <strong>Break the treaty</strong> costs you 15 points of reputation and takes you out of the
+agreement (an institution keeps your seat). A call left unanswered for two turns counts as
+broken.</li>
+</ul>
+<p>The cards can be folded away to a small <strong>Waiting for your answer</strong> button while you think.</p>
+<h2 id="war-weariness">War weariness</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>Every country at war grows <strong>weary</strong> of it, on a scale from 0 to 100 that the game keeps itself;
+no request is made for it. It rises with every year at war, with the men a war calls up, with the
+ground a country loses, under a blockade, and sharply with the troops that weather and being cut
+off wear away, a hard winter above all. Taking ground eases it a little, and it falls away in
+peace. One period can add at most 35.</p>
+<p>Past 50 it tells on a country&#39;s armies: they come back up to strength more slowly, with fewer
+reserves, and fight and move a little worse. The story is told who is weary, so it shows at home.
+Weariness is what makes peace possible: see below.</p>
+<p>You can read it under each war in the <strong>🤝 Diplomacy</strong> tab of your country panel (open it from your flag), under <strong>Current
+conflicts</strong> (<strong>War weariness:</strong> and each side&#39;s leading country with its figure), and on a
+country&#39;s <strong>⚔ Military</strong> card. See <a href="/wiki/statistics/">national statistics</a>.</p>
+<h2 id="ending-a-war-peace-on-terms">Ending a war: peace on terms</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>On the stable build a war ends when the story ends it. On beta a war can also end <strong>on terms</strong>,
+which the game works out and carries out itself. Terms are two things:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>The ground</strong></td>
+<td><strong>Each side keeps the ground it holds</strong>: what was taken is ceded. Or <strong>the old borders</strong>: every region goes back to whose it lawfully was.</td>
+</tr>
+<tr>
+<td><strong>Reparations</strong></td>
+<td>One side pays the other a share of its economy every year for a number of years, out of its public finances. Or nobody pays.</td>
+</tr>
+</tbody></table></div>
+<p><strong>Peace offered to you.</strong> A country nobody plays that is at war with you offers peace once its
+weariness reaches 60, or once your side holds a quarter of its land and it is losing. A <strong>Peace
+offered</strong> card shows the terms: <strong>Accept</strong> or <strong>Decline</strong>. It offers what its position is worth:
+a country that is losing cedes what it lost and pays, one about even offers the old borders and no payment,
+and one that is winning but weary keeps what it holds. An offer you decline is not made again for
+three turns, and an open one lapses after four.</p>
+<p><strong>Peace you propose.</strong> Under each of your wars in the <strong>🤝 Diplomacy</strong> tab of your country panel,
+<strong>Propose peace</strong> opens two choices, the ground and the reparations (nobody pays, or 1% a year
+for 5 years, or 3% a year for 10, either way round), and <strong>Put these terms</strong>. A country nobody
+plays answers at once, by how the war stands for it and how weary it is. A fresh enemy that is not
+losing refuses even a white peace. A war fought against another player is ended by talking to them.</p>
+<p><strong>Between countries nobody plays</strong>, a war ends when one side is nearly spent (weariness 80) or is
+losing its ground, and the other will take its terms.</p>
+<p>A peace made ends the war in the ledger at once. Its battlefields close when time next passes, so
+the map shows them until then. The reparations a country is paying or being paid, and for how
+many more years, are listed in the same tab.</p>
+<p><strong>A ceasefire can still be settled.</strong> A war under a ceasefire or an armistice can be ended on
+terms like one still being fought, and the ground moves with them.</p>
 <h2 id="storylines">Storylines</h2>
 <p>The fourth ledger, and the least visible: persistent world processes running underneath the
 events. A storyline is a thing that is <em>developing</em> — a rivalry sharpening, an economy
@@ -292,7 +365,8 @@ where it was and overdue for the next turn. It never costs you the turn itself.<
 <ul>
 <li><strong>Wars have a beginning.</strong> You cannot drift into one; someone declared it, and the ledger
 says so.</li>
-<li><strong>Ceasefire is a real state.</strong> It is not peace, and resuming from it is a distinct act.</li>
+<li><strong>Ceasefire is a real state.</strong> It is not peace, and resuming from it is a distinct act. (On
+beta, peace terms can still be made from it.)</li>
 <li><strong>Relations are legible.</strong> You can see the number rather than inferring the mood.</li>
 <li><strong>Treaties persist properly.</strong> An alliance signed in turn three still constrains people in
 turn thirty.</li>
@@ -352,6 +426,8 @@ subordination at all.</p>
 <ul>
 <li><a href="/wiki/diplomacy/">Diplomacy</a> — the conversations these ledgers record the results of.</li>
 <li><a href="/wiki/military/">Military and combat</a> — the fighting a war authorises.</li>
+<li><a href="/wiki/war-room/">The War Room</a> — battlefields and fronts, on beta.</li>
+<li><a href="/wiki/war-at-sea/">War at sea</a> — fleets, sea battles and blockades, on beta.</li>
 <li><a href="/wiki/territory/">Territory</a> — what a war moves.</li>
 </ul>
 
@@ -360,7 +436,7 @@ subordination at all.</p>
         <a class="next" href="/wiki/territory/"><span>Next →</span><b>Territory</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

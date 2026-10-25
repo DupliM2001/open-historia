@@ -26,9 +26,9 @@ territory has to ship the border change with it.
 Events are revealed **one at a time**, not dumped as a list.
 
 The Events panel opens as soon as a skip starts and fills as the model writes, so you can begin
-reading before the turn has finished (Gemini delivers everything at once, so there it all arrives
-together). When you open the history for a fresh turn, the map rolls back to how it looked
-*before* the jump. Each time you press **Next event**, that event's changes are applied on top —
+reading before the turn has finished — on Gemini too, except in a skip that may look things up,
+which arrives all at once. When you open the history for a fresh turn, the map rolls back to how
+it looked *before* the jump. Each time you press **Next event**, that event's changes are applied on top —
 the border moves, the unit appears, the flag changes — and the camera flies to where the event
 happened: the places it names as places and the things it changed. An event that names no place
 leaves the camera where it is.
@@ -42,6 +42,13 @@ answering a letter, not the copy an agent stole in it.
 **✋ Intervene here** stops the round at the event you are looking at: what you have seen is
 kept, the rest never happens, and the date becomes that event's. See
 [time and turns](/wiki/time/#intervene).
+
+<p class="beta-note"><b>On beta you can reread earlier turns, and the war plays as you read.</b>
+The panel's header has <b>‹</b> and <b>›</b> either side of the round and its dates: they step back
+through the turns the game keeps, each shown whole and read only, while the map stays as the world
+is now. And where a land war is fought on a <a href="/wiki/war-room/">battlefield</a>, each
+<b>Next event</b> plays the days since the one before, so you see the troops go where the event
+says they went.</p>
 
 ## Event cards
 
@@ -116,6 +123,13 @@ progress: the skip controls lead back to it.
 What it costs, as the panel says beside the buttons: starting is one request, each move one more,
 ending one more; letting it pass, taking a move back and setting a scene aside cost nothing.
 
+<p class="beta-note"><b>On beta a scene changes the map.</b> What you decide in it reaches the
+map like an event's consequences: units, land handed over or occupied, structures, and the Projects
+board. Working that out is one request more when the outcome has something for the map, and none
+when it has not. A scene that reaches its own end is usually written up with its last move, so only
+ending it yourself costs the request for ending. Once you have played a move, <b>Set aside</b> asks
+to be pressed a second time, since the moves played are not kept.</p>
+
 The [cheats panel](/wiki/cheats/)'s **Interactive Event** tool plays any event on the record out
 the same way.
 
@@ -125,8 +139,10 @@ The timeline keeps every event. What the **model** is shown is different: the ne
 always in full, and older ones folded into a **history document** — one living account of the
 campaign that the AI rewrites as each new period is folded in, condensing unimportant older
 material to keep it around 1,500 words. A fold happens every fifth round, or sooner when 48
-events have piled up. So the world still knows that a war happened in year two even though it no
-longer reads every event from it.
+events have piled up, and it rides in the time skip's own answer at no extra request; only a fold
+that has waited until 96 events have piled up is asked for on its own (as is every fold with
+**Batch background AI tasks** on, for Anthropic). So the world still knows that a war happened in
+year two even though it no longer reads every event from it.
 
 This matters for long campaigns: the model's sense of your history stays coherent without the
 context growing without limit. It also means very old, very specific details fade. You can read
@@ -143,6 +159,12 @@ the game uses it to generate the recent history that led to the situation you ha
 including the wars already running and the relationships already soured.
 
 It happens once, and it is what stops turn one feeling like the world began five minutes ago.
+
+<p class="beta-note"><b>On beta a scenario can ship its pre-history.</b> Its author can write or
+generate the events before round one in the Workshop and keep them with the scenario, together
+with the wars, relations and agreements already true on the start date; a new game then opens with
+them on the timeline and asks no model for them. A scenario or a game can also switch
+<b>Pre-game history</b> off in its Features tab, and then no backstory is written.</p>
 
 ## If a turn produced nothing useful
 

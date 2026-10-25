@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -116,10 +116,17 @@
     <p>The desktop app already runs a local server — that is how it works. This page is about running
 that server deliberately: to play entirely offline, to reach your campaign from another device,
 or to keep everything on hardware you control.</p>
-<p><strong>There is no multiplayer.</strong> Hosting lets <em>you</em> reach <em>your</em> game from another device. It does
-not let two people play the same campaign. If you connect from your phone and your laptop at
+<p><strong>Hosting a server is not multiplayer.</strong> It lets <em>you</em> reach <em>your</em> game from another device. It
+does not let two people play the same campaign. If you connect from your phone and your laptop at
 once, you are two windows onto one single-player game, and you will fight each other for it.</p>
-<h2 id="what-you-get">What you get</h2>
+<p class="beta-note"><b>Multiplayer is on beta, and needs no server of yours.</b> The main menu's
+<b>Lobbies</b> tab hosts the game you have open, from the desktop app, under an invite code.
+Friends join with <b>Join a private lobby</b> from the beta desktop app or the beta Android app,
+need the lobby's scenario in their library, and each take a country nobody else plays. The host's
+computer runs the game and pays for its AI with the host's key. Players connect straight to the
+host's computer, found through public relay servers, so the host and each player can see each
+other's network address: share the code only with people you trust. Some strict networks, many
+mobile carriers among them, cannot connect this way.</p><h2 id="what-you-get">What you get</h2>
 <ul>
 <li><strong>Fully offline play.</strong> After install, nothing needs the internet — map, rendering, scenarios,
 editor and interface are all local. Only the AI needs a connection, and not even that if you
@@ -134,9 +141,12 @@ a source checkout:</p>
 cd open-historia
 npm ci
 node scripts/fetch-map-assets.mjs
+npm run build
 node server/server.js
 </code></pre>
-<p>It listens on <strong>port 3000</strong>. Open <code>http://localhost:3000</code>.</p>
+<p>It listens on <strong>port 3000</strong>. Open <code>http://localhost:3000</code>. The server serves the game that
+<code>npm run build</code> made, so build again after you pull a newer version.</p>
+<p>That is the stable build. For the beta, run <code>git checkout beta</code> before <code>npm ci</code>.</p>
 <p>Node.js <code>^20.19.0</code> or <code>&gt;=22.12.0</code> is required on the server machine. Client devices need only a
 browser.</p>
 <h2 id="connecting-from-another-device">Connecting from another device</h2>
@@ -151,7 +161,10 @@ interface, or <code>OH_HOST=192.168.1.9</code> for one. When <code>OH_HOST</code
 switch says the environment owns the decision.</li>
 </ul>
 <p>Then open the address it gives you — <code>http://192.168.x.x:3000</code> — from the other device.</p>
-<p>Writes from a page served by a <em>different</em> origin are blocked either way, which is what stops a
+<p class="beta-note"><b>On beta the server answers only to names it knows</b>: localhost, IP
+addresses and this computer's own name. That stops a web page from reaching your server by
+pointing a name of its own at it. To reach it by any other name — one on your network, or one in
+front of a reverse proxy — list the name in <code>OH_ALLOWED_HOSTS</code>, comma-separated.</p><p>Writes from a page served by a <em>different</em> origin are blocked either way, which is what stops a
 web page you visit from editing your saves. To allow them:</p>
 <pre><code>OH_ALLOW_CROSS_ORIGIN=1 node server/server.js
 </code></pre>
@@ -211,6 +224,18 @@ in front.</p>
 <td><code>OH_ASSETS_DIR</code></td>
 <td>Where the map binaries are read from.</td>
 </tr>
+<tr>
+<td><code>OH_VISIT_COUNT</code></td>
+<td>Set to <code>0</code> and the pages this server serves never load a visit counter and never ask.</td>
+</tr>
+<tr>
+<td><code>OH_DISCORD_PRESENCE</code></td>
+<td>Set to <code>0</code> and the server never tells Discord what you are playing.</td>
+</tr>
+<tr>
+<td><code>OH_ALLOWED_HOSTS</code></td>
+<td>Beta only. Extra names the server answers to, comma-separated; <code>*</code> answers every name.</td>
+</tr>
 </tbody></table></div>
 <h2 id="running-as-a-service">Running as a service</h2>
 <p><strong>Linux — systemd.</strong> Create <code>/etc/systemd/system/open-historia.service</code>:</p>
@@ -236,11 +261,13 @@ should reach it — and read the warning above if you keep it.</p>
 <p><strong>Windows</strong> — Task Scheduler, triggered at logon, running <code>node server/server.js</code> in the project
 directory.</p>
 <h2 id="the-map-data">The map data</h2>
-<p>The map binaries — roughly 200 MB of vector tiles — are not in the Git repository. They are
-release assets, fetched by:</p>
+<p>The map binaries — the world&#39;s vector tiles, its regions and its cities, about 290 MB on the
+stable build and about 150 MB on beta — are not in the Git repository. They are release assets,
+fetched and checked against their checksums by:</p>
 <pre><code>node scripts/fetch-map-assets.mjs
 </code></pre>
-<p>Without them the map is blank. The desktop app does this for you on first launch.</p>
+<p>Without them the map is blank. Run it again after pulling a newer version: it downloads only what
+changed. The desktop app does this for you on first launch.</p>
 <h2 id="where-your-files-are">Where your files are</h2>
 <p>Under the data directory: your games, your scenarios, uploaded basemaps and flags, map editor
 documents, and the manifests that index them. Back up the directory and you have backed up
@@ -250,11 +277,18 @@ for changing a campaign — it goes through the same validation the game does.</
 <h2 id="privacy">Privacy</h2>
 <p>No accounts, and no game data leaves your machine. Your AI provider key is stored locally and
 sent only to the provider you configured.</p>
-<p>One thing does reach the network by default: the browser build&#39;s analytics on the website itself.
-It carries no game data. Importing a scenario from the Community Hub downloads its file from
-GitHub, and GitHub&#39;s count of those downloads is what the hub shows as installs — the game
-reports nothing of its own. (Versions before October 2026 pinged an anonymous counter on every
-import; <code>OH_IMPORT_COUNTER_URL</code>, which switched that off, no longer does anything.)</p>
+<p>Nothing counts your visits until you say yes. A game page opened on this computer asks whether
+it may count visits with Google Analytics and Umami, and loads neither unless you agree;
+<strong>Settings → General → Privacy → Count my visits</strong> changes the answer, and <code>OH_VISIT_COUNT=0</code>
+stops the question altogether. A page opened from another device over the network is never
+counted. The count carries no game data.</p>
+<p>If Discord is running on the same computer, the server tells it what you are playing, so your
+profile reads &quot;Playing Open Historia&quot; with your country, scenario and date. <strong>Show what I am
+playing on Discord</strong>, in the same Privacy section, turns it off.</p>
+<p>Importing a scenario from the Community Hub downloads its checked copy from GitHub, and GitHub&#39;s
+count of those downloads is what the hub shows as installs — the game reports nothing of its own.
+(Versions before October 2026 pinged an anonymous counter on every import;
+<code>OH_IMPORT_COUNTER_URL</code>, which switched that off, no longer does anything.)</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/mobile/">Playing on your phone</a> — the Android app, which needs no server at all.</li>
@@ -267,7 +301,7 @@ import; <code>OH_IMPORT_COUNTER_URL</code>, which switched that off, no longer d
         <a class="next" href="/wiki/mobile/"><span>Next →</span><b>Playing on your phone</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

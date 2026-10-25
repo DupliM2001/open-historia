@@ -101,6 +101,16 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://openhistoria.com/wiki/war-room/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://openhistoria.com/wiki/war-at-sea/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://openhistoria.com/wiki/espionage/</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>

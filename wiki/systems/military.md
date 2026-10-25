@@ -23,6 +23,14 @@ Hands-on control does exist — the **Force Manager**, under **Military** in the
 That placement is deliberate: editing your order of battle by hand is a game-master tool, not the
 normal loop.
 
+<p class="beta-note"><b>On beta, land wars are fought on battlefields.</b> Where two sides at war
+hold land that touches, a battlefield opens and the game fights the land war itself, with hundreds
+of troops a side, before the time skip's story is written. Your infantry, armour and artillery
+formations near the line join it as troops and come back as formations when it closes; fleets,
+air wings and garrisons stay formations. You command your troops in the
+<a href="/wiki/war-room/">War Room</a>, and your fleets there or by order: see
+<a href="/wiki/war-at-sea/">war at sea</a>.</p>
+
 ## Unit types
 
 | Type | Glyph |
@@ -49,8 +57,9 @@ quarters of what that formation should have. A new unit starts at 100. A separat
 | 26 – 60 | Amber |
 | 25 or below | Red |
 
-Strength only changes where the events narrate casualties or reinforcement. A unit that reaches
-zero is destroyed and removed. Saves from before the percentage scale are converted on load —
+Strength only changes where the events narrate casualties or reinforcement (on beta, also where a
+battlefield or a sea battle wears a formation down). A unit that reaches zero is destroyed and
+removed. Saves from before the percentage scale are converted on load —
 anything over 100 is divided by ten.
 
 ## Posture
@@ -93,29 +102,23 @@ much slower. Kilometres a day, by era:
 
 A garrison does not travel. A redeployment that crosses water is paced by how much of its way
 lies over the sea, so a division ordered from Texas to Korea in 2016 arrives in about three
-weeks. Before the railways a march across a continent is still a campaign, not a turn.
-
-A single order is also held to a **movement leash** — how far one order may relocate a unit before
-it has to become a multi-turn campaign instead of a teleport:
-
-| Type | km |
-|---|---|
-| Garrison | 200 |
-| Infantry | 800 |
-| Artillery | 800 |
-| Armor | 1000 |
-| Air | 3000 |
-| Naval | 4000 |
-
-multiplied by ×0.5 before 1500, ×0.7 to 1849, ×1.0 to 1944 and ×1.15 after.
+weeks. Before the railways a march across a continent is still a campaign, not a turn. There is
+no separate cap on how far one order may send a unit: the pace is the limit, and a long move simply
+takes the turns it needs.
 
 ## Other countries' forces
 
 AI countries' formations respond to the military events a turn wrote: the engine reuses an
-existing formation before raising a new one, holds each type to its era's leash, and only changes
+existing formation before raising a new one, moves each at its type's pace, and only changes
 strength where the events say so. The map holds at most **12** formations per AI country and
-**80** in total; your own forces count against neither. With **Background AI** on, forces may
-also reposition between turns.
+**80** in total; your own forces count against neither. On the stable build their formations are
+moved by turns, not between them.
+
+<p class="beta-note"><b>On beta, the world stirs between turns.</b> With <b>Background AI</b> and
+the <b>Idle diplomacy</b> feature on, the pulse that lets other countries write to you while the
+game sits open may also move or re-posture up to two of other countries' formations at a time:
+never one of yours, and never a garrison on the move. A movement near your sphere that your
+services would plausibly see is reported as a sighting.</p>
 
 Combat itself is narrated by the time skip and bound to the [war ledger](/wiki/war/): a battle
 needs an active war with named sides, so fighting cannot quietly appear out of nowhere.
@@ -124,6 +127,37 @@ needs an active war with named sides, so fighting cannot quietly appear out of n
 a squadron formed in an event becomes a unit; a deployment or garrison the skip resolves joins
 the order of battle; a unit's move is listed once, not twice; and a renamed country's counters
 carry its flag.</p>
+
+## Men, money and military power
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+On beta an army is drawn from a country's people and paid for by its economy, and how much it is
+worth in a war is a figure of its own.
+
+**Manpower.** A formation on a battlefield stands for so many men: 2,000 before 1500, 5,000 to
+1849, 12,000 to 1944 and 10,000 after, unless the scenario or the country says otherwise. By
+default 12% of a country's people are fit to serve. Every formation raised, drafted or sent to make good
+a loss is drawn from that pool and leaves the country's population; those who come home when a
+battlefield closes or a country leaves a war are given back. Those who do not come home are what a
+war costs in people. A country with no men left to call up cannot raise more.
+
+**Funding.** A share of a country's GDP goes to its forces, more with a budget in surplus and less
+with a deficit or a heavy debt, and what its forces have to spend weighs in how strong it is.
+Blockades and reparations cut into it.
+
+**Military power.** Each country has military figures, shown as bars on the **⚔ Military** card
+of its stat sheet: **Troop quality**, **Technology**, **Spending**, **Manpower share**, **War
+weariness**, **War resources** (where the scenario counts them) and its **Land**, **Naval** and
+**Air** arms. Its **Military power**, the figure at the top of the card and the one the Stats
+pane's **🏆 Ranking** tab uses to rank military power, comes from its people and its spending
+through those figures, and never from how much land it holds. The figures are rated by the AI
+against every other country, twenty countries to a request: a scenario designer can rate every
+country at once in the scenario editor's **Fronts** tab (**Rate every country**), and a country
+nobody rated is rated the first time the game needs it. Time skips then move your figures with
+what you do: training, new weapons, a bigger defence budget and a larger army raise them over the
+years, and losses and cuts lower them. See
+[national statistics](/wiki/statistics/).
 
 ## Structures do not move borders
 
@@ -135,4 +169,6 @@ does not annex it. See [cities and structures](/wiki/cities/).
 
 - [Territory](/wiki/territory/) — what winning actually transfers.
 - [Giving orders](/wiki/orders/) — phrasing military instructions.
+- [The War Room](/wiki/war-room/) — commanding troops on a battlefield, on beta.
+- [War at sea](/wiki/war-at-sea/) — fleets, sea battles and blockades, on beta.
 - [Cheats](/wiki/cheats/) — where the Force Manager lives.

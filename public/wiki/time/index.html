@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -179,8 +179,44 @@ three days if a crisis is breaking, or eight months if nothing is happening.</p>
 <p>Good for quiet stretches. Less good when you have something specific in motion that you want to
 watch closely.</p>
 <h2 id="how-far-should-i-skip">How far should I skip?</h2>
-<p>The world has to fit everything that happens into one turn&#39;s worth of events. Skip a year and
-twelve months get compressed into a handful of paragraphs; skip a week and you get the texture.</p>
+<p>The world has to fit everything that happens into one turn&#39;s worth of events, and a longer skip
+gets more of them, but not in proportion:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Skip</th>
+<th>Events asked for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Under a day</td>
+<td>1–2</td>
+</tr>
+<tr>
+<td>Up to a week</td>
+<td>3–6</td>
+</tr>
+<tr>
+<td>Up to a month</td>
+<td>10–15</td>
+</tr>
+<tr>
+<td>Up to three months</td>
+<td>16–22</td>
+</tr>
+<tr>
+<td>Up to six months</td>
+<td>22–30</td>
+</tr>
+<tr>
+<td>Longer</td>
+<td>28–36</td>
+</tr>
+</tbody></table></div>
+<p>So a year gets barely more events than six months, and twelve months are compressed into about
+three dozen; skip a week and you get the texture. Queue more orders than the lower figure and it
+rises so that each order has an event to land in, and a scenario&#39;s author can make its periods
+busier or quieter.</p>
 <ul>
 <li><strong>Something is actively unfolding</strong> — a war opening, an ultimatum running out, a coup —
 6 hours to 3 days.</li>
@@ -193,18 +229,27 @@ thin. Start with months.</p>
 <h2 id="what-a-skip-costs">What a skip costs</h2>
 <p>Under the presets the panel shows today&#39;s count — <em>&quot;0 of 500 AI requests used today · a skip uses
 1 request&quot;</em>. A skip is one request, with <strong>Save AI requests</strong> on or off: each event carries what
-it changed — units, fronts, the Projects board — and your agents&#39; reports come back in the same
-answer. With Save AI requests off and AI lookup functions on, the model may look things up first,
-and the panel then says <em>&quot;at most 3&quot;</em>. See <a href="/wiki/settings/#ai-requests">settings</a>.</p>
+it changed — land, units, structures, the Projects board — and your agents&#39; reports come back in
+the same answer. When the history document is due a fold, that rides in the same answer too. With
+Save AI requests off and AI lookup functions on, the model may look things up first, and the panel
+then says <em>&quot;at most 3&quot;</em>; with long skips in segments on, each extra segment adds one. See
+<a href="/wiki/settings/#ai-requests">settings</a>.</p>
 <h2 id="while-it-runs">While it runs</h2>
 <p>A time skip takes a while — the model is simulating the world. The time panel says what it is
-doing as it goes (<em>&quot;Writing 1 month of events…&quot;</em>, <em>&quot;Moving the armies, redrawing the fronts…&quot;</em>), and
+doing as it goes (<em>&quot;Writing 1 month of events…&quot;</em>, <em>&quot;Placing the armies and the fronts…&quot;</em>), and
 there is a <strong>Cancel</strong> button. Cancelling aborts the request cleanly and leaves the world exactly
 as it was.</p>
 <p>The <strong>Events panel</strong> opens as soon as the skip starts and fills as the model writes, so you can
-start reading before it finishes (Gemini delivers the whole answer at once, so there it all arrives
-together). Turn this off with <strong>Show time skip events as they are written</strong> in Settings → AI.</p>
-<p>If jumps routinely hang, turn on <strong>Limit AI generation</strong> in Settings → AI. It gives up on a
+start reading before it finishes — on Gemini too, except in a skip that may look things up, which
+arrives all at once. Turn this off with <strong>Show time skip events as they are written</strong> in
+Settings → AI.</p>
+<p class="beta-note"><b>On beta a land war is fought before its story is written.</b> Where your
+country or anyone else's is at war on a <a href="/wiki/war-room/">battlefield</a>, the skip first fights
+the period's days under the orders that stand (<i>"Fighting the war…"</i>), at no request, and the
+events are then written knowing how it went. If you queued an order for your troops, the model can
+have the period fought again with it before it writes, which is one request more; a skip in which
+no order commands troops stays one request. <b>Cancel all AI requests</b>, in Settings → AI → AI
+requests, stops a skip as its own Cancel does.</p><p>If jumps routinely hang, turn on <strong>Limit AI generation</strong> in Settings → AI. It gives up on a
 stalled generation and falls back to a canned event rather than waiting indefinitely. It watches
 for <em>silence</em> rather than total elapsed time, so a slow-but-working model is not cut off
 mid-answer.</p>
@@ -251,9 +296,19 @@ generated in one pass hangs together better than one generated in pieces.</p>
 auto-jump, which has no span to divide up front. Each segment adds one request to the skip&#39;s cap.</p>
 <p>Each segment is validated against the world as the previous segments left it, so the pieces
 cannot contradict each other — a war started in the first segment is real by the second. If one
-segment fails, the turn is <strong>held</strong> rather than lost: <strong>Retry</strong> re-runs only that segment, and
-<strong>Discard</strong> drops the turn. See <a href="/wiki/troubleshooting/#a-held-time-skip">troubleshooting</a>.</p>
-<h2 id="intervene">Intervene</h2>
+segment fails, the turn is <strong>held</strong> rather than lost: <strong>Retry the segment</strong> re-runs only that
+segment, and <strong>Discard the turn</strong> drops it. See
+<a href="/wiki/troubleshooting/#a-held-time-skip">troubleshooting</a>.</p>
+<p class="beta-note"><b>On beta two more things hold a turn.</b> If a check the game has to ask
+for after a skip's events does not come back — rare now that the events carry their own
+consequences, but a provider that will not answer a skip in one piece is asked for the unit moves,
+territory and structures in a request of their own — nothing is saved yet and the turn waits:
+<b>Retry the checks</b>, <b>Continue without them</b>, or <b>Discard the turn</b>. And with
+<b>Stop when my events fail</b> on (Settings → AI, off by default), a skip in which an event about
+your country was refused, or an order of yours got no outcome, stops before anything is saved and
+lists what failed: <b>Retry the failed events</b> (one more request, for the same dates),
+<b>Retry the whole skip</b>, or <b>Keep it and move on</b>. With it off, a refused event is left
+out and an unanswered order carries over to the next skip as overdue.</p><h2 id="intervene">Intervene</h2>
 <p>Events are revealed one at a time, and three events in you may see the thing you would have acted
 on — an ultimatum, a border crossing — while the events after it assume you did nothing.
 <strong>✋ Intervene here</strong>, under <em>Next event</em> and <em>Skip to end</em> in the Events panel, stops the round at
@@ -327,7 +382,8 @@ against.</p>
 <h2 id="the-first-turn-is-special">The first turn is special</h2>
 <p>On round 1, a scenario that has a <em>World Before Round One</em> briefing generates its own backstory
 before play begins — the recent history that led to the situation you have inherited. It happens
-once, and it gives the world something to refer back to.</p>
+once, and it gives the world something to refer back to. See
+<a href="/wiki/events/#before-round-one">events and history</a>.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/events/">Events and history</a> — reading what a jump produced.</li>
@@ -340,7 +396,7 @@ once, and it gives the world something to refer back to.</p>
         <a class="next" href="/wiki/orders/"><span>Next →</span><b>Giving orders</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

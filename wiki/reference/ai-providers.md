@@ -26,8 +26,17 @@ quality, then speed.
 | **Anthropic Compatible** | Varies | Depends | A self-hosted Anthropic-protocol proxy |
 
 "Works in the browser build" is about whether the provider allows direct requests from a web
-page. The desktop and self-hosted builds relay around this automatically; the hosted website
-cannot. See [connecting an AI provider](/wiki/ai-setup/).
+page. The desktop and self-hosted builds relay around this automatically, and the Android app
+reaches a model on your own network directly; the hosted website cannot. See
+[connecting an AI provider](/wiki/ai-setup/).
+
+<p class="beta-note"><b>On beta, the desktop app has a sixth kind: Your own Agent.</b> It plays on
+a subscription you already pay for instead of an API key. Your own Claude Code, Codex, OpenCode or
+Antigravity CLI, opened in the game's Agent folder, answers what you start — a time skip, the
+advisor, your diplomatic messages, the Game Master, interactive events — when you type
+<code>/answer</code>. The game never starts the agent itself, so what the game does on its own,
+such as Background AI, goes to the entries below it in your list. The models are chosen inside
+your agent, not in the game.</p>
 
 ## Defaults
 
@@ -35,7 +44,7 @@ cannot. See [connecting an AI provider](/wiki/ai-setup/).
 |---|---|
 | Gemini | `gemini-3.5-flash-lite`, with `gemini-3.1-flash-lite` as its backup |
 | Anthropic | `claude-haiku-4-5` |
-| OpenAI | `gpt-5.6-luna` |
+| OpenAI | `gpt-6-luna` |
 | OpenAI Compatible | no model set — the game picks a chat model from the server's own list |
 
 The defaults are the cheap, fast tier of each family. They are a genuinely reasonable place to
@@ -65,6 +74,13 @@ more than three. Diplomacy, the advisor and **Background AI** (countries writing
 you unprompted, forces repositioning, extra agent reports — capped at 30 a day by default) cost
 extra on top. Settings → AI → **AI requests** shows today's count and what your last skip used.
 
+<p class="beta-note"><b>On beta, the wars on the battlefields are fought by the game itself</b>,
+not by the model: troops move and fight in the engine, and the skip's single request tells the
+story of how it went. What costs a request is what you ask for — talking to your generals in the
+War Room, and each new <b>Listen in</b> feed, which is asked only when you open a place with
+nothing kept for that day or ask for more (turn it off in a game's Features tab). In a shared
+game every time skip runs on the host's computer and the host's key.</p>
+
 Rough guidance rather than a price list:
 
 - **Gemini free tier** genuinely covers solo play. Watch the rate limits on the larger models —
@@ -89,6 +105,15 @@ are a sensible floor. Larger is better if your hardware allows it.
 
 If your hardware does not, the Gemini free tier will give you a better game than a very small
 local model.
+
+Mind the **context window** too. A time skip on the built-in scenario is about 47,000 tokens, more
+with a long history, so a model loaded with a 32K window cannot take it. A cloud model that
+refuses a request for its size is remembered, and the game does not send it one too big again but
+moves to the next model in your list. A model on your own machine or network is different: its
+window is whatever you loaded it with, so nothing learned from its refusals is held against it,
+and loading it again with a bigger window takes effect at once. Settings → AI → the model's entry
+→ **This model only** → **Context window (tokens)** shows what the game knows, takes a figure of
+your own, and **Forget this window** clears what it learned.
 
 ## Expert controls
 
@@ -115,8 +140,8 @@ can have custom parameters of its own and **How the AI answers**, which picks th
 method to try first. See [adding backups](/wiki/ai-setup/#adding-backups).
 
 <p class="beta-note"><b>On beta the game sets a temperature per task.</b> Tasks that match or
-classify — placing a name on a region, choosing the next speaker — are asked at 0.1; the ones that
-reconcile or summarise at 0.2; stat sheets and intelligence readings at 0.3. Anything written to be
+classify — placing a name on a region, reading a leader's answer to a demand — are asked at 0.1;
+the ones that reconcile or summarise at 0.2; stat sheets and intelligence readings at 0.3. Anything written to be
 read in character (time skips, diplomacy, the advisor) is left at the provider's default. A
 temperature in your own custom parameters still wins, and a model that refuses one (an OpenAI
 reasoning model, say) is remembered and asked without it.</p>
@@ -124,7 +149,7 @@ reasoning model, say) is remembered and asked without it.</p>
 ## Seeing what the AI did
 
 ![The AI debug console](/wiki/img/debug-console.jpg)
-*The debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.*
+*The debug console: every call with its task, model, token counts and latency. These two are idle diplomacy firing on its own.*
 
 The **AI debug console** (☰ → Tools) shows every call with its full prompt, answer, model, token
 counts, latency and validation verdict, with analytics per task and model and a JSON or CSV

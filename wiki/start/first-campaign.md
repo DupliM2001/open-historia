@@ -13,8 +13,18 @@ respond and this walkthrough will not work.
 
 From the main menu, **Scenarios → Modern Day → New Game**.
 
+<p class="beta-note"><b>On beta the menu may be behind a vault door.</b> The first time the game
+starts after an update, a steel door stands before the main menu: click it and it opens.
+Settings has a switch to show it every time.</p>
+
 The country picker opens with a map and a searchable list. Find **Poland** and select it. Leave
 **Create a faction** alone for now — that is for inventing a country that does not exist.
+
+<p class="beta-note"><b>On beta the picker has two tabs.</b> <b>Pick a country</b> is the map and
+the list, each country with its colour on the map and its flag where one is known; <b>Play as a
+group</b> is for leading a group instead — a cartel, a militia, a movement — one of the
+scenario's or one you make up, and inventing a faction of your own is there too. Stay on Pick a
+country.</p>
 
 Pick **⚖️ Medium**, and the game starts.
 
@@ -36,9 +46,17 @@ economy, your stability, your strategic indices and your intelligence rating. No
 intelligence number — it decides how well your spies work and how well you can read other
 people's, and 40 is ordinary.
 
+<p class="beta-note"><b>On beta the statistics have a panel of their own.</b> The advisor's
+drawer is the advisor alone: your flag in the corner opens your country panel, with the same
+statistics and a <b>Ranking</b> tab that sets the countries side by side.</p>
+
 Finally, **click Germany on the map**. A card opens naming the country and the region you
 clicked; press **ⓘ** for Germany's panel — flag, details, related events, and an **Advisor
 Report** on request. Read it. Do the same for Russia and Ukraine.
+
+<p class="beta-note"><b>On beta you can also Listen in.</b> The region's card has a <b>Listen
+in</b> button: a phone of posts by people who live there, about the day's news and about nothing
+at all. Each new feed is one AI request.</p>
 
 ## 3. Talk to someone
 
@@ -73,17 +91,17 @@ Three orders is plenty. Each one should be a thing a government could actually d
 month.
 
 If you are not sure how to phrase one, type a rough version and press the **✦ sparkle** in the
-input to have it rewritten into a proper order. **Get AI suggestions** proposes orders based on
-your situation, and **Help brainstorm actions** opens the advisor to plan a set of orders with
-you.
+input (**Improve action text**) to have it rewritten into a proper order. **AI Suggestions**
+proposes orders based on your situation, and **Brainstorm** opens the advisor to plan a set of
+orders with you.
 
 ## 5. Skip a month
 
 Open the time panel (**»** on the date pill) and choose **1 month**.
 
 This takes a little while — the model is simulating the world, and the time panel says what it
-is doing. You can cancel if it hangs. On a free key, the panel also shows how many of the day's
-requests you have used; a skip costs one to three.
+is doing. You can cancel if it hangs. Under the skip buttons, the panel also counts the AI
+requests you have used today; a skip uses one.
 
 ## 6. Read what happened
 
@@ -126,6 +144,10 @@ panel and it is there to be used.
 **Trying to control your army directly.** Forces move because you *order* it and the world
 carries it out; the engine keeps them moving turn after turn. Hands-on deployment exists, but it
 is the **Force Manager** in the cheats panel. See [military and combat](/wiki/military/).
+
+<p class="beta-note"><b>On beta a war on your border is yours to command.</b> When you are at war
+with a neighbour, a red <b>War Room</b> button appears: speak to your generals, or pick troops and
+draw the route they take. Your typed orders still reach them in the same skip.</p>
 
 ## Where to go next
 

@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -112,16 +112,20 @@
     <h1>Settings Reference</h1>
     <p class="tagline">Every option in the game, what it does, and which ones are worth changing first.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-game-menu">The game menu</a></li><li class="d3"><a href="#where-things-are">Where things are</a></li><li class="d2"><a href="#ai">AI</a></li><li class="d3"><a href="#models-and-connections">Models and connections</a></li><li class="d3"><a href="#ai-requests">AI requests</a></li><li class="d3"><a href="#generation-behaviour">Generation behaviour</a></li><li class="d2"><a href="#general">General</a></li><li class="d2"><a href="#map">Map</a></li><li class="d2"><a href="#advanced">Advanced</a></li><li class="d2"><a href="#what-to-change-first">What to change first</a></li><li class="d2"><a href="#where-settings-are-stored">Where settings are stored</a></li><li class="d2"><a href="#detailed-logging">Detailed logging</a></li><li class="d3"><a href="#please-turn-it-on-before-reporting-a-bug">Please turn it on before reporting a bug</a></li><li class="d3"><a href="#what-it-adds">What it adds</a></li><li class="d3"><a href="#what-it-means-for-your-privacy">What it means for your privacy</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-game-menu">The game menu</a></li><li class="d3"><a href="#where-things-are">Where things are</a></li><li class="d2"><a href="#ai">AI</a></li><li class="d3"><a href="#models-and-connections">Models and connections</a></li><li class="d3"><a href="#ai-requests">AI requests</a></li><li class="d3"><a href="#generation-behaviour">Generation behaviour</a></li><li class="d2"><a href="#general">General</a></li><li class="d2"><a href="#sound">Sound</a></li><li class="d2"><a href="#map">Map</a></li><li class="d2"><a href="#advanced">Advanced</a></li><li class="d2"><a href="#what-to-change-first">What to change first</a></li><li class="d2"><a href="#where-settings-are-stored">Where settings are stored</a></li><li class="d2"><a href="#detailed-logging">Detailed logging</a></li><li class="d3"><a href="#please-turn-it-on-before-reporting-a-bug">Please turn it on before reporting a bug</a></li><li class="d3"><a href="#what-it-adds">What it adds</a></li><li class="d3"><a href="#what-it-means-for-your-privacy">What it means for your privacy</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Settings live behind the <strong>☰</strong> button in the top-left corner. It opens a small <strong>game menu</strong>,
 and the game menu leads to a full-screen <strong>settings workspace</strong>.</p>
-<h2 id="the-game-menu">The game menu</h2>
+<p class="beta-note"><b>On beta the main menu has Settings too.</b> Its <b>Settings</b> button — at
+the foot of the menu's rail on a wide screen — opens the same workspace straight away, holding
+what applies to every game.
+A game's own choices — its <a href="/wiki/time/#player-focus">player focus</a>, its pick of map —
+stay in that game's <b>☰</b> menu.</p><h2 id="the-game-menu">The game menu</h2>
 <p><img src="/wiki/img/game-menu-settings.jpg" alt="The game menu, Settings tab">
 <em>The game menu&#39;s Settings tab — the four tiles open the settings workspace at that section.</em></p>
 <p>Press <strong>☰</strong> and you get the game menu with four tabs — <strong>Game</strong>, <strong>Tools</strong>, <strong>Settings</strong> and
 <strong>Help</strong>. Game holds the current campaign and <strong>Game Management</strong> (switch, duplicate, import or
 manage campaigns). Tools puts cheats, the events timeline and the AI debug console one click away.
-Help has the wiki, bug reporting and the community links.</p>
+Help has the wiki, bug reporting, the privacy policy and the community links.</p>
 <p>Choosing one of the four <strong>Settings</strong> tiles opens the full-screen <strong>workspace</strong> with that section
 selected:</p>
 <div class="table-scroll"><table>
@@ -135,7 +139,7 @@ selected:</p>
 <tbody><tr>
 <td>◫</td>
 <td><strong>General</strong></td>
-<td>Language, display, accessibility</td>
+<td>Language, display, accessibility, privacy</td>
 </tr>
 <tr>
 <td>◇</td>
@@ -153,7 +157,9 @@ selected:</p>
 <td>Per-task models, telemetry, network, diagnostics</td>
 </tr>
 </tbody></table></div>
-<h3 id="where-things-are">Where things are</h3>
+<p class="beta-note"><b>On beta there is a fifth tile, ♫ Sound</b>, for the music and the sound
+effects (see <a href="#sound">Sound</a> below), and Help also has <b>Check for updates</b>, which
+asks the installed app for a newer build there and then.</p><h3 id="where-things-are">Where things are</h3>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -176,6 +182,10 @@ selected:</p>
 <tr>
 <td>Change language</td>
 <td>☰ → Settings → <strong>General</strong></td>
+</tr>
+<tr>
+<td>Stop Discord showing what I play</td>
+<td>☰ → Settings → <strong>General</strong> → Privacy</td>
 </tr>
 <tr>
 <td>Turn off the globe</td>
@@ -202,7 +212,9 @@ selected:</p>
 <td>☰ → <strong>Tools</strong> → AI debug console</td>
 </tr>
 </tbody></table></div>
-<h2 id="ai">AI</h2>
+<p class="beta-note"><b>On beta:</b> the music and its volume are in ☰ → Settings → <b>Sound</b>;
+the switch between the Political and Diplomatic map is in ☰ → Settings → <b>Map</b>, and also at the
+bottom right of the screen, under the advisor's button.</p><h2 id="ai">AI</h2>
 <p>The only part you must set up. Covered in full in
 <a href="/wiki/ai-setup/">connecting an AI provider</a> and <a href="/wiki/ai-providers/">AI providers and models</a>.</p>
 <h3 id="models-and-connections">Models and connections</h3>
@@ -219,6 +231,10 @@ selected:</p>
 <td>Gemini, OpenAI, Anthropic, OpenAI Compatible, Anthropic Compatible.</td>
 </tr>
 <tr>
+<td><strong>Connection name</strong></td>
+<td>A name you choose, so two keys for the same provider can be told apart.</td>
+</tr>
+<tr>
 <td><strong>API Key</strong></td>
 <td>Yours. Stored locally, never sent to an Open Historia server.</td>
 </tr>
@@ -232,7 +248,7 @@ selected:</p>
 </tr>
 <tr>
 <td><strong>Strict tool schema</strong></td>
-<td>For OpenAI-compatible endpoints that handle structured output badly. Toggle it if turns keep failing to parse.</td>
+<td>Only on an OpenAI Compatible connection. Makes a self-hosted backend such as vLLM or SGLang keep to the shape of the answer. Leave it off for OpenAI and Azure, which refuse it.</td>
 </tr>
 </tbody></table></div>
 <div class="table-scroll"><table>
@@ -248,16 +264,33 @@ selected:</p>
 </tr>
 <tr>
 <td><strong>This model only</strong></td>
-<td>Custom parameters for this model alone, and <strong>How the AI answers</strong> — the structured-output method to try first.</td>
+<td>Custom parameters for this model alone; <strong>How the AI answers</strong> — the structured-output method to try first; and <strong>Context window (tokens)</strong>, which shows what the game has learned about how much the model can take, or holds your own figure. <strong>Forget this window</strong> clears it — for a local model you have restarted with a bigger window.</td>
 </tr>
 </tbody></table></div>
 <p>Several entries can share one connection, and the list is tried from the top: when one model runs
 out or cannot answer, the next one takes over. See <a href="/wiki/ai-setup/#backup-models">backup models</a>.
-<strong>Model reasoning</strong> sits under the list and applies to every entry.</p>
+<strong>+ Add a backup</strong> adds an entry, <strong>Fill…</strong> builds the list from every model you type on every
+connection you tick, and <strong>Clear list</strong> empties it while keeping your connections and keys.
+<strong>When a model is rate limited</strong> decides what a short pause from the provider does: use the next
+one straight away (the default), or wait and try the same one again, which spares your backups&#39;
+daily allowance at the cost of a slower turn. <strong>Model reasoning</strong> sits under the list and applies
+to every entry.</p>
+<p>The <strong>Connections</strong> section below it lists every saved connection, how many entries use it, and
+ready-made ones to add: <strong>+ Groq</strong>, <strong>+ OpenRouter</strong> and <strong>+ Local Ollama</strong>. Removing a connection
+names the entries that go with it before it asks.</p>
 <p>A first Gemini connection fills the list with Google&#39;s defaults — <code>gemini-3.5-flash-lite</code>, with
-<code>gemini-3.1-flash-lite</code> as its backup. An OpenAI entry with no model runs <code>gpt-5.6-luna</code>; an
+<code>gemini-3.1-flash-lite</code> as its backup. An OpenAI entry with no model runs <code>gpt-6-luna</code>; an
 Anthropic one runs <code>claude-haiku-4-5</code>.</p>
-<h3 id="ai-requests">AI requests</h3>
+<p class="beta-note"><b>On beta the key field has an eye button</b> to show or hide the key as
+you type it, and in the desktop app there is a sixth provider, <b>Your own Agent</b>, under
+<i>Your subscription</i>. It needs no key: what you start waits for your own Claude Code, Codex,
+OpenCode or Antigravity CLI, signed in with your own account and opened in the Agent folder
+(<b>Open the Agent folder</b>, and a <b>Copy the command for…</b> button for each), where typing
+<code>/answer</code> answers everything waiting, a whole time skip included. Its switches say which
+of Time skips, Advisor, Diplomacy, Game Master and Interactive events go to it; <b>Pause my
+Agent</b> sends everything to the entry below it while you are away. Anything unticked, and what
+the game starts by itself, goes to the next entry in the list — with nothing below it, that
+background work does not run.</p><h3 id="ai-requests">AI requests</h3>
 <p>A free key allows a few hundred requests a day, and this section decides how many the game
 spends. It shows how many have been used today (counted on this device, from midnight Pacific
 time, which is when a Gemini key&#39;s day begins) and what your last time skip cost.</p>
@@ -284,13 +317,11 @@ time, which is when a Gemini key&#39;s day begins) and what your last time skip 
 <td><strong>Background requests a day, at most</strong></td>
 <td>30 by default. Background AI also stops by itself once less than a tenth of your day is left.</td>
 </tr>
-<tr>
-<td><strong>Checks after a time skip</strong></td>
-<td>Gone. Each event of a skip now carries its own consequences — the units it moved, the land it took, the Projects board, your agents&#39; reports — inside the skip&#39;s one request, so there is nothing left to switch on or off.</td>
-</tr>
 </tbody></table></div>
-<p class="beta-note"><b>On beta there is a sixth check</b>, <b>Put new structures on the map</b>:
-bases, shipyards, data centres and ground stations appear where the events built them.</p><h3 id="generation-behaviour">Generation behaviour</h3>
+<p class="beta-note"><b>On beta the section does more.</b> <b>Used today, by task</b> opens the
+day's count task by task; an <b>Emergency AI stop</b> box holds <b>Cancel all AI requests</b>,
+which stops every AI call the game can still abort; and NPC votes in an institution are a second
+thing, beside the Stats refresh, that can add a request to a skip when they fall due.</p><h3 id="generation-behaviour">Generation behaviour</h3>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -321,7 +352,10 @@ bases, shipyards, data centres and ground stations appear where the events built
 </tbody></table></div>
 <p class="beta-note"><b>On beta, Player focus sits here too</b> — how much of each time skip is
 about your own country, stored with the game rather than the device. See
-<a href="/wiki/time/#player-focus">time and turns</a>.</p><h2 id="general">General</h2>
+<a href="/wiki/time/#player-focus">time and turns</a>. So does <b>Stop when my events fail</b>, off
+by default: on, a skip that has an event about your country refused, or an order of yours left
+without an outcome, stops before anything is saved and lists what failed, so you can retry those
+events, retry the whole skip, or keep it and move on.</p><h2 id="general">General</h2>
 <p><strong>UI language</strong> translates the interface. Applying it reloads the page. Twenty-two languages ship
 fully translated — Arabic, Bengali, Chinese, Dutch, French, German, Hindi, Indonesian, Italian,
 Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Swedish, Thai, Turkish,
@@ -334,6 +368,57 @@ run an English interface with French diplomacy, or the reverse.</p>
 <p><strong>Fullscreen</strong> is under Display, and <strong>Reduce motion</strong> under Accessibility. Reduce motion turns on
 both camera switches in the Map section at once — turn it on first if the game feels busy or you
 are prone to motion sickness.</p>
+<p><strong>Privacy</strong> holds the two things the game tells other services about you, with a link to the
+<a href="/privacy/">privacy policy</a>:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Switch</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Show what I am playing on Discord</strong></td>
+<td>Desktop app only, on by default. Discord shows the country you play, the scenario and the in-game date to people who can see your activity.</td>
+</tr>
+<tr>
+<td><strong>Count my visits</strong></td>
+<td><strong>Off unless you say yes.</strong> Lets Google Analytics and Umami count that you played and which version; Google Analytics sets cookies. If your browser asks sites not to track you, it stays off until you answer yourself. Only shown where the build counts visits.</td>
+</tr>
+</tbody></table></div>
+<p class="beta-note"><b>On beta</b>, Display also has <b>Show the vault door every time</b>, off by
+default: the door shows the first time the game opens after an update, and with this on, at every
+start. Reduce motion also follows your system's own reduced-motion setting (the switch then shows
+on and cannot be turned off here), lands a region's new colour at once instead of sweeping it in,
+and lets the vault door simply fade away.</p><h2 id="sound">Sound</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>The game has a soundtrack: music by Scott Buckley, released under CC BY 4.0, which Settings credits
+along with every piece it ships. The menu, a game opening, a game being played and the War Room
+each have their own; a scenario may bring tracks of its own from the community hub&#39;s music list.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Music</strong></td>
+<td>On by default. Nothing plays until your first click, tap or key press, and the music stops while the window is hidden.</td>
+</tr>
+<tr>
+<td><strong>Music volume</strong></td>
+<td>0 to 100%, 25% by default.</td>
+</tr>
+<tr>
+<td><strong>Sound effects</strong></td>
+<td>On by default — the vault door&#39;s among them.</td>
+</tr>
+<tr>
+<td><strong>Downloaded music</strong></td>
+<td>How many scenario tracks are kept on this device, and how much room they take. <strong>Clear</strong> deletes them; a scenario that plays one again downloads it again.</td>
+</tr>
+</tbody></table></div>
+<p>While a scenario&#39;s own track plays, <strong>Now playing</strong> names it and who made it.</p>
 <h2 id="map">Map</h2>
 <div class="table-scroll"><table>
 <thead>
@@ -344,7 +429,7 @@ are prone to motion sickness.</p>
 </thead>
 <tbody><tr>
 <td><strong>Basemap</strong></td>
-<td>The imagery under the political colours. <em>Scenario default</em> uses whatever the scenario&#39;s author chose; fourteen others override it. See <a href="/wiki/world-map/#basemaps">the world map</a>.</td>
+<td>The imagery under the political colours. <em>Scenario default</em> uses whatever the scenario&#39;s author chose; fourteen others override it. A scenario with a map of its own keeps it, and the list is greyed out. See <a href="/wiki/world-map/#basemaps">the world map</a>.</td>
 </tr>
 <tr>
 <td><strong>Country label font</strong></td>
@@ -356,7 +441,7 @@ are prone to motion sickness.</p>
 </tr>
 <tr>
 <td><strong>3D Globe</strong></td>
-<td>Sphere instead of a flat map, with a real day/night terminator. Marked experimental.</td>
+<td>Sphere instead of a flat map, with a real day/night terminator. Marked experimental. A scenario whose map is a flat sheet can switch the globe off, and the switch then says so.</td>
 </tr>
 <tr>
 <td><strong>3D Terrain</strong></td>
@@ -372,7 +457,20 @@ are prone to motion sickness.</p>
 </tr>
 </tbody></table></div>
 <p>Switching the globe on or off shows the game&#39;s loading screen while the map redraws from nothing.</p>
-<h2 id="advanced">Advanced</h2>
+<p class="beta-note"><b>On beta the Map section has more.</b> <b>Map mode</b> switches between
+<b>Political</b> and <b>Diplomatic</b>, which colours each country by where it stands with you —
+your puppets, allies, friends, hostile countries and enemies at war; every time the game opens it
+starts on Political. In a game, <b>Basemap</b> picks among the maps the scenario offers, the
+starting one first, and the pick is kept for that game on this device; from the main menu it is
+<b>Use my default basemap</b> and <b>Default basemap</b>, a built-in map every game starts on
+wherever its scenario offers it. In the desktop app, <b>Detailed maps</b> lists the scenario's
+large terrain maps you are missing or have an older version of, with <b>Download…</b>, and
+<b>Browse and download maps…</b> opens your basemaps, your detailed maps and the community's. <b>Seasons and weather</b> (on by default) tints the map by
+the season and shows its weather, and <b>Weather effects</b> under it (on by default, off by
+default in Low memory) draws the rain, snow, frost and fog. <b>Performance mode</b> is
+<b>Auto</b>, <b>Low memory</b> or <b>Full</b>: Auto picks Low memory in the Android app, on a
+touch screen with no mouse, and on a device with 4 GB of memory or less, and a change applies
+after the game is reloaded.</p><h2 id="advanced">Advanced</h2>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -405,7 +503,12 @@ are prone to motion sickness.</p>
 <td>Off by default. See below — <strong>please turn it on if you are going to report a bug</strong>.</td>
 </tr>
 </tbody></table></div>
-<h2 id="what-to-change-first">What to change first</h2>
+<p class="beta-note"><b>On beta</b>, with Let other devices connect on, a second switch — <b>Let
+other devices send AI calls through this server</b> — lets a browser on another device reach a
+model running on this computer (LM Studio, Ollama) that refuses calls from other sites. And a
+<b>Storage</b> section, on the desktop, says how many community downloads are kept and how much
+room they take, with <b>Clear download cache</b>; past 1 GB the ones used longest ago are removed
+on their own.</p><h2 id="what-to-change-first">What to change first</h2>
 <ol>
 <li><strong>Set up your AI provider.</strong> Nothing else matters until this is done.</li>
 <li><strong>Look at AI requests</strong> if you are on a free key — the defaults are chosen for one, and the
@@ -461,6 +564,7 @@ kept.</p>
 <li><strong>Every AI task and what it answered</strong>, and why an answer was rejected.</li>
 <li><strong>What each turn changed in the world.</strong></li>
 <li><strong>Every server request and every save</strong>, with sizes.</li>
+<li><strong>Which panels you opened</strong>, and the game&#39;s routine console messages.</li>
 </ul>
 <p>The conversations are deliberate. The bugs people actually report about diplomacy are about the
 <em>content</em> of an exchange — &quot;it forgot what I told it&quot;, &quot;it replied as the wrong country&quot;, &quot;it
@@ -486,7 +590,7 @@ accident inside a provider error or a URL is scrubbed before it is ever stored.<
         <a class="next" href="/wiki/cheats/"><span>Next →</span><b>Cheats &amp; GM console</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

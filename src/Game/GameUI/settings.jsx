@@ -144,50 +144,55 @@ const baseStyle = {
 
 const labelStyle = {
     display: "block",
-    fontSize: "0.82rem",
-    marginBottom: "0.45rem",
-    color: "rgba(255,255,255,0.92)",
+    fontSize: "0.78rem",
+    fontWeight: 650,
+    marginBottom: "0.4rem",
+    color: "rgba(255,255,255,0.88)",
     cursor: "text",
 };
 
 const inputStyle = {
     width: "100%",
-    padding: "0.65rem 0.7rem",
+    padding: "0.55rem 0.75rem",
     borderRadius: "8px",
-    border: "1px solid rgba(255,255,255,0.16)",
-    backgroundColor: "rgba(0,0,0,0.22)",
-    color: "white",
-    fontSize: "0.85rem",
+    border: "1px solid rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    color: "#f8fafc",
+    fontSize: "0.82rem",
     outline: "none",
     boxSizing: "border-box",
     cursor: "text",
+    transition: "border-color 150ms ease, background-color 150ms ease",
 };
 
 const helperStyle = {
     marginTop: "0.35rem",
-    fontSize: "0.74rem",
-    color: "rgba(255,255,255,0.58)",
+    fontSize: "0.72rem",
+    color: "rgba(255,255,255,0.48)",
     lineHeight: 1.45,
 };
 
 const fieldGroupStyle = {
-    marginBottom: "0.85rem",
+    marginBottom: "0.9rem",
 };
 
 const smallButtonStyle = {
-    padding: "0.4rem 0.7rem",
+    padding: "0.45rem 0.75rem",
     borderRadius: "8px",
-    border: "1px solid rgba(255,255,255,0.16)",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    color: "white",
+    border: "1px solid rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    color: "#f8fafc",
     fontSize: "0.78rem",
+    fontWeight: 600,
     cursor: "pointer",
+    transition: "background-color 150ms ease",
 };
 
 const primaryButtonStyle = {
     ...smallButtonStyle,
-    backgroundColor: "rgba(59,130,246,0.35)",
-    borderColor: "rgba(59,130,246,0.6)",
+    backgroundColor: "rgba(59,130,246,0.22)",
+    borderColor: "rgba(96,165,250,0.45)",
+    color: "#93c5fd",
 };
 
 const listCardStyle = {
@@ -195,10 +200,10 @@ const listCardStyle = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: "0.5rem",
-    padding: "0.55rem 0.7rem",
+    padding: "0.6rem 0.75rem",
     borderRadius: "8px",
-    border: "1px solid rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(0,0,0,0.18)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.025)",
     marginBottom: "0.45rem",
 };
 
@@ -255,31 +260,44 @@ const LanguagePicker = ({ label, current, onSelect, saving = false, helperText, 
 
     return (
         <div style={fieldGroupStyle}>
-        <label style={labelStyle}>{label}</label>
-        <input
-        style={{ ...inputStyle, marginBottom: "0.4rem" }}
-        type="text"
-        value={query}
-        placeholder="Search languages..."
-        onChange={(event) => setQuery(event.target.value)}
-        />
-        <select
-        data-no-translate
-        value={listed ? current : ""}
-        onChange={(event) => onSelect(event.target.value)}
-        style={{ ...inputStyle, cursor: "pointer", opacity: saving ? 0.6 : 1 }}
-        >
-        {!listed && (
-            <option value="" disabled>
-            {filtered.length ? `${filtered.length} matches — pick one` : "No matching language"}
-            </option>
-        )}
-        {filtered.map((option) => (
-            <option key={option.code} value={option.code} style={{ color: "black" }}>
-            {option.name}{option.native && option.native !== option.name ? ` — ${option.native}` : ""}{markBuiltIn && isBuiltInLanguage(option.code) ? " ✓" : ""}
-            </option>
-        ))}
-        </select>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.4rem" }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>{label}</label>
+            {query && (
+                <button
+                type="button"
+                onClick={() => setQuery("")}
+                style={{ background: "none", border: "none", color: "#60a5fa", fontSize: "0.7rem", cursor: "pointer", padding: 0 }}
+                >
+                Clear
+                </button>
+            )}
+        </div>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <select
+            data-no-translate
+            value={listed ? current : ""}
+            onChange={(event) => onSelect(event.target.value)}
+            style={{ ...inputStyle, flex: "1 1 200px", cursor: "pointer", opacity: saving ? 0.6 : 1, borderColor: "rgba(96,165,250,0.3)" }}
+            >
+            {!listed && (
+                <option value="" disabled>
+                {filtered.length ? `${filtered.length} matches — pick one` : "No matching language"}
+                </option>
+            )}
+            {filtered.map((option) => (
+                <option key={option.code} value={option.code} style={{ color: "black" }}>
+                {option.name}{option.native && option.native !== option.name ? ` — ${option.native}` : ""}{markBuiltIn && isBuiltInLanguage(option.code) ? " ✓" : ""}
+                </option>
+            ))}
+            </select>
+            <input
+            style={{ ...inputStyle, flex: "0 1 180px", minWidth: "130px" }}
+            type="text"
+            value={query}
+            placeholder="Search languages..."
+            onChange={(event) => setQuery(event.target.value)}
+            />
+        </div>
         {helperText && (
             <div style={helperStyle}>
             {helperText}
@@ -541,45 +559,50 @@ const Toggle = ({ label, enabled, onToggle, disabled = false, inactive = "" }) =
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: "1rem",
+        padding: "0.35rem 0",
+        marginBottom: "0.65rem",
         ...(touch ? { cursor: disabled ? "default" : "pointer", gap: "0.75rem" } : null),
     }}
     >
     {inactive
         ? (
-            <span style={{ minWidth: 0 }}>
-            <span style={{ display: "block", fontSize: "0.9rem" }}>{label}</span>
-            <span style={{ color: "rgba(255,255,255,0.5)", display: "block", fontSize: "0.72rem", marginTop: "0.1rem" }}>{inactive}</span>
+            <span style={{ minWidth: 0, paddingRight: "0.5rem" }}>
+            <span style={{ display: "block", fontSize: "0.86rem", fontWeight: 550, color: "rgba(255,255,255,0.9)" }}>{label}</span>
+            <span style={{ color: "rgba(255,255,255,0.45)", display: "block", fontSize: "0.7rem", marginTop: "0.15rem" }}>{inactive}</span>
             </span>
         )
-        : <span style={{ fontSize: "0.9rem" }}>{label}</span>}
+        : <span style={{ fontSize: "0.86rem", fontWeight: 550, color: "rgba(255,255,255,0.9)", paddingRight: "0.5rem" }}>{label}</span>}
     <button
+    type="button"
     onClick={touch || disabled ? undefined : onToggle}
     disabled={disabled}
+    aria-label={label}
     style={{
-        width: "3.5rem",
-        height: "1.75rem",
-        borderRadius: "1rem",
+        width: "2.75rem",
+        height: "1.5rem",
+        borderRadius: "9999px",
         border: "none",
         cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.55 : 1,
+        opacity: disabled ? 0.45 : 1,
         position: "relative",
-        transition: "0.3s",
-        backgroundColor: enabled ? (inactive ? "rgba(59,130,246,0.35)" : "#3b82f6") : "#55555b",
-        ...(touch ? { flexShrink: 0 } : null),
+        padding: "2px",
+        boxSizing: "border-box",
+        transition: "background-color 150ms ease, box-shadow 150ms ease",
+        backgroundColor: enabled ? (inactive ? "rgba(59,130,246,0.35)" : "#3b82f6") : "rgba(255,255,255,0.14)",
+        boxShadow: enabled && !inactive ? "0 0 10px rgba(59,130,246,0.35)" : "none",
+        flexShrink: 0,
+        outline: "none",
     }}
     >
     <div
     style={{
-        position: "absolute",
-        top: "2px",
-        left: enabled ? "1.8rem" : "2px",
-        width: "1.5rem",
-        height: "1.5rem",
-        backgroundColor: "white",
+        width: "1.25rem",
+        height: "1.25rem",
+        backgroundColor: "#ffffff",
         borderRadius: "50%",
-        transition: "0.3s",
-        boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+        transform: enabled ? "translateX(1.25rem)" : "translateX(0px)",
+        transition: "transform 150ms cubic-bezier(0.2, 0, 0, 1)",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
         pointerEvents: "none",
     }}
     />
@@ -2522,11 +2545,14 @@ const PlayerFocusSetting = () => {
 };
 
 const SettingsSection = ({ title, description, right, children }) => (
-    <section style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "12px", padding: "1rem" }}>
-        <div style={{ alignItems: "flex-start", display: "flex", gap: "0.75rem", justifyContent: "space-between", marginBottom: "0.9rem" }}>
+    <section style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "1.1rem 1.25rem" }}>
+        <div style={{ alignItems: "flex-start", display: "flex", gap: "0.75rem", justifyContent: "space-between", marginBottom: "0.85rem" }}>
             <div style={{ minWidth: 0 }}>
-                <div style={{ color: "rgba(255,255,255,0.92)", fontSize: "0.88rem", fontWeight: 850 }}>{title}</div>
-                {description && <div style={{ color: "rgba(255,255,255,0.36)", fontSize: "0.66rem", lineHeight: 1.45, marginTop: "0.2rem" }}>{description}</div>}
+                <div style={{ alignItems: "center", display: "flex", gap: "0.5rem" }}>
+                    <span style={{ backgroundColor: "#3b82f6", borderRadius: "2px", display: "inline-block", height: "0.85rem", width: "3px" }} />
+                    <span style={{ color: "#f8fafc", fontSize: "0.92rem", fontWeight: 750, letterSpacing: "-0.01em" }}>{title}</span>
+                </div>
+                {description && <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", lineHeight: 1.45, marginTop: "0.22rem", paddingLeft: "0.7rem" }}>{description}</div>}
             </div>
             {right}
         </div>
@@ -2540,7 +2566,7 @@ const ExperimentalPill = ({ children = "Experimental" }) => (
     </div>
 );
 
-const settingsHelper = { ...helperStyle, marginTop: "-0.55rem", marginBottom: "0.85rem" };
+const settingsHelper = { ...helperStyle, marginTop: "-0.45rem", marginBottom: "0.75rem" };
 
 // --- Sound ---------------------------------------------------------------------
 // The music a scenario played is downloaded once and kept on this device, so
@@ -2628,9 +2654,9 @@ const SoundSection = ({ musicOn, onToggleMusic, effectsOn, onToggleEffects }) =>
                     disabled={!musicOn}
                     onChange={(event) => setMapSettingValue(MAP_SETTING_KEYS.musicVolume, String(musicVolumeOf(event.target.value)))}
                     aria-label="Music volume"
-                    style={{ accentColor: "#d4d4d8", width: "9rem" }}
+                    style={{ accentColor: "#3b82f6", width: "9rem" }}
                     />
-                    <span data-no-translate style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.78rem", minWidth: "2.6rem", textAlign: "right" }}>{`${volume}%`}</span>
+                    <span data-no-translate style={{ color: "#93c5fd", fontSize: "0.78rem", minWidth: "2.6rem", textAlign: "right", fontWeight: 650 }}>{`${volume}%`}</span>
                 </span>
             </label>
             <Toggle label="Sound effects" enabled={effectsOn} onToggle={onToggleEffects} />
@@ -2676,7 +2702,7 @@ const PrivacyPolicyLink = () => {
         target="_blank"
         rel="noopener noreferrer"
         className="oh-tap-row"
-        style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: "8px", color: "rgba(255,255,255,0.9)", fontSize: "0.72rem", fontWeight: 750, padding: "0.45rem 0.65rem", textDecoration: "none", whiteSpace: "nowrap", ...(touch ? { alignItems: "center", display: "inline-flex" } : null) }}
+        style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.28)", borderRadius: "8px", color: "#93c5fd", fontSize: "0.72rem", fontWeight: 750, padding: "0.45rem 0.65rem", textDecoration: "none", whiteSpace: "nowrap", transition: "background-color 140ms ease", ...(touch ? { alignItems: "center", display: "inline-flex" } : null) }}
         >
         {"Privacy policy"}
         </a>
@@ -2827,7 +2853,7 @@ const SettingsWorkspace = ({
     // Side by side at 9.6rem each only two fitted, and nothing said the strip
     // scrolled to the other two.
     const nav = (
-        <nav style={{ display: "flex", flexDirection: isMobile ? "row" : "column", gap: "0.35rem", overflowX: isMobile ? "auto" : "visible", padding: isMobile ? "0.65rem" : "0.85rem", scrollbarWidth: "none" }}>
+        <nav style={{ display: "flex", flexDirection: isMobile ? "row" : "column", gap: "0.35rem", overflowX: isMobile ? "auto" : "visible", padding: isMobile ? "0.65rem" : "0.75rem 0.65rem", scrollbarWidth: "none" }}>
             {SETTINGS_SECTIONS.map((section) => {
                 const selected = section.key === activeSection;
                 return (
@@ -2838,26 +2864,27 @@ const SettingsWorkspace = ({
                     onClick={() => onSectionChange(section.key)}
                     style={{
                         alignItems: "center",
-                        background: selected ? "rgba(0,0,0,0.42)" : "transparent",
-                        border: `1px solid ${selected ? "rgba(255,255,255,0.28)" : "transparent"}`,
-                        borderRadius: "9px",
-                        color: selected ? "#f4f4f5" : "rgba(255,255,255,0.58)",
+                        background: selected ? "rgba(59,130,246,0.12)" : "transparent",
+                        border: `1px solid ${selected ? "rgba(96,165,250,0.3)" : "transparent"}`,
+                        borderRadius: "10px",
+                        color: selected ? "#ffffff" : "rgba(255,255,255,0.6)",
                         cursor: "pointer",
                         display: "flex",
                         flex: isMobile ? "1 1 0" : "none",
                         fontFamily: "inherit",
                         gap: "0.65rem",
                         minWidth: 0,
-                        padding: "0.62rem 0.65rem",
+                        padding: "0.55rem 0.65rem",
                         textAlign: "left",
                         width: isMobile ? "auto" : "100%",
-                        ...(isMobile ? { flexDirection: "column", gap: "0.3rem", justifyContent: "center", padding: "0.45rem 0.2rem", textAlign: "center" } : null),
+                        transition: "background-color 140ms ease, border-color 140ms ease, color 140ms ease",
+                        ...(isMobile ? { flexDirection: "column", gap: "0.25rem", justifyContent: "center", padding: "0.45rem 0.2rem", textAlign: "center" } : null),
                     }}
                     >
-                        <span aria-hidden="true" style={{ alignItems: "center", background: selected ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.05)", borderRadius: "7px", display: "inline-flex", flexShrink: 0, fontSize: "0.76rem", fontWeight: 900, height: "1.8rem", justifyContent: "center", width: "1.8rem" }}>{section.icon}</span>
+                        <span aria-hidden="true" style={{ alignItems: "center", background: selected ? "rgba(59,130,246,0.24)" : "rgba(255,255,255,0.04)", border: `1px solid ${selected ? "rgba(96,165,250,0.4)" : "transparent"}`, borderRadius: "8px", color: selected ? "#60a5fa" : "rgba(255,255,255,0.7)", display: "inline-flex", flexShrink: 0, fontSize: "0.85rem", fontWeight: 700, height: "1.9rem", justifyContent: "center", width: "1.9rem", transition: "all 140ms ease" }}>{section.icon}</span>
                         <span>
-                            <span style={{ display: "block", fontSize: "0.74rem", fontWeight: 850 }}>{section.label}</span>
-                            {!isMobile && <span style={{ color: "rgba(255,255,255,0.3)", display: "block", fontSize: "0.57rem", lineHeight: 1.35, marginTop: "0.12rem" }}>{section.description}</span>}
+                            <span style={{ display: "block", fontSize: "0.8rem", fontWeight: selected ? 750 : 600, color: selected ? "#bfdbfe" : "inherit" }}>{section.label}</span>
+                            {!isMobile && <span style={{ color: selected ? "rgba(191,219,254,0.65)" : "rgba(255,255,255,0.32)", display: "block", fontSize: "0.62rem", lineHeight: 1.35, marginTop: "0.12rem" }}>{section.description}</span>}
                         </span>
                     </button>
                 );
@@ -2870,10 +2897,13 @@ const SettingsWorkspace = ({
     const pageDescription = page?.description ?? "";
 
     const content = (
-        <div key={activeSection} className="oh-surface-in" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            <div style={{ marginBottom: "0.1rem" }}>
-                <div style={{ color: "#f8fafc", fontSize: "1rem", fontWeight: 900 }}>{pageTitle}</div>
-                <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.66rem", marginTop: "0.18rem" }}>{pageDescription}</div>
+        <div key={activeSection} className="oh-surface-in" style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+            <div style={{ marginBottom: "0.2rem" }}>
+                <div style={{ alignItems: "center", display: "flex", gap: "0.5rem" }}>
+                    <span style={{ color: "#60a5fa", fontSize: "0.95rem" }}>{page?.icon}</span>
+                    <span style={{ color: "#f8fafc", fontSize: "1.1rem", fontWeight: 800, letterSpacing: "-0.01em" }}>{pageTitle}</span>
+                </div>
+                <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.72rem", marginTop: "0.2rem" }}>{pageDescription}</div>
             </div>
 
             {activeSection === "general" && (
@@ -3124,27 +3154,27 @@ const SettingsWorkspace = ({
     // is widened by the notch and the home indicator so neither covers the ←, the
     // ✕ or the bottom of the page.
     return createPortal(
-        <div role="dialog" aria-modal="true" aria-label="Game settings" className={leaving ? "oh-fade-out" : closing ? "oh-fade-out-slow" : fromRect ? undefined : "oh-fade-in"} style={{ alignItems: "center", background: "rgba(6,6,7,0.42)", backdropFilter: "blur(18px) saturate(1.2)", display: "flex", inset: 0, justifyContent: "center", padding: isMobile ? `calc(0.45rem + ${SAFE_TOP}) calc(0.45rem + ${SAFE_RIGHT}) calc(0.45rem + ${SAFE_BOTTOM}) calc(0.45rem + ${SAFE_LEFT})` : "clamp(0.8rem, 2vw, 1.6rem)", position: "fixed", zIndex: 2147483000 }}>
-            <div ref={cardRef} className="oh-ws-card" style={{ background: "rgba(32,32,35,0.67)", backdropFilter: "var(--oh-hud-blur)", WebkitBackdropFilter: "var(--oh-hud-blur)", border: "1px solid var(--oh-hud-border)", borderRadius: isMobile ? "12px" : "18px", boxShadow: "var(--oh-hud-shadow)", color: "white", display: "flex", flexDirection: "column", fontFamily: "sans-serif", height: isMobile ? `calc(${APP_HEIGHT} - 0.9rem - ${SAFE_TOP} - ${SAFE_BOTTOM})` : `min(800px, calc(${APP_HEIGHT} - 2.4rem))`, maxWidth: "1120px", overflow: "hidden", width: isMobile ? `calc(100vw - 0.9rem - ${SAFE_LEFT} - ${SAFE_RIGHT})` : "min(94vw, 1120px)" }}>
-                <div aria-hidden="true" className="oh-ws-tint" style={{ background: "rgba(32,32,35,0.63)", borderRadius: "inherit", inset: 0, pointerEvents: "none", position: "absolute" }} />
-                <div style={{ alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: "0.75rem", padding: "0.8rem 0.9rem" }}>
-                    <button type="button" className="oh-tap" onClick={onBack} aria-label="Back to game menu" title="Back to game menu" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.66)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>←</button>
+        <div role="dialog" aria-modal="true" aria-label="Game settings" className={leaving ? "oh-fade-out" : closing ? "oh-fade-out-slow" : fromRect ? undefined : "oh-fade-in"} style={{ alignItems: "center", background: "rgba(8,9,11,0.75)", display: "flex", inset: 0, justifyContent: "center", padding: isMobile ? `calc(0.45rem + ${SAFE_TOP}) calc(0.45rem + ${SAFE_RIGHT}) calc(0.45rem + ${SAFE_BOTTOM}) calc(0.45rem + ${SAFE_LEFT})` : "clamp(0.8rem, 2vw, 1.6rem)", position: "fixed", zIndex: 2147483000, contain: "strict" }}>
+            <div ref={cardRef} className="oh-ws-card" style={{ background: "rgba(20,21,24,0.97)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: isMobile ? "12px" : "18px", boxShadow: "0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)", color: "white", display: "flex", flexDirection: "column", fontFamily: "sans-serif", height: isMobile ? `calc(${APP_HEIGHT} - 0.9rem - ${SAFE_TOP} - ${SAFE_BOTTOM})` : `min(800px, calc(${APP_HEIGHT} - 2.4rem))`, maxWidth: "1120px", overflow: "hidden", width: isMobile ? `calc(100vw - 0.9rem - ${SAFE_LEFT} - ${SAFE_RIGHT})` : "min(94vw, 1120px)" }}>
+                <div style={{ alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", gap: "0.75rem", padding: "0.85rem 1.1rem" }}>
+                    <button type="button" className="oh-tap" onClick={onBack} aria-label="Back to game menu" title="Back to game menu" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", color: "rgba(255,255,255,0.7)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.1rem", justifyContent: "center", width: "2.1rem", transition: "background-color 140ms ease, color 140ms ease" }}>←</button>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ alignItems: "baseline", display: "flex", flexWrap: "wrap", gap: "0.35rem 0.65rem" }}>
-                            <span style={{ color: "#f8fafc", fontSize: "1rem", fontWeight: 900 }}>Settings</span>
-                            {forGame && context?.scenarioName && <span style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.72rem", fontWeight: 700 }}>{context.scenarioName}</span>}
+                        <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: "0.45rem 0.65rem" }}>
+                            <span style={{ backgroundColor: "#3b82f6", borderRadius: "3px", display: "inline-block", height: "1.05rem", width: "4px" }} />
+                            <span style={{ color: "#f8fafc", fontSize: "1.04rem", fontWeight: 800 }}>Settings</span>
+                            {forGame && context?.scenarioName && <span style={{ backgroundColor: "rgba(59,130,246,0.15)", border: "1px solid rgba(96,165,250,0.3)", borderRadius: "6px", color: "#93c5fd", fontSize: "0.7rem", fontWeight: 700, padding: "0.15rem 0.45rem" }}>{context.scenarioName}</span>}
                         </div>
-                        <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.61rem", marginTop: "0.12rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.66rem", marginTop: "0.12rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {forGame
                                 ? [context?.countryName ? `Playing as ${context.countryName}` : "", context?.date || ""].filter(Boolean).join(" · ") || "Game preferences"
                                 : "For every game. A game's own settings are in its ☰ menu."}
                         </div>
                     </div>
-                    <button type="button" className="oh-tap" onClick={onClose} aria-label="Close settings" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: "8px", color: "rgba(255,255,255,0.62)", cursor: "pointer", display: "flex", fontSize: "1rem", height: "2.25rem", justifyContent: "center", width: "2.25rem" }}>×</button>
+                    <button type="button" className="oh-tap" onClick={onClose} aria-label="Close settings" style={{ alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", color: "rgba(255,255,255,0.7)", cursor: "pointer", display: "flex", fontSize: "1.1rem", height: "2.1rem", justifyContent: "center", width: "2.1rem", transition: "background-color 140ms ease, color 140ms ease" }}>×</button>
                 </div>
                 <div style={{ display: "grid", flex: 1, gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "235px minmax(0, 1fr)", gridTemplateRows: isMobile ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", minHeight: 0 }}>
-                    <aside style={{ backgroundColor: "rgba(9,9,10,0.24)", borderBottom: isMobile ? "1px solid rgba(255,255,255,0.07)" : "none", borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,0.07)", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>{nav}</aside>
-                    <main style={{ minHeight: 0, overflowY: "auto", padding: isMobile ? "0.8rem" : "1rem 1.05rem 1.2rem" }}>{content}</main>
+                    <aside style={{ backgroundColor: "rgba(0,0,0,0.18)", borderBottom: isMobile ? "1px solid rgba(255,255,255,0.06)" : "none", borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,0.06)", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>{nav}</aside>
+                    <main style={{ minHeight: 0, overflowY: "auto", padding: isMobile ? "0.8rem" : "1.1rem 1.25rem 1.4rem", contain: "paint" }}>{content}</main>
                 </div>
             </div>
         </div>,

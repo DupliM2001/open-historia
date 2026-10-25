@@ -17,14 +17,20 @@
     "every file it touches — the goal is 'this page probably needs a look', not a build graph."
   ],
   "verifiedAgainst": {
-    "main": "e62a1c5529634e53622386dc86d546187b368eb5",
-    "beta": "2f48a6c22be815e81ee6f2c49001728dd76e0c2c",
-    "date": "2026-09-24",
-    "note": "Main absorbed nearly all of beta between 5ee1ab5 and e62a1c5 (the game menu and settings workspace, the Fallback list, Map vNext as the only renderer, the war/relation/agreement/storyline ledgers, sovereignty, Projects & Operations, the engine-driven unit system as the only one, tracked stats, loopback-only networking), so the stable/beta split was rewritten page by page: former beta notes became plain text, and what is beta-only now (puppets and demands, player focus, per-task temperature, structures from events, filed events, the Android app carrying its map) was re-marked. New on both builds and documented: the request budget, Intervene, interactive events, the standing goal, documents, group turns in one request with polls, simulation reminders, the history document, game export/import, scenario features and scenario stat sheets, the 22 shipped language packs. Written from source and from driving the main build's UI in headless Chromium; no campaign was played through turns (no API key in the capture environment)."
+    "main": "6e6239c4924c60619d5ee3c01ec1f26519c611c4",
+    "beta": "d7e8fa8503195ce9a55e3d91ce498469ac415a68",
+    "date": "2026-10-25",
+    "note": "Every page and the site's own pages re-read against the code of both builds, a month after the last pass. Main had gained the real-world Modern Day map, one-request time skips, groups, projections, the flat interface, chunked desktop updates and the update screen at launch, the privacy policy and counting consent, CC BY 4.0 scenarios and the full Android app; beta had gained battlefields and the War Room, war at sea, alliances that call allies in, war weariness and peace on terms, manpower and funding, the country panel and ranking, seasons and weather, the diplomatic map mode, institutions, Listen in, multiplayer lobbies, the music, the vault door and update notices, Espionage Part 2 (orders, operations, unidentified captures, the new clarity curve), the Agent connection and the map editor's rework. The stable/beta split was redrawn page by page; two beta pages were added (war-room, war-at-sea). Written from source; no campaign was played through turns and no screenshot was taken."
   },
   "pages": {
     "index.md": [
-      "README.md"
+      "README.md",
+      "src/multiplayer/ui/LobbiesTab.jsx",
+      "src/Game/AI/providerConfig.js",
+      "src/Game/GameUI/apiSetupPrompt.jsx",
+      "electron/main.cjs",
+      "src/runtime/AppUpdateBanner.jsx",
+      "src/Game/AI/requestBudget.js"
     ],
     "start/install.md": [
       "site/index.html",
@@ -32,7 +38,21 @@
       ".github/workflows/desktop-installer.yml",
       "scripts/fetch-map-assets.mjs",
       ".github/workflows/desktop-beta.yml",
-      ".github/workflows/android-apk.yml"
+      ".github/workflows/android-apk.yml",
+      "electron-builder.beta.yml",
+      ".github/workflows/android-apk-beta.yml",
+      "scripts/map-assets.json",
+      "scripts/mac-adhoc-sign.cjs",
+      "electron/main.cjs",
+      "electron/launchUpdate.cjs",
+      "electron/layeredUpdate.cjs",
+      "electron/payloadUpdate.cjs",
+      "electron/betaRecommendation.cjs",
+      "electron/setup.html",
+      "src/runtime/AppUpdateBanner.jsx",
+      "src/runtime/appUpdate.js",
+      "src/Game/GameUI/settings.jsx",
+      "mobile/android/variables.gradle"
     ],
     "start/ai-setup.md": [
       "src/Game/AI/providerConfig.js",
@@ -43,7 +63,12 @@
       "src/Game/GameUI/apiSetupPrompt.jsx",
       "src/Game/GameUI/settings.jsx",
       "src/Game/GameUI/fallbackSwitchNotice.jsx",
-      "src/Game/AI/requestBudget.js"
+      "src/Game/AI/requestBudget.js",
+      "src/Game/AI/contextWindow.js",
+      "src/Game/AI/agentConnection.js",
+      "server/agentFolder.js",
+      "src/Game/GameUI/time.jsx",
+      "src/Game/GameUI/ListenInPhone.jsx"
     ],
     "start/how-to-play.md": [
       "src/Game/GameUI/main.jsx",
@@ -51,7 +76,11 @@
       "src/Game/GameUI/actions.jsx",
       "src/runtime/playerGoal.js",
       "src/Game/AI/intervene.js",
-      "src/runtime/interactiveOffer.js"
+      "src/runtime/interactiveOffer.js",
+      "src/Game/AI/jumpSegments.js",
+      "src/runtime/difficulty.js",
+      "src/Game/GameUI/settings.jsx",
+      "src/Game/GameUI/warRoomRail.jsx"
     ],
     "start/first-campaign.md": [
       "src/Game/GameUI/libraryBar.jsx",
@@ -59,7 +88,14 @@
       "src/runtime/difficulty.js",
       "src/Game/GameUI/actions.jsx",
       "src/Game/GameUI/apiSetupPrompt.jsx",
-      "src/Game/Selection/Regions.jsx"
+      "src/Game/Selection/Regions.jsx",
+      "src/Game/GameUI/other.jsx",
+      "src/Game/GameUI/stats.jsx",
+      "src/Game/GameUI/countryPanel.jsx",
+      "src/Game/GameUI/VaultDoor.jsx",
+      "src/Game/GameUI/ListenInPhone.jsx",
+      "src/runtime/spycraft.js",
+      "src/Game/GameUI/main.jsx"
     ],
     "play/new-game.md": [
       "src/Game/GameUI/libraryBar.jsx",
@@ -67,7 +103,18 @@
       "src/Game/GameUI/CountryPickerMap.jsx",
       "src/runtime/difficulty.js",
       "server/seed/default",
-      "server/gameFeatures.js"
+      "server/gameFeatures.js",
+      "src/Game/GameUI/communityHub.jsx",
+      "src/runtime/fronts/constants.js",
+      "src/runtime/fronts/mind/commanders.js",
+      "server/libraryStore.js",
+      "src/runtime/groups.js",
+      "src/App.jsx",
+      "src/runtime/vaultDoorDue.js",
+      "src/Game/GameUI/VaultDoor.jsx",
+      "src/runtime/gameEntry.js",
+      "src/Game/GameUI/settings.jsx",
+      "scripts/presets"
     ],
     "play/interface.md": [
       "src/Game/GameUI/main.jsx",
@@ -76,7 +123,17 @@
       "src/Game/Selection",
       "src/Game/GameUI/search.jsx",
       "src/Game/GameUI/cheats.jsx",
-      "src/Game/GameUI/projects.jsx"
+      "src/Game/GameUI/projects.jsx",
+      "src/Game/GameUI/hudDock.js",
+      "src/Game/GameUI/libraryBar.jsx",
+      "src/Game/GameUI/actions.jsx",
+      "src/Game/GameUI/advisor.jsx",
+      "src/Game/GameUI/countryPanel.jsx",
+      "src/Game/GameUI/stats.jsx",
+      "src/Game/GameUI/other.jsx",
+      "src/Game/GameUI/MapModeSelector.jsx",
+      "src/multiplayer/ui/LobbiesTab.jsx",
+      "src/Game/GameUI/updates"
     ],
     "play/world-map.md": [
       "src/Game/Map/World.jsx",
@@ -85,7 +142,24 @@
       "src/runtime/assets.js",
       "src/runtime/mapSettings.js",
       "src/Game/Map/labels",
-      "src/Game/GameUI/gameLoadingScreen.jsx"
+      "src/Game/GameUI/gameLoadingScreen.jsx",
+      "src/Game/Map/vnext/presentationPolicy.js",
+      "src/Game/Map/ownerColors.js",
+      "src/runtime/basemapPick.js",
+      "src/runtime/tiledBasemaps.js",
+      "src/runtime/diplomaticStance.js",
+      "src/runtime/fronts/weather.js",
+      "server/mapProjection.js",
+      "src/Game/GameUI/MapModeSelector.jsx",
+      "src/Game/GameUI/settings.jsx",
+      "src/Game/Map/GroupAreaLayers.jsx",
+      "src/Game/Map/SeasonLayers.jsx",
+      "src/Game/Map/FrontWeatherLayers.jsx",
+      "src/Game/Map/IceLayers.jsx",
+      "src/Game/Map/FrontLayers.jsx",
+      "src/Game/Map/AirLayers.jsx",
+      "src/Game/Map/SeaBattleLayers.jsx",
+      "src/Game/Map/StrikeLayers.jsx"
     ],
     "play/time.md": [
       "src/Game/GameUI/time.jsx",
@@ -97,14 +171,23 @@
       "src/Game/AI/requestBudget.js",
       "src/Game/AI/intervene.js",
       "src/runtime/interactiveOffer.js",
-      "src/Game/AI/playerFocus.js"
+      "src/Game/AI/playerFocus.js",
+      "src/Game/AI/skipPhases.js",
+      "src/Game/AI/turnChecks.js",
+      "src/Game/AI/frontOrderFunction.js",
+      "src/Game/AI/main.jsx",
+      "src/Game/GameUI/settings.jsx"
     ],
     "play/orders.md": [
       "src/Game/GameUI/actions.jsx",
       "src/Game/AI/gameplay.js",
       "src/runtime/playerGoal.js",
       "src/runtime/spycraft.js",
-      "src/Game/AI/actionOutcomeAssociations.js"
+      "src/Game/AI/actionOutcomeAssociations.js",
+      "src/Game/AI/orderedAnnexations.js",
+      "src/Game/AI/frontOrderFunction.js",
+      "src/Game/GameUI/chat.jsx",
+      "src/runtime/difficulty.js"
     ],
     "play/events.md": [
       "src/Game/GameUI/time.jsx",
@@ -117,7 +200,12 @@
       "src/Game/AI/historyConsolidation.js",
       "src/runtime/unseenEvents.js",
       "src/Game/GameUI/eventFocus.js",
-      "src/runtime/filedEvents.js"
+      "src/runtime/filedEvents.js",
+      "src/Game/AI/mapConsequences.js",
+      "src/runtime/scenarioPrehistory.js",
+      "src/Game/GameUI/PrehistoryPanel.jsx",
+      "server/gameFeatures.js",
+      "src/Game/AI/main.jsx"
     ],
     "systems/diplomacy.md": [
       "src/Game/GameUI/chat.jsx",
@@ -129,29 +217,63 @@
       "src/Game/AI/conversationCatchUp.js",
       "server/gameFeatures.js",
       "src/runtime/reportDelivery.js",
-      "src/runtime/demandCheck.js"
+      "src/runtime/demandCheck.js",
+      "src/Game/GameUI/InstitutionsWorkspace.jsx",
+      "src/Game/AI/formalAgenda.js",
+      "src/Game/GameUI/warAndPeace.jsx",
+      "src/Game/AI/warAndPeace.js",
+      "src/runtime/alliances.js",
+      "src/runtime/peaceTerms.js",
+      "src/runtime/listenIn.js",
+      "src/Game/GameUI/ListenInPhone.jsx",
+      "src/Game/Selection/Regions.jsx",
+      "src/Game/Selection/CountryPanel.jsx",
+      "src/Game/GameUI/MapModeSelector.jsx",
+      "src/runtime/diplomaticStance.js"
     ],
     "systems/war.md": [
       "src/Game/AI/nativeWarLedger.js",
       "src/Game/AI/nativeDiplomaticDirector.js",
       "src/Game/AI/nativeWorldDirector.js",
       "src/runtime/gameState.js",
-      "src/runtime/puppets.js"
+      "src/runtime/puppets.js",
+      "src/runtime/alliances.js",
+      "src/runtime/warWeariness.js",
+      "src/runtime/peaceTerms.js",
+      "src/Game/AI/warAndPeace.js",
+      "src/Game/GameUI/warAndPeace.jsx",
+      "src/Game/GameUI/stats.jsx",
+      "src/runtime/fronts/engine.js"
     ],
     "systems/territory.md": [
       "src/runtime/gameState.js",
       "src/Game/Selection/Regions.jsx",
       "src/Game/AI/nativeTerritoryDirector.js",
       "server/gameFeatures.js",
-      "src/runtime/puppets.js"
+      "src/runtime/puppets.js",
+      "src/Game/AI/frontTurn.js",
+      "src/runtime/fronts/heldRegions.js",
+      "src/runtime/fronts/constants.js",
+      "src/Game/AI/polityTransitions.js",
+      "src/Game/AI/orderedAnnexations.js",
+      "src/Game/AI/warAndPeace.js"
     ],
     "systems/military.md": [
-      "src/Game/Map/unitCombat.js",
       "src/Game/GameUI/forces.jsx",
       "src/runtime/unitMotion.js",
       "src/Game/Map/unitsController.js",
       "src/runtime/gameState.js",
-      "src/Game/AI/placement.js"
+      "src/Game/AI/placement.js",
+      "src/Game/AI/idlePulse.js",
+      "src/Game/AI/gameplay.js",
+      "src/runtime/fronts/battle.js",
+      "src/runtime/fronts/manpower.js",
+      "src/runtime/fronts/constants.js",
+      "src/runtime/militaryFunding.js",
+      "src/runtime/militaryStats.js",
+      "src/runtime/militaryPower.js",
+      "src/Game/AI/militaryRating.js",
+      "src/Game/GameUI/stats.jsx"
     ],
     "systems/espionage.md": [
       "src/runtime/spycraft.js",
@@ -159,20 +281,48 @@
       "src/Game/GameUI/chat.jsx",
       "src/runtime/reportDelivery.js",
       "server/gameFeatures.js",
-      "src/runtime/puppets.js"
+      "src/runtime/puppets.js",
+      "src/Game/AI/covertOperationsDirective.js",
+      "src/Game/AI/gameplay.js",
+      "src/Game/AI/agentReports.js",
+      "src/Game/AI/spyOrdersDirective.js",
+      "src/runtime/projects.js",
+      "src/runtime/fronts/plans.js",
+      "src/Game/GameUI/warRoom.jsx",
+      "src/Game/GameUI/main.jsx",
+      "src/Game/GameUI/other.jsx"
     ],
     "systems/projects.md": [
       "src/runtime/projects.js",
       "src/Game/GameUI/projects.jsx",
       "src/runtime/gameState.js",
-      "src/Game/AI/requestBudget.js"
+      "src/Game/AI/requestBudget.js",
+      "src/Game/AI/playerFocus.js"
     ],
     "systems/statistics.md": [
       "src/Game/GameUI/stats.jsx",
       "src/runtime/countryStats.js",
       "src/Game/AI/countryStatsWorkerKernel.js",
       "src/Game/GameUI/StatsSheetEditor.jsx",
-      "src/runtime/statIndexDefinitions.js"
+      "src/runtime/statIndexDefinitions.js",
+      "src/Game/GameUI/countryPanel.jsx",
+      "src/Game/GameUI/other.jsx",
+      "src/Game/GameUI/countryRanking.js",
+      "src/Game/GameUI/PoliticalOverview.jsx",
+      "src/Game/GameUI/warAndPeace.jsx",
+      "src/Game/GameUI/afterAction.jsx",
+      "src/runtime/militaryPower.js",
+      "src/runtime/militaryStats.js",
+      "src/runtime/militaryStanding.js",
+      "src/runtime/militaryFunding.js",
+      "src/runtime/statsBackend.js",
+      "src/runtime/spycraft.js",
+      "src/runtime/warResources.js",
+      "src/Game/AI/militaryRating.js",
+      "src/Game/AI/conflictBackends.js",
+      "src/Game/AI/gameplay.js",
+      "src/Game/AI/frontApply.js",
+      "src/Editor/PolitiesPanel.jsx"
     ],
     "systems/countries.md": [
       "src/runtime/gameState.js",
@@ -180,14 +330,32 @@
       "src/runtime/polityIdentity.js",
       "src/runtime/countryFlags.js",
       "server/polityRename.js",
-      "src/Editor/PolitiesPanel.jsx"
+      "src/Editor/PolitiesPanel.jsx",
+      "src/Editor/SelectionInspector.jsx",
+      "src/Game/Selection/CountryPanel.jsx",
+      "src/Game/Map/ownerColors.js",
+      "src/Game/AI/defaultPrompts.json",
+      "src/Game/AI/gameplaySchemas.js",
+      "src/Game/GameUI/libraryBar.jsx",
+      "src/Game/GameUI/FactionCreator.jsx",
+      "src/Game/GameUI/cheats.jsx",
+      "src/runtime/powerStatus.js",
+      "src/runtime/spycraft.js"
     ],
     "systems/cities.md": [
       "src/Game/Map/Cities.jsx",
       "src/Game/Map/MarkersLayer.jsx",
       "src/runtime/cityFeatures.js",
       "server/seed/default/cities.geojson",
-      "src/Game/AI/nativeStructureDirector.js"
+      "src/Game/AI/nativeStructureDirector.js",
+      "src/runtime/cityPopulation.js",
+      "src/runtime/structurePlacement.js",
+      "src/runtime/gameState.js",
+      "src/Game/AI/frontApply.js",
+      "src/Game/AI/mapConsequences.js",
+      "src/Game/Selection/Features.jsx",
+      "src/Editor/CityPopup.jsx",
+      "src/Game/GameUI/cheats.jsx"
     ],
     "systems/advisor.md": [
       "src/Game/GameUI/advisor.jsx",
@@ -195,7 +363,13 @@
       "src/Game/GameUI/advisorDrafts.js",
       "src/runtime/reportDelivery.js",
       "src/runtime/playerGoal.js",
-      "src/Game/AI/conversationCatchUp.js"
+      "src/Game/AI/conversationCatchUp.js",
+      "src/Game/AI/main.jsx",
+      "src/Game/AI/lookupTools.js",
+      "src/Game/GameUI/advisorInstitutionDrafts.js",
+      "src/Game/GameUI/countryPanel.jsx",
+      "src/Game/GameUI/actions.jsx",
+      "src/Game/GameUI/settings.jsx"
     ],
     "tools/settings.md": [
       "src/Game/GameUI/settings.jsx",
@@ -204,44 +378,116 @@
       "src/Game/AI/providerConfig.js",
       "src/Game/AI/requestBudget.js",
       "src/Game/AI/telemetry.js",
-      "public/lang"
+      "public/lang",
+      "src/Game/AI/structuredMode.js",
+      "src/Game/AI/agentConnection.js",
+      "src/runtime/ambientMusic.js",
+      "src/runtime/keptMusic.js",
+      "src/runtime/appUpdateManualCheck.js",
+      "src/runtime/deviceProfile.js",
+      "src/runtime/assets.js",
+      "src/runtime/discordPresence.js",
+      "src/runtime/visitConsent.js",
+      "src/Game/GameUI/MapModeSelector.jsx",
+      "src/Game/GameUI/main.jsx",
+      "src/Game/GameUI/libraryBar.jsx"
     ],
     "tools/cheats.md": [
       "src/Game/GameUI/cheats.jsx",
       "src/Game/GameUI/forces.jsx",
       "src/runtime/gmChanges.js",
-      "src/Game/AI/historyConsolidation.js"
+      "src/Game/AI/historyConsolidation.js",
+      "src/Game/GameUI/gmPreviewOps.js",
+      "src/Game/GameUI/settings.jsx",
+      "src/runtime/difficulty.js",
+      "src/runtime/puppets.js",
+      "src/runtime/groups.js",
+      "src/Editor/scenarioPuppets.js"
     ],
     "tools/saves.md": [
       "src/runtime/gameState.js",
       "src/runtime/library.js",
       "src/Game/GameUI/libraryBar.jsx",
       "server/libraryStore.js",
-      "src/runtime/gameZip.js"
+      "src/runtime/gameZip.js",
+      "server/server.js",
+      "src/runtime/web/libraryStore.js",
+      "src/runtime/web/saveMove.js",
+      "public/save-move",
+      "src/runtime/saveFile.js",
+      "src/runtime/native/fileSave.js",
+      "src/runtime/web/index.js",
+      "src/Game/AI/gameplay.js",
+      "src/Game/GameUI/time.jsx"
     ],
     "tools/editor.md": [
       "src/Editor",
       "src/Game/GameUI/FeaturesSectionEditor.jsx",
       "server/gameFeatures.js",
-      "src/Game/GameUI/StatsSheetEditor.jsx"
+      "src/Game/GameUI/StatsSheetEditor.jsx",
+      "server/mapProjection.js",
+      "src/Game/GameUI/libraryBar.jsx",
+      "src/Game/GameUI/ScenarioMusicPanel.jsx",
+      "src/Game/GameUI/PrehistoryPanel.jsx",
+      "src/Game/GameUI/ScenarioWarSettings.jsx",
+      "src/Game/GameUI/ScenarioMilitaryPanel.jsx",
+      "src/Game/GameUI/ScenarioFrontsPanel.jsx",
+      "src/Game/GameUI/ScriptedEventsEditor.jsx",
+      "src/Game/GameUI/communityHub.jsx",
+      "server/scenarioMusic.js",
+      "server/seed/default/regions.geojson",
+      "server/seed/earlier/fault-lines-2014-v1.geojson"
     ],
     "hosting/community-hub.md": [
       "src/Game/GameUI/communityHub.jsx",
       "src/runtime/hubFiles.js",
       "src/runtime/hubPosts.js",
       "server/libraryStore.js",
-      "hub-templates"
+      "hub-templates",
+      "src/Game/GameUI/ScenarioSuggestions.jsx",
+      "src/Game/GameUI/libraryBar.jsx",
+      "src/Game/GameUI/ScenarioMusicPanel.jsx",
+      "src/runtime/hubIssues.js",
+      "src/runtime/scenarioDateRange.js",
+      "src/runtime/scenarioLicense.js",
+      "src/runtime/gameZip.js",
+      "src/runtime/bundleFiles.js",
+      "src/Editor/simplifyRegions.js",
+      "src/Editor/SelectionInspector.jsx"
     ],
     "hosting/self-hosting.md": [
       "server/server.js",
       "server/dataDir.js",
       "server/security.js",
-      "README.md"
+      "README.md",
+      "server/appKind.js",
+      "server/discordPresence.js",
+      "public/consent.js",
+      "src/runtime/visitConsent.js",
+      "src/runtime/visitCount.js",
+      "scripts/fetch-map-assets.mjs",
+      "scripts/map-assets.json",
+      "package.json",
+      "src/Game/GameUI/settings.jsx",
+      "src/multiplayer/ui/LobbiesTab.jsx",
+      "src/multiplayer/signaling/relays.js"
     ],
     "hosting/mobile.md": [
       "mobile",
       "src/runtime/appUpdate.js",
-      ".github/workflows/android-apk.yml"
+      ".github/workflows/android-apk.yml",
+      "mobile/android/app/build.gradle",
+      ".github/workflows/android-apk-beta.yml",
+      "src/runtime/AppUpdateBanner.jsx",
+      "src/runtime/web/router.js",
+      "src/runtime/native/fileSave.js",
+      "src/runtime/native/http.js",
+      "src/runtime/native/backgroundPause.js",
+      "src/runtime/native/rendererRestart.js",
+      "src/runtime/native/appInstaller.js",
+      "public/offline-relief",
+      "src/Game/GameUI/settings.jsx",
+      "src/multiplayer/ui/LobbiesTab.jsx"
     ],
     "reference/ai-providers.md": [
       "src/Game/AI/providerConfig.js",
@@ -250,7 +496,12 @@
       "src/Game/AI/requestBudget.js",
       "src/Game/GameUI/debugConsole.jsx",
       "src/Game/AI/telemetry.js",
-      "src/Game/AI/sampling.js"
+      "src/Game/AI/sampling.js",
+      "src/Game/AI/contextWindow.js",
+      "src/Game/AI/localEndpoint.js",
+      "server/gameFeatures.js",
+      "src/runtime/fronts/engine.js",
+      "src/runtime/native/http.js"
     ],
     "reference/troubleshooting.md": [
       "src/Game/GameUI/advisor.jsx",
@@ -265,7 +516,71 @@
       "src/runtime/debugLog.js",
       "src/runtime/saveDebugLog.js",
       "src/Game/AI/contextWindow.js",
-      "src/Game/AI/requestBudget.js"
+      "src/Game/AI/requestBudget.js",
+      "src/Game/GameUI/main.jsx",
+      "electron/setup.html",
+      "electron/launchUpdate.cjs",
+      "electron/payloadUpdate.cjs",
+      "electron/main.cjs",
+      "src/Game/AI/jumpSegments.js",
+      "src/runtime/web/saveMove.js",
+      "src/runtime/native/fileSave.js",
+      "src/runtime/hubFiles.js",
+      "src/Game/GameUI/communityHub.jsx",
+      "src/Game/GameUI/libraryBar.jsx",
+      "src/Editor/simplifyRegions.js",
+      "src/Editor/ClipboardPanel.jsx",
+      "src/Editor/ProvinceImportPanel.jsx",
+      ".github/workflows/desktop-installer.yml"
+    ],
+    "systems/war-room.md": [
+      "src/Game/GameUI/warRoom.jsx",
+      "src/Game/GameUI/warRoomRail.jsx",
+      "src/Game/GameUI/warRoomFortify.jsx",
+      "src/Game/GameUI/warRoomRehearsal.jsx",
+      "src/Game/GameUI/warRoomWeather.jsx",
+      "src/Game/GameUI/warRoomData.js",
+      "src/Game/GameUI/afterAction.jsx",
+      "src/Game/GameUI/main.jsx",
+      "src/Game/GameUI/ScenarioWarSettings.jsx",
+      "src/Game/GameUI/ScenarioFrontsPanel.jsx",
+      "src/Game/GameUI/ScenarioMilitaryPanel.jsx",
+      "src/runtime/fronts/engine.js",
+      "src/runtime/fronts/battle.js",
+      "src/runtime/fronts/constants.js",
+      "src/runtime/fronts/deploy.js",
+      "src/runtime/fronts/swarms.js",
+      "src/runtime/fronts/walls.js",
+      "src/runtime/fronts/fortifyOps.js",
+      "src/runtime/fronts/air.js",
+      "src/runtime/fronts/transports.js",
+      "src/runtime/fronts/handicap.js",
+      "src/runtime/fronts/mind/commanders.js",
+      "src/runtime/fortifyCost.js",
+      "src/runtime/warResources.js",
+      "src/runtime/warSettings.js",
+      "src/Game/AI/frontTurn.js",
+      "src/Game/AI/frontApply.js",
+      "src/Game/AI/frontOrderFunction.js",
+      "src/Game/AI/frontsGate.js",
+      "src/Game/Map/FrontLayers.jsx",
+      "src/Game/Map/troopDetail.js",
+      "src/Game/Map/StrikeLayers.jsx",
+      "server/gameFeatures.js"
+    ],
+    "systems/war-at-sea.md": [
+      "src/runtime/naval/engine.js",
+      "src/runtime/naval/blockade.js",
+      "src/runtime/naval/fleetOps.js",
+      "src/runtime/naval/record.js",
+      "src/Game/GameUI/warRoomFleets.jsx",
+      "src/Game/Map/SeaBattleLayers.jsx",
+      "src/Game/Map/seaBattleFeatures.js",
+      "src/runtime/fronts/transports.js",
+      "src/Game/AI/frontTurn.js",
+      "src/Game/AI/frontApply.js",
+      "src/runtime/warWeariness.js",
+      "src/runtime/warResources.js"
     ]
   },
   "images": {
@@ -446,7 +761,8 @@
     "No screenshot of a held time-skip segment or a held Projects board: both live in in-memory pending state and cannot be authored into a save.",
     "No screenshot of Intervene, an interactive event, a group turn with a poll, a document notice, or any beta-only surface (puppet card, demand card, Player focus): each needs AI output or beta, and the 2026-09-24 pass had neither a key nor a beta build running.",
     "Content screenshots (events, diplomacy, advisor, stats, espionage, retry) predate the 2026-09-24 pass and use the older palette.",
-    "Neither build was verified by playing a campaign through turns; the 2026-09-24 pass read source and drove main's menus and panels."
+    "Neither build was verified by playing a campaign through turns; the 2026-09-24 pass read source and drove main's menus and panels.",
+    "No screenshot of any surface added since 2026-09-24: the War Room, fleets and sea battles, the Intelligence tab's Operations, peace and call-to-arms cards, institutions, Listen in, the country panel and ranking, lobbies, the vault door and update notices, the map editor's sidebar. The existing statistics-sheet.jpg and the content shots show the stable layout."
   ],
   "pageVerified": {
     "_comment": "Pages re-verified against a commit NEWER than verifiedAgainst. wiki:check skips a page for a channel whose recorded commit here is at or past the current tip. Only add a page you actually re-read. Emptied on 2026-09-11, when the global record moved past every entry that was here.",
