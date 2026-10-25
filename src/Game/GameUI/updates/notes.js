@@ -80,6 +80,7 @@ const NEW_UPDATES = [
               "An operation is carried out during the next time skip, and the world reacts to what it did.",
               "An operation that is never traced is never tied to you: the world only sees what happened.",
               "A recruited source makes its network harder to catch, and its reports draw on what the source knows.",
+              "How much of an intercept you can read now rests on your own service: a world-class one reads nearly every word, a weak one only scraps.",
             ],
           },
         ],

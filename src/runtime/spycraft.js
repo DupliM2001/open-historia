@@ -537,16 +537,16 @@ export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "
 
 // ---- redaction ----------------------------------------------------------------
 
-// How much of an intercept survives. The reader's service does the work; the
-// target's service resists it, at half weight so that spying on a peer is worth
-// doing and spying on a superior service is hard rather than useless. Never
+// How much of an intercept survives. The reader's service does nearly all the
+// work, on a steep curve: a world-class one reads almost everything, a weak one
+// scraps. The target's service resists it only lightly. Never
 // zero: even the worst intercept yields a word or two, or there is nothing on
 // screen to make the reader want a better service.
 export const signalClarity = (readerIntelligence, targetIntelligence) => {
   const mine = clampPct(readerIntelligence) / 100;
   const theirs = clampPct(targetIntelligence) / 100;
-  const raw = 0.12 + mine * 0.88 - theirs * 0.35;
-  return clamp01(Number(raw.toFixed(3)), 0.06, 1);
+  const raw = 0.07 + mine ** 1.6 * 0.92 - theirs * 0.1;
+  return clamp01(Number(raw.toFixed(3)), 0.04, 1);
 };
 
 const BLOCK = "█";

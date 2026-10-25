@@ -151,9 +151,13 @@ test("the foreign-spy cap and the one-agent-per-polity rule hold", () => {
   assert.equal(new Set(inFrance.map((s) => s.owner)).size, inFrance.length, "one agent per polity");
 });
 
-test("clarity: reader's service helps, target's hurts at half weight, never zero", () => {
-  assert.equal(signalClarity(100, 0), 1);
-  assert.ok(signalClarity(0, 100) >= 0.06);
+test("clarity: reader's service does nearly all of it, target's hurts a little, never zero", () => {
+  assert.equal(signalClarity(100, 40), 0.95);
+  assert.ok(signalClarity(100, 100) >= 0.88);
+  assert.ok(signalClarity(100, 0) >= 0.98);
+  assert.ok(signalClarity(40, 40) <= 0.25);
+  assert.ok(signalClarity(20, 40) <= 0.11);
+  assert.equal(signalClarity(0, 100), 0.04);
   assert.ok(signalClarity(60, 40) > signalClarity(40, 40));
   assert.ok(signalClarity(40, 80) < signalClarity(40, 40));
   assert.ok(signalClarity(60, 40) - signalClarity(40, 40) > signalClarity(40, 40) - signalClarity(40, 60));
