@@ -61,7 +61,7 @@ test("the real cards are the size the outlines say", () => {
   const card = (name, next) => libraryBar.slice(libraryBar.indexOf(`const ${name} = `), libraryBar.indexOf(next));
   const game = card("GameCard", "// A responsive shelf on the main menu.");
   const scenario = card("ScenarioCard", "// Edit, Clone and Export live behind");
-  for (const [source, height, padding] of [[game, "22rem", /padding: "1rem 1\.05rem",/], [scenario, "22rem", /padding: "1rem 1\.05rem",/]]) {
+  for (const [source, height, padding] of [[game, "22rem", /padding: "0\.85rem 1\.05rem 1rem",/], [scenario, "22rem", /padding: "0\.85rem 1\.05rem 1rem",/]]) {
     assert.match(source, /borderRadius: "24px",/);
     assert.match(source, new RegExp(`minHeight: "${height}",`));
     assert.match(source, padding);
