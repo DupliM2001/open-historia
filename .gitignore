@@ -77,3 +77,7 @@ electron/channel.json
 
 # Relocatable wiki preview (scripts/build-wiki-preview.mjs) — a build output, like dist-site.
 dist-wiki-preview/
+
+/native/engine/target/
+/native/godot/.godot/
+/native/godot/bin/
