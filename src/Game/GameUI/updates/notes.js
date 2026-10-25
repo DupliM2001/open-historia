@@ -53,6 +53,39 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // "get rid of the idle troop animation that makes it look like they are at war or battling" (the owner, 2026-10-25).
+    id: "2026-10-still-fronts",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Quiet fronts stay quiet",
+        items: [
+          "Between time skips, troops on a front no longer push forward and fall back, and the ground along it no longer flickers between the two sides' colours.",
+          "A front now stands still until the next time skip, when what really happened is played out on the map as before.",
+          "Nothing about the fighting itself has changed.",
+        ],
+      },
+    ],
+  },
+  {
+    // "the ai is mistaking itself as being the player country talking to the united states (its talking to washington
+    // but it is playing the united states)" (the owner, 2026-10-25).
+    id: "2026-10-own-voice",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Countries speak for themselves",
+        items: [
+          "Countries that write to you, or answer you in a conversation, are now told plainly which country they are and that you are the one they are writing to.",
+          "A message shown as another country's should no longer read as your side of the exchange, such as the United States telling Washington to back off.",
+          "This covers replies in your conversations, notes sent after events, and notes sent between turns.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-interactive-offers",
     kind: "minor",
     date: "2026-10-25",

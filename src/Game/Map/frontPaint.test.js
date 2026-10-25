@@ -227,48 +227,18 @@ test("a picture the map already has takes another run of the same frame, and no 
   for (const nothing of [[null, frame], [picture, null], [{}, frame], [{ canvas: picture.canvas }, frame]]) assert.equal(pictureFits(...nothing), false);
 });
 
-test("ground that is for the moment changing hands is laid over the ground as it stands, and comes off again", () => {
-  // Russia holds to column 14; three cells of Ukraine's own beside that are turning Russia's.
-  const player = createPaintPlayer(viewOf([14, 14]));
-  player.seek(1);
-  const stood = { state: Uint8Array.from(player.state), was: Uint8Array.from(player.was), since: Float32Array.from(player.since) };
-  const cells = Int32Array.of(at(14, 6), at(14, 7), at(14, 8));
-  const russia = Uint8Array.of(1, 1, 1);
-  const shown = (turned) => {
-    const changed = player.sway(cells, russia, Float32Array.of(turned, turned, turned));
-    const target = picture();
-    paintPixels(player, palette, target);
-    return { changed, pixel: pixelAt(target, 14, 7) };
-  };
-  assert.equal(shown(0).pixel[3], 0, "not turned at all: Ukraine's own, and no paint on it");
-  const whole = shown(1);
-  assert.deepEqual(whole.pixel, [200, 0, 0, 255], "turned all the way: Russia's colour");
-  assert.deepEqual(whole.changed, [{ minCol: 14, maxCol: 14, minRow: 6, maxRow: 8 }], "and that patch of the ground is what changed");
-  const half = shown(0.5).pixel[3];
-  const most = shown(0.8).pixel[3];
-  assert.ok(half <= most && most <= 255 && shown(0.2).pixel[3] <= half, "the further it has turned the more of it shows");
-  // Taken off, the ground is as it stood, to the last cell.
-  const off = player.sway(new Int32Array(0), new Uint8Array(0), new Float32Array(0));
-  assert.deepEqual(off, [{ minCol: 14, maxCol: 14, minRow: 6, maxRow: 8 }]);
-  assert.deepEqual([player.state, player.was, player.since], [stood.state, stood.was, stood.since]);
-  // And bringing the ground to another day takes it off by itself.
-  player.sway(cells, russia, Float32Array.of(1, 1, 1));
-  player.seek(1);
-  assert.deepEqual(player.state, stood.state);
-  // Sea is never turned, and a cell the picture does not have is passed over.
-  assert.deepEqual(player.sway(Int32Array.of(at(14, 0), 99999, -1), Uint8Array.of(1, 1, 1), Float32Array.of(1, 1, 1)), []);
-  // Changes far apart are told as patches of their own, not as one great box.
-  const apart = player.sway(Int32Array.of(at(14, 3), at(14, 10)), Uint8Array.of(1, 1), Float32Array.of(1, 1));
-  assert.equal(apart.length, 2);
-});
-
 test("a part of the picture is drawn alone, and the rest of it is left as it is", () => {
   const player = createPaintPlayer(viewOf([14, 14]));
   player.seek(1);
   const whole = picture();
   paintPixels(player, palette, whole);
-  // A change, drawn into a copy of that picture as its own small part only.
-  const [box] = player.sway(Int32Array.of(at(14, 6), at(14, 7), at(14, 8)), Uint8Array.of(1, 1, 1), Float32Array.of(1, 1, 1));
+  // A change, drawn into a copy of that picture as its own small part only: three cells of the edge turned Russia's.
+  for (const row of [6, 7, 8]) {
+    player.was[at(14, row)] = player.state[at(14, row)];
+    player.state[at(14, row)] = 1;
+    player.since[at(14, row)] = -1e6;
+  }
+  const box = { minCol: 14, maxCol: 14, minRow: 6, maxRow: 8 };
   const part = picture();
   part.data.set(whole.data);
   const area = paintPixels(player, palette, part, box);

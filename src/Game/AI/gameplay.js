@@ -15253,6 +15253,13 @@ export const runChatActionBatch = async ({
     signal,
     ...(agentKind ? { agentKind } : {}),
     userMessage: [
+      // Whose words these are: "its talking to washington but it is playing the united states" (the owner, 2026-10-25).
+      [
+        "[Whose voice]",
+        `You write ONLY as ${aiParticipants.join(", ")}${aiParticipants.length > 1 ? ", each in its own voice" : ""}.`,
+        `${player} is the human player: the lines marked ${player} in the conversation are what it said to you. Answer them as the polity you write for, never as ${player}.`,
+        `A message is that polity's own words (its own "we" and "our"), addressed to ${[player, ...otherPeople].join(" and ")} or the others here: never ${player}'s words, and never addressed to the speaker's own government, capital or leader.`,
+      ].join("\n"),
       normalizeString(catchUp),
       playerMessage
         ? `${player} has just said: ${playerMessage}`
@@ -19661,6 +19668,17 @@ const chatParticipantNamesKey = (chat) => normalizeArray(chat?.countries)
 
 let eventReactionInFlight = false;
 
+// Whose note it is, for a note a polity writes to the player (idle diplomacy and an event's outreach): "the ai is
+// mistaking itself as being the player country talking to the united states (its talking to washington but it is
+// playing the united states)" (the owner, 2026-10-25).
+const noteVoiceText = (player) => [
+  "[Whose voice]",
+  `${player} is the PLAYER: the country the note is written TO. You are never ${player}.`,
+  "You write as the polity named in speaker, and only as it: in its own first person (\"we\", \"our government\"),"
+  + ` addressed to ${player}'s government, leader or capital.`,
+  `The note is never ${player}'s words and never says ${player}'s side of anything, and it never addresses the speaker's own government, capital or leader.`,
+].join("\n");
+
 export const processPendingEventOutreach = async ({ debug = false } = {}) => {
   if (eventReactionInFlight) return debug ? { processed: 0, reason: "already-in-flight", retryAfterMs: 1000 } : null;
   if (isSimulationBusy()) return debug ? { processed: 0, reason: "simulation-busy", retryAfterMs: 5000 } : null;
@@ -19776,6 +19794,7 @@ export const processPendingEventOutreach = async ({ debug = false } = {}) => {
         lookups: buildTaskLookups(bundle),
         userMessage:
           "Evaluate the supplied canonical event once. Decide whether one AI-controlled polity or a genuinely joint small group would naturally send the player a diplomatic note about it right now, or whether silence is the natural outcome. Return unitOps as an empty array and no sighting."
+          + `\n\n${noteVoiceText(normalizeString(bundle.game?.country))}`
           + conversationContext
           + (politicalDecisionContext ? `\n\n${politicalDecisionContext}` : "")
           + "\n\nReturn JSON only.",
@@ -20881,6 +20900,7 @@ export const maybeSendIdleDiplomacy = async () => {
       lookups: buildTaskLookups(bundle),
       requestKind: BACKGROUND_REQUEST,
       userMessage: "A quiet moment between rounds. Decide whether any single polity would send the player a short diplomatic note right now, and whether any forces would visibly move."
+        + `\n\n${noteVoiceText(bundle.game.country)}`
         + conversationContext
         + (institutionRoutingContext ? `\n\n${institutionRoutingContext}` : "")
         + (politicalDecisionContext ? `\n\n${politicalDecisionContext}` : "")
