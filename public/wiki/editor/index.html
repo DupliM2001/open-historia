@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -112,7 +112,7 @@
     <h1>The Map Editor</h1>
     <p class="tagline">Draw your own world: regions, owners, cities, flags, basemaps and imported maps.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-tools">The tools</a></li><li class="d3"><a href="#two-things-that-make-it-pleasant">Two things that make it pleasant</a></li><li class="d2"><a href="#countries">Countries</a></li><li class="d2"><a href="#region-properties">Region properties</a></li><li class="d2"><a href="#panels">Panels</a></li><li class="d2"><a href="#importing">Importing</a></li><li class="d2"><a href="#reference-tracing">Reference tracing</a></li><li class="d2"><a href="#saving-and-playing">Saving and playing</a></li><li class="d2"><a href="#the-scenario-editor">The scenario editor</a></li><li class="d2"><a href="#sharing-what-you-make">Sharing what you make</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-tools">The tools</a></li><li class="d3"><a href="#two-things-that-make-it-pleasant">Two things that make it pleasant</a></li><li class="d2"><a href="#countries">Countries</a></li><li class="d2"><a href="#region-properties">Region properties</a></li><li class="d2"><a href="#panels">Panels</a></li><li class="d2"><a href="#projections">Projections</a></li><li class="d2"><a href="#the-war-map">The war map</a></li><li class="d2"><a href="#importing">Importing</a></li><li class="d2"><a href="#reference-tracing">Reference tracing</a></li><li class="d2"><a href="#starting-a-new-map">Starting a new map</a></li><li class="d2"><a href="#saving-and-playing">Saving and playing</a></li><li class="d2"><a href="#the-scenario-editor">The scenario editor</a></li><li class="d2"><a href="#sharing-what-you-make">Sharing what you make</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>The map editor is a full vector editor for building worlds. Draw regions, assign owners, place
 cities, set flags and colours, import a background, and hit <strong>Apply &amp; Play</strong> to start a campaign
 on what you made.</p>
@@ -120,7 +120,12 @@ on what you made.</p>
 standalone editor at <strong><code>/?editor=1</code></strong>.</p>
 <p><img src="/wiki/img/map-editor.jpg" alt="The map editor">
 <em>The standalone editor on its default world. The tools run along the top; the bottom bar opens the panels, each with a count — regions, countries, features, units, region types.</em></p>
-<h2 id="the-tools">The tools</h2>
+<p class="beta-note"><b>On beta the editor is laid out anew</b>, in the style of the main menu:
+the tools, the panels and the save buttons sit in one sidebar, docked on the right. Its gear
+(<b>Settings</b>) moves it to the left — <b>Side: Left / Right</b>, remembered on this device — and
+the tab on its edge hides it and brings it back. Its header holds the map's name, the Documents
+menu and search; on a phone it is a drawer, opened with the <b>Tools</b> button at the bottom of
+the screen beside <b>Undo</b> and <b>Redo</b>.</p><h2 id="the-tools">The tools</h2>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -130,7 +135,7 @@ standalone editor at <strong><code>/?editor=1</code></strong>.</p>
 </thead>
 <tbody><tr>
 <td><strong>Select</strong></td>
-<td>Pick a region and inspect it.</td>
+<td>Pick a region and inspect it. Shift-click adds more; a double-click takes its whole country.</td>
 </tr>
 <tr>
 <td><strong>Lasso select</strong></td>
@@ -182,13 +187,22 @@ standalone editor at <strong><code>/?editor=1</code></strong>.</p>
 </tr>
 </tbody></table></div>
 <p>Plus <strong>Undo</strong>, <strong>Redo</strong> and <strong>Fit to data</strong>.</p>
-<h3 id="two-things-that-make-it-pleasant">Two things that make it pleasant</h3>
+<p class="beta-note"><b>On beta the tools come in four groups</b> — Select, Edit, On the map and
+War map — with a card under them naming the tool in hand and holding its options, such as the
+country the paint tool lays down. Two kinds are new. The <b>Map feature tool</b> places what a
+scenario starts with besides cities — a landmark, a military HQ or base, a fortress, an airfield,
+a port, a mine, an oil field, an industrial or power plant, a research facility, an embassy — each
+with an owner and a state such as active or under construction. The <b>War map</b> tools draw
+terrain, fortified lines and climate zones (see <a href="#the-war-map">the war map</a>).</p><h3 id="two-things-that-make-it-pleasant">Two things that make it pleasant</h3>
 <p><strong>Drawing traces borders.</strong> Clicking along an existing boundary follows it exactly rather than
 making you approximate it by hand. Adjacent countries end up sharing a real border instead of
 almost sharing one.</p>
 <p><strong>Regions cannot overlap.</strong> Drawing a new region carves it out of whatever was underneath, so no
 piece of ground is ever owned twice. You do not have to clean up after yourself.</p>
-<h2 id="countries">Countries</h2>
+<p class="beta-note"><b>On beta the regions are drawn by the graphics card</b>, so zooming and
+panning stay smooth even on a very detailed map. Zoomed out, what is drawn is a lighter copy of
+each region; every tool, the clipboard and every save still work on the regions at full detail.
+Where the graphics card cannot be used, the editor draws the way it always did.</p><h2 id="countries">Countries</h2>
 <p>Every country in the scenario is in the <strong>Countries</strong> panel (the chip in the bottom bar says how
 many): a registry you edit in one place — name, aliases, colour, flag, tags, lore — rather than
 region by region, with a bulk roster import. Renaming a country there keeps every region, flag,
@@ -202,14 +216,24 @@ same session and its name, aliases and lore return. Creating a country puts it o
 regions selected it takes them, and without a selection it is handed to the paint tool. Its delete
 button is <strong>Remove from the map</strong> — its regions become unowned, its claims are dropped, and the
 record goes with its colour, flag and tags. See <a href="/wiki/countries/">countries and identity</a>.</p>
-<h2 id="region-properties">Region properties</h2>
+<p class="beta-note"><b>On beta a country's record holds more</b>: its <b>Population when the
+scenario begins</b> (left empty, the game works it out), its <b>Military</b> figures — troop
+quality, technology, what it can do on land, at sea and in the air, its manpower, its mix of units
+and how it musters — which the AI can rate for you, and, under <b>Puppet of</b>, the overlord it
+answers to, how, whether openly or covertly, and how loyal it is.</p><h2 id="region-properties">Region properties</h2>
 <p>Select a region and the inspector gives you its name, its type, its owner, a colour override, a
 flag, tags, and <strong>Disputed by</strong> — the claimants list that makes a region render
-<a href="/wiki/territory/">striped</a>.</p>
-<p><strong>Region types</strong> are reusable property sets: opacity, stroke, z-order, whether the region is
-interactable or passable, whether it appears in labels, and which zoom levels it shows at. Every
-document starts with Land and Coastal, and you can define your own.</p>
-<h2 id="panels">Panels</h2>
+<a href="/wiki/territory/">striped</a> — with <strong>Merge</strong>, <strong>Duplicate</strong>, <strong>Copy to clipboard</strong>, <strong>Zoom</strong> and
+<strong>Delete</strong> for the selection.</p>
+<p><strong>Region types</strong> are reusable property sets: opacity, stroke, z-order, pathfinding speed, whether
+the region is interactable or passable, whether it appears in labels, and which zoom levels it
+shows at. Every document starts with Land and Coastal, and you can define your own.</p>
+<p class="beta-note"><b>On beta, Simplify</b> in the inspector lightens the selected regions'
+outlines to the detail of the rest of the map, in one undo step; their neighbours keep the borders
+they share with them. Use it on regions imported at far more detail than the map around them. A
+region type can also be marked <b>Water</b> — sea that ships sail through and no army marches
+across — and a water region <b>Can freeze</b>, so it ices over in the seasons whose climate says
+so.</p><h2 id="panels">Panels</h2>
 <p>The bottom bar opens them, with a count on each:</p>
 <div class="table-scroll"><table>
 <thead>
@@ -239,6 +263,10 @@ document starts with Land and Coastal, and you can define your own.</p>
 <td>The country registry, above.</td>
 </tr>
 <tr>
+<td><strong>Groups</strong></td>
+<td>Groups and their areas, below.</td>
+</tr>
+<tr>
 <td><strong>Topology</strong></td>
 <td>Find and repair slivers, overlaps and enclosed gaps.</td>
 </tr>
@@ -255,20 +283,71 @@ document starts with Land and Coastal, and you can define your own.</p>
 <td>Drop in an image to trace over — a historical atlas, a sketch, a screenshot.</td>
 </tr>
 <tr>
+<td><strong>Projection</strong></td>
+<td>How the map is laid on the screen, below.</td>
+</tr>
+<tr>
 <td><strong>Import Map</strong></td>
 <td>Province import, below.</td>
 </tr>
 </tbody></table></div>
 <p>Plus the <strong>basemap picker</strong> (a built-in basemap, one you uploaded, or a new upload), a <strong>flag
-picker</strong> for countries, and <strong>search</strong> to find a place by name.</p>
-<p><strong>Copying between maps.</strong> Copy regions from one map and paste them into another: they replace the
+picker</strong> for countries, and <strong>search</strong> to find a place by name. While you review changes someone
+<a href="/wiki/community-hub/#suggesting-changes">suggested</a> for your scenario, a <strong>Suggested changes</strong>
+panel lists them.</p>
+<p class="beta-note"><b>On beta the panels are listed in the sidebar</b> in three groups:
+<b>Map</b> (Regions, Countries, Groups, Region Types, Map features, Units, War map), <b>View</b>
+(Basemap, Detailed map, Layers, Reference, Projection) and <b>Import</b> (Suggested changes,
+Import Map, Clipboard). There is no Topology panel: every save cleans the borders (below). The
+basemap picker keeps <b>This scenario's maps</b> — the starting map, marked ★, and every map
+players may switch to in their own settings: picking a map adds it to the list rather than
+replacing the scenario's own, <b>★ Make starting map</b> changes which one a game opens on, and a
+detailed map is shown over one of the scenario's drawn maps.</p><p><strong>Copying between maps.</strong> Copy regions from one map and paste them into another: they replace the
 territory they cover (one covered entirely is removed), and countries the target map does not know
 yet arrive with their colour and flag.</p>
-<p><strong>Groups.</strong> The <strong>Groups</strong> chip in the bottom bar opens a panel for actors that are not countries
+<p class="beta-note"><b>On beta, pasted regions are kept to the map's own detail.</b> <b>Simplify
+to this map's detail</b>, on by default in the Clipboard panel, lightens what you paste to match
+the map it lands on, so regions copied from a far more detailed map do not swell the scenario.</p><p><strong>Groups.</strong> The <strong>Groups</strong> chip in the bottom bar opens a panel for actors that are not countries
 — a cartel, a militia, an outbreak: name one, say what it is (the AI is told this), pick its tint,
 and add or remove the selected regions. <strong>Controlled by group</strong> in the region inspector sets it
 per selection. A group&#39;s area is tinted and outlined on the map and owns nothing; see
 <a href="/wiki/territory/#groups">territory</a>.</p>
+<h2 id="projections">Projections</h2>
+<p>The <strong>Projection</strong> panel says how the map is laid on the screen, here and in the game. Every map
+starts as Mercator; the others are Equirectangular, Miller, Gall-Peters, Robinson, Natural Earth,
+Equal Earth, Mollweide, Sinusoidal, and <strong>Freeform</strong>, a flat sheet of any shape with no globe
+behind it. <strong>Convert the map</strong> moves every region, city and unit together with the basemap; for a
+picture drawn in the new projection already, <strong>The picture is already drawn for it</strong> keeps it as
+it is. Undo does not reach back past a conversion — convert again to return.</p>
+<p>Two switches below, both off by default, say how the map is shown: <strong>Disable the 3D globe</strong> keeps
+players on the flat map, and <strong>Disable map looping</strong> stops it repeating sideways.</p>
+<h2 id="the-war-map">The war map</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>The <strong>War map</strong> panel, and the three War map tools, draw what a scenario&#39;s wars are fought over.
+None of it carves the regions it is drawn across. It has three tabs:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Tab</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Terrain</strong></td>
+<td>Areas troops cross more slowly — mountains, marshes, a river, a crevice — from level 0, flat ground, to 10, which cannot be crossed at all. The game&#39;s map never shows them; they slow troops.</td>
+</tr>
+<tr>
+<td><strong>Fortified lines</strong></td>
+<td>Walls and lines of forts that troops have to break through, from level 3, the weakest, to 10, which can never be broken, each held by a country, a group or no one.</td>
+</tr>
+<tr>
+<td><strong>Climate</strong></td>
+<td>Zones with their own seasons, weather and dated events. Each season has its dates, its colour on the game&#39;s map, how often each weather comes, and what it does besides — such as <strong>Water freezes</strong>. A zone can start from a Polar, Continental, Arid or Tropical climate, and its colour blends into its neighbours&#39; across its blend width.</td>
+</tr>
+</tbody></table></div>
+<p>Each tab has a button to draw on the map, and its list picks, zooms to or deletes what is drawn.
+With nothing of its own, a scenario on the built-in basemaps is fought on the real world&#39;s hard
+ground and climates; <strong>Start from the real world&#39;s hard ground</strong> and <strong>Start from the real
+world&#39;s climates</strong> copy those into the scenario to change. See <a href="/wiki/war-room/#for-scenario-designers">the War Room</a>.</p>
 <h2 id="importing">Importing</h2>
 <p><strong>Cities</strong> can be imported from the built-in database of roughly seventy thousand, filtered to
 your map.</p>
@@ -278,9 +357,15 @@ province and it traces the regions out for you, in the browser, which is dramati
 drawing a few hundred by hand. Optional definition and metadata files supply owners, names and
 cities. It also takes GeoJSON, and <strong>Import explicit city Point markers</strong> brings that file&#39;s cities
 in as real cities — replacing the current ones or merging with them.</p>
-<p><strong>Features</strong> can be imported too, and box-selected to tag in bulk.</p>
-<p><strong>Fantasy Map Generator</strong> documents import directly, which is the fastest route to a
-non-Earth world: generate the landmass there, bring it in here, and paint the politics.</p>
+<p class="beta-note"><b>On beta, Simplify outlines to about 100 m</b>, on by default in Import
+Map, lightens imported GeoJSON regions as they arrive. Importers used to keep every point a file
+held, and a few hundred finely drawn districts could more than double a scenario's size.</p><p><strong>Features</strong> can be imported too, and box-selected to tag in bulk.</p>
+<p><strong>Generate a world.</strong> In the desktop app, the <strong>GENERATE</strong> tab on the right edge opens Azgaar&#39;s
+Fantasy Map Generator, which ships inside the installer and reaches no outside site. Choose a seed,
+a landmass template, the detail, and how many countries, cultures and cities; <strong>Generate &amp;
+import</strong> builds the land, countries and cities and brings them into your map as regions over a
+basemap of its own — the fastest route to a non-Earth world. Tick <strong>Regions from provinces</strong> for
+regions finer than whole countries. The tab is not offered on the website or in the Android app.</p>
 <p><strong>Custom backgrounds</strong> replace Earth entirely, either as an image pinned to an extent or as
 vector artwork. This is what makes fantasy scenarios work — the political layer sits on a world
 that has nothing to do with this planet.</p>
@@ -288,7 +373,14 @@ that has nothing to do with this planet.</p>
 <p>Load a historical map as a reference image, position it over the canvas, and draw on top of it.
 This is by far the most practical way to build a historically accurate scenario, and it is what
 the official presets were made with.</p>
-<h2 id="saving-and-playing">Saving and playing</h2>
+<h2 id="starting-a-new-map">Starting a new map</h2>
+<p>The Documents menu — the 🗺️ button with the map&#39;s name, at the top left — holds <strong>New — world
+map</strong> and <strong>New — blank map</strong>, <strong>Save now</strong>, <strong>Export JSON</strong> and <strong>Export for game</strong>, and your
+saved maps. On beta it is the file button in the sidebar&#39;s header.</p>
+<p class="beta-note"><b>On beta there are two world maps.</b> <b>New — world map</b> is the
+hand-drawn world map with the most regions, 4,848, and the one the standalone editor opens on;
+<b>New — legacy world map</b> is the map the built-in Modern Day scenario is played on, 3,662
+regions of the real world's provinces.</p><h2 id="saving-and-playing">Saving and playing</h2>
 <ul>
 <li><strong>Save</strong> keeps working.</li>
 <li><strong>Save &amp; Exit</strong> returns to the scenario.</li>
@@ -296,10 +388,16 @@ the official presets were made with.</p>
 background back into the scenario and starts a game on it.</li>
 </ul>
 <p>Apply &amp; Play is the fast iteration loop: change something, play a turn, come back.</p>
-<p><strong>Every save cleans up the borders first</strong> — slivers, overlaps and gaps between neighbours — then
-writes only the regions that changed. The clean-up stops after a minute and looks again only
-around its own repairs, so a large map does not stall on it.</p>
-<p><strong>Saving waits for the map.</strong> A scenario&#39;s own map streams in after the editor opens, and a large
+<p><strong>Every save cleans up the borders first</strong> — slivers, overlaps and gaps between neighbours, up to
+500 m wide — then writes only the regions that changed. The clean-up stops after a minute and
+looks again only around its own repairs, so a large map does not stall on it; after ten seconds
+<strong>Save now</strong> stops it where it is and keeps what it has repaired.</p>
+<p class="beta-note"><b>On beta the buttons are Save, Exit and Apply & Play</b>, at the foot of
+the sidebar. <b>Exit</b> asks before it leaves, offering <b>Save & Exit</b> beside it. Every save
+first asks how far to clean: <b>Quick clean</b> repairs cracks and slivers up to 500 m wide, and
+<b>Deep clean</b> up to 1.5 km, closing the wider gaps too; both read every region, and
+<b>Cancel</b> saves nothing. The standalone editor's two exports clean the borders the same way
+first.</p><p><strong>Saving waits for the map.</strong> A scenario&#39;s own map streams in after the editor opens, and a large
 one takes a while. Until it has loaded, Save reads <strong>Loading map…</strong> and Save &amp; Exit and Apply &amp;
 Play are disabled, so an early click cannot write an empty map over your scenario.</p>
 <h2 id="the-scenario-editor">The scenario editor</h2>
@@ -326,7 +424,7 @@ override:</p>
 </thead>
 <tbody><tr>
 <td><strong>Espionage</strong></td>
-<td>Spies, intercepts and foreign agents. Off hides the Spy tab.</td>
+<td>Spies, intercepts and foreign agents. Off hides the Spy tab (Intelligence, on beta).</td>
 </tr>
 <tr>
 <td><strong>Idle diplomacy</strong></td>
@@ -337,19 +435,34 @@ override:</p>
 <td><strong>Pace</strong> (40–250% of the usual number of events), <strong>the world&#39;s share</strong> (at least this much of each skip is not about the player, 35% by default), <strong>priority rules</strong> that outrank everything else the simulation is told, <strong>scripted events</strong> (one per line, the date first — the engine writes any the skip leaves out), and <strong>the map&#39;s tempo</strong> (a ceiling on regions changing hands per 30 days).</td>
 </tr>
 </tbody></table></div>
-<p class="beta-note"><b>On beta there are two more.</b> <b>Puppet states</b> switches the
-<a href="/wiki/war/#puppets-and-overlords">puppet system</a> off entirely, and <b>Player focus</b>
-sets where new games start on <a href="/wiki/time/#player-focus">how much of a skip is the
-player's own</a>.</p><p><strong>Stats</strong> — the scenario&#39;s own <strong>National Stats</strong> sheet. See
+<p class="beta-note"><b>On beta there are more.</b> <b>Groups</b> switches the
+<a href="/wiki/territory/#groups">groups</a> and their areas off; <b>Fronts</b> switches off the
+land war fought on battlefields, with a <b>Pace of an advance</b> from 25 to 300% of the usual
+ground gained in a day;
+<b>Listen in</b> hides the Listen in button; <b>Pre-game history</b> stops a new game asking the
+AI to turn the <i>World Before Round One</i> briefing into history; and <b>Player focus</b> sets
+where new games start on <a href="/wiki/time/#player-focus">how much of a skip is the player's
+own</a>. <b>Scripted events</b> are a list of their own, each with its date, the conditions it
+waits for — all, any or at least some — and a chance, settled once. There is no Puppet states
+switch any more: puppet states are part of every game.</p><p><strong>Stats</strong> — the scenario&#39;s own <strong>National Stats</strong> sheet. See
 <a href="/wiki/statistics/#scenario-stat-sheets">scenario stat sheets</a>.</p>
 <p><strong>Assets</strong> — cover image, cities, colours, countries, regions.</p>
 <p><strong>Bundles</strong> — download the whole scenario as a <code>.zip</code> or <code>.json</code>.</p>
-<h2 id="sharing-what-you-make">Sharing what you make</h2>
+<p class="beta-note"><b>On beta the drawer's sections come in groups</b> — Presentation
+(Overview, Assets, <b>Music</b>), Setting (World, <b>Pre-history</b>, <b>Politics</b>), War
+(<b>Fronts</b>), Rules and AI (Stats, Features, Prompts) and Sharing (Bundles). <b>Music</b>
+picks tracks from the community hub's music list for a game opening, the game, the player at war
+and the War Room, each with its own volume. <b>Pre-history</b> holds the events that led to the
+start date, kept so a new game need not ask the AI for them. <b>Politics</b> holds governments,
+parties and institutions. <b>Fronts</b> says how the scenario's wars are fought, rates every
+country's military, and draws the fronts it begins with.</p><h2 id="sharing-what-you-make">Sharing what you make</h2>
 <p>Export a bundle and publish it to the <a href="/wiki/community-hub/">Community Hub</a>. Bundles carry the
 map, cities, colours, flags and any custom basemap — including a map uploaded as a tile archive
 (<code>.pmtiles</code>) rather than drawn in the editor — so someone importing it gets exactly what you
 built.</p>
-<h2 id="next">Next</h2>
+<p class="beta-note"><b>On beta, publishing warns about size.</b> GitHub takes files of up to
+25 MB, and a scenario whose file is larger is refused; publishing says so before you post, and
+points you to the map editor's <b>Simplify</b> for the scenario's most detailed regions.</p><h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/community-hub/">The community hub</a> — publishing it.</li>
 <li><a href="/wiki/territory/">Territory</a> — what regions and claims mean in play.</li>
@@ -361,7 +474,7 @@ built.</p>
         <a class="next" href="/wiki/community-hub/"><span>Next →</span><b>The community hub</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

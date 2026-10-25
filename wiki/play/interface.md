@@ -8,10 +8,18 @@ when you are not using it.
 
 | Where | What |
 |---|---|
-| **Top left** | **☰** the game menu, the session pill — scenario, country, date — and **⌂ Exit Game**. |
+| **Top left** | **☰** the game menu, the session pill — the game, your country, the date — and **⌂ Exit Game**. |
 | **Top right** | The date pill, with **«** events and **»** time skip. |
 | **Bottom left** | The toolbar: **Chat**, **✦ Actions** and **Projects & Operations**, with search beside it. |
 | **Bottom right** | Your flag, and the **Advisor** button, which opens a drawer with Advisor and Stats. |
+
+<p class="beta-note"><b>On beta the bottom corners hold more.</b> Bottom right, your flag opens
+the <b>Country</b> panel (on a phone, your country's name in the date pill does), the
+<b>Advisor</b> button opens the advisor alone, and under them is the map switch,
+<b>Political</b> or <b>Diplomatic</b>, with a legend (see
+<a href="/wiki/world-map/#map-modes">map modes</a>). Bottom left, while your troops are on a
+battlefield, a red <b>War room</b> button stands beside the toolbar (see
+<a href="/wiki/war-room/">the War Room</a>).</p>
 
 Panels overlap in a fixed order, so opening the advisor never buries the thing you were reading,
 and the main menu always comes out on top. On a phone the whole interface fits the screen and the
@@ -23,13 +31,18 @@ Clicking things is the primary way you interact with the world.
 
 - **Click the map** → a card for the country and the region under your cursor. The country row
   has **💬** to open a diplomatic chat, **⧉** to copy its name and **ⓘ** to open its panel; the
-  region row names the region.
+  region row names the region. Where the region is occupied or contested the card says who is
+  sovereign, who controls it and who claims it, and where a group controls it, which group.
 - **The country panel** → flag, details, alternative names, related events filtered by
-  importance (All, Major, Minor), and an **Advisor Report** — an AI intelligence reading — on
-  request.
+  importance (All, Major, Minor), an **Advisor Report** — an AI intelligence reading — on
+  request, and **Open Diplomacy**. On beta it also has **Stats** and **Listen in**.
 - **Click a unit** → an intelligence card describing the formation — what it is, whose it is,
   how strong, and what it appears to be doing.
 - **Click a city or structure** → its name, population, and what it is.
+
+<p class="beta-note"><b>On beta the region row's ⓘ opens the region's details</b> — its cities
+and its neighbours — and the card has <b>Listen in</b>, a phone of what ordinary people there are
+posting (see <a href="/wiki/diplomacy/">diplomacy</a>).</p>
 
 Drag to pan, scroll to zoom. See [the world map](/wiki/world-map/) for what the colours,
 stripes and labels mean.
@@ -60,14 +73,21 @@ Diplomacy. Two tabs:
 - **Spy** — everyone else's conversations, as far as your intelligence service can read them.
   This is also where you deploy, recall, expel and turn agents.
 
+<p class="beta-note"><b>On beta the panel is headed Diplomacy</b>, with three tabs:
+<b>Contacts</b> (your conversations), <b>Institutions</b> (the bodies countries belong to) and
+<b>Intelligence</b> (your service), which has its own <b>Overview</b>, <b>Countries</b>,
+<b>Operations</b> and <b>Reports</b>. Intelligence is where your agents take their orders.</p>
+
 See [diplomacy](/wiki/diplomacy/) and [espionage](/wiki/espionage/).
 
 ### ✦ Actions
 
 Your order queue for the coming turn, under your **standing goal**. Write orders in plain
-English, get AI suggestions, refine a rough draft into a proper order, and delete anything you
-change your mind about. Only planned orders show; they clear as the turn resolves them. See
-[giving orders](/wiki/orders/).
+English, press **AI Suggestions** for ideas or **Brainstorm** to talk them through with the
+advisor, refine a rough draft into a proper order, and delete anything you change your mind about.
+Only planned orders show, under **Your Submitted Actions**; they clear as the turn resolves them.
+On beta, **Suggested Actions** and **Your Submitted Actions** are two sections, and one is open at
+a time. See [giving orders](/wiki/orders/).
 
 ### Projects & Operations
 
@@ -88,6 +108,12 @@ agreements and conflicts on one, the economy, strategic indices, stability, popu
 intelligence rating on the other. It retargets to **whatever country you last clicked**, so it
 doubles as a way to read anyone.
 
+<p class="beta-note"><b>On beta Stats has a panel of its own.</b> The drawer is the advisor alone,
+and the stat sheet is the <b>Country</b> panel, opened by your flag or by <b>Stats</b> in any
+country's panel. It has four tabs —
+<b>🏛 Politics</b>, <b>🤝 Diplomacy</b>, <b>📈 Economy</b> and <b>🏆 Ranking</b>, which sets the
+countries side by side. While it is open, clicking a country on the map shows that one.</p>
+
 See [the advisor](/wiki/advisor/) and [national statistics](/wiki/statistics/).
 
 ## The game menu
@@ -98,25 +124,26 @@ See [the advisor](/wiki/advisor/) and [national statistics](/wiki/statistics/).
   campaigns.
 - **Tools** — **Cheats**, **Events / Timeline** and the **AI debug console**, one click away.
 - **Settings** — four tiles, **General**, **Map**, **AI** and **Advanced**, each opening the
-  full-screen settings workspace at that section.
-- **Help** — the wiki, bug reporting and the community links.
+  full-screen settings workspace at that section. On beta there is a fifth, **Sound**.
+- **Help** — the wiki, bug reporting, the privacy policy and the community links.
 
 See [the settings reference](/wiki/settings/).
 
 ## Search
 
 The **🔍** button beside the toolbar finds places by name as you type and flies the camera to
-them. The game's own countries and cities come first, under the names they have in your
-campaign, then real-world places from an OpenStreetMap search. It only moves the camera — it does
-not select or change anything.
+them. The game's own countries, cities and structures come first, under the names they have in
+your campaign, then real-world places from an OpenStreetMap search. It only moves the camera — it
+does not select or change anything. On beta it finds the world's groups and units too, and in an
+invented world it leaves real-world places out.
 
 ## Cheats
 
 ☰ → **Tools** → **Cheats** is the game master's toolbox: the GM console, standing reminders every
 AI is told, the event editor, interactive events, the history document, rolling back turns,
 annexing territory, editing or creating countries, inspecting regions, the Force Manager,
-difficulty, switching which country you play, and map features. See
-[cheats and the GM console](/wiki/cheats/).
+difficulty, switching which country you play, and map features — and on beta, groups and puppet
+states. See [cheats and the GM console](/wiki/cheats/).
 
 ## The main menu
 
@@ -126,11 +153,24 @@ The session pill's **⌂ Exit Game** returns you to the library, which has three
 - **Scenarios** — the worlds you can start new games on, plus **Create Scenario**.
 - **Community** — the [Community Hub](/wiki/community-hub/).
 
+<p class="beta-note"><b>On beta the menu is where the game starts.</b> Nothing loads until you
+press <b>Play</b> on a game. The first time the game opens after an update, a vault door stands in
+front of the menu: click its wheel to open it, onto a notice of what the update brings when there
+is one. On a wide screen the pages sit on a rail down the left — <b>Games</b>, <b>Scenarios</b>,
+<b>Community</b> and <b>Lobbies</b> — with <b>Settings</b>, for what applies to every game, at its
+foot; the Open Historia mark at the top opens the history of every update. <b>Games</b> has
+<b>Continue Playing</b> and <b>All Games</b>; <b>Scenarios</b> has <b>Recently Used</b> and the
+<b>Scenario Library</b>, with All, Yours, Community and Updates; what you delete waits at the
+foot of each, on its <b>Recently deleted</b> shelf. <b>Lobbies</b> is for shared games: join one
+with the invite code its host sent you, or host one from the desktop app.</p>
+
 ## If the screen is blank
 
-A full-screen warning means WebGL is unavailable — the map cannot render without it. On a
-desktop this usually means graphics drivers or a browser flag. See
-[troubleshooting](/wiki/troubleshooting/).
+A full-screen warning, **WebGL Not Available**, means the map cannot render. WebGL is sometimes
+refused for a moment — a laptop switching graphics, a driver reset, a wake from sleep — so the
+warning keeps checking for half a minute and reloads the game by itself if WebGL comes back;
+**Reload** tries again by hand. If it stays, on a desktop it usually means graphics drivers or a
+browser setting. See [troubleshooting](/wiki/troubleshooting/).
 
 ## Next
 

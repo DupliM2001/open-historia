@@ -2,9 +2,18 @@ The desktop app already runs a local server — that is how it works. This page 
 that server deliberately: to play entirely offline, to reach your campaign from another device,
 or to keep everything on hardware you control.
 
-**There is no multiplayer.** Hosting lets *you* reach *your* game from another device. It does
-not let two people play the same campaign. If you connect from your phone and your laptop at
+**Hosting a server is not multiplayer.** It lets *you* reach *your* game from another device. It
+does not let two people play the same campaign. If you connect from your phone and your laptop at
 once, you are two windows onto one single-player game, and you will fight each other for it.
+
+<p class="beta-note"><b>Multiplayer is on beta, and needs no server of yours.</b> The main menu's
+<b>Lobbies</b> tab hosts the game you have open, from the desktop app, under an invite code.
+Friends join with <b>Join a private lobby</b> from the beta desktop app or the beta Android app,
+need the lobby's scenario in their library, and each take a country nobody else plays. The host's
+computer runs the game and pays for its AI with the host's key. Players connect straight to the
+host's computer, found through public relay servers, so the host and each player can see each
+other's network address: share the code only with people you trust. Some strict networks, many
+mobile carriers among them, cannot connect this way.</p>
 
 ## What you get
 
@@ -24,10 +33,14 @@ git clone https://github.com/Open-Historia/open-historia.git
 cd open-historia
 npm ci
 node scripts/fetch-map-assets.mjs
+npm run build
 node server/server.js
 ```
 
-It listens on **port 3000**. Open `http://localhost:3000`.
+It listens on **port 3000**. Open `http://localhost:3000`. The server serves the game that
+`npm run build` made, so build again after you pull a newer version.
+
+That is the stable build. For the beta, run `git checkout beta` before `npm ci`.
 
 Node.js `^20.19.0` or `>=22.12.0` is required on the server machine. Client devices need only a
 browser.
@@ -45,6 +58,11 @@ open it up:
   switch says the environment owns the decision.
 
 Then open the address it gives you — `http://192.168.x.x:3000` — from the other device.
+
+<p class="beta-note"><b>On beta the server answers only to names it knows</b>: localhost, IP
+addresses and this computer's own name. That stops a web page from reaching your server by
+pointing a name of its own at it. To reach it by any other name — one on your network, or one in
+front of a reverse proxy — list the name in <code>OH_ALLOWED_HOSTS</code>, comma-separated.</p>
 
 Writes from a page served by a *different* origin are blocked either way, which is what stops a
 web page you visit from editing your saves. To allow them:
@@ -87,6 +105,9 @@ in front.
 | `OH_RATE_LIMIT` | Requests a minute allowed from each other device. Default `1200`. This machine is exempt. |
 | `OH_RELAY_TIMEOUT_MS` | How long the AI relay waits for a generation to finish. Default ten minutes. |
 | `OH_ASSETS_DIR` | Where the map binaries are read from. |
+| `OH_VISIT_COUNT` | Set to `0` and the pages this server serves never load a visit counter and never ask. |
+| `OH_DISCORD_PRESENCE` | Set to `0` and the server never tells Discord what you are playing. |
+| `OH_ALLOWED_HOSTS` | Beta only. Extra names the server answers to, comma-separated; `*` answers every name. |
 
 ## Running as a service
 
@@ -120,14 +141,16 @@ directory.
 
 ## The map data
 
-The map binaries — roughly 200 MB of vector tiles — are not in the Git repository. They are
-release assets, fetched by:
+The map binaries — the world's vector tiles, its regions and its cities, about 290 MB on the
+stable build and about 150 MB on beta — are not in the Git repository. They are release assets,
+fetched and checked against their checksums by:
 
 ```
 node scripts/fetch-map-assets.mjs
 ```
 
-Without them the map is blank. The desktop app does this for you on first launch.
+Without them the map is blank. Run it again after pulling a newer version: it downloads only what
+changed. The desktop app does this for you on first launch.
 
 ## Where your files are
 
@@ -143,11 +166,20 @@ for changing a campaign — it goes through the same validation the game does.
 No accounts, and no game data leaves your machine. Your AI provider key is stored locally and
 sent only to the provider you configured.
 
-One thing does reach the network by default: the browser build's analytics on the website itself.
-It carries no game data. Importing a scenario from the Community Hub downloads its file from
-GitHub, and GitHub's count of those downloads is what the hub shows as installs — the game
-reports nothing of its own. (Versions before October 2026 pinged an anonymous counter on every
-import; `OH_IMPORT_COUNTER_URL`, which switched that off, no longer does anything.)
+Nothing counts your visits until you say yes. A game page opened on this computer asks whether
+it may count visits with Google Analytics and Umami, and loads neither unless you agree;
+**Settings → General → Privacy → Count my visits** changes the answer, and `OH_VISIT_COUNT=0`
+stops the question altogether. A page opened from another device over the network is never
+counted. The count carries no game data.
+
+If Discord is running on the same computer, the server tells it what you are playing, so your
+profile reads "Playing Open Historia" with your country, scenario and date. **Show what I am
+playing on Discord**, in the same Privacy section, turns it off.
+
+Importing a scenario from the Community Hub downloads its checked copy from GitHub, and GitHub's
+count of those downloads is what the hub shows as installs — the game reports nothing of its own.
+(Versions before October 2026 pinged an anonymous counter on every import;
+`OH_IMPORT_COUNTER_URL`, which switched that off, no longer does anything.)
 
 ## Next
 

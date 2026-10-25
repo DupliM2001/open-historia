@@ -4,29 +4,51 @@ all of that when deciding how to treat it.
 
 ## Identity and names
 
-Every country has **one stable identity**, and its name is how that identity is presented. A
-scenario keeps a registry of its countries — independently of the regions they hold, so a
-country can exist with no land at all — and region ownership, the colour palette, flags, tags,
-diplomacy, the war records and your standing goal all hang off that identity.
+Every country is known by **one name**, and that name is its identity. A scenario keeps a
+registry of its countries — independently of the regions they hold, so a country can exist with
+no land at all — and region ownership, the colour palette, flags, tags, statistics, diplomacy,
+the war records and your standing goal are all kept under that name.
 
-Two practical consequences:
+Three practical consequences:
 
 - **In the map editor, typing a new country name creates that country.** There is no separate
-  "add nation" step; giving a region an owner that does not exist yet brings it into being, and
-  the owner is picked from the registry, so a typo cannot quietly mint a one-province country.
-- **Renaming changes the label, not the country.** A country renamed after a revolution keeps
-  every region, flag, tag, colour, conversation and war record, and the map labels it by its new
-  name. The world only renames on an actual regime change, never for a mere change of leader.
-  Territory handed to a country that does not exist yet founds it.
+  "add nation" step: type a name nobody has yet as a region's owner and press Enter (or
+  **Create**), and the country is made and given the region. Leaving the field only ever assigns
+  a country that already exists, so a typo cannot quietly mint a one-province country.
+- **Renaming moves the country, not just its label.** A country renamed after a revolution keeps
+  every region, flag, tag, colour, statistic, conversation and war record: the rename carries all
+  of it over to the new name, and the map labels it by that name. A name that already belongs to
+  another country is refused — a rename cannot merge two countries. The world renames a country
+  you do not play only on a regime change, a change in its fundamental way of governing, never
+  for a new leader or ruling party; your own country is renamed whenever you order it.
+- **Territory handed to a country that does not exist yet founds it**, under exactly the name
+  given.
 
 Countries also carry **aliases**: alternative names the game will recognise as the same country.
-This is what lets a scenario use a historical name while still matching modern data.
+This is what lets a scenario use a historical name while still matching modern data. A rename in
+play keeps the old name among them, so events and conversations written under it still find the
+country; a rename in the map editor keeps no old name, since everything that used it is renamed
+with it.
+
+## The country card
+
+Click a country, then **ⓘ** on its map card. The card shows the country's flag (**Flag** changes
+it), its tags, its **Alternative Names**, its **Sovereign Regions** and, where they differ, the
+regions it holds that are not its own (**Controlled, Not Sovereign**) and its own that someone else
+holds (**Under Foreign Control**). Below them are its **Related Events**, which you can search and
+filter by importance, and two buttons: **Advisor Report**, an AI reading of the country on request,
+and **Open Diplomacy**.
+
+<p class="beta-note"><b>On beta the card does more.</b> It says what you know of any
+<a href="/wiki/war/#puppets-and-overlords">puppet arrangement</a> the country is part of, and has
+two more buttons: <b>Stats</b>, which opens the country in the <b>Country</b> panel (see
+<a href="/wiki/statistics/">national statistics</a>), and <b>Listen in</b>, which opens a phone of
+posts by people who live there.</p>
 
 ## Tags
 
 Tags are short descriptors of **what a country is** — its ideology, alignment, character,
-whatever matters about it. "NATO member", "nuclear power", "military junta", "resource
-exporter".
+whatever matters about it. "Socialist", "nuclear", "military-junta", "non-aligned".
 
 - Up to **8 tags**, each up to **32 characters**.
 - They are fed to the world as context, so they genuinely change how a country behaves and how
@@ -34,8 +56,9 @@ exporter".
 - When a country's alignment shifts, the world rewrites the **complete** tag list rather than
   adding one — tags are a full replacement, not a running log.
 
-You can see a country's tags in its panel, and edit your own (or anyone's) in the
-[cheats panel](/wiki/cheats/).
+You can see a country's tags on its card. A scenario's starting tags are set in the
+[map editor](/wiki/editor/); in play the world rewrites them, and the
+[GM console](/wiki/cheats/#gm-console) can change them like anything else about a country.
 
 ## Reputation
 
@@ -51,8 +74,9 @@ take your word, and more will assume the worst reading of what you do.
 
 ## Intelligence rating
 
-Also 0–100, and it works the same way — moved by events, absent meaning ordinary. It is the
-espionage system's master statistic. See [espionage](/wiki/espionage/).
+Also 0–100, and it works the same way — moved by events, absent meaning ordinary (40). It is the
+espionage system's master statistic. See [espionage](/wiki/espionage/) and
+[national statistics](/wiki/statistics/#intelligence-service).
 
 ## Leaders
 
@@ -62,6 +86,13 @@ same event — so the stat sheet and the story never disagree about who is in ch
 
 The leader is who you are talking to in [diplomacy](/wiki/diplomacy/), and their voice changes
 when they change.
+
+<p class="beta-note"><b>On beta a country has a government, not just a leader.</b> A scenario can
+generate its Political World: each country's government, its head of state and head of
+government, and the parties or power blocs that compete for it. The <b>🏛 Politics</b> tab of the
+Country panel shows them (see <a href="/wiki/statistics/#the-politics-tab">the Politics tab</a>),
+and the panel says whether a country is a <b>Major power</b>, <b>Regional power</b> or <b>Minor
+power</b>.</p>
 
 ## Colours
 
@@ -79,7 +110,8 @@ land on similar shades — the derivation does not know about the rest of the ma
 ## Flags
 
 Countries can carry a flag from the built-in set, from a scenario's own flag pack, or from a
-community flag pack. Invented factions can pick one or go without.
+community flag pack. Invented factions can pick one or go without. In play, **Flag** on a
+country's card changes its flag.
 
 The diplomacy and spy pickers show the scenario's own flags, and a flag changed mid-campaign
 updates live. One deliberate rule: **a country that holds no land never borrows a real country's
@@ -109,11 +141,23 @@ everyone, and gets treated accordingly. It is worth writing properly.
 Any regions you claim at creation are taken from whoever held them, and that country will have
 opinions.
 
+<p class="beta-note"><b>On beta, Create a faction is part of Play as a group.</b> The picker's
+second tab is <b>Play as a group</b>. Where the scenario has
+<a href="/wiki/territory/#groups">groups</a>, you lead one of its groups or make a new one, which
+controls an area without owning it. In a scenario with groups switched off, the same form invents
+a country, as above.</p>
+
 ## Editing countries mid-campaign
 
-The [cheats panel](/wiki/cheats/) has a **Country Editor** — identity, colour, tags,
-reputation, the persistent stat sheet — and an **Add Country** tool. Useful for repairing a country the simulation has drifted
-on, or for authoring the world by hand.
+The [cheats panel](/wiki/cheats/) has a **Country Editor** — the country's name and colour, and,
+once it has a stat sheet, the sheet itself: population, GDP and growth, capital, currency,
+stability, inflation, unemployment, debt, budget balance, the six strategic indices
+(international reputation among them) and the GDP sector split — and an **Add Country** tool. Useful for repairing a country the
+simulation has drifted on, or for authoring the world by hand.
+
+<p class="beta-note"><b>On beta the Country Editor also edits the country's Political World</b>:
+its government and political system, its strategic outlook, its parties and power blocs, and its
+political traits.</p>
 
 ## Next
 

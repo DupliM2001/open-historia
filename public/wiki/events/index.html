@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -132,9 +132,9 @@ territory has to ship the border change with it.</p>
 <em>Events are revealed one at a time, with the map changing as each lands.</em></p>
 <p>Events are revealed <strong>one at a time</strong>, not dumped as a list.</p>
 <p>The Events panel opens as soon as a skip starts and fills as the model writes, so you can begin
-reading before the turn has finished (Gemini delivers everything at once, so there it all arrives
-together). When you open the history for a fresh turn, the map rolls back to how it looked
-<em>before</em> the jump. Each time you press <strong>Next event</strong>, that event&#39;s changes are applied on top —
+reading before the turn has finished — on Gemini too, except in a skip that may look things up,
+which arrives all at once. When you open the history for a fresh turn, the map rolls back to how
+it looked <em>before</em> the jump. Each time you press <strong>Next event</strong>, that event&#39;s changes are applied on top —
 the border moves, the unit appears, the flag changes — and the camera flies to where the event
 happened: the places it names as places and the things it changed. An event that names no place
 leaves the camera where it is.</p>
@@ -145,7 +145,12 @@ answering a letter, not the copy an agent stole in it.</p>
 <p><strong>✋ Intervene here</strong> stops the round at the event you are looking at: what you have seen is
 kept, the rest never happens, and the date becomes that event&#39;s. See
 <a href="/wiki/time/#intervene">time and turns</a>.</p>
-<h2 id="event-cards">Event cards</h2>
+<p class="beta-note"><b>On beta you can reread earlier turns, and the war plays as you read.</b>
+The panel's header has <b>‹</b> and <b>›</b> either side of the round and its dates: they step back
+through the turns the game keeps, each shown whole and read only, while the map stays as the world
+is now. And where a land war is fought on a <a href="/wiki/war-room/">battlefield</a>, each
+<b>Next event</b> plays the days since the one before, so you see the troops go where the event
+says they went.</p><h2 id="event-cards">Event cards</h2>
 <p>Each card has the event&#39;s date, its title and a description that says what happened — who,
 where, with what — in a paragraph or two rather than a fixed word count. Below it are <strong>chips</strong>
 for the countries, regions, formations and structures the event is about; click one and the map
@@ -199,15 +204,22 @@ record, or <strong>Set aside</strong>, which writes nothing. <strong>Time stands
 progress: the skip controls lead back to it.</p>
 <p>What it costs, as the panel says beside the buttons: starting is one request, each move one more,
 ending one more; letting it pass, taking a move back and setting a scene aside cost nothing.</p>
-<p>The <a href="/wiki/cheats/">cheats panel</a>&#39;s <strong>Interactive Event</strong> tool plays any event on the record out
+<p class="beta-note"><b>On beta a scene changes the map.</b> What you decide in it reaches the
+map like an event's consequences: units, land handed over or occupied, structures, and the Projects
+board. Working that out is one request more when the outcome has something for the map, and none
+when it has not. A scene that reaches its own end is usually written up with its last move, so only
+ending it yourself costs the request for ending. Once you have played a move, <b>Set aside</b> asks
+to be pressed a second time, since the moves played are not kept.</p><p>The <a href="/wiki/cheats/">cheats panel</a>&#39;s <strong>Interactive Event</strong> tool plays any event on the record out
 the same way.</p>
 <h2 id="what-the-world-remembers">What the world remembers</h2>
 <p>The timeline keeps every event. What the <strong>model</strong> is shown is different: the newest 24 events
 always in full, and older ones folded into a <strong>history document</strong> — one living account of the
 campaign that the AI rewrites as each new period is folded in, condensing unimportant older
 material to keep it around 1,500 words. A fold happens every fifth round, or sooner when 48
-events have piled up. So the world still knows that a war happened in year two even though it no
-longer reads every event from it.</p>
+events have piled up, and it rides in the time skip&#39;s own answer at no extra request; only a fold
+that has waited until 96 events have piled up is asked for on its own (as is every fold with
+<strong>Batch background AI tasks</strong> on, for Anthropic). So the world still knows that a war happened in
+year two even though it no longer reads every event from it.</p>
 <p>This matters for long campaigns: the model&#39;s sense of your history stays coherent without the
 context growing without limit. It also means very old, very specific details fade. You can read
 and edit the document yourself — <strong>Cheats → History Document</strong> — and if something is
@@ -219,7 +231,11 @@ event history. See <a href="/wiki/diplomacy/">diplomacy</a>.</p>
 the game uses it to generate the recent history that led to the situation you have inherited,
 including the wars already running and the relationships already soured.</p>
 <p>It happens once, and it is what stops turn one feeling like the world began five minutes ago.</p>
-<h2 id="if-a-turn-produced-nothing-useful">If a turn produced nothing useful</h2>
+<p class="beta-note"><b>On beta a scenario can ship its pre-history.</b> Its author can write or
+generate the events before round one in the Workshop and keep them with the scenario, together
+with the wars, relations and agreements already true on the start date; a new game then opens with
+them on the timeline and asks no model for them. A scenario or a game can also switch
+<b>Pre-game history</b> off in its Features tab, and then no backstory is written.</p><h2 id="if-a-turn-produced-nothing-useful">If a turn produced nothing useful</h2>
 <p>Two options.</p>
 <p><strong>Undo the turn</strong> from the time panel and try again with different orders — the world is
 re-simulated, so you will not get the same events back.</p>
@@ -240,7 +256,7 @@ when the simulation wanders.</p>
         <a class="next" href="/wiki/diplomacy/"><span>Next →</span><b>Diplomacy</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

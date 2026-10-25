@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -121,9 +121,12 @@ model plays, and a button that advances time.</p>
 <li><strong>Look at the world.</strong> Click countries to read them. Ask your advisor what it thinks.</li>
 <li><strong>Write down what you intend to do.</strong> Orders go in the actions queue, in plain English.</li>
 <li><strong>Talk to people.</strong> Open a chat with any country and negotiate, threaten, or ask questions.</li>
-<li><strong>Skip time.</strong> Choose how far — six hours, a month, a year.</li>
+<li><strong>Skip time.</strong> Choose how far — six hours, a month, a year. However far you go, the skip is
+one AI request.</li>
 <li><strong>Read what happened.</strong> The world hands you back a set of events, arriving as the model
-writes them and revealed one at a time, with the map changing as each one lands.</li>
+writes them and revealed one at a time, with the map changing as each one lands. Each event
+carries what it changed — the map, units and structures, your orders, your Projects board —
+and your spies&#39; reports come back in the same answer.</li>
 </ol>
 <p>Then you do it again. That is the whole game. Everything else is detail.</p>
 <p>The important thing to internalise is that <strong>step 4 is where the game happens</strong>. Steps 1–3 are
@@ -187,8 +190,10 @@ theirs and takes the capital&quot;</em> is not an order — it is you trying to 
 </tbody></table></div>
 <p>There is also <strong>Auto-jump</strong>, which lets the model choose the distance — it skips to the next
 moment it thinks you would want to be present for.</p>
-<p>Longer skips are not free: the world has to compress more into the same number of events, so
-detail is lost. If something important is in motion, take smaller steps.</p>
+<p>Longer skips are not free: the world has to compress more into fewer events for each month. A
+week is told in three to six events and a month in ten to fifteen, but a whole year in
+twenty-eight to thirty-six, so detail is lost. If something important is in motion, take smaller
+steps.</p>
 <h2 id="reading-the-results">Reading the results</h2>
 <p>The Events panel opens as soon as the skip starts and fills as the model writes, with the time
 panel saying what the skip is doing (&quot;Writing 1 month of events…&quot;). Events are revealed <strong>one at
@@ -226,7 +231,15 @@ events.</li>
 <li><strong>Difficulty changes how it treats you</strong>, not what it knows. See
 <a href="/wiki/new-game/">starting a game</a> for what the six levels actually do.</li>
 </ul>
-<h2 id="where-to-go-next">Where to go next</h2>
+<p class="beta-note"><b>On beta difficulty decides how things go for you.</b> On Very Easy almost
+everything goes your way, on Medium things happen realistically, and on Impossible almost
+everything goes poorly. A setback always has a cause the story names, and what you order is
+always attempted.</p><p class="beta-note"><b>On beta wars are also fought on the ground.</b> Where your country is at
+war with a neighbour, the game fights it out troop by troop on a battlefield before the period's
+story is written. While your troops are on one, a red <b>War Room</b> button appears: there you
+can speak to your generals, pick troops and draw the route they take, fortify a line and call up
+reinforcements. Orders you type as actions reach your troops too. See
+<a href="/wiki/war-room/">the War Room</a>.</p><h2 id="where-to-go-next">Where to go next</h2>
 <ul>
 <li><a href="/wiki/first-campaign/">Your first campaign</a> — the same thing again, but walked through step
 by step with a specific country.</li>
@@ -240,7 +253,7 @@ by step with a specific country.</li>
         <a class="next" href="/wiki/first-campaign/"><span>Next →</span><b>Your first campaign</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

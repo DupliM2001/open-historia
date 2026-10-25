@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/" class="on" aria-current="page">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/" class="on" aria-current="page">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -119,7 +119,8 @@ them differently.</p>
 <h2 id="control">Control</h2>
 <p>Whoever administers a region owns it as far as the map is concerned: the region is painted in
 their colour, it counts as their territory, and their units sit on it without asking.</p>
-<p>Control moves when an event says it moves. That is the only route. A time skip produces an event
+<p>Control moves when an event says it moves. On the stable build that is the only route (beta adds
+battlefields and peace terms, below). A time skip produces an event
 narrating a conquest, an annexation, a treaty cession or a peaceful hand-over, and the border
 change ships attached to that event. There is no separate &quot;conquer&quot; button, and no event can
 describe territory changing hands without actually changing it — the narration and the mechanical
@@ -133,7 +134,18 @@ days. A skip that moves more than that has the rest held back, and the next skip
 front moves this far and to carry the rest on.</p>
 <p>You can also move control by hand from the <a href="/wiki/cheats/">cheats panel</a>, which is the
 game-master route rather than the gameplay one.</p>
-<p><img src="/wiki/img/territory-dispute.jpg" alt="Disputed territory on the map">
+<p class="beta-note"><b>On beta, troops take the ground a battlefield fights over.</b> Where a
+land war is fought on a <a href="/wiki/war-room/">battlefield</a>, the ground changes hands only
+where troops take it: each troop paints the ground it crosses in its side's colour, and a capture
+the story writes for a region on that battlefield is left out, so the troops take it or they do
+not. A region counts as taken once its new holder holds more than 60% of it, and changes colour on
+the map once all of it is held. Ground taken on a battlefield is drawn as its holder's, not in the
+stripes of a dispute; its card says who controls it and whose it lawfully is.</p><p class="beta-note"><b>On beta, more of the story reaches the map.</b> A country the story founds
+as another dissolves, such as a republic replacing an empire, takes the old country's land. An
+annexation you ordered reaches the map once a turn tells of it happening, when the place it names
+is unambiguous. And a war that ends <a href="/wiki/war/#ending-a-war-peace-on-terms">on terms</a>
+settles the ground as the terms say, even from a ceasefire or an armistice: what each side holds
+becomes its own, or every region goes back to whose it lawfully was.</p><p><img src="/wiki/img/territory-dispute.jpg" alt="Disputed territory on the map">
 <em>Western Sahara, between Morocco and Mauritania, drawn in faint diagonal stripes — a region more than one country claims.</em></p>
 <h2 id="claims-and-disputes">Claims and disputes</h2>
 <p>A region can carry a list of <strong>claimants</strong> — up to <strong>four</strong> countries that assert it is theirs.</p>
@@ -179,9 +191,11 @@ transfers.</p>
 <p>Territory is not a resource you spend. There is no per-province income to collect and no
 buildings to place on it. What it gives you is:</p>
 <ul>
-<li><strong>Standing.</strong> A larger, more coherent country is treated as a more consequential one.</li>
-<li><strong>Position.</strong> Units act within <a href="/wiki/military/">era-appropriate ranges</a>; where your border is
-determines what you can reach.</li>
+<li><strong>Standing.</strong> A larger, more coherent country is treated as a more consequential one. (On beta
+its military strength is never counted from its land: see
+<a href="/wiki/military/#men-money-and-military-power">men, money and military power</a>.)</li>
+<li><strong>Position.</strong> Units travel at <a href="/wiki/military/">era-appropriate speeds</a>; where your border is
+determines what you can reach quickly.</li>
 <li><strong>Statistics.</strong> Population, economy and the strategic indices reflect what you hold. See
 <a href="/wiki/statistics/">national statistics</a>.</li>
 <li><strong>Grievances.</strong> Yours and other people&#39;s.</li>
@@ -231,6 +245,7 @@ subordination lives in its own ledger. And a structure an event credits to a cou
 land goes to whoever holds the ground it stands on.</p><h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/military/">Military and combat</a> — taking ground.</li>
+<li><a href="/wiki/war-room/">The War Room</a> — where troops take ground on a battlefield, on beta.</li>
 <li><a href="/wiki/war/">Relations, treaties and war</a> — the ledgers that formalise who is fighting whom.</li>
 <li><a href="/wiki/editor/">The map editor</a> — drawing regions and disputes yourself.</li>
 </ul>
@@ -240,7 +255,7 @@ land goes to whoever holds the ground it stands on.</p><h2 id="next">Next</h2>
         <a class="next" href="/wiki/military/"><span>Next →</span><b>Military &amp; combat</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

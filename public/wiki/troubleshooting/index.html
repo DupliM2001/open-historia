@@ -9,13 +9,13 @@
   <link rel="icon" type="image/jpeg" href="/logo.png" />
   <title>Troubleshooting — Open Historia Wiki</title>
   <link rel="canonical" href="https://openhistoria.com/wiki/troubleshooting/" />
-  <meta name="description" content="Blank maps, greyed-out AI, slow turns, CORS errors and the other things that go wrong." />
+  <meta name="description" content="Blank maps, WebGL, greyed-out AI, slow turns, updates at launch, community hub and CORS errors, and the other things that go wrong." />
 
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="Open Historia" />
   <meta property="og:url" content="https://openhistoria.com/wiki/troubleshooting/" />
   <meta property="og:title" content="Troubleshooting — Open Historia Wiki" />
-  <meta property="og:description" content="Blank maps, greyed-out AI, slow turns, CORS errors and the other things that go wrong." />
+  <meta property="og:description" content="Blank maps, WebGL, greyed-out AI, slow turns, updates at launch, community hub and CORS errors, and the other things that go wrong." />
   <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
   <meta property="og:image:type" content="image/jpeg" />
   <meta property="og:image:width" content="1280" />
@@ -23,7 +23,7 @@
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Troubleshooting — Open Historia Wiki" />
-  <meta name="twitter:description" content="Blank maps, greyed-out AI, slow turns, CORS errors and the other things that go wrong." />
+  <meta name="twitter:description" content="Blank maps, WebGL, greyed-out AI, slow turns, updates at launch, community hub and CORS errors, and the other things that go wrong." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
 
   <link rel="stylesheet" href="/fonts/fonts.css" />
@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -110,9 +110,9 @@
       <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> Troubleshooting
     </nav>
     <h1>Troubleshooting</h1>
-    <p class="tagline">Blank maps, greyed-out AI, slow turns, CORS errors and the other things that go wrong.</p>
+    <p class="tagline">Blank maps, WebGL, greyed-out AI, slow turns, updates at launch, community hub and CORS errors, and the other things that go wrong.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-map-is-blank">The map is blank</a></li><li class="d2"><a href="#the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</a></li><li class="d2"><a href="#turns-fail-or-always-fall-back-to-canned-events">Turns fail, or always fall back to canned events</a></li><li class="d2"><a href="#turns-hang-forever">Turns hang forever</a></li><li class="d2"><a href="#when-a-request-fails">When a request fails</a></li><li class="d3"><a href="#the-advisor">The advisor</a></li><li class="d3"><a href="#diplomatic-messages">Diplomatic messages</a></li><li class="d3"><a href="#a-held-time-skip">A held time skip</a></li><li class="d3"><a href="#a-held-projects-board">A held Projects board</a></li><li class="d3"><a href="#if-retrying-does-not-help">If retrying does not help</a></li><li class="d2"><a href="#every-model-has-used-its-allowance">Every model has used its allowance</a></li><li class="d2"><a href="#the-writing-suddenly-changed">The writing suddenly changed</a></li><li class="d2"><a href="#rate-limits">Rate limits</a></li><li class="d2"><a href="#cors-errors-with-a-local-model">CORS errors with a local model</a></li><li class="d2"><a href="#everything-is-slow">Everything is slow</a></li><li class="d2"><a href="#i-lost-my-games">I lost my games</a></li><li class="d2"><a href="#a-country-is-behaving-incoherently">A country is behaving incoherently</a></li><li class="d2"><a href="#windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</a></li><li class="d2"><a href="#macos-will-not-open-the-app">macOS will not open the app</a></li><li class="d2"><a href="#reporting-a-bug">Reporting a bug</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#the-map-is-blank">The map is blank</a></li><li class="d2"><a href="#the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</a></li><li class="d2"><a href="#turns-fail-or-always-fall-back-to-canned-events">Turns fail, or always fall back to canned events</a></li><li class="d2"><a href="#turns-hang-forever">Turns hang forever</a></li><li class="d2"><a href="#when-a-request-fails">When a request fails</a></li><li class="d3"><a href="#the-advisor">The advisor</a></li><li class="d3"><a href="#diplomatic-messages">Diplomatic messages</a></li><li class="d3"><a href="#a-held-time-skip">A held time skip</a></li><li class="d3"><a href="#a-held-projects-board">A held Projects board</a></li><li class="d3"><a href="#if-retrying-does-not-help">If retrying does not help</a></li><li class="d2"><a href="#every-model-has-used-its-allowance">Every model has used its allowance</a></li><li class="d2"><a href="#the-writing-suddenly-changed">The writing suddenly changed</a></li><li class="d2"><a href="#rate-limits">Rate limits</a></li><li class="d2"><a href="#cors-errors-with-a-local-model">CORS errors with a local model</a></li><li class="d2"><a href="#everything-is-slow">Everything is slow</a></li><li class="d2"><a href="#i-lost-my-games">I lost my games</a></li><li class="d2"><a href="#a-country-is-behaving-incoherently">A country is behaving incoherently</a></li><li class="d2"><a href="#the-game-updates-when-it-opens">The game updates when it opens</a></li><li class="d2"><a href="#community-hub-problems">Community hub problems</a></li><li class="d2"><a href="#windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</a></li><li class="d2"><a href="#macos-will-not-open-the-app">macOS will not open the app</a></li><li class="d2"><a href="#reporting-a-bug">Reporting a bug</a></li></ul></nav>
     <p>The common failures, and what actually fixes them.</p>
 <p>Before anything else: <strong>☰ → Settings → Advanced → Diagnostics</strong> holds the game&#39;s log — what you
 did, and every error and API failure along the way. <strong>🔎 View log</strong> reads it in place. It usually
@@ -120,13 +120,20 @@ explains the problem immediately, and it is what to attach to a bug report.</p>
 <h2 id="the-map-is-blank">The map is blank</h2>
 <p><strong>In the browser.</strong> The web build streams its map from community-run content nodes. If none is
 reachable you get no map. Reload; if it persists, the node network is having a bad day — try
-again later, or use the desktop app, which stores the map locally.</p>
-<p><strong>On desktop.</strong> The map data failed to download on first launch. It is about 200 MB fetched
-separately from the installer. Restart the app and let the startup screen finish. From a source
-checkout, run <code>node scripts/fetch-map-assets.mjs</code>.</p>
-<p><strong>A full-screen WebGL warning.</strong> The map cannot render without WebGL. Update your graphics
-drivers; in a browser, check that hardware acceleration is enabled. On a virtual machine or over
-remote desktop, WebGL is often unavailable.</p>
+again later, or use the desktop or Android app, which keep the map on the device.</p>
+<p><strong>On desktop.</strong> The map data failed to download on first launch. It is fetched separately from
+the installer, once, behind the <strong>Setting up Open Historia</strong> screen. Restart the app and let that
+screen finish. From a source checkout, run <code>node scripts/fetch-map-assets.mjs</code>.</p>
+<p class="beta-note"><b>On beta the setup screen says when the download fails</b>, with
+<b>Try again</b>, or <b>Continue without the map</b> to open the game anyway.</p><p><strong>On Android.</strong> The current app carries the map inside it and needs no connection to draw it.
+The old app, from before 23 September 2026, streamed it from the network like the website; if
+you still have that one, replace it — see <a href="/wiki/mobile/">playing on your phone</a>.</p>
+<p><strong>&quot;WebGL Not Available&quot;.</strong> The map cannot render without WebGL. WebGL can drop out for a moment —
+a graphics driver resetting, the computer waking from sleep, a laptop switching graphics card —
+so while the warning is up the game keeps checking for half a minute and reloads by itself as soon
+as WebGL is back. <strong>Reload</strong> on the warning tries again at once. If it stays, update your graphics
+drivers, and in a browser check that hardware acceleration is enabled. On a virtual machine or
+over remote desktop, WebGL is often unavailable.</p>
 <h2 id="the-ai-is-greyed-out-or-does-nothing">The AI is greyed out or does nothing</h2>
 <p>Work through these in order:</p>
 <ol>
@@ -135,7 +142,7 @@ list: an entry reading <strong>Unusable</strong> says what is wrong with it, suc
 <code>model not found (404)</code>. Fix it and the mark clears.</li>
 <li><strong>Is the key right?</strong> Paste it fresh; keys often pick up whitespace.</li>
 <li><strong>Is the model name right?</strong> A model you type must exist on that provider. Left blank, OpenAI
-uses <code>gpt-5.6-luna</code> and OpenAI Compatible picks one from the server&#39;s list.</li>
+uses <code>gpt-6-luna</code> and OpenAI Compatible picks one from the server&#39;s list.</li>
 <li><strong>Is the endpoint right?</strong> Compatible providers need the base URL, usually ending <code>/v1</code>.
 An address that points at the service&#39;s website rather than its API gets a web page back
 instead of an answer. The error quotes a line of that page and tells you to check the address,
@@ -154,7 +161,12 @@ thousand tokens cannot take it. A turn needs <strong>32k tokens or more</strong>
 The error says the context window was exceeded and how big the request was. Once a model has
 said how big its window is, the game remembers and does not send it a request that cannot fit:
 the call goes to the next model in the list instead, or, if none can take it, is not sent at
-all and says so.</li>
+all and says so. If a model can now take more — a provider raised its limit — open its entry in
+Settings → AI and press <strong>Forget this window</strong> under <strong>This model only</strong>.</li>
+<li><strong>A local model you loaded with a bigger window is still refused.</strong> A model on your own machine
+or network is never held to a window learned from its refusals, since you set its window when
+you load it. Older builds did hold it, for a month: forget the window as above, or update the
+game.</li>
 <li><strong>Toggle Strict tool schema</strong> (on the connection, in Settings → AI). Some gateways and local servers handle the strict
 form of structured output badly, and flipping this fixes it outright.</li>
 <li><strong>Try a different model on the same provider.</strong> Some are far better at this than others.</li>
@@ -188,7 +200,8 @@ time.</p>
 <p><img src="/wiki/img/retry-diplomacy.jpg" alt="A diplomatic message that failed, with Retry">
 <em>The message you sent stays in the thread. Retry asks Berlin again; nothing needs retyping.</em></p>
 <h3 id="a-held-time-skip">A held time skip</h3>
-<p>This is the one that saves real time. When a long skip is generated in segments and one segment
+<p>This is the one that saves real time. With <strong>Generate long time skips in segments</strong> on
+(Settings → AI; off by default), a skip of 120 days or more is written in parts. When one part
 does not come back, the turn is <strong>held</strong>, not failed:</p>
 <ul>
 <li>Nothing has been written. Your campaign is still on its old date.</li>
@@ -210,7 +223,13 @@ not re-run the whole simulation to fix a board that was the only thing to fail. 
 the turn runs again from the start.</p>
 <p>The turn is released before the retry runs, so a turn can never be applied twice, and it is only
 held again if the <strong>board</strong> fails a second time.</p>
-<h3 id="if-retrying-does-not-help">If retrying does not help</h3>
+<p class="beta-note"><b>On beta two more things hold a turn.</b> When the checks after a time
+skip — the ones that move units, ground, structures, the timeline, the board and your agents'
+reports with the events — do not come back, the turn waits: <b>Retry the checks</b>,
+<b>Continue without them</b>, or <b>Discard the turn</b>. And with <b>Stop when my events
+fail</b> on (Settings → AI), a skip in which your own events were refused, or an order got no
+outcome, lists them and waits: <b>Retry the failed events</b>, <b>Retry the whole skip</b>, or
+<b>Keep it and move on</b>.</p><h3 id="if-retrying-does-not-help">If retrying does not help</h3>
 <p>Undo the turn from the time panel and try a shorter skip, or a different model.</p>
 <h2 id="every-model-has-used-its-allowance">Every model has used its allowance</h2>
 <p><em>&quot;Every model in your Fallback list has used its allowance for now. The first back is …, at …&quot;</em></p>
@@ -240,7 +259,7 @@ again</strong> waits it out on the same model instead: slower, but it keeps your
 partway through an answer — the game says so rather than treating it as a model that answered
 with nothing: <em>&quot;… is overloaded right now. Nothing is wrong with your game, your model or your
 message.&quot;</em> It retries once after five seconds; still busy, that model sits out for ten minutes
-and the next one in your list takes over.</p>
+(a minute on beta) and the next one in your list takes over.</p>
 <h2 id="cors-errors-with-a-local-model">CORS errors with a local model</h2>
 <p>The error will name a blocked cross-origin request.</p>
 <ul>
@@ -248,7 +267,8 @@ and the next one in your list takes over.</p>
 <li><strong>LM Studio</strong> — make sure the local server is actually started, and check whether it has a
 CORS setting to enable.</li>
 <li><strong>llama.cpp</strong> — <code>llama-server</code> may need to be started with CORS permitted.</li>
-<li><strong>Use the desktop app</strong>, which relays around this automatically. The hosted website cannot.</li>
+<li><strong>Use the desktop app</strong>, which relays around this automatically. The Android app reaches a
+model on your network without it too. The hosted website cannot.</li>
 <li><strong>Check <code>http</code> vs <code>https</code></strong> and that the port matches.</li>
 </ul>
 <h2 id="everything-is-slow">Everything is slow</h2>
@@ -260,14 +280,23 @@ CORS setting to enable.</li>
 <li>Zoom out, or switch to a lighter basemap such as Light Gray Canvas.</li>
 <li>On the desktop app, close and reopen it — a long session accumulates map tiles.</li>
 </ul>
-<h2 id="i-lost-my-games">I lost my games</h2>
+<p class="beta-note"><b>On beta, try Performance mode</b> in Settings → Map. <b>Low memory</b>
+loads the map in smaller steps with fewer workers, which can steady a weak computer; <b>Full</b>
+is faster on a strong tablet. <b>Auto</b> picks Low memory in the Android app, on a touch screen
+with no mouse, and on a device with 4 GB of memory or less. It applies once the game is
+reloaded.</p><h2 id="i-lost-my-games">I lost my games</h2>
 <p><strong>In the browser</strong> — clearing site data clears your campaigns. There is no server-side
 copy. Grant persistent storage permission when asked.</p>
+<p><strong>On the website, after it moved to https</strong> — a browser keeps <code>http://openhistoria.com</code> and
+<code>https://openhistoria.com</code> as two sites, each with its own library, so games first played under
+the old http address seemed to vanish once the site sent everyone to https. The game now brings
+them across by itself the first time it opens. Nothing is replaced or deleted: where the same
+game is in both, the old copy arrives beside the new one unless the two are identical.</p>
 <p><strong>On desktop</strong> — saves are files in the app&#39;s data directory and are still there. If the library
 looks empty, the app may be pointed at a different data directory.</p>
-<p><strong>After installing the beta</strong> — the beta build keeps a <strong>separate library</strong> by design. Your
-stable campaigns are untouched; they are just not visible from the beta app. Open the stable app
-and they are there.</p>
+<p><strong>After installing the beta</strong> — the beta, on a computer or on Android, keeps a <strong>separate
+library</strong> by design. Your stable campaigns are untouched; they are just not visible from the beta
+app. Open the stable app and they are there; Export and Import carry a game across.</p>
 <h2 id="a-country-is-behaving-incoherently">A country is behaving incoherently</h2>
 <p>The world drifted. Fix it rather than restarting:</p>
 <ul>
@@ -280,7 +309,39 @@ and apply it.</li>
 </ul>
 <p>See <a href="/wiki/cheats/">cheats and the GM console</a>. Using these is normal; an AI-driven world
 occasionally produces nonsense, and repairing it is part of running a long campaign.</p>
-<h2 id="windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</h2>
+<h2 id="the-game-updates-when-it-opens">The game updates when it opens</h2>
+<p><strong>On a computer</strong>, opening the desktop app checks for an update first. When there is one, an
+<strong>Updating Open Historia</strong> screen downloads only the parts of the game that changed and restarts
+on the new version, with your games kept. <strong>Open the game now</strong> plays on the version you have;
+the update then installs when you close the game. An update that has failed to download twice at
+launch is not tried at launch again, so a broken one cannot hold every start up: the banner offers
+it once the game is open.</p>
+<p>Before it downloads, the stable app reads every file it already has to see what it can keep. From
+a cold disk that can take a few minutes, and the window may be marked <strong>Not Responding</strong>
+meanwhile: let it finish.</p>
+<p class="beta-note"><b>On beta that step takes a second or two</b>: an update checks your files
+against the list the last update left, and the window stays responsive throughout. The first
+update after installing the game from its installer still reads every file once.</p><p><strong>On Android</strong>, the stable app offers a new build in a banner; see
+<a href="/wiki/mobile/#updating">playing on your phone</a> for how each app updates.</p>
+<h2 id="community-hub-problems">Community hub problems</h2>
+<p><strong>&quot;The community hub&#39;s list cannot be read yet.&quot;</strong> The game lists only what the hub has checked,
+from one index the hub publishes; until it can read that index, it shows nothing rather than
+anything unchecked. Try again later. <strong>&quot;The community hub could not be reached&quot;</strong> is your
+connection.</p>
+<p><strong>A downloaded scenario asks to be updated.</strong> It was downloaded before the hub started checking
+its files, and its card says so. <strong>Update</strong> swaps it for the hub&#39;s checked copy — if you have
+edited it, clone it first, because updating replaces your changes. See
+<a href="/wiki/community-hub/">the community hub</a>.</p>
+<p><strong>A new post does not appear.</strong> The hub checks a post&#39;s file before listing it, which takes a
+minute or two after posting, and the game reads the hub&#39;s list at most every five minutes. A file
+that fails the check is refused with a comment on the post saying why.</p>
+<p><strong>The post refuses your scenario&#39;s file.</strong> GitHub takes attachments of up to 25 MB. The usual cause
+is regions imported from another map, which keep every point of their outlines.</p>
+<p class="beta-note"><b>On beta the game warns at once</b> when the file it saves for publishing
+is over that limit. In the map editor, select the scenario's most detailed regions and press
+<b>Simplify</b>, which takes them down to the map's own detail and keeps their shared borders
+shared; save, and publish again. Regions you paste or import on beta are simplified as they
+arrive, by a switch on the paste and import panels that is on by default.</p><h2 id="windows-says-the-installer-is-unsafe">Windows says the installer is unsafe</h2>
 <p>The installer is not code-signed yet. Choose <strong>More info → Run anyway</strong> in SmartScreen.</p>
 <h2 id="macos-will-not-open-the-app">macOS will not open the app</h2>
 <p>Also not code-signed. Right-click the app and choose <strong>Open</strong>, then confirm. Once only.</p>
@@ -300,10 +361,10 @@ a <b>💾 Save logging file</b> button. It saves the whole diagnostics log as a 
 failure&#39;s details — for a turn, the model&#39;s raw response in full — in a <i>Reported problem</i>
 block at the top. Attach the file. With the diagnostics log turned off there is no log to save, so
 the button copies the one failure instead, under its old label (<b>Copy debugging message</b> or
-<b>Copy for a bug report</b>). The Android app cannot save files, so there it copies the whole log
-and says so.</p>
-<p class="beta-note"><b>On beta the Android app saves files too</b>, through Android's share
-sheet, so the log and the game can be attached there as well.</p><p>Include your platform, your build (stable or beta), your provider and model, and what you were
+<b>Copy for a bug report</b>). The Android app saves the file to your phone&#39;s Downloads folder,
+under <strong>Open Historia</strong>; if a file cannot be saved, the report goes to the clipboard instead and
+the button says so.</p>
+<p>Include your platform, your build (stable or beta), your provider and model, and what you were
 doing.</p>
 
     <nav class="wiki-pager" aria-label="Pagination">
@@ -311,7 +372,7 @@ doing.</p>
         <span></span>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

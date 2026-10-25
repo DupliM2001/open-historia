@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/" class="on" aria-current="page">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/" class="on" aria-current="page">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -112,31 +112,49 @@
     <h1>Countries and Identity</h1>
     <p class="tagline">Names, aliases, tags, flags, colours, reputation, leaders, and countries that hold no land at all.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#identity-and-names">Identity and names</a></li><li class="d2"><a href="#tags">Tags</a></li><li class="d2"><a href="#reputation">Reputation</a></li><li class="d2"><a href="#intelligence-rating">Intelligence rating</a></li><li class="d2"><a href="#leaders">Leaders</a></li><li class="d2"><a href="#colours">Colours</a></li><li class="d2"><a href="#flags">Flags</a></li><li class="d2"><a href="#landless-countries">Landless countries</a></li><li class="d2"><a href="#inventing-a-country">Inventing a country</a></li><li class="d2"><a href="#editing-countries-mid-campaign">Editing countries mid-campaign</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#identity-and-names">Identity and names</a></li><li class="d2"><a href="#the-country-card">The country card</a></li><li class="d2"><a href="#tags">Tags</a></li><li class="d2"><a href="#reputation">Reputation</a></li><li class="d2"><a href="#intelligence-rating">Intelligence rating</a></li><li class="d2"><a href="#leaders">Leaders</a></li><li class="d2"><a href="#colours">Colours</a></li><li class="d2"><a href="#flags">Flags</a></li><li class="d2"><a href="#landless-countries">Landless countries</a></li><li class="d2"><a href="#inventing-a-country">Inventing a country</a></li><li class="d2"><a href="#editing-countries-mid-campaign">Editing countries mid-campaign</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>A country in Open Historia is not a row in a table of stats. It is a name, a set of things it is
 known for, a reputation, a flag, a colour, and whatever territory it holds — and the world reads
 all of that when deciding how to treat it.</p>
 <h2 id="identity-and-names">Identity and names</h2>
-<p>Every country has <strong>one stable identity</strong>, and its name is how that identity is presented. A
-scenario keeps a registry of its countries — independently of the regions they hold, so a
-country can exist with no land at all — and region ownership, the colour palette, flags, tags,
-diplomacy, the war records and your standing goal all hang off that identity.</p>
-<p>Two practical consequences:</p>
+<p>Every country is known by <strong>one name</strong>, and that name is its identity. A scenario keeps a
+registry of its countries — independently of the regions they hold, so a country can exist with
+no land at all — and region ownership, the colour palette, flags, tags, statistics, diplomacy,
+the war records and your standing goal are all kept under that name.</p>
+<p>Three practical consequences:</p>
 <ul>
 <li><strong>In the map editor, typing a new country name creates that country.</strong> There is no separate
-&quot;add nation&quot; step; giving a region an owner that does not exist yet brings it into being, and
-the owner is picked from the registry, so a typo cannot quietly mint a one-province country.</li>
-<li><strong>Renaming changes the label, not the country.</strong> A country renamed after a revolution keeps
-every region, flag, tag, colour, conversation and war record, and the map labels it by its new
-name. The world only renames on an actual regime change, never for a mere change of leader.
-Territory handed to a country that does not exist yet founds it.</li>
+&quot;add nation&quot; step: type a name nobody has yet as a region&#39;s owner and press Enter (or
+<strong>Create</strong>), and the country is made and given the region. Leaving the field only ever assigns
+a country that already exists, so a typo cannot quietly mint a one-province country.</li>
+<li><strong>Renaming moves the country, not just its label.</strong> A country renamed after a revolution keeps
+every region, flag, tag, colour, statistic, conversation and war record: the rename carries all
+of it over to the new name, and the map labels it by that name. A name that already belongs to
+another country is refused — a rename cannot merge two countries. The world renames a country
+you do not play only on a regime change, a change in its fundamental way of governing, never
+for a new leader or ruling party; your own country is renamed whenever you order it.</li>
+<li><strong>Territory handed to a country that does not exist yet founds it</strong>, under exactly the name
+given.</li>
 </ul>
 <p>Countries also carry <strong>aliases</strong>: alternative names the game will recognise as the same country.
-This is what lets a scenario use a historical name while still matching modern data.</p>
-<h2 id="tags">Tags</h2>
+This is what lets a scenario use a historical name while still matching modern data. A rename in
+play keeps the old name among them, so events and conversations written under it still find the
+country; a rename in the map editor keeps no old name, since everything that used it is renamed
+with it.</p>
+<h2 id="the-country-card">The country card</h2>
+<p>Click a country, then <strong>ⓘ</strong> on its map card. The card shows the country&#39;s flag (<strong>Flag</strong> changes
+it), its tags, its <strong>Alternative Names</strong>, its <strong>Sovereign Regions</strong> and, where they differ, the
+regions it holds that are not its own (<strong>Controlled, Not Sovereign</strong>) and its own that someone else
+holds (<strong>Under Foreign Control</strong>). Below them are its <strong>Related Events</strong>, which you can search and
+filter by importance, and two buttons: <strong>Advisor Report</strong>, an AI reading of the country on request,
+and <strong>Open Diplomacy</strong>.</p>
+<p class="beta-note"><b>On beta the card does more.</b> It says what you know of any
+<a href="/wiki/war/#puppets-and-overlords">puppet arrangement</a> the country is part of, and has
+two more buttons: <b>Stats</b>, which opens the country in the <b>Country</b> panel (see
+<a href="/wiki/statistics/">national statistics</a>), and <b>Listen in</b>, which opens a phone of
+posts by people who live there.</p><h2 id="tags">Tags</h2>
 <p>Tags are short descriptors of <strong>what a country is</strong> — its ideology, alignment, character,
-whatever matters about it. &quot;NATO member&quot;, &quot;nuclear power&quot;, &quot;military junta&quot;, &quot;resource
-exporter&quot;.</p>
+whatever matters about it. &quot;Socialist&quot;, &quot;nuclear&quot;, &quot;military-junta&quot;, &quot;non-aligned&quot;.</p>
 <ul>
 <li>Up to <strong>8 tags</strong>, each up to <strong>32 characters</strong>.</li>
 <li>They are fed to the world as context, so they genuinely change how a country behaves and how
@@ -144,8 +162,9 @@ others treat it.</li>
 <li>When a country&#39;s alignment shifts, the world rewrites the <strong>complete</strong> tag list rather than
 adding one — tags are a full replacement, not a running log.</li>
 </ul>
-<p>You can see a country&#39;s tags in its panel, and edit your own (or anyone&#39;s) in the
-<a href="/wiki/cheats/">cheats panel</a>.</p>
+<p>You can see a country&#39;s tags on its card. A scenario&#39;s starting tags are set in the
+<a href="/wiki/editor/">map editor</a>; in play the world rewrites them, and the
+<a href="/wiki/cheats/#gm-console">GM console</a> can change them like anything else about a country.</p>
 <h2 id="reputation">Reputation</h2>
 <p><strong>International reputation</strong> runs 0–100, where <strong>0 is a pariah</strong> and <strong>100 is universally
 trusted</strong>.</p>
@@ -155,15 +174,21 @@ is a summary of how you have behaved.</p>
 <p>Low reputation makes diplomacy harder in exactly the way you would expect: fewer countries will
 take your word, and more will assume the worst reading of what you do.</p>
 <h2 id="intelligence-rating">Intelligence rating</h2>
-<p>Also 0–100, and it works the same way — moved by events, absent meaning ordinary. It is the
-espionage system&#39;s master statistic. See <a href="/wiki/espionage/">espionage</a>.</p>
+<p>Also 0–100, and it works the same way — moved by events, absent meaning ordinary (40). It is the
+espionage system&#39;s master statistic. See <a href="/wiki/espionage/">espionage</a> and
+<a href="/wiki/statistics/#intelligence-service">national statistics</a>.</p>
 <h2 id="leaders">Leaders</h2>
 <p>A country has a named leader, stored on its stat sheet. When a leader is overthrown,
 assassinated, dies, resigns or is voted out, the successor&#39;s name is written there as part of the
 same event — so the stat sheet and the story never disagree about who is in charge.</p>
 <p>The leader is who you are talking to in <a href="/wiki/diplomacy/">diplomacy</a>, and their voice changes
 when they change.</p>
-<h2 id="colours">Colours</h2>
+<p class="beta-note"><b>On beta a country has a government, not just a leader.</b> A scenario can
+generate its Political World: each country's government, its head of state and head of
+government, and the parties or power blocs that compete for it. The <b>🏛 Politics</b> tab of the
+Country panel shows them (see <a href="/wiki/statistics/#the-politics-tab">the Politics tab</a>),
+and the panel says whether a country is a <b>Major power</b>, <b>Regional power</b> or <b>Minor
+power</b>.</p><h2 id="colours">Colours</h2>
 <p>How a country paints on the map. Resolution order:</p>
 <ol>
 <li>The scenario&#39;s own palette.</li>
@@ -176,7 +201,8 @@ five seconds ago and never picked a colour for. It is also why two countries ver
 land on similar shades — the derivation does not know about the rest of the map.</p>
 <h2 id="flags">Flags</h2>
 <p>Countries can carry a flag from the built-in set, from a scenario&#39;s own flag pack, or from a
-community flag pack. Invented factions can pick one or go without.</p>
+community flag pack. Invented factions can pick one or go without. In play, <strong>Flag</strong> on a
+country&#39;s card changes its flag.</p>
 <p>The diplomacy and spy pickers show the scenario&#39;s own flags, and a flag changed mid-campaign
 updates live. One deliberate rule: <strong>a country that holds no land never borrows a real country&#39;s
 flag</strong>. A
@@ -197,11 +223,19 @@ and why you exist gets treated as that thing. A faction with a blank lore field 
 everyone, and gets treated accordingly. It is worth writing properly.</p>
 <p>Any regions you claim at creation are taken from whoever held them, and that country will have
 opinions.</p>
-<h2 id="editing-countries-mid-campaign">Editing countries mid-campaign</h2>
-<p>The <a href="/wiki/cheats/">cheats panel</a> has a <strong>Country Editor</strong> — identity, colour, tags,
-reputation, the persistent stat sheet — and an <strong>Add Country</strong> tool. Useful for repairing a country the simulation has drifted
-on, or for authoring the world by hand.</p>
-<h2 id="next">Next</h2>
+<p class="beta-note"><b>On beta, Create a faction is part of Play as a group.</b> The picker's
+second tab is <b>Play as a group</b>. Where the scenario has
+<a href="/wiki/territory/#groups">groups</a>, you lead one of its groups or make a new one, which
+controls an area without owning it. In a scenario with groups switched off, the same form invents
+a country, as above.</p><h2 id="editing-countries-mid-campaign">Editing countries mid-campaign</h2>
+<p>The <a href="/wiki/cheats/">cheats panel</a> has a <strong>Country Editor</strong> — the country&#39;s name and colour, and,
+once it has a stat sheet, the sheet itself: population, GDP and growth, capital, currency,
+stability, inflation, unemployment, debt, budget balance, the six strategic indices
+(international reputation among them) and the GDP sector split — and an <strong>Add Country</strong> tool. Useful for repairing a country the
+simulation has drifted on, or for authoring the world by hand.</p>
+<p class="beta-note"><b>On beta the Country Editor also edits the country's Political World</b>:
+its government and political system, its strategic outlook, its parties and power blocs, and its
+political traits.</p><h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/statistics/">National statistics</a> — the numbers behind a country.</li>
 <li><a href="/wiki/diplomacy/">Diplomacy</a> — dealing with them.</li>
@@ -213,7 +247,7 @@ on, or for authoring the world by hand.</p>
         <a class="next" href="/wiki/cities/"><span>Next →</span><b>Cities &amp; structures</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

@@ -49,8 +49,22 @@ watch closely.
 
 ## How far should I skip?
 
-The world has to fit everything that happens into one turn's worth of events. Skip a year and
-twelve months get compressed into a handful of paragraphs; skip a week and you get the texture.
+The world has to fit everything that happens into one turn's worth of events, and a longer skip
+gets more of them, but not in proportion:
+
+| Skip | Events asked for |
+|---|---|
+| Under a day | 1–2 |
+| Up to a week | 3–6 |
+| Up to a month | 10–15 |
+| Up to three months | 16–22 |
+| Up to six months | 22–30 |
+| Longer | 28–36 |
+
+So a year gets barely more events than six months, and twelve months are compressed into about
+three dozen; skip a week and you get the texture. Queue more orders than the lower figure and it
+rises so that each order has an event to land in, and a scenario's author can make its periods
+busier or quieter.
 
 - **Something is actively unfolding** — a war opening, an ultimatum running out, a coup —
   6 hours to 3 days.
@@ -65,20 +79,31 @@ thin. Start with months.
 
 Under the presets the panel shows today's count — *"0 of 500 AI requests used today · a skip uses
 1 request"*. A skip is one request, with **Save AI requests** on or off: each event carries what
-it changed — units, fronts, the Projects board — and your agents' reports come back in the same
-answer. With Save AI requests off and AI lookup functions on, the model may look things up first,
-and the panel then says *"at most 3"*. See [settings](/wiki/settings/#ai-requests).
+it changed — land, units, structures, the Projects board — and your agents' reports come back in
+the same answer. When the history document is due a fold, that rides in the same answer too. With
+Save AI requests off and AI lookup functions on, the model may look things up first, and the panel
+then says *"at most 3"*; with long skips in segments on, each extra segment adds one. See
+[settings](/wiki/settings/#ai-requests).
 
 ## While it runs
 
 A time skip takes a while — the model is simulating the world. The time panel says what it is
-doing as it goes (*"Writing 1 month of events…"*, *"Moving the armies, redrawing the fronts…"*), and
+doing as it goes (*"Writing 1 month of events…"*, *"Placing the armies and the fronts…"*), and
 there is a **Cancel** button. Cancelling aborts the request cleanly and leaves the world exactly
 as it was.
 
 The **Events panel** opens as soon as the skip starts and fills as the model writes, so you can
-start reading before it finishes (Gemini delivers the whole answer at once, so there it all arrives
-together). Turn this off with **Show time skip events as they are written** in Settings → AI.
+start reading before it finishes — on Gemini too, except in a skip that may look things up, which
+arrives all at once. Turn this off with **Show time skip events as they are written** in
+Settings → AI.
+
+<p class="beta-note"><b>On beta a land war is fought before its story is written.</b> Where your
+country or anyone else's is at war on a <a href="/wiki/war-room/">battlefield</a>, the skip first fights
+the period's days under the orders that stand (<i>"Fighting the war…"</i>), at no request, and the
+events are then written knowing how it went. If you queued an order for your troops, the model can
+have the period fought again with it before it writes, which is one request more; a skip in which
+no order commands troops stays one request. <b>Cancel all AI requests</b>, in Settings → AI → AI
+requests, stops a skip as its own Cancel does.</p>
 
 If jumps routinely hang, turn on **Limit AI generation** in Settings → AI. It gives up on a
 stalled generation and falls back to a canned event rather than waiting indefinitely. It watches
@@ -112,8 +137,20 @@ auto-jump, which has no span to divide up front. Each segment adds one request t
 
 Each segment is validated against the world as the previous segments left it, so the pieces
 cannot contradict each other — a war started in the first segment is real by the second. If one
-segment fails, the turn is **held** rather than lost: **Retry** re-runs only that segment, and
-**Discard** drops the turn. See [troubleshooting](/wiki/troubleshooting/#a-held-time-skip).
+segment fails, the turn is **held** rather than lost: **Retry the segment** re-runs only that
+segment, and **Discard the turn** drops it. See
+[troubleshooting](/wiki/troubleshooting/#a-held-time-skip).
+
+<p class="beta-note"><b>On beta two more things hold a turn.</b> If a check the game has to ask
+for after a skip's events does not come back — rare now that the events carry their own
+consequences, but a provider that will not answer a skip in one piece is asked for the unit moves,
+territory and structures in a request of their own — nothing is saved yet and the turn waits:
+<b>Retry the checks</b>, <b>Continue without them</b>, or <b>Discard the turn</b>. And with
+<b>Stop when my events fail</b> on (Settings → AI, off by default), a skip in which an event about
+your country was refused, or an order of yours got no outcome, stops before anything is saved and
+lists what failed: <b>Retry the failed events</b> (one more request, for the same dates),
+<b>Retry the whole skip</b>, or <b>Keep it and move on</b>. With it off, a refused event is left
+out and an unanswered order carries over to the next skip as overdue.</p>
 
 ## Intervene
 
@@ -192,7 +229,8 @@ against.
 
 On round 1, a scenario that has a *World Before Round One* briefing generates its own backstory
 before play begins — the recent history that led to the situation you have inherited. It happens
-once, and it gives the world something to refer back to.
+once, and it gives the world something to refer back to. See
+[events and history](/wiki/events/#before-round-one).
 
 ## Next
 

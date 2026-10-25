@@ -20,7 +20,13 @@ You need step 2. Open Historia ships with no model of its own and does not sell 
 bring a key from Google, OpenAI, Anthropic or any compatible service, or you point it at a model
 running on your own machine. Without one, the game still opens and the map still works, but the
 world stops responding: time skips fall back to canned events and the advisor cannot answer.
-Google's free tier is enough for solo play, and a local model costs nothing at all.
+Google's free tier is enough for solo play — a time skip is a single request — and a local model
+costs nothing at all.
+
+<p class="beta-note"><b>On beta the desktop app can use your own Agent.</b> Instead of an API
+key, your own Claude Code, Codex, OpenCode or Antigravity CLI, on your own subscription, can
+answer the time skips, chats and scenes you start. See
+<a href="/wiki/ai-setup/#your-own-agent">connecting an AI provider</a>.</p>
 
 ## Deep dives
 
@@ -28,8 +34,10 @@ Every system, with the actual rules and numbers rather than a summary.
 
 <div class="feature-grid">
   <div class="feature-tag"><a href="/wiki/diplomacy/">Diplomacy</a></div>
+  <div class="feature-tag"><a href="/wiki/war/">Relations, treaties &amp; war</a></div>
   <div class="feature-tag"><a href="/wiki/espionage/">Espionage</a></div>
   <div class="feature-tag"><a href="/wiki/military/">Military &amp; combat</a></div>
+  <div class="feature-tag"><a href="/wiki/projects/">Projects &amp; operations</a></div>
   <div class="feature-tag"><a href="/wiki/territory/">Territory</a></div>
   <div class="feature-tag"><a href="/wiki/countries/">Countries &amp; identity</a></div>
   <div class="feature-tag"><a href="/wiki/statistics/">National statistics</a></div>
@@ -39,11 +47,16 @@ Every system, with the actual rules and numbers rather than a summary.
 
 ## Things worth knowing up front
 
-**There is no multiplayer.** Open Historia is a single-player game. You can host it on your own
-machine and reach it from your phone or another computer on the same network, and you can share
-scenarios with other players through the [Community Hub](/wiki/community-hub/) — but there is no
-lobby, no shared session and no simultaneous turns. Anything you have read elsewhere describing
-a multiplayer lobby is wrong.
+**The stable release is single-player.** You can host it on your own machine and reach it from
+your phone or another computer on the same network, and you can share scenarios with other
+players through the [Community Hub](/wiki/community-hub/), but there is no shared session.
+
+<p class="beta-note"><b>On beta you can play together.</b> The main menu has a <b>Lobbies</b>
+tab. <b>Host a lobby</b> shares the game you have open, from the desktop app: you keep playing
+your own country, and the friends you send its invite code to each take another. They join under
+<b>Join a private lobby</b>, from the beta app on a computer or on Android, and need the lobby's
+scenario in their library. The host's computer runs the game and pays for its AI with the host's
+key. The host, and the services that connect you, can see each player's network address.</p>
 
 **Your API key never leaves your machine.** Provider settings live in your browser's local
 storage, or in the desktop app's own profile. No Open Historia server ever sees it. On the
@@ -56,8 +69,14 @@ turn and reacts in character; a very small local model will give you a thinner o
 [AI providers and models](/wiki/ai-providers/) for what to pick.
 
 **Some features are beta-only.** Pages and sections marked <em>beta</em> describe systems that
-have not reached the stable release. The beta build installs alongside the stable app and keeps
-its own saves, so trying it costs you nothing.
+have not reached the stable release — on the beta now: wars fought on battlefields from a War
+Room, war at sea, peace terms, espionage orders, seasons and weather, multiplayer and music. The
+beta build installs alongside the stable app and keeps its own saves, so trying it costs you
+nothing; see [installing the beta](/wiki/install/#the-beta-build).
+
+**Updates take care of themselves.** The desktop app installs a waiting update when you open it,
+fetching only the parts that changed, and the Android app and the website offer theirs as they
+come. There is no update script to run. See [installing](/wiki/install/#updating).
 
 ## If something is broken
 
