@@ -3937,10 +3937,13 @@ const normalizeWorldWar = (entry, index = 0) => {
   };
 
   const id = normalizeOptionalString(entry.id) || `war-${index}`;
-  const sideA = uniquePolities(entry.sideA);
-  const sideAKeys = new Set(sideA.map((name) => name.toLocaleLowerCase()));
-  const sideB = uniquePolities(entry.sideB)
-    .filter((name) => !sideAKeys.has(name.toLocaleLowerCase()));
+  // A polity's name has a letter in it. A war kept as "United Kingdom, Ireland" against "1, 2" (a time skip wrote its
+  // event numbers where the opponents go, battle-of-europe-session-2, 2026-10-25) is its two parties against each other.
+  const named = (list) => uniquePolities(list).filter((name) => /\p{L}/u.test(name));
+  const read = named(entry.sideA);
+  const readKeys = new Set(read.map((name) => name.toLocaleLowerCase()));
+  const others = named(entry.sideB).filter((name) => !readKeys.has(name.toLocaleLowerCase()));
+  const [sideA, sideB] = others.length === 0 && read.length === 2 ? [[read[0]], [read[1]]] : [read, others];
   if (!sideA.length || !sideB.length) return null;
 
   const rawStatus = normalizeOptionalString(entry.status).toLowerCase();

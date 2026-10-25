@@ -53,6 +53,23 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // A player at war with Ireland had no War Room: the war was kept as Britain and Ireland against "1" and "2"
+    // (battle-of-europe-session-2, 2026-10-25).
+    id: "2026-10-war-sides",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Wars have the right sides",
+        items: [
+          "A war you declared could be recorded with you and your enemy on the same side, so no front opened and the War Room button never appeared.",
+          "Such a war is now read the right way round when your game opens: its front opens on the next time skip, and with it the War Room.",
+          "New wars can no longer be recorded that way.",
+        ],
+      },
+    ],
+  },
+  {
     // "get rid of the idle troop animation that makes it look like they are at war or battling" (the owner, 2026-10-25).
     id: "2026-10-still-fronts",
     kind: "minor",
