@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -122,9 +122,12 @@ you write these.</p>
 <p><img src="/wiki/img/orders-actions.jpg" alt="The actions panel">
 <em>The standing goal above, the order queue below. Orders are plain English and resolve on the next time skip.</em></p>
 <p>Type it into the composer at the bottom of the panel and press Enter (Shift+Enter for a new
-line) or the send button. It appears under <strong>Your submitted actions</strong> as <strong>planned</strong> and stays
+line) or the send button. It appears under <strong>Your Submitted Actions</strong> as <strong>planned</strong> and stays
 there until a turn resolves it.</p>
-<p>You can queue as many as you like, but three or four substantial orders per turn is a sensible
+<p class="beta-note"><b>On beta the panel has two sections, and one is open at a time.</b> Once
+you have asked for suggestions, <b>Suggested Actions</b> and <b>Your Submitted Actions</b> each
+have a header with a count; opening one folds the other, so whichever you are working in has the
+room.</p><p>You can queue as many as you like, but three or four substantial orders per turn is a sensible
 working number. Beyond that the world has to divide one turn&#39;s worth of attention among all of
 them, and each gets less.</p>
 <p><strong>✕</strong> removes an order you have changed your mind about. If the order was a troop
@@ -167,9 +170,9 @@ when you know what you want but not how to phrase it — and useful for learning
 looks like, because you can watch what it changes.</p>
 <p>Nothing is committed until you queue it, so you can refine and rewrite freely.</p>
 <h2 id="ai-suggestions">AI suggestions</h2>
-<p><strong>Get AI suggestions</strong> proposes orders based on your actual situation. They arrive as topic
-cards; clicking one queues it. <strong>Help brainstorm actions</strong> opens the advisor instead, to talk a
-set of orders through with you.</p>
+<p><strong>AI Suggestions</strong> proposes orders based on your actual situation. They arrive as topic cards,
+each with orders under it; clicking one queues it. <strong>Brainstorm</strong>, beside it, opens the advisor
+instead, to talk a set of orders through with you.</p>
 <p>Worth doing on a turn where you are not sure what to attend to — the suggestions are derived
 from the real state of your country, so they tend to surface things you have not noticed. They
 are not a to-do list, and following them uncritically produces a passive campaign.</p>
@@ -195,8 +198,9 @@ good ones beat six thin ones.</p>
 world. The events that come back reference the orders they resolve, so you can see which of your
 instructions actually landed and what came of them.</p>
 <p>An order does <strong>not</strong> guarantee an outcome. On Medium, orders succeed or fail on their merits; on
-Hard and above, a weak or vague order will fail or backfire. See
-<a href="/wiki/new-game/">starting a game</a> for what each difficulty changes.</p>
+Hard and above, a weak or vague order will fail or backfire. On beta difficulty goes further and
+tilts how your orders tend to go, from mostly well on the easy levels to mostly badly on the hard
+ones. See <a href="/wiki/new-game/#difficulty">starting a game</a> for what each difficulty changes.</p>
 <p>Orders that are not resolved this turn stay in the queue and carry forward.</p>
 <p class="beta-note"><b>On beta an order is settled once.</b> When an event plainly carries out
 a queued order — sharing most of its distinctive words — the order counts as done even if the
@@ -204,7 +208,8 @@ model forgot to say which order it answered, so the next skip is not told to car
 again.</p><h2 id="orders-that-touch-other-systems">Orders that touch other systems</h2>
 <p>Some orders are executed through the game&#39;s mechanical systems rather than just narrated:</p>
 <ul>
-<li><strong>&quot;Deploy a spy in Germany&quot;</strong> places a real agent, through the same rules as the Spy tab — one
+<li><strong>&quot;Deploy a spy in Germany&quot;</strong> places a real agent, through the same rules as the Spy tab
+(Intelligence, on beta) — one
 agent per country, three in the field, never at home — and opens its operation on the Projects
 board the same turn. See <a href="/wiki/espionage/">espionage</a>.</li>
 <li><strong>Troop orders</strong> move real units on the map, within era-appropriate ranges. See
@@ -214,6 +219,20 @@ who may transfer what. See <a href="/wiki/territory/">territory</a>.</li>
 </ul>
 <p>This is why phrasing matters mechanically and not just narratively: a clearly-specified order is
 one the game can turn into a concrete change.</p>
+<p class="beta-note"><b>On beta, three more kinds of order are carried out directly:</b></p><ul>
+<li><strong>Troops on a battlefield.</strong> Where your troops are fighting on a
+<a href="/wiki/war-room/">battlefield</a>, an order such as <em>&quot;the north digs in, the south pushes for the
+city&quot;</em> reaches them in the same skip: the period is fought again with it before the events are
+written, so the events tell the war as it went with your order. That costs one request more,
+and only in a skip where an order commands troops. The War Room commands them directly.</li>
+<li><strong>Annexation.</strong> An order to annex a region or a country, answered by an event that says the
+annexation is done but carries no change to the map, moves the region or the whole country to
+you all the same.</li>
+<li><strong>Your agents.</strong> An agent already in place takes its own orders — what to collect on, and
+operations such as sabotage or recruiting a source — from the <strong>Intelligence</strong> tab of the
+Diplomacy panel, each with its odds of success and its risk of capture shown first. See
+<a href="/wiki/espionage/">espionage</a>.</li>
+</ul>
 <h2 id="orders-are-not-the-only-lever">Orders are not the only lever</h2>
 <p>Plenty of a campaign happens in <a href="/wiki/diplomacy/">diplomacy</a> rather than the order queue. A
 conversation that talks a neighbour into an alliance does more than an order announcing that you
@@ -230,7 +249,7 @@ want one. Use both.</p>
         <a class="next" href="/wiki/events/"><span>Next →</span><b>Events &amp; history</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

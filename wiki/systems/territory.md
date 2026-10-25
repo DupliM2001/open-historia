@@ -7,7 +7,8 @@ them differently.
 Whoever administers a region owns it as far as the map is concerned: the region is painted in
 their colour, it counts as their territory, and their units sit on it without asking.
 
-Control moves when an event says it moves. That is the only route. A time skip produces an event
+Control moves when an event says it moves. On the stable build that is the only route (beta adds
+battlefields and peace terms, below). A time skip produces an event
 narrating a conquest, an annexation, a treaty cession or a peaceful hand-over, and the border
 change ships attached to that event. There is no separate "conquer" button, and no event can
 describe territory changing hands without actually changing it — the narration and the mechanical
@@ -24,6 +25,21 @@ front moves this far and to carry the rest on.
 
 You can also move control by hand from the [cheats panel](/wiki/cheats/), which is the
 game-master route rather than the gameplay one.
+
+<p class="beta-note"><b>On beta, troops take the ground a battlefield fights over.</b> Where a
+land war is fought on a <a href="/wiki/war-room/">battlefield</a>, the ground changes hands only
+where troops take it: each troop paints the ground it crosses in its side's colour, and a capture
+the story writes for a region on that battlefield is left out, so the troops take it or they do
+not. A region counts as taken once its new holder holds more than 60% of it, and changes colour on
+the map once all of it is held. Ground taken on a battlefield is drawn as its holder's, not in the
+stripes of a dispute; its card says who controls it and whose it lawfully is.</p>
+
+<p class="beta-note"><b>On beta, more of the story reaches the map.</b> A country the story founds
+as another dissolves, such as a republic replacing an empire, takes the old country's land. An
+annexation you ordered reaches the map once a turn tells of it happening, when the place it names
+is unambiguous. And a war that ends <a href="/wiki/war/#ending-a-war-peace-on-terms">on terms</a>
+settles the ground as the terms say, even from a ceasefire or an armistice: what each side holds
+becomes its own, or every region goes back to whose it lawfully was.</p>
 
 ![Disputed territory on the map](/wiki/img/territory-dispute.jpg)
 *Western Sahara, between Morocco and Mauritania, drawn in faint diagonal stripes — a region more than one country claims.*
@@ -85,9 +101,11 @@ transfers.
 Territory is not a resource you spend. There is no per-province income to collect and no
 buildings to place on it. What it gives you is:
 
-- **Standing.** A larger, more coherent country is treated as a more consequential one.
-- **Position.** Units act within [era-appropriate ranges](/wiki/military/); where your border is
-  determines what you can reach.
+- **Standing.** A larger, more coherent country is treated as a more consequential one. (On beta
+  its military strength is never counted from its land: see
+  [men, money and military power](/wiki/military/#men-money-and-military-power).)
+- **Position.** Units travel at [era-appropriate speeds](/wiki/military/); where your border is
+  determines what you can reach quickly.
 - **Statistics.** Population, economy and the strategic indices reflect what you hold. See
   [national statistics](/wiki/statistics/).
 - **Grievances.** Yours and other people's.
@@ -134,5 +152,6 @@ land goes to whoever holds the ground it stands on.</p>
 ## Next
 
 - [Military and combat](/wiki/military/) — taking ground.
+- [The War Room](/wiki/war-room/) — where troops take ground on a battlefield, on beta.
 - [Relations, treaties and war](/wiki/war/) — the ledgers that formalise who is fighting whom.
 - [The map editor](/wiki/editor/) — drawing regions and disputes yourself.

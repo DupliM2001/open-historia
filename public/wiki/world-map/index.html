@@ -9,13 +9,13 @@
   <link rel="icon" type="image/jpeg" href="/logo.png" />
   <title>The World Map — Open Historia Wiki</title>
   <link rel="canonical" href="https://openhistoria.com/wiki/world-map/" />
-  <meta name="description" content="Reading the map: political fills, striped disputes, labels, the 3D globe, terrain and basemaps." />
+  <meta name="description" content="Reading the map: political fills, striped disputes, groups&#39; areas, labels, projections, the 3D globe, terrain and basemaps — and on beta the diplomatic map, war, seasons and weather." />
 
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="Open Historia" />
   <meta property="og:url" content="https://openhistoria.com/wiki/world-map/" />
   <meta property="og:title" content="The World Map — Open Historia Wiki" />
-  <meta property="og:description" content="Reading the map: political fills, striped disputes, labels, the 3D globe, terrain and basemaps." />
+  <meta property="og:description" content="Reading the map: political fills, striped disputes, groups&#39; areas, labels, projections, the 3D globe, terrain and basemaps — and on beta the diplomatic map, war, seasons and weather." />
   <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
   <meta property="og:image:type" content="image/jpeg" />
   <meta property="og:image:width" content="1280" />
@@ -23,7 +23,7 @@
 
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="The World Map — Open Historia Wiki" />
-  <meta name="twitter:description" content="Reading the map: political fills, striped disputes, labels, the 3D globe, terrain and basemaps." />
+  <meta name="twitter:description" content="Reading the map: political fills, striped disputes, groups&#39; areas, labels, projections, the 3D globe, terrain and basemaps — and on beta the diplomatic map, war, seasons and weather." />
   <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
 
   <link rel="stylesheet" href="/fonts/fonts.css" />
@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -110,9 +110,9 @@
       <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> The World Map
     </nav>
     <h1>The World Map</h1>
-    <p class="tagline">Reading the map: political fills, striped disputes, labels, the 3D globe, terrain and basemaps.</p>
+    <p class="tagline">Reading the map: political fills, striped disputes, groups&#39; areas, labels, projections, the 3D globe, terrain and basemaps — and on beta the diplomatic map, war, seasons and weather.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#political-fills">Political fills</a></li><li class="d2"><a href="#striped-regions-mean-a-dispute">Striped regions mean a dispute</a></li><li class="d2"><a href="#labels">Labels</a></li><li class="d2"><a href="#zoom-and-bounds">Zoom and bounds</a></li><li class="d2"><a href="#basemaps">Basemaps</a></li><li class="d2"><a href="#the-3d-globe">The 3D globe</a></li><li class="d2"><a href="#3d-terrain">3D terrain</a></li><li class="d2"><a href="#custom-backgrounds">Custom backgrounds</a></li><li class="d2"><a href="#clicking-things">Clicking things</a></li><li class="d2"><a href="#performance">Performance</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#political-fills">Political fills</a></li><li class="d2"><a href="#striped-regions-mean-a-dispute">Striped regions mean a dispute</a></li><li class="d2"><a href="#groups39-areas">Groups&#39; areas</a></li><li class="d2"><a href="#map-modes">Map modes</a></li><li class="d2"><a href="#war-on-the-map">War on the map</a></li><li class="d2"><a href="#labels">Labels</a></li><li class="d2"><a href="#zoom-and-bounds">Zoom and bounds</a></li><li class="d2"><a href="#basemaps">Basemaps</a></li><li class="d2"><a href="#the-3d-globe">The 3D globe</a></li><li class="d2"><a href="#3d-terrain">3D terrain</a></li><li class="d2"><a href="#custom-backgrounds">Custom backgrounds</a></li><li class="d2"><a href="#seasons-and-weather">Seasons and weather</a></li><li class="d2"><a href="#clicking-things">Clicking things</a></li><li class="d2"><a href="#performance">Performance</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>The map is the game&#39;s main display and its main control. Everything on it is clickable, and the
 way it is coloured tells you who holds what.</p>
 <h2 id="political-fills">Political fills</h2>
@@ -134,16 +134,44 @@ picked one — and why two countries occasionally land on similar shades.</p>
 colour of whoever actually administers it with the colours of the claimants.</p>
 <p>This is a real mechanic, not decoration — see <a href="/wiki/territory/">territory</a> for the difference
 between holding ground and being acknowledged as its owner.</p>
+<h2 id="groups39-areas">Groups&#39; areas</h2>
+<p>Not everything that holds ground is a country. A <strong>group</strong> — a cartel, a militia, a movement, an
+outbreak — can control an area without owning it. Its area is drawn over the countries&#39; colours
+with a light tint in the group&#39;s colour, an outline around the whole area and the group&#39;s name;
+the regions in it stay their countries&#39;, and nothing about it is a border. Click a region inside
+one and its card shows <strong>Group control</strong>, with the group&#39;s name and what it is. The story creates,
+moves and ends groups as it goes. On beta a scenario or a game can switch groups off, and then no
+area is drawn.</p>
+<h2 id="map-modes">Map modes</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>On beta the map has two modes, switched at the bottom right under the advisor&#39;s button or in
+<strong>Settings → Map → Map mode</strong>:</p>
+<ul>
+<li><strong>Political</strong> — every country in its own colour, as described above.</li>
+<li><strong>Diplomatic</strong> — every country, and the ground taken on a battlefield, in the colour of where it
+stands with you. A legend beside the switch says what each colour means: <strong>You</strong>,
+<strong>Puppets</strong>, <strong>Allies</strong>, <strong>Friendly / Trade</strong>, <strong>Hostile</strong>, <strong>At War</strong> and <strong>Neutral</strong>.</li>
+</ul>
+<p>Each time the game opens, the map starts on Political.</p>
+<h2 id="war-on-the-map">War on the map</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>On beta, where a land war is fought on a battlefield, the battlefield is drawn over the map: the
+ground each side has taken, painted in the colour of whose troops took it; the troops as counters
+where they stand; and behind them arrows along the way they have come. The front is where the
+colours meet. Aircraft circle over battlefields that have them, a battle at sea is marked where it
+was fought with a ring and a cross, a blockading fleet has a dashed ring round the water it closes,
+and a missile or bombing raid an event tells of is flown across the map when it happens. See
+<a href="/wiki/war-room/">the War Room</a> and <a href="/wiki/war-at-sea/">war at sea</a>.</p>
 <h2 id="labels">Labels</h2>
 <p>Each country gets <strong>one label</strong>: curved along its territory where it fits, a straight one where
 it does not, placed so compact countries read horizontally and long ones follow their length.
 Detached land of consequence — Alaska, Kalimantan, Greenland — carries its owner&#39;s name as well.
 Labels use the name the scenario gives the country, so a renamed country is labelled by its new
-name. They scale with the map and fade out by zoom 7.5, once the provinces read on their own.
-Cities appear from about zoom 3.4 and get more numerous as you go in.</p>
+name. They scale with the map and fade out by zoom 7.5, once the provinces read on their own (on
+beta they begin to fade at zoom 5 and are gone by 6.2). Cities appear from about zoom 3.4 and get
+more numerous as you go in.</p>
 <p>Scenario authors can set the label font, letter colour and border colour for their world, so a
 custom map may look quite different from Modern Day.</p>
-<p>You can turn country labels off, or override the label font, in <strong>Settings → Map</strong>.</p>
+<p>You can turn country labels off (<strong>Hide country labels</strong>), or override the label font, in
+<strong>Settings → Map</strong>.</p>
 <h2 id="zoom-and-bounds">Zoom and bounds</h2>
 <p>The camera runs from zoom <strong>2.25</strong> (the whole world) to <strong>16</strong> (street level, where the basemap
 supports it). Vertical panning is bounded at roughly 80°S to 85°N — there is no reason to fly off
@@ -217,10 +245,17 @@ fourteen others:</p>
 </tr>
 </tbody></table></div>
 <p>Your choice is stored per browser and overrides the scenario&#39;s; it applies immediately. Setting
-it back to Scenario default hands control back to the scenario.</p>
+it back to Scenario default hands control back to the scenario. A scenario drawn on a map of its
+own — a picture, a drawn map, the plain sea of a flat sheet — keeps it: there the list is greyed
+out and says so.</p>
 <p>Not every basemap has imagery at every zoom — Physical stops at zoom 8, Terrain and Shaded Relief
 at 13. Past that the game upscales the last available tiles rather than showing nothing.</p>
-<h2 id="the-3d-globe">The 3D globe</h2>
+<p class="beta-note"><b>On beta the list is the scenario's maps.</b> In a game, <b>Basemap</b>
+offers its scenario's starting map, any maps of its own, and the built-in ones it allows — every
+one on a real-world scenario, none on an invented one — and your pick is kept for that game only.
+The main menu's Settings has <b>Use my default basemap</b>, a built-in map every game starts on
+wherever its scenario offers it. Beta also has a fifteenth built-in map, <b>Midnight Terrain</b>, a
+very dark physical canvas with no names on it.</p><h2 id="the-3d-globe">The 3D globe</h2>
 <p><strong>Settings → Map → 3D Globe</strong> swaps the flat projection for a sphere.</p>
 <p>It is not just a projection change. The globe carries a real day/night terminator computed from
 the actual subsolar point, a starfield, and a sun sprite — the lighting corresponds to the real
@@ -228,6 +263,8 @@ world clock, refreshed every minute. Left alone, the globe rotates slowly, a ful
 minutes.</p>
 <p>Both the idle rotation and the general motion can be switched off — <strong>Disable idle globe
 rotation</strong>, or <strong>Reduce motion</strong> as an umbrella setting.</p>
+<p>A scenario whose map is a flat sheet rather than a world can switch the globe off for its map;
+the switch then says <em>The 3D globe is disabled for this scenario&#39;s map.</em></p>
 <h2 id="3d-terrain">3D terrain</h2>
 <p><strong>Settings → Map → 3D Terrain</strong>, marked experimental and honestly so. It raises real elevation
 with a heavy 15× exaggeration so that mountain ranges actually read at world scale, plus light
@@ -237,6 +274,31 @@ there.</p>
 <p>A scenario can replace Earth entirely, either with an image pinned to a geographic extent or
 with its own vector artwork. This is how fantasy maps work: the political layer sits on top of a
 world that has nothing to do with this planet.</p>
+<p>A scenario&#39;s map can also keep the <strong>projection</strong> it was drawn in — Mercator, Equirectangular,
+Miller, Gall-Peters, Robinson, Natural Earth, Equal Earth, Mollweide, Sinusoidal, or <strong>Freeform</strong>,
+a flat sheet of any shape — so a flat map or an invented world arrives undistorted. Its author can
+also stop the map repeating sideways as you pan past its edge. Projections are set in the
+<a href="/wiki/editor/">map editor</a>.</p>
+<p class="beta-note"><b>On beta a scenario can have detailed maps.</b> These are large terrain
+maps that stay sharp however far you zoom in, drawn over the scenario's own map in the desktop app.
+Each downloads once, is checked, and is shared by every scenario that uses it; on the website, on
+Android, or without the download, you see the drawn map underneath. In a game,
+<b>Settings → Map</b> lists the scenario's maps by name, and under <b>Detailed maps</b> a line says
+which are missing or out of date, with <b>Download…</b> beside it.</p><h2 id="seasons-and-weather">Seasons and weather</h2>
+<p class="beta-note"><b>Beta channel only.</b></p><p>On beta the world has climates. The whole map is faintly tinted by the season each place is in on
+the game&#39;s date — winter a cold blue-white, spring green, summer a warm yellow, autumn amber —
+following climate zones drawn across the world: the real world&#39;s on the built-in maps, or a
+scenario&#39;s own.</p>
+<p>Each zone has one weather at a time — clear, rain, storm, mud, snow, blizzard, frost, heat or
+fog — drawn over the land as a patch in the zone&#39;s own shape, thinning at its edges into the zones
+beside it. Clear skies are the commonest weather nearly everywhere. Nothing is written on the map:
+ask your advisor for the season and the weather. Lakes and seas frozen hard enough for troops to
+cross are drawn as cracked ice, whatever the switches below say, since they change where armies
+can go.</p>
+<p>In <strong>Settings → Map</strong>, <strong>Seasons and weather</strong> (on by default) turns the tint and the weather on
+or off, and <strong>Weather effects</strong> under it the weather alone. A scenario can also fight its wars
+without weather, and then none is drawn. What the weather does to armies is on the
+<a href="/wiki/war-room/">War Room</a> page.</p>
 <h2 id="clicking-things">Clicking things</h2>
 <div class="table-scroll"><table>
 <thead>
@@ -247,7 +309,7 @@ world that has nothing to do with this planet.</p>
 </thead>
 <tbody><tr>
 <td><strong>A region</strong></td>
-<td>A card naming the country and the region, with <strong>💬</strong> to open a chat, <strong>⧉</strong> to copy the name and <strong>ⓘ</strong> to open the country&#39;s panel.</td>
+<td>A card naming the country and the region, with <strong>💬</strong> to open a chat, <strong>⧉</strong> to copy the name and <strong>ⓘ</strong> to open the country&#39;s panel. An occupied or contested region also shows who is sovereign, who controls it and who claims it, and a region in a group&#39;s area names the group.</td>
 </tr>
 <tr>
 <td><strong>A country&#39;s panel</strong></td>
@@ -272,7 +334,11 @@ world that has nothing to do with this planet.</p>
 </ul>
 <p>The map caches a bounded number of tiles deliberately, to avoid running a browser tab out of
 memory on a long campaign.</p>
-<h2 id="next">Next</h2>
+<p class="beta-note"><b>On beta, Settings → Map has Performance mode.</b> <b>Auto</b> picks
+<b>Low memory</b> in the Android app, on a touch screen with no mouse, and on a device with 4 GB of
+memory or less: the map then loads in smaller steps with fewer workers. <b>Full</b> is faster on a
+strong tablet, and Low memory can steady a weak computer. A change applies after the game is
+reloaded.</p><h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/territory/">Territory</a> — what the stripes actually mean.</li>
 <li><a href="/wiki/cities/">Cities and structures</a> — the things drawn on top.</li>
@@ -284,7 +350,7 @@ memory on a long campaign.</p>
         <a class="next" href="/wiki/time/"><span>Next →</span><b>Time &amp; turns</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

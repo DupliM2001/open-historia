@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Visit counters: asked for first, loaded only after a yes (consent.js). -->
+  <script defer src="/consent.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111113" />
+  <link rel="icon" type="image/jpeg" href="/logo.png" />
+  <title>The War Room: Battlefields and Fronts — Open Historia Wiki</title>
+  <link rel="canonical" href="https://openhistoria.com/wiki/war-room/" />
+  <meta name="description" content="Land wars fought by troops on real ground: how battlefields open, the War Room&#39;s tools, fronts and swarms, fortified lines, supply and what the difficulty changes." />
+
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="Open Historia" />
+  <meta property="og:url" content="https://openhistoria.com/wiki/war-room/" />
+  <meta property="og:title" content="The War Room: Battlefields and Fronts — Open Historia Wiki" />
+  <meta property="og:description" content="Land wars fought by troops on real ground: how battlefields open, the War Room&#39;s tools, fronts and swarms, fortified lines, supply and what the difficulty changes." />
+  <meta property="og:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="720" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="The War Room: Battlefields and Fronts — Open Historia Wiki" />
+  <meta name="twitter:description" content="Land wars fought by troops on real ground: how battlefields open, the War Room&#39;s tools, fronts and swarms, fortified lines, supply and what the difficulty changes." />
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/Open-Historia/open-historia/main/public/loading_screen.jpg" />
+
+  <link rel="stylesheet" href="/fonts/fonts.css" />
+  <link rel="stylesheet" href="/wiki.css" />
+
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Open Historia",
+      "item": "https://openhistoria.com/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Wiki",
+      "item": "https://openhistoria.com/wiki/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "The War Room: Battlefields and Fronts",
+      "item": "https://openhistoria.com/wiki/war-room/"
+    }
+  ]
+}
+  </script>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><img class="mark" src="/icon-192.png" alt="" width="28" height="28" /> Open Historia</a>
+    <nav class="nav-links">
+      <a href="/#features">Features</a>
+      <a class="nav-keep" href="/wiki/">Wiki</a>
+      <a href="/#download">Download</a>
+      <a href="https://github.com/Open-Historia/open-historia" target="_blank" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="/play/">▶ Play</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap wiki-layout">
+  <aside class="wiki-sidebar">
+    <div class="wiki-search">
+      <input type="search" id="wikiSearch" placeholder="Search the wiki…" aria-label="Search the wiki" autocomplete="off" />
+      <ul id="wikiResults" hidden></ul>
+    </div>
+    <ul class="wiki-nav">
+        <li class="sec"><ul><li><a href="/wiki/">Wiki home</a></li></ul></li>
+        <li class="sec">
+          <span>Getting started</span>
+          <ul><li><a href="/wiki/install/">Install</a></li><li><a href="/wiki/ai-setup/">Connect an AI</a></li><li><a href="/wiki/how-to-play/">How to play</a></li><li><a href="/wiki/first-campaign/">Your first campaign</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Playing</span>
+          <ul><li><a href="/wiki/new-game/">Starting a game</a></li><li><a href="/wiki/interface/">The interface</a></li><li><a href="/wiki/world-map/">The world map</a></li><li><a href="/wiki/time/">Time &amp; turns</a></li><li><a href="/wiki/orders/">Giving orders</a></li><li><a href="/wiki/events/">Events &amp; history</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Game systems</span>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/" class="on" aria-current="page">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Tools</span>
+          <ul><li><a href="/wiki/settings/">Settings</a></li><li><a href="/wiki/cheats/">Cheats &amp; GM console</a></li><li><a href="/wiki/saves/">Saves &amp; rollback</a></li><li><a href="/wiki/editor/">The map editor</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Sharing &amp; hosting</span>
+          <ul><li><a href="/wiki/community-hub/">The community hub</a></li><li><a href="/wiki/self-hosting/">Hosting a server</a></li><li><a href="/wiki/mobile/">Playing on your phone</a></li></ul>
+        </li>
+        <li class="sec">
+          <span>Reference</span>
+          <ul><li><a href="/wiki/ai-providers/">AI providers &amp; models</a></li><li><a href="/wiki/troubleshooting/">Troubleshooting</a></li></ul>
+        </li>
+      </ul>
+  </aside>
+
+  <main class="wiki-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Open Historia</a> <span aria-hidden="true">/</span> <a href="/wiki/">Wiki</a> <span aria-hidden="true">/</span> The War Room: Battlefields and Fronts
+    </nav>
+    <h1>The War Room: Battlefields and Fronts</h1>
+    <p class="tagline">Land wars fought by troops on real ground: how battlefields open, the War Room&#39;s tools, fronts and swarms, fortified lines, supply and what the difficulty changes.</p>
+    <p class="beta-note"><b>Beta channel only.</b> This system is not in the stable release yet. To try it, install the
+      <a href="https://github.com/Open-Historia/open-historia/releases/tag/desktop-beta">beta build</a>, which installs alongside
+      the stable app and keeps its own saves.</p>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#battlefields">Battlefields</a></li><li class="d2"><a href="#opening-the-war-room">Opening the War Room</a></li><li class="d2"><a href="#the-troop-tools">The troop tools</a></li><li class="d2"><a href="#deploy-a-front-or-a-swarm">Deploy: a front or a swarm</a></li><li class="d2"><a href="#fortified-lines">Fortified lines</a></li><li class="d2"><a href="#supply">Supply</a></li><li class="d2"><a href="#the-panel">The panel</a></li><li class="d2"><a href="#orders-from-outside-the-war-room">Orders from outside the War Room</a></li><li class="d2"><a href="#difficulty">Difficulty</a></li><li class="d2"><a href="#reading-a-battlefield">Reading a battlefield</a></li><li class="d2"><a href="#when-a-war-ends">When a war ends</a></li><li class="d2"><a href="#for-scenario-designers">For scenario designers</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <p>On beta the game fights its land wars itself. Where two countries at war hold land that touches,
+a <strong>battlefield</strong> opens: hundreds of troops a side move over the real ground, and who holds what is
+decided by where they go, not by a sentence in an event. The <strong>War Room</strong> is where you command
+yours. On the stable build a land war is told by the time skip and moved by its formations: see
+<a href="/wiki/military/">military and combat</a>.</p>
+<h2 id="battlefields">Battlefields</h2>
+<p>A battlefield opens by itself where the two sides of an active war hold land that touches. A war
+fought overseas opens one too: when the sides do not touch and your land troops already stand on
+the enemy&#39;s land, a battlefield opens where most of them are. Troops carried across the sea and put
+ashore open one round the place they land. At most 12 battlefields are open in a world at once.</p>
+<ul>
+<li><strong>Troops.</strong> Each side is given troops by its strength, up to 400. Your infantry, armour and
+artillery formations near the line join as troops and come back as formations, at the strength
+they ended with, when the battlefield closes. An army musters over weeks: not every troop is
+there on the first day.</li>
+<li><strong>Ground.</strong> Each troop paints the ground it crosses in its side&#39;s colour. Ground cut off from
+every source of supply is filled the day the ring closes if it is empty and under 1,500 km²;
+anything else is a pocket, whose troops fight at a disadvantage, waste away and give up after ten
+days. A place under siege is shut in and holds out for 45 days. A region counts as taken once
+more than 60% of it is held, and changes colour on the map once all of it is. A capture the
+story writes for a region on a battlefield is left out: the troops take it or they do not. See
+<a href="/wiki/territory/">territory</a>.</li>
+<li><strong>Fought before it is told.</strong> When you skip time, the period&#39;s land war is fought first, and the
+time skip&#39;s story is written from what happened, at no extra request.</li>
+<li><strong>Troops tire</strong> as they march and fight and recover at rest. Fortified lines must be broken
+through. Weather and ground matter: rain, storms, mud, snow, blizzards, frost, heat and fog slow
+armies and blunt attacks, harsh winters wear down armies caught out in them, frozen lakes and seas
+can be crossed, and rough ground slows an advance.</li>
+<li><strong>In the air.</strong> Every country at war flies its air arm over the battlefields it fights on. The
+side that holds the sky fights harder below and slows the other&#39;s columns. Yours fly in support of
+your troops; a commander the game runs may instead send its aircraft against your troops or keep
+them on the ground. Each side&#39;s aircraft are drawn circling over the battlefield.</li>
+<li><strong>Under a ceasefire</strong> a battlefield stays, marked as such, and its fighting halts.</li>
+</ul>
+<p>The <strong>Fronts</strong> feature switches all of this on or off for a scenario or a game, in the Features
+tab, with a <strong>Pace of an advance</strong> from 25% to 300% of the usual (100 by default). Off, land war is
+the formations and the regions the story hands over, as on the stable build.</p>
+<h2 id="opening-the-war-room">Opening the War Room</h2>
+<p>While your troops are on a battlefield, a round red <strong>War room</strong> button with crossed swords stands
+beside the toolbar, where the <strong>🔍</strong> search button usually is (search moves over; on a phone the
+button stands above the toolbar). Press it. The War Room takes the whole screen: every other
+control is put away, the map is fitted to the battlefield inside a steel frame whose top bar names
+it, who fights whom and the date, and the panel stands on the right. The <strong>×</strong> in the panel&#39;s head
+shuts it, and so does <strong>Esc</strong> with no tool in hand; the button beside it, <strong>Show the whole
+battlefield</strong>, fits the map again. On a phone the panel fills the screen: <strong>Map</strong> folds it down to
+show the map and the troop tools, and <strong>Generals</strong> brings it back.</p>
+<p><strong>Nothing moves while the War Room is open.</strong> Every order you give here is carried out when time
+next passes. While a turn is being resolved, no orders are taken until it has landed.</p>
+<p>If you fight on more than one battlefield, each has a tab across the top of the panel.</p>
+<h2 id="the-troop-tools">The troop tools</h2>
+<p>The tools for your troops are on a rail down the left of the map. The number at its top is how many
+troops you have picked out. A small plate beside the rail says what the tool in hand wants.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Key</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Select</strong></td>
+<td>Drag a box round your troops on the map to pick them. Hold Shift to add to those picked.</td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td>Draw the way the troops picked out are to go. They follow it as the ground and the enemy allow, each moving by itself.</td>
+</tr>
+<tr>
+<td><strong>Advance</strong></td>
+<td>Send the troops picked out straight forward from where they stand, with no route.</td>
+</tr>
+<tr>
+<td><strong>Dig in</strong></td>
+<td>They entrench where they stand: stronger, but they do not move.</td>
+</tr>
+<tr>
+<td><strong>Hold</strong></td>
+<td>They keep their ground and attack nothing.</td>
+</tr>
+<tr>
+<td><strong>Fall back</strong></td>
+<td>They give ground toward their own rear.</td>
+</tr>
+<tr>
+<td><strong>Release</strong></td>
+<td>Give them back to their stretch of the line, under its general&#39;s orders.</td>
+</tr>
+<tr>
+<td><strong>Withdraw</strong></td>
+<td>They leave the battlefield and go home; with none picked out, all of yours do. The ground stays as it is. Once they are gone the key becomes <strong>Send back</strong>.</td>
+</tr>
+<tr>
+<td><strong>Transport</strong></td>
+<td>Carry the troops picked out by sea, by rail or by air to a place your side has no border with: choose the carrier, then click where.</td>
+</tr>
+<tr>
+<td><strong>Diversion</strong></td>
+<td>Draw a movement you want the other side to believe.</td>
+</tr>
+<tr>
+<td><strong>Deploy</strong></td>
+<td>Choose where your new troops on this battlefield come in, and call up fresh ones.</td>
+</tr>
+<tr>
+<td><strong>Fortify</strong></td>
+<td>Draw a fortified line to be built, then choose how strong.</td>
+</tr>
+<tr>
+<td><strong>Fleets</strong></td>
+<td>Command your fleets at sea. See <a href="/wiki/war-at-sea/">war at sea</a>.</td>
+</tr>
+<tr>
+<td><strong>Supply</strong></td>
+<td>Shade how well supplied the ground is.</td>
+</tr>
+</tbody></table></div>
+<p>A small tab beside the rail tucks it against the edge and brings it out again.</p>
+<p><strong>Routes into other countries.</strong> A route that runs into a country not in this war is an attack on
+it. The panel says so in amber on the route&#39;s row: when your troops reach its border it is at war
+with you, and its land is fought over.</p>
+<p><strong>Transport.</strong> The menu lists only what carries troops in the game&#39;s year, with how many formations
+each carrier takes and how far it goes in a day. One dispatch carries at most 40 formations. The
+troops board when time next passes, and the panel shows the way found for them and how long it
+takes, or why they cannot set out. Enemy fleets and aircraft along the way can catch a transporter.</p>
+<p><strong>Diversions</strong> work only through a spy of theirs you have turned: that agent sends them your
+diversions in place of your plans. If you have turned none, there is nobody to show a diversion to,
+and an agent of theirs you have not caught sends them your real plans. See
+<a href="/wiki/espionage/">espionage</a>.</p>
+<h2 id="deploy-a-front-or-a-swarm">Deploy: a front or a swarm</h2>
+<p>Fronts have not always existed. The <strong>Deploy</strong> tool asks which you want:</p>
+<ul>
+<li><strong>Front</strong>: draw a line. Your new troops here come in along it, on ground your side holds near it.</li>
+<li><strong>Swarm</strong>: click a place. Your new troops gather there as a group under one general of their
+own. Once deployed, a swarm&#39;s troops move and fight one by one like any others. New troops join
+the swarm while it is still near the place; once it has marched on, the next ones gather there as
+a new swarm under a new general.</li>
+</ul>
+<p><strong>Formations to call up</strong> says how many fresh formations the deployment calls up there when time
+next passes, up to 60. Leave it empty for as many as a usual draft brings, or put 0 to only move
+where new troops arrive. A call-up is limited by the men your country has left and the room along
+the front, not by how large your army already is. Levies, drafts and reinforcements keep coming in
+there afterwards.</p>
+<p>The deployment&#39;s card under <strong>Planned movements</strong> says how many are coming, how many came and on
+what day, or why none could be called up: no more men fit to serve, no room left on the
+battlefield, no ground of your side&#39;s along the line, or the fighting halted. <strong>Redraw</strong> and
+<strong>Remove</strong> are on the card.</p>
+<p>Unless the scenario says otherwise, a war&#39;s troops are raised as swarms in games set before 1900
+and along fronts from 1900 on. When the War Room opens, Deploy starts on the way you deployed there
+last, or else on that.</p>
+<h2 id="fortified-lines">Fortified lines</h2>
+<p><strong>Fortify</strong> draws a line you want built, over land your country holds; water may be crossed,
+another country&#39;s land may not, not even a little way past the border. Once it is drawn, a plate
+beside the rail asks how strong it is to be. Level 10, a line nobody passes, is for scenario
+designers alone.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Name</th>
+<th>An assault at two to one breaks through a stretch in about</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>3</td>
+<td>Palisade</td>
+<td>3 days</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Earthworks</td>
+<td>6 days</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Rampart</td>
+<td>10 days</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Redoubts</td>
+<td>15 days</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Bastions</td>
+<td>22 days</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Fortress line</td>
+<td>32 days</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Great wall</td>
+<td>50 days</td>
+</tr>
+</tbody></table></div>
+<p>Siege guns do it in a third of the time. The plate gives the line&#39;s length, how long it takes to
+build and the date it would stand from, reckoned from its length and level, your treasury and the
+men you have, and what it costs of your war resources each month while it is built. Name it if you
+wish, then <strong>Confirm</strong>, <strong>Draw again</strong> or <strong>Cancel</strong>. Your lines are listed in the panel, standing
+or being built; <strong>Stop building it</strong> gives one up. A line holds nothing until it stands. A scenario
+can switch fortified lines off, and then the key is greyed out.</p>
+<h2 id="supply">Supply</h2>
+<p>With <strong>Supply</strong> down, the map shades the ground: yours in amber is stretched past where supplies
+come in full, yours in red is cut off, and pale ground is theirs, cut off. The plate gives each in
+square kilometres. It shows once time has passed on the battlefield.</p>
+<p>Your country&#39;s <strong>war resources</strong> pay for fortified lines while they are built, and its economy
+refills them; a blockade slows that. Running low makes your troops recover more slowly and fight a
+little worse. The figure is on your country&#39;s <strong>⚔ Military</strong> card.</p>
+<h2 id="the-panel">The panel</h2>
+<p>From top to bottom:</p>
+<ul>
+<li><strong>Your generals.</strong> Each commands a body of your troops: how many formations at what strength,
+what they are doing and near where, and how many are cut off. Point at a general to light his
+troops on the map; <strong>Pick</strong> picks them out. His orders are listed under him in amber.</li>
+<li><strong>Weather ahead.</strong> The weather of the next two weeks on this battlefield, a tile a day, then the
+spells and what each does to an army. It is the weather that will come, not a guess: time an
+offensive by it.</li>
+<li><strong>Planned movements.</strong> Every movement your side means to make, drawn on the map as an arrow:
+your routes, your generals&#39; orders, operations on your Projects board that send troops at a place
+here, and your diversions. A route or order has <strong>Pick its troops</strong> and <strong>Call it off</strong>. A Board
+operation can be redrawn (<strong>Redraw</strong>, <strong>Suggested way</strong>), held back (<strong>Hold it back</strong>, <strong>Let it go
+ahead</strong>), or sent again once it is over (<strong>Send it again</strong>). Under them, <strong>Rehearse the next week</strong>
+fights the next seven days ahead of time with your orders as they stand: the map shades what you
+would take in green and lose in red, and the panel lists the towns taken and lost, troops cut
+off, and each side&#39;s strength before and after. Nothing is written, and the next turn&#39;s story can
+still change it.</li>
+<li><strong>Under way.</strong> Movements time has already passed over. Their arrows are off the map; point at one
+to see what is left of it.</li>
+<li><strong>Allies.</strong> Each country fighting beside you commands its own troops here. <strong>Talk strategy with
+its leader</strong> shuts the War Room and opens a conversation with them.</li>
+<li><strong>Transporters.</strong> Yours, with where each is bound and how it is going (<strong>Call it off</strong> before it
+sets out), and theirs on the way, with <strong>Go after it</strong> to send your forces to intercept it.</li>
+<li><strong>Fleets</strong> and <strong>Fortified lines</strong>, as they stand.</li>
+<li><strong>What is known of theirs.</strong> What the difficulty gives them here, who leads them, and what your
+spies and aircraft have found. An agent inside one of their countries sends their staff&#39;s plan and
+their planned movements; your aircraft over the front see where their troops are heading.</li>
+</ul>
+<p>At the foot, <strong>talk to your generals</strong>. Tell them what you want done in your own words; they answer
+from the real battlefield, may push back, and carry out an order they accept when time next
+passes. Each message is one AI request.</p>
+<h2 id="orders-from-outside-the-war-room">Orders from outside the War Room</h2>
+<p>You do not have to open it. An order you type as an action, such as <em>&quot;the northern army digs in and
+the south pushes for the city&quot;</em>, reaches your troops in the same time skip: the skip fights the
+period again with your order before writing its story, which costs one more request only in a turn
+where your actions command troops. The story also gives orders to the sides nobody plays, can call
+up more troops through drafts and reinforcements, and can send troops by sea, rail or air.</p>
+<p>A side nobody plays has a commander of its own. It looks several plans ahead on a copy of the
+battle and picks the best, weighing ground, towns, capitals, its strength, its supply and troops
+nearly cut off; a deep thrust into its land is answered with a counter-offensive. A front a
+scenario began with keeps the stance its author gave it.</p>
+<h2 id="difficulty">Difficulty</h2>
+<p>The difficulty weighs a battlefield only when a person fights on one side of it, and only the side
+facing that person; a war between countries nobody plays, or between players, is fought on even
+terms. The War Room says what it gives them.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Their troops fight at</th>
+<th>Advance at</th>
+<th>Reserves</th>
+<th>Recover at</th>
+<th>Their commander</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Very Easy</td>
+<td>85%</td>
+<td>90%</td>
+<td>70%</td>
+<td>75%</td>
+<td>a plainer one, who looks less far ahead</td>
+</tr>
+<tr>
+<td>Easy</td>
+<td>93%</td>
+<td>95%</td>
+<td>85%</td>
+<td>90%</td>
+<td>a plainer one</td>
+</tr>
+<tr>
+<td>Medium</td>
+<td>100%</td>
+<td>100%</td>
+<td>100%</td>
+<td>100%</td>
+<td>the best there is</td>
+</tr>
+<tr>
+<td>Hard</td>
+<td>115%</td>
+<td>110%</td>
+<td>130%</td>
+<td>125%</td>
+<td>the best, weighing how you are likely to answer</td>
+</tr>
+<tr>
+<td>Very Hard</td>
+<td>135%</td>
+<td>120%</td>
+<td>175%</td>
+<td>160%</td>
+<td>the same</td>
+</tr>
+<tr>
+<td>Impossible</td>
+<td>175%</td>
+<td>140%</td>
+<td>300%</td>
+<td>250%</td>
+<td>the same</td>
+</tr>
+</tbody></table></div>
+<p>A side short of supplies, under a blockade that has stood for months, or past half war-weary is
+weighed down on top of that. See <a href="/wiki/new-game/">starting a game</a> for what else the levels change.</p>
+<h2 id="reading-a-battlefield">Reading a battlefield</h2>
+<p>On the map a battlefield is three things. The ground each side has taken is painted in its colour
+over the regions, which keep their shapes. Each troop is a counter: a red rim means it is cut off,
+a yellow rim that it is advancing, a dark ring with a pale rim that it is dug in, and a worn troop
+fades. Behind the troops are arrows along the way they came, merged into a few broad ones from far
+off. A turn&#39;s fighting is played back as it went; after that the front skirmishes back and forth
+without anything changing hands until time passes again.</p>
+<p>On the main map the counters show only from close in. The War Room shows every troop from far off,
+and so does the map while the Events panel is open, so you can see where what you are reading
+happened. When an event tells of a missile strike or a bombing, the map plays it, with
+interceptions; it is a picture of what the event did and changes nothing by itself.</p>
+<h2 id="when-a-war-ends">When a war ends</h2>
+<p>When a battlefield you fought on closes, an <strong>after-action report</strong> opens once: how long it was
+fought, each side&#39;s formations over time, what each side took, and the turning points, such as
+offensives, counter-offensives, towns and capitals taken, pockets that surrendered, sieges,
+fortified lines broken through and landings. It stays to be read again under <strong>War reports</strong> in
+the <strong>🤝 Diplomacy</strong> tab of your country panel (open it from your flag). How wars end on terms is on
+<a href="/wiki/war/#ending-a-war-peace-on-terms">relations, treaties and war</a>.</p>
+<h2 id="for-scenario-designers">For scenario designers</h2>
+<p>The scenario editor&#39;s <strong>Fronts</strong> tab sets how a scenario&#39;s wars are fought: <strong>Warfare</strong> (fronts or
+swarms, or by the date), the men a counter stands for, the mustering curve and which mechanics are
+on. It also holds the fronts a scenario begins with (at war from the first day, or a fortified
+border at peace, each side with its stance, its formations, its generals and whether it is
+<strong>Deployed as</strong> a front or swarms), <strong>Scripted outcomes</strong> for a war meant to end one way (that side
+is led by a plainer commander, and good play can still turn it), and <strong>Rate every country</strong> for the
+countries&#39; military figures. See <a href="/wiki/editor/#the-scenario-editor">the scenario editor</a>.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li><a href="/wiki/military/">Military and combat</a> — formations, posture and travel.</li>
+<li><a href="/wiki/war-at-sea/">War at sea</a> — fleets, sea battles and blockades.</li>
+<li><a href="/wiki/war/">Relations, treaties and war</a> — the war ledger, alliances and peace.</li>
+<li><a href="/wiki/territory/">Territory</a> — what a battlefield moves.</li>
+</ul>
+
+    <nav class="wiki-pager" aria-label="Pagination">
+        <a class="prev" href="/wiki/military/"><span>← Previous</span><b>Military &amp; combat</b></a>
+        <a class="next" href="/wiki/war-at-sea/"><span>Next →</span><b>War at sea</b></a>
+      </nav>
+    <p class="wiki-stale">Open Historia is under active development on two channels, and this
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
+      here does not match what you see in the game, trust the game and
+      <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <img class="mark" src="/icon-192.png" alt="" width="22" height="22" loading="lazy" /> <b>Open Historia</b> · AGPL-3.0 licensed ·
+    <a href="/">Home</a> ·
+    <a href="/wiki/">Wiki</a> ·
+    <a href="https://github.com/Open-Historia/open-historia" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">Discord</a> ·
+    <a href="/privacy/">Privacy</a> ·
+    <a href="/privacy/#choices" data-consent-open>Privacy choices</a> ·
+    <a href="/sitemap.xml">Sitemap</a>
+    <p class="foot-legal">Open Historia is an independent, open-source project and is not affiliated with, endorsed, sponsored, approved, or authorized by Pax Historia. Pax Historia has no involvement in the development, operation, or distribution of Open Historia. Pax Historia™ and all associated trademarks, trade names, and logos are the exclusive property of Pax Historia.</p>
+  </div>
+</footer>
+
+<script>
+// Client-side search over a generated index — no dependency, no server, no network call.
+// The index is small enough (a few tens of KB) that a plain substring scan is instant.
+(function () {
+  var input = document.getElementById("wikiSearch");
+  var list = document.getElementById("wikiResults");
+  if (!input || !list) return;
+  var index = null, pending = false;
+
+  function load() {
+    if (index || pending) return;
+    pending = true;
+    fetch("/wiki/search-index.json")
+      .then(function (r) { return r.json(); })
+      .then(function (data) { index = data; pending = false; render(); })
+      .catch(function () { pending = false; });
+  }
+
+  function render() {
+    var q = input.value.trim().toLowerCase();
+    if (!q || !index) { list.hidden = true; list.innerHTML = ""; return; }
+    var hits = [];
+    for (var i = 0; i < index.length && hits.length < 12; i++) {
+      var page = index[i];
+      if (page.haystack.indexOf(q) === -1) continue;
+      // A title match is what the reader almost always meant, so float those first.
+      hits.push({ page: page, rank: page.title.toLowerCase().indexOf(q) === -1 ? 1 : 0 });
+    }
+    hits.sort(function (a, b) { return a.rank - b.rank; });
+    if (hits.length === 0) {
+      list.innerHTML = "<li class='none'>No matches</li>";
+    } else {
+      list.innerHTML = hits.map(function (h) {
+        return "<li><a href='" + h.page.url + "'>" + h.page.title +
+               "<span>" + (h.page.section || "Wiki") + "</span></a></li>";
+      }).join("");
+    }
+    list.hidden = false;
+  }
+
+  input.addEventListener("focus", load);
+  input.addEventListener("input", function () { load(); render(); });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { input.value = ""; list.hidden = true; input.blur(); }
+    if (e.key === "Enter") { var a = list.querySelector("a"); if (a) window.location.href = a.getAttribute("href"); }
+  });
+  document.addEventListener("click", function (e) {
+    if (!list.hidden && !input.contains(e.target) && !list.contains(e.target)) list.hidden = true;
+  });
+})();
+</script>
+</body>
+</html>

@@ -27,24 +27,28 @@ Each carries a status:
 
 | Status | |
 |---|---|
-| `proposed` | Suggested, not yet under way |
-| `active` | Running |
-| `stalled` | Running, but not moving |
-| `paused` | Deliberately halted |
-| `complete` | Finished successfully |
-| `failed` | Finished unsuccessfully |
-| `cancelled` | Abandoned |
+| **Proposed** | Suggested, not yet under way |
+| **Active** | Running |
+| **Stalled** | Running, but not moving |
+| **Paused** | Deliberately halted |
+| **Complete** | Finished successfully |
+| **Failed** | Finished unsuccessfully |
+| **Cancelled** | Abandoned |
 
 The first four are **open** and appear on the default board. The last three are closed and live
 behind a separate view.
+
+Your [agents](/wiki/espionage/) are on the board too: each one in place is a covert operation of
+its own, *Agent in Germany*, opened the moment it is deployed, cancelled when you recall it and
+failed when it is caught.
 
 ## Secrecy
 
 | | |
 |---|---|
-| `public` | Everyone can see it |
-| 🔒 `restricted` | Known, but not openly |
-| 🕵 `covert` | Hidden |
+| Public (no mark) | Everyone can see it |
+| 🔒 Restricted | Known, but not openly |
+| 🕵 Covert | Hidden |
 
 A covert operation you can see on your own board is not visible to the country it targets —
 unless their intelligence service finds it.
@@ -55,23 +59,48 @@ A project carries up to **8 milestones**, each dated and either pending, done or
 next pending one is what the board shows you as the thing to watch.
 
 Milestones can **repeat** — weekly, monthly, quarterly, annual or biennial. Marking a repeating
-milestone done advances it by one interval from *its own* date, so an annual exercise on 1 June
-stays on 1 June rather than drifting. A missed occurrence is deliberately **not** rolled
-forward: it stays pending and is flagged as missed, because a drill you skipped is a fact about
-your country, not a scheduling inconvenience.
+milestone done advances it to its next date on *its own* calendar, so an annual exercise on 1 June
+stays on 1 June rather than drifting, and the card counts how many times it has been done. A
+missed occurrence is deliberately **not** rolled forward: it stays pending and the card flags it,
+**Milestone slipped**, because a drill you skipped is a fact about your country, not a scheduling
+inconvenience.
+
+<p class="beta-note"><b>On beta a date that passes with nothing said is a slip.</b> A milestone
+whose date the time skip reaches without an outcome is marked <i>slipped</i>: late, but not
+missed, and the next skip is asked to say what became of it — reached, slipped again or
+missed.</p>
 
 A project marked **ongoing** is a standing effort with no planned end. It has no target date and
 can never be overdue.
+
+## On each card
+
+Besides its status, progress and next milestone, a card warns you of what the calendar says:
+**⚠ Overdue** once its target date has passed, **⏳ Due in** so many days when a milestone falls
+inside the next month, **Milestone slipped** when one's date went by while it was still pending,
+and **No recent progress** — on another power's entry, **No fresh intelligence** — when it has
+stalled or nothing has been reported of it for three rounds. Under that:
+
+- **🧭 Ask advisor** on your own work, or **What do we know?** on someone else's, has the advisor
+  brief you on it.
+- **⚖ Our options**, on another power's running effort, asks the advisor what you could do about
+  it.
+- **📍 Show on map** takes the camera to where it is happening, when the board knows.
+- **Activity** lists the events behind it, with their dates.
 
 ## What you actually control
 
 Two things, and this is deliberate:
 
-**Priority.** `high`, `normal` or `low`. High means the advisor briefs it first and the
-simulation is told to keep it moving. Low means it is allowed to drift.
+**Priority.** **▲** high, **●** normal or **▼** low, on each of your own cards. High means the
+advisor briefs it first and the simulation is told to keep it moving. Low means it is allowed to
+drift.
 
-**Abandoning it.** Which routes through cancellation — the project stays on the board under
-**Closed**, with the progress it actually reached.
+**Abandoning it.** **Abandon**, then **Confirm abandon?**, which routes through cancellation —
+the project stays on the board under **Closed**, with the progress it actually reached.
+
+Neither is offered on another power's entry: you can watch it and act against it, but its priority
+and its cancellation are not yours to set.
 
 You do **not** author a project's content. Projects are written *by* the world — by events, by
 your intelligence service, and by the advisor — in response to what your country is doing. You
@@ -112,9 +141,14 @@ about them. Those carry a **verification** state:
 | **Fabricated** | Established as false |
 
 The loop this creates is the best thing on the board. A [turned agent](/wiki/espionage/) feeds
-you planted material. A foreign project opens on your board from it. Later, your
-counter-intelligence realises that source was compromised, and the entry is stamped
-**Doubtful** — the engine can raise the doubt but it cannot settle it.
+you planted material. A foreign project opens on your board from it. Later, that source is found
+to be compromised, and the entry is stamped **Doubtful** and stalls — the engine can raise the
+doubt but it cannot settle it. On the stable build the stamp comes as soon as the source is turned
+or your analysts suspect it.
+
+<p class="beta-note"><b>On beta a turned agent's reports stay trusted until your own service
+catches on.</b> The stamp comes only when your analysts suspect the source, or the agent is caught
+after having been turned: the board never knows more than your service does.</p>
 
 The only way to resolve it is to get a **fresh** agent into that country and look again. Until
 you do, you are planning against something that may not exist.
@@ -132,9 +166,18 @@ evicted first**, oldest by last update — your active programmes are never drop
 
 ## Filtering
 
-The board filters by owner (yours or foreign), free text, and tag chips, with several sort
-orders and a separate **Closed** view. On a long campaign with a busy intelligence service you
+The board filters by owner — **All**, **Mine** (where it opens) or **Foreign**, once there is
+anything foreign on it — by free text, and by tag chips, and sorts by **Recently updated**,
+**Priority**, **Next milestone**, **Progress**, **Name** or **Status**. **Closed** switches to the
+finished entries, and **← Running** back. On a long campaign with a busy intelligence service you
 will need them.
+
+<p class="beta-note"><b>On beta the tags sit behind one Tags button</b>: a menu you tick them in,
+with a box to find one once there are many and <b>Clear selection</b>, so a long campaign's tags no
+longer push the projects off the panel. An entry shows if it carries any of the ticked tags.</p>
+
+**🧭 Ask the advisor to review or extend the board**, at the foot of the list, has the advisor fill
+gaps a long campaign has left.
 
 ## Next
 

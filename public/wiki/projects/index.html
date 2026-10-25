@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/" class="on" aria-current="page">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/" class="on" aria-current="page">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -112,7 +112,7 @@
     <h1>Projects and Operations</h1>
     <p class="tagline">Long-running efforts that span turns: research programmes, construction, covert operations and campaigns.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#projects-and-operations">Projects and operations</a></li><li class="d2"><a href="#secrecy">Secrecy</a></li><li class="d2"><a href="#milestones">Milestones</a></li><li class="d2"><a href="#what-you-actually-control">What you actually control</a></li><li class="d2"><a href="#completion-has-consequences">Completion has consequences</a></li><li class="d2"><a href="#foreign-projects-and-whether-to-believe-them">Foreign projects, and whether to believe them</a></li><li class="d2"><a href="#limits">Limits</a></li><li class="d2"><a href="#filtering">Filtering</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#projects-and-operations">Projects and operations</a></li><li class="d2"><a href="#secrecy">Secrecy</a></li><li class="d2"><a href="#milestones">Milestones</a></li><li class="d2"><a href="#on-each-card">On each card</a></li><li class="d2"><a href="#what-you-actually-control">What you actually control</a></li><li class="d2"><a href="#completion-has-consequences">Completion has consequences</a></li><li class="d2"><a href="#foreign-projects-and-whether-to-believe-them">Foreign projects, and whether to believe them</a></li><li class="d2"><a href="#limits">Limits</a></li><li class="d2"><a href="#filtering">Filtering</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Some things a country does cannot happen in one turn. A nuclear programme, a canal, a rearmament
 plan, a decade-long insurgency, a covert operation to destabilise a neighbour — these are
 <em>efforts</em>, not actions, and they get their own board.</p>
@@ -142,36 +142,39 @@ something, generally.</li>
 </tr>
 </thead>
 <tbody><tr>
-<td><code>proposed</code></td>
+<td><strong>Proposed</strong></td>
 <td>Suggested, not yet under way</td>
 </tr>
 <tr>
-<td><code>active</code></td>
+<td><strong>Active</strong></td>
 <td>Running</td>
 </tr>
 <tr>
-<td><code>stalled</code></td>
+<td><strong>Stalled</strong></td>
 <td>Running, but not moving</td>
 </tr>
 <tr>
-<td><code>paused</code></td>
+<td><strong>Paused</strong></td>
 <td>Deliberately halted</td>
 </tr>
 <tr>
-<td><code>complete</code></td>
+<td><strong>Complete</strong></td>
 <td>Finished successfully</td>
 </tr>
 <tr>
-<td><code>failed</code></td>
+<td><strong>Failed</strong></td>
 <td>Finished unsuccessfully</td>
 </tr>
 <tr>
-<td><code>cancelled</code></td>
+<td><strong>Cancelled</strong></td>
 <td>Abandoned</td>
 </tr>
 </tbody></table></div>
 <p>The first four are <strong>open</strong> and appear on the default board. The last three are closed and live
 behind a separate view.</p>
+<p>Your <a href="/wiki/espionage/">agents</a> are on the board too: each one in place is a covert operation of
+its own, <em>Agent in Germany</em>, opened the moment it is deployed, cancelled when you recall it and
+failed when it is caught.</p>
 <h2 id="secrecy">Secrecy</h2>
 <div class="table-scroll"><table>
 <thead>
@@ -181,15 +184,15 @@ behind a separate view.</p>
 </tr>
 </thead>
 <tbody><tr>
-<td><code>public</code></td>
+<td>Public (no mark)</td>
 <td>Everyone can see it</td>
 </tr>
 <tr>
-<td>🔒 <code>restricted</code></td>
+<td>🔒 Restricted</td>
 <td>Known, but not openly</td>
 </tr>
 <tr>
-<td>🕵 <code>covert</code></td>
+<td>🕵 Covert</td>
 <td>Hidden</td>
 </tr>
 </tbody></table></div>
@@ -199,18 +202,39 @@ unless their intelligence service finds it.</p>
 <p>A project carries up to <strong>8 milestones</strong>, each dated and either pending, done or missed. The
 next pending one is what the board shows you as the thing to watch.</p>
 <p>Milestones can <strong>repeat</strong> — weekly, monthly, quarterly, annual or biennial. Marking a repeating
-milestone done advances it by one interval from <em>its own</em> date, so an annual exercise on 1 June
-stays on 1 June rather than drifting. A missed occurrence is deliberately <strong>not</strong> rolled
-forward: it stays pending and is flagged as missed, because a drill you skipped is a fact about
-your country, not a scheduling inconvenience.</p>
-<p>A project marked <strong>ongoing</strong> is a standing effort with no planned end. It has no target date and
+milestone done advances it to its next date on <em>its own</em> calendar, so an annual exercise on 1 June
+stays on 1 June rather than drifting, and the card counts how many times it has been done. A
+missed occurrence is deliberately <strong>not</strong> rolled forward: it stays pending and the card flags it,
+<strong>Milestone slipped</strong>, because a drill you skipped is a fact about your country, not a scheduling
+inconvenience.</p>
+<p class="beta-note"><b>On beta a date that passes with nothing said is a slip.</b> A milestone
+whose date the time skip reaches without an outcome is marked <i>slipped</i>: late, but not
+missed, and the next skip is asked to say what became of it — reached, slipped again or
+missed.</p><p>A project marked <strong>ongoing</strong> is a standing effort with no planned end. It has no target date and
 can never be overdue.</p>
+<h2 id="on-each-card">On each card</h2>
+<p>Besides its status, progress and next milestone, a card warns you of what the calendar says:
+<strong>⚠ Overdue</strong> once its target date has passed, <strong>⏳ Due in</strong> so many days when a milestone falls
+inside the next month, <strong>Milestone slipped</strong> when one&#39;s date went by while it was still pending,
+and <strong>No recent progress</strong> — on another power&#39;s entry, <strong>No fresh intelligence</strong> — when it has
+stalled or nothing has been reported of it for three rounds. Under that:</p>
+<ul>
+<li><strong>🧭 Ask advisor</strong> on your own work, or <strong>What do we know?</strong> on someone else&#39;s, has the advisor
+brief you on it.</li>
+<li><strong>⚖ Our options</strong>, on another power&#39;s running effort, asks the advisor what you could do about
+it.</li>
+<li><strong>📍 Show on map</strong> takes the camera to where it is happening, when the board knows.</li>
+<li><strong>Activity</strong> lists the events behind it, with their dates.</li>
+</ul>
 <h2 id="what-you-actually-control">What you actually control</h2>
 <p>Two things, and this is deliberate:</p>
-<p><strong>Priority.</strong> <code>high</code>, <code>normal</code> or <code>low</code>. High means the advisor briefs it first and the
-simulation is told to keep it moving. Low means it is allowed to drift.</p>
-<p><strong>Abandoning it.</strong> Which routes through cancellation — the project stays on the board under
-<strong>Closed</strong>, with the progress it actually reached.</p>
+<p><strong>Priority.</strong> <strong>▲</strong> high, <strong>●</strong> normal or <strong>▼</strong> low, on each of your own cards. High means the
+advisor briefs it first and the simulation is told to keep it moving. Low means it is allowed to
+drift.</p>
+<p><strong>Abandoning it.</strong> <strong>Abandon</strong>, then <strong>Confirm abandon?</strong>, which routes through cancellation —
+the project stays on the board under <strong>Closed</strong>, with the progress it actually reached.</p>
+<p>Neither is offered on another power&#39;s entry: you can watch it and act against it, but its priority
+and its cancellation are not yours to set.</p>
 <p>You do <strong>not</strong> author a project&#39;s content. Projects are written <em>by</em> the world — by events, by
 your intelligence service, and by the advisor — in response to what your country is doing. You
 steer them; you do not type them into existence.</p>
@@ -257,10 +281,13 @@ about them. Those carry a <strong>verification</strong> state:</p>
 </tr>
 </tbody></table></div>
 <p>The loop this creates is the best thing on the board. A <a href="/wiki/espionage/">turned agent</a> feeds
-you planted material. A foreign project opens on your board from it. Later, your
-counter-intelligence realises that source was compromised, and the entry is stamped
-<strong>Doubtful</strong> — the engine can raise the doubt but it cannot settle it.</p>
-<p>The only way to resolve it is to get a <strong>fresh</strong> agent into that country and look again. Until
+you planted material. A foreign project opens on your board from it. Later, that source is found
+to be compromised, and the entry is stamped <strong>Doubtful</strong> and stalls — the engine can raise the
+doubt but it cannot settle it. On the stable build the stamp comes as soon as the source is turned
+or your analysts suspect it.</p>
+<p class="beta-note"><b>On beta a turned agent's reports stay trusted until your own service
+catches on.</b> The stamp comes only when your analysts suspect the source, or the agent is caught
+after having been turned: the board never knows more than your service does.</p><p>The only way to resolve it is to get a <strong>fresh</strong> agent into that country and look again. Until
 you do, you are planning against something that may not exist.</p>
 <h2 id="limits">Limits</h2>
 <div class="table-scroll"><table>
@@ -286,9 +313,15 @@ you do, you are planning against something that may not exist.</p>
 <p>The board warns you when you are within ten of the project limit. Past it, <strong>finished work is
 evicted first</strong>, oldest by last update — your active programmes are never dropped to make room.</p>
 <h2 id="filtering">Filtering</h2>
-<p>The board filters by owner (yours or foreign), free text, and tag chips, with several sort
-orders and a separate <strong>Closed</strong> view. On a long campaign with a busy intelligence service you
+<p>The board filters by owner — <strong>All</strong>, <strong>Mine</strong> (where it opens) or <strong>Foreign</strong>, once there is
+anything foreign on it — by free text, and by tag chips, and sorts by <strong>Recently updated</strong>,
+<strong>Priority</strong>, <strong>Next milestone</strong>, <strong>Progress</strong>, <strong>Name</strong> or <strong>Status</strong>. <strong>Closed</strong> switches to the
+finished entries, and <strong>← Running</strong> back. On a long campaign with a busy intelligence service you
 will need them.</p>
+<p class="beta-note"><b>On beta the tags sit behind one Tags button</b>: a menu you tick them in,
+with a box to find one once there are many and <b>Clear selection</b>, so a long campaign's tags no
+longer push the projects off the panel. An entry shows if it carries any of the ticked tags.</p><p><strong>🧭 Ask the advisor to review or extend the board</strong>, at the foot of the list, has the advisor fill
+gaps a long campaign has left.</p>
 <h2 id="next">Next</h2>
 <ul>
 <li><a href="/wiki/espionage/">Espionage</a> — where the foreign entries and the doubt come from.</li>
@@ -301,7 +334,7 @@ will need them.</p>
         <a class="next" href="/wiki/statistics/"><span>Next →</span><b>National statistics</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

@@ -7,9 +7,12 @@ model plays, and a button that advances time.
 1. **Look at the world.** Click countries to read them. Ask your advisor what it thinks.
 2. **Write down what you intend to do.** Orders go in the actions queue, in plain English.
 3. **Talk to people.** Open a chat with any country and negotiate, threaten, or ask questions.
-4. **Skip time.** Choose how far — six hours, a month, a year.
+4. **Skip time.** Choose how far — six hours, a month, a year. However far you go, the skip is
+   one AI request.
 5. **Read what happened.** The world hands you back a set of events, arriving as the model
-   writes them and revealed one at a time, with the map changing as each one lands.
+   writes them and revealed one at a time, with the map changing as each one lands. Each event
+   carries what it changed — the map, units and structures, your orders, your Projects board —
+   and your spies' reports come back in the same answer.
 
 Then you do it again. That is the whole game. Everything else is detail.
 
@@ -70,8 +73,10 @@ theirs and takes the capital"* is not an order — it is you trying to write the
 There is also **Auto-jump**, which lets the model choose the distance — it skips to the next
 moment it thinks you would want to be present for.
 
-Longer skips are not free: the world has to compress more into the same number of events, so
-detail is lost. If something important is in motion, take smaller steps.
+Longer skips are not free: the world has to compress more into fewer events for each month. A
+week is told in three to six events and a month in ten to fifteen, but a whole year in
+twenty-eight to thirty-six, so detail is lost. If something important is in motion, take smaller
+steps.
 
 ## Reading the results
 
@@ -121,6 +126,18 @@ That means:
   events.
 - **Difficulty changes how it treats you**, not what it knows. See
   [starting a game](/wiki/new-game/) for what the six levels actually do.
+
+<p class="beta-note"><b>On beta difficulty decides how things go for you.</b> On Very Easy almost
+everything goes your way, on Medium things happen realistically, and on Impossible almost
+everything goes poorly. A setback always has a cause the story names, and what you order is
+always attempted.</p>
+
+<p class="beta-note"><b>On beta wars are also fought on the ground.</b> Where your country is at
+war with a neighbour, the game fights it out troop by troop on a battlefield before the period's
+story is written. While your troops are on one, a red <b>War Room</b> button appears: there you
+can speak to your generals, pick troops and draw the route they take, fortify a line and call up
+reinforcements. Orders you type as actions reach your troops too. See
+<a href="/wiki/war-room/">the War Room</a>.</p>
 
 ## Where to go next
 

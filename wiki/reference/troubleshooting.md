@@ -8,15 +8,25 @@ explains the problem immediately, and it is what to attach to a bug report.
 
 **In the browser.** The web build streams its map from community-run content nodes. If none is
 reachable you get no map. Reload; if it persists, the node network is having a bad day — try
-again later, or use the desktop app, which stores the map locally.
+again later, or use the desktop or Android app, which keep the map on the device.
 
-**On desktop.** The map data failed to download on first launch. It is about 200 MB fetched
-separately from the installer. Restart the app and let the startup screen finish. From a source
-checkout, run `node scripts/fetch-map-assets.mjs`.
+**On desktop.** The map data failed to download on first launch. It is fetched separately from
+the installer, once, behind the **Setting up Open Historia** screen. Restart the app and let that
+screen finish. From a source checkout, run `node scripts/fetch-map-assets.mjs`.
 
-**A full-screen WebGL warning.** The map cannot render without WebGL. Update your graphics
-drivers; in a browser, check that hardware acceleration is enabled. On a virtual machine or over
-remote desktop, WebGL is often unavailable.
+<p class="beta-note"><b>On beta the setup screen says when the download fails</b>, with
+<b>Try again</b>, or <b>Continue without the map</b> to open the game anyway.</p>
+
+**On Android.** The current app carries the map inside it and needs no connection to draw it.
+The old app, from before 23 September 2026, streamed it from the network like the website; if
+you still have that one, replace it — see [playing on your phone](/wiki/mobile/).
+
+**"WebGL Not Available".** The map cannot render without WebGL. WebGL can drop out for a moment —
+a graphics driver resetting, the computer waking from sleep, a laptop switching graphics card —
+so while the warning is up the game keeps checking for half a minute and reloads by itself as soon
+as WebGL is back. **Reload** on the warning tries again at once. If it stays, update your graphics
+drivers, and in a browser check that hardware acceleration is enabled. On a virtual machine or
+over remote desktop, WebGL is often unavailable.
 
 ## The AI is greyed out or does nothing
 
@@ -27,7 +37,7 @@ Work through these in order:
    `model not found (404)`. Fix it and the mark clears.
 2. **Is the key right?** Paste it fresh; keys often pick up whitespace.
 3. **Is the model name right?** A model you type must exist on that provider. Left blank, OpenAI
-   uses `gpt-5.6-luna` and OpenAI Compatible picks one from the server's list.
+   uses `gpt-6-luna` and OpenAI Compatible picks one from the server's list.
 4. **Is the endpoint right?** Compatible providers need the base URL, usually ending `/v1`.
    An address that points at the service's website rather than its API gets a web page back
    instead of an answer. The error quotes a line of that page and tells you to check the address,
@@ -47,7 +57,12 @@ This is almost always the model failing to produce valid structured output.
   The error says the context window was exceeded and how big the request was. Once a model has
   said how big its window is, the game remembers and does not send it a request that cannot fit:
   the call goes to the next model in the list instead, or, if none can take it, is not sent at
-  all and says so.
+  all and says so. If a model can now take more — a provider raised its limit — open its entry in
+  Settings → AI and press **Forget this window** under **This model only**.
+- **A local model you loaded with a bigger window is still refused.** A model on your own machine
+  or network is never held to a window learned from its refusals, since you set its window when
+  you load it. Older builds did hold it, for a month: forget the window as above, or update the
+  game.
 - **Toggle Strict tool schema** (on the connection, in Settings → AI). Some gateways and local servers handle the strict
   form of structured output badly, and flipping this fixes it outright.
 - **Try a different model on the same provider.** Some are far better at this than others.
@@ -95,7 +110,8 @@ time.
 
 ### A held time skip
 
-This is the one that saves real time. When a long skip is generated in segments and one segment
+This is the one that saves real time. With **Generate long time skips in segments** on
+(Settings → AI; off by default), a skip of 120 days or more is written in parts. When one part
 does not come back, the turn is **held**, not failed:
 
 - Nothing has been written. Your campaign is still on its old date.
@@ -121,6 +137,14 @@ the turn runs again from the start.
 
 The turn is released before the retry runs, so a turn can never be applied twice, and it is only
 held again if the **board** fails a second time.
+
+<p class="beta-note"><b>On beta two more things hold a turn.</b> When the checks after a time
+skip — the ones that move units, ground, structures, the timeline, the board and your agents'
+reports with the events — do not come back, the turn waits: <b>Retry the checks</b>,
+<b>Continue without them</b>, or <b>Discard the turn</b>. And with <b>Stop when my events
+fail</b> on (Settings → AI), a skip in which your own events were refused, or an order got no
+outcome, lists them and waits: <b>Retry the failed events</b>, <b>Retry the whole skip</b>, or
+<b>Keep it and move on</b>.</p>
 
 ### If retrying does not help
 
@@ -164,7 +188,7 @@ again** waits it out on the same model instead: slower, but it keeps your backup
 partway through an answer — the game says so rather than treating it as a model that answered
 with nothing: *"… is overloaded right now. Nothing is wrong with your game, your model or your
 message."* It retries once after five seconds; still busy, that model sits out for ten minutes
-and the next one in your list takes over.
+(a minute on beta) and the next one in your list takes over.
 
 ## CORS errors with a local model
 
@@ -174,7 +198,8 @@ The error will name a blocked cross-origin request.
 - **LM Studio** — make sure the local server is actually started, and check whether it has a
   CORS setting to enable.
 - **llama.cpp** — `llama-server` may need to be started with CORS permitted.
-- **Use the desktop app**, which relays around this automatically. The hosted website cannot.
+- **Use the desktop app**, which relays around this automatically. The Android app reaches a
+  model on your network without it too. The hosted website cannot.
 - **Check `http` vs `https`** and that the port matches.
 
 ## Everything is slow
@@ -186,17 +211,29 @@ The error will name a blocked cross-origin request.
 - Zoom out, or switch to a lighter basemap such as Light Gray Canvas.
 - On the desktop app, close and reopen it — a long session accumulates map tiles.
 
+<p class="beta-note"><b>On beta, try Performance mode</b> in Settings → Map. <b>Low memory</b>
+loads the map in smaller steps with fewer workers, which can steady a weak computer; <b>Full</b>
+is faster on a strong tablet. <b>Auto</b> picks Low memory in the Android app, on a touch screen
+with no mouse, and on a device with 4 GB of memory or less. It applies once the game is
+reloaded.</p>
+
 ## I lost my games
 
 **In the browser** — clearing site data clears your campaigns. There is no server-side
 copy. Grant persistent storage permission when asked.
 
+**On the website, after it moved to https** — a browser keeps `http://openhistoria.com` and
+`https://openhistoria.com` as two sites, each with its own library, so games first played under
+the old http address seemed to vanish once the site sent everyone to https. The game now brings
+them across by itself the first time it opens. Nothing is replaced or deleted: where the same
+game is in both, the old copy arrives beside the new one unless the two are identical.
+
 **On desktop** — saves are files in the app's data directory and are still there. If the library
 looks empty, the app may be pointed at a different data directory.
 
-**After installing the beta** — the beta build keeps a **separate library** by design. Your
-stable campaigns are untouched; they are just not visible from the beta app. Open the stable app
-and they are there.
+**After installing the beta** — the beta, on a computer or on Android, keeps a **separate
+library** by design. Your stable campaigns are untouched; they are just not visible from the beta
+app. Open the stable app and they are there; Export and Import carry a game across.
 
 ## A country is behaving incoherently
 
@@ -211,6 +248,51 @@ The world drifted. Fix it rather than restarting:
 
 See [cheats and the GM console](/wiki/cheats/). Using these is normal; an AI-driven world
 occasionally produces nonsense, and repairing it is part of running a long campaign.
+
+## The game updates when it opens
+
+**On a computer**, opening the desktop app checks for an update first. When there is one, an
+**Updating Open Historia** screen downloads only the parts of the game that changed and restarts
+on the new version, with your games kept. **Open the game now** plays on the version you have;
+the update then installs when you close the game. An update that has failed to download twice at
+launch is not tried at launch again, so a broken one cannot hold every start up: the banner offers
+it once the game is open.
+
+Before it downloads, the stable app reads every file it already has to see what it can keep. From
+a cold disk that can take a few minutes, and the window may be marked **Not Responding**
+meanwhile: let it finish.
+
+<p class="beta-note"><b>On beta that step takes a second or two</b>: an update checks your files
+against the list the last update left, and the window stays responsive throughout. The first
+update after installing the game from its installer still reads every file once.</p>
+
+**On Android**, the stable app offers a new build in a banner; see
+[playing on your phone](/wiki/mobile/#updating) for how each app updates.
+
+## Community hub problems
+
+**"The community hub's list cannot be read yet."** The game lists only what the hub has checked,
+from one index the hub publishes; until it can read that index, it shows nothing rather than
+anything unchecked. Try again later. **"The community hub could not be reached"** is your
+connection.
+
+**A downloaded scenario asks to be updated.** It was downloaded before the hub started checking
+its files, and its card says so. **Update** swaps it for the hub's checked copy — if you have
+edited it, clone it first, because updating replaces your changes. See
+[the community hub](/wiki/community-hub/).
+
+**A new post does not appear.** The hub checks a post's file before listing it, which takes a
+minute or two after posting, and the game reads the hub's list at most every five minutes. A file
+that fails the check is refused with a comment on the post saying why.
+
+**The post refuses your scenario's file.** GitHub takes attachments of up to 25 MB. The usual cause
+is regions imported from another map, which keep every point of their outlines.
+
+<p class="beta-note"><b>On beta the game warns at once</b> when the file it saves for publishing
+is over that limit. In the map editor, select the scenario's most detailed regions and press
+<b>Simplify</b>, which takes them down to the map's own detail and keeps their shared borders
+shared; save, and publish again. Regions you paste or import on beta are simplified as they
+arrive, by a switch on the paste and import panels that is on by default.</p>
 
 ## Windows says the installer is unsafe
 
@@ -239,11 +321,9 @@ a <b>💾 Save logging file</b> button. It saves the whole diagnostics log as a 
 failure's details — for a turn, the model's raw response in full — in a <i>Reported problem</i>
 block at the top. Attach the file. With the diagnostics log turned off there is no log to save, so
 the button copies the one failure instead, under its old label (<b>Copy debugging message</b> or
-<b>Copy for a bug report</b>). The Android app cannot save files, so there it copies the whole log
-and says so.
-
-<p class="beta-note"><b>On beta the Android app saves files too</b>, through Android's share
-sheet, so the log and the game can be attached there as well.</p>
+<b>Copy for a bug report</b>). The Android app saves the file to your phone's Downloads folder,
+under **Open Historia**; if a file cannot be saved, the report goes to the clipboard instead and
+the button says so.
 
 Include your platform, your build (stable or beta), your provider and model, and what you were
 doing.

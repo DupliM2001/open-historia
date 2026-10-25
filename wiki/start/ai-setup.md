@@ -15,6 +15,11 @@ key and paste it in.**
 | **Intelligence reports** | An advisor report on any country you click. |
 | **Combat adjudication** | Battles and their consequences are narrated and applied. |
 
+<p class="beta-note"><b>On beta the game fights land wars itself.</b> Where two sides at war hold
+touching land, their troops fight it out on a battlefield before the period's story is written,
+and the model then tells the war as it went, at no extra request. The model also writes the posts
+behind a region's <b>Listen in</b> phone, one request for each new feed.</p>
+
 Without a provider the game still runs — the map, the editor, saved games and the interface all
 work — but time skips fall back to a small set of canned events and the advisor cannot answer.
 
@@ -38,6 +43,9 @@ Your key is stored in your browser's local storage, or in the desktop app's own 
 never sent to an Open Historia server, never written to your save files, and never included in a
 scenario you export.
 
+<p class="beta-note"><b>On beta the key can be shown as you type it.</b> The eye beside the key
+box, in the prompt and in Settings, shows or hides what you pasted.</p>
+
 ## The five provider types
 
 | Provider | What it is |
@@ -50,6 +58,10 @@ scenario you export.
 
 Most third-party services fall under **OpenAI Compatible**. If a service tells you its base URL
 ends in `/v1` and it takes an `Authorization: Bearer` header, that is the one to pick.
+
+<p class="beta-note"><b>On beta the desktop app has a sixth: Your own Agent.</b> Your own Claude
+Code, Codex, OpenCode or Antigravity CLI answers, on your own subscription and with no API key.
+See <a href="#your-own-agent">your own Agent</a> below.</p>
 
 ### A note on browser restrictions
 
@@ -90,7 +102,7 @@ pay-per-token — there is no free tier.
 ## OpenAI
 
 1. Create a key at [platform.openai.com](https://platform.openai.com) and load some credit.
-2. Provider **OpenAI**, paste the key. With the model left blank it runs `gpt-5.6-luna`, the
+2. Provider **OpenAI**, paste the key. With the model left blank it runs `gpt-6-luna`, the
    model the game is built around; type another name to use that instead.
 
 Requires the desktop or a self-hosted build, because of the browser restriction above.
@@ -130,6 +142,15 @@ which serves models by name, you do not need to clear that out: the game checks 
 path against the names the server lists and uses the matching one. If nothing matches, it sends
 the id unchanged and the server's own "not found" message tells you what it offers.
 
+### Context windows
+
+A model that refuses a request as too long for it teaches the game its context window, and the
+game then keeps from sending it a request it cannot fit. Each entry shows what is known under
+**This model only → Context window (tokens)**: type your own figure there, which beats what was
+learned, or press **Forget this window** after a provider raises its limit. For a model on your
+own machine or network only your own figure counts, so reloading a local model with a bigger
+window needs nothing from you.
+
 ### Be realistic about model size
 
 Open Historia asks a lot of the model: it has to return strictly structured data describing
@@ -155,10 +176,10 @@ name.
 
 ## Backup models
 
-Free tiers give each model a daily allowance, and a time skip uses several requests. When your
-model's allowance runs out, every AI call fails until it resets — even if another model, a paid
-key or a local model would have answered. So you can list backups, and the game carries on
-without you.
+Free tiers give each model a daily allowance, and every time skip, chat and advisor reply spends
+from it. When your model's allowance runs out, every AI call fails until it resets — even if
+another model, a paid key or a local model would have answered. So you can list backups, and the
+game carries on without you.
 
 ![The Models list and Connections](/wiki/img/settings-ai-models.jpg)
 *Settings → AI after pasting a Gemini key: Google's default list of two models on one connection, both Ready.*
@@ -234,10 +255,13 @@ again on the next call — after you top up billing, say.
 - Whether a Gemini "429" is a spent day or a short pause is decided by the quota Google names in
   the error, not guessed.
 
+<p class="beta-note"><b>On beta a busy model sits out for one minute</b>, not ten: ten minutes
+left a whole list idle far longer than a provider stays overloaded.</p>
+
 The first time the game moves down the list, a short notice near the top of the screen says why:
-*gemini-3.7-flash (Main Google) has used today's allowance. Now using gemini-3.6-flash (Main
-Google).* It says so once per switch, not once per call, because the writing may change with the
-model and you should know why.
+*gemini-3.5-flash-lite (Gemini) has used today's allowance. Now using gemini-3.1-flash-lite
+(Gemini).* An entry is named by its model and its connection's name. It says so once per switch,
+not once per call, because the writing may change with the model and you should know why.
 
 When **no** entry can answer — each one Spent or Unusable — a time skip does not start, so you
 do not lose a turn to canned events. It tells you which model comes back first and when, or, if
@@ -292,14 +316,45 @@ serious or repeated breaches. Open Historia never spreads requests across keys t
 Note that Gemini's [limits count per project](https://ai.google.dev/gemini-api/docs/rate-limits),
 not per key, so several keys in one project share the same allowance.
 
+## Your own Agent
+
+<p class="beta-note"><b>Beta channel only, and the desktop app only:</b> the Agent waits on the
+desktop app's own local server, so the website and the Android app do not offer it.</p>
+
+If you pay for Claude Code, Codex, OpenCode or Antigravity CLI, it can answer Open Historia for
+you, on your own subscription, with no API key. In **☰ → Settings → AI**, add an entry to the
+list (or open one) and choose the provider **Your own Agent**, under *Your subscription*. Keep it
+at the top, with an entry that has a key below it. It is not offered in the first-run prompt.
+
+The Agent's settings show the **Agent folder**, with **Open the Agent folder** and a **Copy the
+command for …** button for each Agent. Open a terminal in that folder, start your Agent there,
+signed in with your own account, and type **/answer** whenever something is waiting. One /answer
+answers all of it, a whole time skip included. The first /answer asks which models to use for
+Open Historia; `/answer models` asks again. The game never starts your Agent and never reads its
+sign-in.
+
+- **What it answers** is what you start, one switch each: **Time skips**, **Advisor**,
+  **Diplomacy** (replies to your messages), **Game Master** and **Interactive events**. All are
+  on when you add it.
+- **Everything else goes to the entry below it**: anything switched off, and what the game
+  starts by itself, such as background diplomacy, idle chats and automatic stat tracking. With
+  nothing below it, those don't run, so keep a free Gemini key under it.
+- **Pause my Agent** sends everything to the entry below, for when you are away from your
+  terminal. In a shared game the Agent sits out the same way.
+- **While a skip waits**, the time panel says *Waiting for your Agent*, and **Use API key** sends
+  the rest of that skip on to the next entry instead.
+
 ## Worth knowing
 
 - **You can switch provider at any time**, mid-campaign. Each key is a connection and stays until
   you remove it; move an entry to the top to try it first.
 - **Cancel works.** A time skip that is taking too long can be stopped.
-- **Mind your daily requests.** A free key allows a few hundred a day. **Save AI requests**, on by
-  default, keeps a time skip to one to three of them; Settings → AI → **AI requests** shows how
-  many you have used today. See [settings](/wiki/settings/#ai-requests).
+- **Mind your daily requests.** A free key allows a few hundred a day. A time skip is one request,
+  however far it goes: its events, their changes to the map and your spies' reports all come back
+  in the same answer. Under the skip buttons the time panel counts the requests used today
+  against the day's allowance, and Settings → AI → **AI requests** shows them by task. With
+  **Save AI requests** turned off, the model may look things up before it answers, and a skip can
+  then take up to three. See [settings](/wiki/settings/#ai-requests).
 - **Limit AI generation** (Settings → AI) is off by default. Turned on, it gives up on a stalled
   generation and falls back to a canned event rather than waiting forever. It measures *silence*,
   not total time, so a slow-but-working model is not cut off.

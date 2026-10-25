@@ -3,7 +3,11 @@ accept/decline dialog. You open a chat with a country and talk its leader into s
 fail to.
 
 Find it in the **Chat** panel, **Diplomacy** tab — **Start New Chat** to open a thread — or with
-**💬** on the card when you click a country on the map.
+**💬** on the card when you click a country on the map, or **Open Diplomacy** in a country's
+panel.
+
+<p class="beta-note"><b>On beta the panel is headed Diplomacy</b>, and its tabs are
+<b>Contacts</b> (your threads, with Start New Chat), <b>Institutions</b> and <b>Intelligence</b>.</p>
 
 ## Talking to a country
 ![The diplomacy tab](/wiki/img/diplomacy-threads.jpg)
@@ -68,6 +72,33 @@ bring with it.
 Group threads are where multi-party diplomacy actually happens: mediating between two rivals,
 assembling a coalition, or being ganged up on.
 
+## Institutions
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+On beta, the bodies countries belong to — an alliance, a union, a council of nations — have a tab
+of their own in the Diplomacy panel: **Institutions**. **Your institutions** lists the ones you
+take part in, **View all** every one in the world, and **＋ Found institution** creates a new one: a
+name, a type, a purpose and the governments you invite to found it, with its decision rule
+(simple majority, qualified majority or unanimity) and the rest of its charter under the advanced
+settings.
+
+Open one and it has tabs of its own: **Overview**, **Council**, **Agenda**, **Decisions**,
+**Charter**, **Members** and **Documents**.
+
+- **Council** is the members' own conversation. It reads like a group thread, and the members
+  nobody plays speak, table business and vote in it themselves.
+- **Agenda** is where business is done. **Table a matter** and choose **Open for debate** or
+  **Put to vote now**. On an open proposal you cast your ballot — yes, no or abstain, or veto where
+  the charter gives you one — propose amendments, which its sponsor accepts or rejects, or
+  **Call vote** on one that is ready.
+- **Decisions** keeps what was settled, with every member's ballot and its reasons.
+- **Members** is where you **Request membership** or **Request observer status**, invite other
+  governments, withdraw, or propose a member's expulsion or the institution's dissolution: each a
+  formal procedure under the charter.
+
+Your [advisor](/wiki/advisor/) knows your institutions and can draft your business in them.
+
 ## They contact you
 ![A diplomatic exchange](/wiki/img/diplomacy-thread.jpg)
 *Germany's opening message, in its government's voice and grounded in what the world had just done.*
@@ -117,6 +148,27 @@ answer.
 So if you find yourself in an alliance, you agreed to it. Events remain free to narrate whatever
 other countries do among themselves.
 
+## Peace and calls to arms
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+On beta two decisions do come as cards to accept or decline. They sit over the map until you
+answer them (**Fold away** shrinks them to a button that counts what is waiting):
+
+- **Peace offered.** A country at war with you that is weary enough, or losing its own ground,
+  offers terms — the ground as each side holds it or restored to the old borders, and any
+  reparations — and you **Accept** or **Decline**. A declined offer is not made again for three
+  turns.
+- **Call to arms.** When an ally you are bound to defend is attacked, it calls on you:
+  **Honour the alliance** and you are at war beside it, or **Break the treaty**, which ends it and
+  costs you 15 reputation. A call left unanswered for two turns counts as broken.
+
+You can make the first move too: under each of your wars on the **🤝 Diplomacy** tab of a stat
+sheet, **Propose peace** lets you set the ground and the reparations and **Put these terms**. A
+country nobody plays answers at once, by how the war stands for it and how weary it is; a fresh
+enemy that is not losing refuses. See [alliances that bind](/wiki/war/#alliances-that-bind) and
+[peace on terms](/wiki/war/#ending-a-war-peace-on-terms).
+
 ## Turning talk into outcomes
 
 A conversation on its own changes attitudes. To change the *world*, pair it with an
@@ -131,9 +183,24 @@ tends to produce a campaign where everyone likes you and nothing happens.
 
 ## Reading everyone else's diplomacy
 
-The **Spy** tab of the same panel shows conversations you are *not* part of, as far as your
-intelligence service can read them. That is a whole system of its own — see
-[espionage](/wiki/espionage/).
+The **Spy** tab of the same panel (**Intelligence** on beta) shows conversations you are *not*
+part of, as far as your intelligence service can read them. That is a whole system of its own —
+see [espionage](/wiki/espionage/).
+
+## Listen in
+
+<p class="beta-note"><b>Beta channel only.</b></p>
+
+Leaders are not the only voices. On beta, **Listen in** — on a region's card when you click it on
+the map, and in a country's panel — opens a phone full of what ordinary people who live there are
+posting: the day's news as it reaches a kitchen table, rumours half right, and about one post in
+four about nothing at all. A region's phone has a second tab for the country that holds it,
+**Trending** sums up the talk, and earlier feeds stay further down, by day.
+
+Each new feed is one AI request, made only when a place has nothing kept for that game day or you
+press the refresh button for new posts; opening it again the same day costs nothing. The people
+posting know only what is public. A scenario or a game can switch it off with its **Listen in**
+feature.
 
 ## The ledgers behind the talk
 
@@ -146,13 +213,22 @@ You read them from the **🤝 Diplomacy** block on any country's
 its treaty register and its current wars, for anyone you click on the map. Checking a country's
 existing friendships before you open a thread with them changes how you play.
 
+<p class="beta-note"><b>On beta the map can show the same thing.</b> Switch it from
+<b>Political</b> to <b>Diplomatic</b> at the bottom right, and every country takes the colour of
+where it stands with you — your puppets, allies, friends and trade partners, the hostile, those at
+war with you, and the neutral — with a legend beside the switch.</p>
+
 <p class="beta-note"><b>On beta, an overlord can make demands.</b> In the one-on-one thread
 between a <a href="/wiki/war/#puppets-and-overlords">puppet and its overlord</a>, a message can be a
-demand, answered on a card with Accept, Refuse or an alternative — and only a refusal costs the
-puppet loyalty.</p>
+demand — an overlord marks one with the <b>⚑</b> beside the message box — answered on a card with
+<b>Accept</b>, <b>Refuse</b> or an alternative of the puppet's own (<b>Offer</b>). Only a refusal
+costs the puppet loyalty, and only once; the card stays, so a puppet that thinks better of it can
+still <b>Accept after all</b>. An overlord offered an alternative can <b>Accept alternative</b> or
+<b>Reject</b> it, insisting on the demand or revising it.</p>
 
 ## Next
 
 - [Espionage](/wiki/espionage/) — reading what is said when you are not in the room.
 - [Giving orders](/wiki/orders/) — acting on what you agreed.
+- [Relations, treaties and war](/wiki/war/) — the ledgers, and what happens when talk fails.
 - [Countries and identity](/wiki/countries/) — reputation, tags, and who you are dealing with.

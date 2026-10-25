@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -112,7 +112,7 @@
     <h1>Connecting an AI Provider</h1>
     <p class="tagline">Open Historia is driven by a language model you supply. Set up Gemini, OpenAI, Anthropic, or a local model on your own machine.</p>
     
-    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-the-ai-actually-does">What the AI actually does</a></li><li class="d2"><a href="#where-to-put-the-key">Where to put the key</a></li><li class="d2"><a href="#the-five-provider-types">The five provider types</a></li><li class="d3"><a href="#a-note-on-browser-restrictions">A note on browser restrictions</a></li><li class="d2"><a href="#google-gemini-free-and-the-quickest-start">Google Gemini — free, and the quickest start</a></li><li class="d2"><a href="#anthropic-claude">Anthropic Claude</a></li><li class="d2"><a href="#openai">OpenAI</a></li><li class="d2"><a href="#a-local-model-free-private-offline">A local model — free, private, offline</a></li><li class="d3"><a href="#ollama-easiest">Ollama (easiest)</a></li><li class="d3"><a href="#lm-studio">LM Studio</a></li><li class="d3"><a href="#llamacpp">llama.cpp</a></li><li class="d3"><a href="#be-realistic-about-model-size">Be realistic about model size</a></li><li class="d2"><a href="#other-cloud-services">Other cloud services</a></li><li class="d2"><a href="#backup-models">Backup models</a></li><li class="d3"><a href="#adding-backups">Adding backups</a></li><li class="d3"><a href="#connections">Connections</a></li><li class="d3"><a href="#what-each-entry-says">What each entry says</a></li><li class="d3"><a href="#when-a-model-can39t-answer">When a model can&#39;t answer</a></li><li class="d3"><a href="#rate-limits-wait-or-move-on">Rate limits: wait, or move on</a></li><li class="d3"><a href="#a-model-for-each-task">A model for each task</a></li><li class="d3"><a href="#if-you-set-up-ai-before-the-list-existed">If you set up AI before the list existed</a></li><li class="d3"><a href="#using-more-than-one-google-account">Using more than one Google account</a></li><li class="d2"><a href="#worth-knowing">Worth knowing</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
+    <nav class="wiki-toc" aria-label="On this page"><b>On this page</b><ul><li class="d2"><a href="#what-the-ai-actually-does">What the AI actually does</a></li><li class="d2"><a href="#where-to-put-the-key">Where to put the key</a></li><li class="d2"><a href="#the-five-provider-types">The five provider types</a></li><li class="d3"><a href="#a-note-on-browser-restrictions">A note on browser restrictions</a></li><li class="d2"><a href="#google-gemini-free-and-the-quickest-start">Google Gemini — free, and the quickest start</a></li><li class="d2"><a href="#anthropic-claude">Anthropic Claude</a></li><li class="d2"><a href="#openai">OpenAI</a></li><li class="d2"><a href="#a-local-model-free-private-offline">A local model — free, private, offline</a></li><li class="d3"><a href="#ollama-easiest">Ollama (easiest)</a></li><li class="d3"><a href="#lm-studio">LM Studio</a></li><li class="d3"><a href="#llamacpp">llama.cpp</a></li><li class="d3"><a href="#context-windows">Context windows</a></li><li class="d3"><a href="#be-realistic-about-model-size">Be realistic about model size</a></li><li class="d2"><a href="#other-cloud-services">Other cloud services</a></li><li class="d2"><a href="#backup-models">Backup models</a></li><li class="d3"><a href="#adding-backups">Adding backups</a></li><li class="d3"><a href="#connections">Connections</a></li><li class="d3"><a href="#what-each-entry-says">What each entry says</a></li><li class="d3"><a href="#when-a-model-can39t-answer">When a model can&#39;t answer</a></li><li class="d3"><a href="#rate-limits-wait-or-move-on">Rate limits: wait, or move on</a></li><li class="d3"><a href="#a-model-for-each-task">A model for each task</a></li><li class="d3"><a href="#if-you-set-up-ai-before-the-list-existed">If you set up AI before the list existed</a></li><li class="d3"><a href="#using-more-than-one-google-account">Using more than one Google account</a></li><li class="d2"><a href="#your-own-agent">Your own Agent</a></li><li class="d2"><a href="#worth-knowing">Worth knowing</a></li><li class="d2"><a href="#next">Next</a></li></ul></nav>
     <p>Open Historia does not ship with a model and does not sell you one. You point it at a provider —
 a cloud API you have a key for, or a model running on your own computer — and it uses that for
 everything the world does.</p>
@@ -147,7 +147,10 @@ key and paste it in.</strong></p>
 <td>Battles and their consequences are narrated and applied.</td>
 </tr>
 </tbody></table></div>
-<p>Without a provider the game still runs — the map, the editor, saved games and the interface all
+<p class="beta-note"><b>On beta the game fights land wars itself.</b> Where two sides at war hold
+touching land, their troops fight it out on a battlefield before the period's story is written,
+and the model then tells the war as it went, at no extra request. The model also writes the posts
+behind a region's <b>Listen in</b> phone, one request for each new feed.</p><p>Without a provider the game still runs — the map, the editor, saved games and the interface all
 work — but time skips fall back to a small set of canned events and the advisor cannot answer.</p>
 <h2 id="where-to-put-the-key">Where to put the key</h2>
 <p><strong>The first time you open a campaign without a working model, the game asks.</strong> The
@@ -164,7 +167,8 @@ screen is for <a href="#backup-models">backup models</a>, and you can ignore it 
 <p>Your key is stored in your browser&#39;s local storage, or in the desktop app&#39;s own profile. It is
 never sent to an Open Historia server, never written to your save files, and never included in a
 scenario you export.</p>
-<h2 id="the-five-provider-types">The five provider types</h2>
+<p class="beta-note"><b>On beta the key can be shown as you type it.</b> The eye beside the key
+box, in the prompt and in Settings, shows or hides what you pasted.</p><h2 id="the-five-provider-types">The five provider types</h2>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -195,7 +199,9 @@ scenario you export.</p>
 </tbody></table></div>
 <p>Most third-party services fall under <strong>OpenAI Compatible</strong>. If a service tells you its base URL
 ends in <code>/v1</code> and it takes an <code>Authorization: Bearer</code> header, that is the one to pick.</p>
-<h3 id="a-note-on-browser-restrictions">A note on browser restrictions</h3>
+<p class="beta-note"><b>On beta the desktop app has a sixth: Your own Agent.</b> Your own Claude
+Code, Codex, OpenCode or Antigravity CLI answers, on your own subscription and with no API key.
+See <a href="#your-own-agent">your own Agent</a> below.</p><h3 id="a-note-on-browser-restrictions">A note on browser restrictions</h3>
 <p>Some provider APIs refuse requests made directly from a web page. On the desktop and
 self-hosted builds this is handled for you: the game tries the provider directly, and if the
 browser blocks it, it retries through a relay on your own local server. On
@@ -229,7 +235,7 @@ pay-per-token — there is no free tier.</p>
 <h2 id="openai">OpenAI</h2>
 <ol>
 <li>Create a key at <a href="https://platform.openai.com">platform.openai.com</a> and load some credit.</li>
-<li>Provider <strong>OpenAI</strong>, paste the key. With the model left blank it runs <code>gpt-5.6-luna</code>, the
+<li>Provider <strong>OpenAI</strong>, paste the key. With the model left blank it runs <code>gpt-6-luna</code>, the
 model the game is built around; type another name to use that instead.</li>
 </ol>
 <p>Requires the desktop or a self-hosted build, because of the browser restriction above.</p>
@@ -261,6 +267,13 @@ path such as <code>F:\Models\model.gguf</code> as the model id. If you later run
 which serves models by name, you do not need to clear that out: the game checks a remembered file
 path against the names the server lists and uses the matching one. If nothing matches, it sends
 the id unchanged and the server&#39;s own &quot;not found&quot; message tells you what it offers.</p>
+<h3 id="context-windows">Context windows</h3>
+<p>A model that refuses a request as too long for it teaches the game its context window, and the
+game then keeps from sending it a request it cannot fit. Each entry shows what is known under
+<strong>This model only → Context window (tokens)</strong>: type your own figure there, which beats what was
+learned, or press <strong>Forget this window</strong> after a provider raises its limit. For a model on your
+own machine or network only your own figure counts, so reloading a local model with a bigger
+window needs nothing from you.</p>
 <h3 id="be-realistic-about-model-size">Be realistic about model size</h3>
 <p>Open Historia asks a lot of the model: it has to return strictly structured data describing
 territory changes, unit movements and diplomatic shifts, not just prose. Small models
@@ -304,10 +317,10 @@ name.</p>
 </tr>
 </tbody></table></div>
 <h2 id="backup-models">Backup models</h2>
-<p>Free tiers give each model a daily allowance, and a time skip uses several requests. When your
-model&#39;s allowance runs out, every AI call fails until it resets — even if another model, a paid
-key or a local model would have answered. So you can list backups, and the game carries on
-without you.</p>
+<p>Free tiers give each model a daily allowance, and every time skip, chat and advisor reply spends
+from it. When your model&#39;s allowance runs out, every AI call fails until it resets — even if
+another model, a paid key or a local model would have answered. So you can list backups, and the
+game carries on without you.</p>
 <p><img src="/wiki/img/settings-ai-models.jpg" alt="The Models list and Connections">
 <em>Settings → AI after pasting a Gemini key: Google&#39;s default list of two models on one connection, both Ready.</em></p>
 <p>This is your <strong>Fallback list</strong>: the <strong>Models</strong> section of Settings → AI, and the name error
@@ -392,10 +405,11 @@ tried, busy ones first, so a mark that has quietly expired is never what fails a
 <li>Whether a Gemini &quot;429&quot; is a spent day or a short pause is decided by the quota Google names in
 the error, not guessed.</li>
 </ul>
-<p>The first time the game moves down the list, a short notice near the top of the screen says why:
-<em>gemini-3.7-flash (Main Google) has used today&#39;s allowance. Now using gemini-3.6-flash (Main
-Google).</em> It says so once per switch, not once per call, because the writing may change with the
-model and you should know why.</p>
+<p class="beta-note"><b>On beta a busy model sits out for one minute</b>, not ten: ten minutes
+left a whole list idle far longer than a provider stays overloaded.</p><p>The first time the game moves down the list, a short notice near the top of the screen says why:
+<em>gemini-3.5-flash-lite (Gemini) has used today&#39;s allowance. Now using gemini-3.1-flash-lite
+(Gemini).</em> An entry is named by its model and its connection&#39;s name. It says so once per switch,
+not once per call, because the writing may change with the model and you should know why.</p>
 <p>When <strong>no</strong> entry can answer — each one Spent or Unusable — a time skip does not start, so you
 do not lose a turn to canned events. It tells you which model comes back first and when, or, if
 none is coming back, which one to fix. Add a backup to keep playing now. A turn that runs out of
@@ -439,14 +453,41 @@ limits. Google can suspend your access to its APIs without notice, and
 serious or repeated breaches. Open Historia never spreads requests across keys to get more usage.</p>
 <p>Note that Gemini&#39;s <a href="https://ai.google.dev/gemini-api/docs/rate-limits">limits count per project</a>,
 not per key, so several keys in one project share the same allowance.</p>
+<h2 id="your-own-agent">Your own Agent</h2>
+<p class="beta-note"><b>Beta channel only, and the desktop app only:</b> the Agent waits on the
+desktop app's own local server, so the website and the Android app do not offer it.</p><p>If you pay for Claude Code, Codex, OpenCode or Antigravity CLI, it can answer Open Historia for
+you, on your own subscription, with no API key. In <strong>☰ → Settings → AI</strong>, add an entry to the
+list (or open one) and choose the provider <strong>Your own Agent</strong>, under <em>Your subscription</em>. Keep it
+at the top, with an entry that has a key below it. It is not offered in the first-run prompt.</p>
+<p>The Agent&#39;s settings show the <strong>Agent folder</strong>, with <strong>Open the Agent folder</strong> and a <strong>Copy the
+command for …</strong> button for each Agent. Open a terminal in that folder, start your Agent there,
+signed in with your own account, and type <strong>/answer</strong> whenever something is waiting. One /answer
+answers all of it, a whole time skip included. The first /answer asks which models to use for
+Open Historia; <code>/answer models</code> asks again. The game never starts your Agent and never reads its
+sign-in.</p>
+<ul>
+<li><strong>What it answers</strong> is what you start, one switch each: <strong>Time skips</strong>, <strong>Advisor</strong>,
+<strong>Diplomacy</strong> (replies to your messages), <strong>Game Master</strong> and <strong>Interactive events</strong>. All are
+on when you add it.</li>
+<li><strong>Everything else goes to the entry below it</strong>: anything switched off, and what the game
+starts by itself, such as background diplomacy, idle chats and automatic stat tracking. With
+nothing below it, those don&#39;t run, so keep a free Gemini key under it.</li>
+<li><strong>Pause my Agent</strong> sends everything to the entry below, for when you are away from your
+terminal. In a shared game the Agent sits out the same way.</li>
+<li><strong>While a skip waits</strong>, the time panel says <em>Waiting for your Agent</em>, and <strong>Use API key</strong> sends
+the rest of that skip on to the next entry instead.</li>
+</ul>
 <h2 id="worth-knowing">Worth knowing</h2>
 <ul>
 <li><strong>You can switch provider at any time</strong>, mid-campaign. Each key is a connection and stays until
 you remove it; move an entry to the top to try it first.</li>
 <li><strong>Cancel works.</strong> A time skip that is taking too long can be stopped.</li>
-<li><strong>Mind your daily requests.</strong> A free key allows a few hundred a day. <strong>Save AI requests</strong>, on by
-default, keeps a time skip to one to three of them; Settings → AI → <strong>AI requests</strong> shows how
-many you have used today. See <a href="/wiki/settings/#ai-requests">settings</a>.</li>
+<li><strong>Mind your daily requests.</strong> A free key allows a few hundred a day. A time skip is one request,
+however far it goes: its events, their changes to the map and your spies&#39; reports all come back
+in the same answer. Under the skip buttons the time panel counts the requests used today
+against the day&#39;s allowance, and Settings → AI → <strong>AI requests</strong> shows them by task. With
+<strong>Save AI requests</strong> turned off, the model may look things up before it answers, and a skip can
+then take up to three. See <a href="/wiki/settings/#ai-requests">settings</a>.</li>
 <li><strong>Limit AI generation</strong> (Settings → AI) is off by default. Turned on, it gives up on a stalled
 generation and falls back to a canned event rather than waiting forever. It measures <em>silence</em>,
 not total time, so a slow-but-working model is not cut off.</li>
@@ -465,7 +506,7 @@ For picking between models in more detail, see <a href="/wiki/ai-providers/">AI 
         <a class="next" href="/wiki/how-to-play/"><span>Next →</span><b>How to play</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

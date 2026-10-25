@@ -11,8 +11,13 @@ you write these.
 
 
 Type it into the composer at the bottom of the panel and press Enter (Shift+Enter for a new
-line) or the send button. It appears under **Your submitted actions** as **planned** and stays
+line) or the send button. It appears under **Your Submitted Actions** as **planned** and stays
 there until a turn resolves it.
+
+<p class="beta-note"><b>On beta the panel has two sections, and one is open at a time.</b> Once
+you have asked for suggestions, <b>Suggested Actions</b> and <b>Your Submitted Actions</b> each
+have a header with a count; opening one folds the other, so whichever you are working in has the
+room.</p>
 
 You can queue as many as you like, but three or four substantial orders per turn is a sensible
 working number. Beyond that the world has to divide one turn's worth of attention among all of
@@ -50,9 +55,9 @@ Nothing is committed until you queue it, so you can refine and rewrite freely.
 
 ## AI suggestions
 
-**Get AI suggestions** proposes orders based on your actual situation. They arrive as topic
-cards; clicking one queues it. **Help brainstorm actions** opens the advisor instead, to talk a
-set of orders through with you.
+**AI Suggestions** proposes orders based on your actual situation. They arrive as topic cards,
+each with orders under it; clicking one queues it. **Brainstorm**, beside it, opens the advisor
+instead, to talk a set of orders through with you.
 
 Worth doing on a turn where you are not sure what to attend to — the suggestions are derived
 from the real state of your country, so they tend to surface things you have not noticed. They
@@ -89,8 +94,9 @@ world. The events that come back reference the orders they resolve, so you can s
 instructions actually landed and what came of them.
 
 An order does **not** guarantee an outcome. On Medium, orders succeed or fail on their merits; on
-Hard and above, a weak or vague order will fail or backfire. See
-[starting a game](/wiki/new-game/) for what each difficulty changes.
+Hard and above, a weak or vague order will fail or backfire. On beta difficulty goes further and
+tilts how your orders tend to go, from mostly well on the easy levels to mostly badly on the hard
+ones. See [starting a game](/wiki/new-game/#difficulty) for what each difficulty changes.
 
 Orders that are not resolved this turn stay in the queue and carry forward.
 
@@ -103,7 +109,8 @@ again.</p>
 
 Some orders are executed through the game's mechanical systems rather than just narrated:
 
-- **"Deploy a spy in Germany"** places a real agent, through the same rules as the Spy tab — one
+- **"Deploy a spy in Germany"** places a real agent, through the same rules as the Spy tab
+  (Intelligence, on beta) — one
   agent per country, three in the field, never at home — and opens its operation on the Projects
   board the same turn. See [espionage](/wiki/espionage/).
 - **Troop orders** move real units on the map, within era-appropriate ranges. See
@@ -113,6 +120,21 @@ Some orders are executed through the game's mechanical systems rather than just 
 
 This is why phrasing matters mechanically and not just narratively: a clearly-specified order is
 one the game can turn into a concrete change.
+
+<p class="beta-note"><b>On beta, three more kinds of order are carried out directly:</b></p>
+
+- **Troops on a battlefield.** Where your troops are fighting on a
+  [battlefield](/wiki/war-room/), an order such as *"the north digs in, the south pushes for the
+  city"* reaches them in the same skip: the period is fought again with it before the events are
+  written, so the events tell the war as it went with your order. That costs one request more,
+  and only in a skip where an order commands troops. The War Room commands them directly.
+- **Annexation.** An order to annex a region or a country, answered by an event that says the
+  annexation is done but carries no change to the map, moves the region or the whole country to
+  you all the same.
+- **Your agents.** An agent already in place takes its own orders — what to collect on, and
+  operations such as sabotage or recruiting a source — from the **Intelligence** tab of the
+  Diplomacy panel, each with its odds of success and its risk of capture shown first. See
+  [espionage](/wiki/espionage/).
 
 ## Orders are not the only lever
 

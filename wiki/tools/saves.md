@@ -13,8 +13,17 @@ Two different things, and the distinction matters:
 - A **game** is one playthrough of a scenario. It starts as a copy of that world and diverges
   from the first turn.
 
-One scenario seeds as many games as you like. Editing a scenario later does not touch games
-already running on it.
+One scenario seeds as many games as you like. Editing a scenario later does not rewrite the games
+already running on it — each keeps its own world, from who owns what to its events — but a game
+draws its regions from its scenario's map, so a border you reshape in the
+[map editor](/wiki/editor/) shows in that scenario's games too.
+
+That is also why, when an update replaces the built-in **Modern Day** scenario's map, the
+campaigns begun on the old map are not moved onto the new one: they go with the old map into a
+scenario of their own, **Modern Day (classic map)**, and carry on there. An update that only
+refreshes the built-in scenario's content on the same map leaves your campaigns where they are —
+unless you had edited the built-in scenario yourself, in which case your edited copy and the
+campaigns on it are kept as **Modern Day (your edited copy)**.
 
 ## Autosave
 
@@ -57,6 +66,13 @@ directory up like any other folder.
 clears your campaigns.** The game will ask for persistent storage permission when you first
 play, and you should grant it.
 
+A browser keeps a site's `http://` and `https://` addresses as two separate stores, so games
+played on the website before it moved to https were left behind under the old address. The website
+brings them across by itself when you open it in that browser: your games and scenarios arrive in
+the library beside the ones you already have — nothing here is replaced, and the old copy is left
+as it was — along with any settings you have not already set again. If the trip fails, it tries
+again later, up to three times in all.
+
 **Android** — on the phone, in the app's storage.
 
 The beta desktop build keeps a **completely separate** library from the stable one. Installing
@@ -67,9 +83,11 @@ the beta cannot touch your stable campaigns, and vice versa.
 **Games export as one zip.** On a game's card, **⋮ → Export** saves `<name>-game.zip`: the world,
 the clock, events, chats, actions, the advisor's conversation, prompts, colours, flags, tags,
 intercepts — and every rollback snapshot, so the campaign can be continued and undone on the other
-side, not just looked at. The card says so while the zip is being built. **Import game**, in the
-Games tab's header, brings one back; it lands right beside your current game, marked
-**(Imported)** if its name collides with one you already have.
+side, not just looked at. The card says so while the zip is being built, and the menu reminds you
+that an exported game carries its conversations, advisors and events, worth a look before you post
+it anywhere public. **Import game** (**Import Game** on beta), in the Games tab's header, brings one
+back; it lands right beside your current game, marked **(Imported)** if its name collides with one
+you already have.
 
 The scenario travels only when it has to. A built-in scenario is not included (everyone has it),
 nor one that came from the Community Hub (it can be fetched again). A map too large to carry — over
@@ -78,15 +96,17 @@ up in the same position as a game whose scenario is missing. A game whose scenar
 listed, opens in the editor, and can still be exported.
 
 **Scenarios** export and import as a `.zip` bundle carrying the map, cities, colours, flags and
-any custom basemap, or as plain `.json`. Use **Import JSON** in the Scenarios tab's header, or the
-**Download** buttons in a scenario's editor drawer. **Create Scenario** starts a blank one from the
-base template and drops you straight into its editor. This is also how you
-[publish to the Community Hub](/wiki/community-hub/).
+any custom basemap, or as plain `.json`. Use **Import JSON** (**Import Scenario** on beta) in the
+Scenarios tab's header — it takes either form — or the **Download .zip** and **Download JSON**
+buttons in a scenario's editor drawer. **Create Scenario** starts a new one as a copy of the
+built-in world and drops you straight into its editor. To share one on the Community Hub, use
+**⬆ Publish to Hub** in the Community tab, which makes the export for you (see
+[the Community Hub](/wiki/community-hub/)).
 
-On the stable Android app a file cannot be saved, so export is not offered there.
-
-<p class="beta-note"><b>On beta the Android app exports too</b>, through Android's share
-sheet.</p>
+**In the Android app** an export is saved into the phone's Downloads folder, in a folder of its own
+called *Open Historia*, where the Files app and the import picker both find it, and a notice
+offers to share it. On Android 10 and older, where the app may not write to Downloads, it goes to
+the share sheet instead.
 
 ## Syncing between devices
 
@@ -100,17 +120,30 @@ To play the same campaign on another device, move it yourself as described under
 If you had an account and want what it stored deleted, see the
 [privacy policy](/privacy/).
 
-## Archiving
+## Archiving and deleting
 
 **Archive**, on a game's card, takes it out of the main library view without throwing it away, and the same
 button becomes **Unarchive** to bring it back. Useful once you have accumulated a dozen
 half-finished campaigns.
 
+**Delete**, in a game's or a scenario's editor drawer, removes it after asking. On the stable build
+the game has no way to bring it back.
+
+<p class="beta-note"><b>On beta a delete can be undone.</b> Deleted games and scenarios go to a
+<b>Recently deleted</b> shelf at the bottom of the Games and Scenarios tabs, each with
+<b>Restore</b>, and <b>Empty</b> deletes the shelf's contents for good. The desktop app keeps them
+for 30 days; the website and the Android app keep them for a week, and only the last five things
+you deleted. On the desktop the shelf is shown only on the computer the game runs on, not to
+other devices on your network. An archived game's card also has its own <b>Delete</b>, and
+archiving or deleting the game you have open takes you back to the main menu. In <b>All
+Games</b>, the <b>Active</b>, <b>All</b> and <b>Archived</b> buttons choose which games are
+shown.</p>
+
 ## What a save contains
 
 For the curious: five documents per game — the world, the game state, the events, the actions
 queue and the chat history — plus siblings for colours, flags, tags, rollback snapshots, advisor
-history and intercepts, and the map geometry.
+history and intercepts. The map geometry is its scenario's.
 
 Intercepts are the exception to "it is all just JSON": they are
 [encrypted at rest](/wiki/espionage/) with a key unique to the campaign.

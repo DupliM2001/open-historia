@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -167,9 +167,16 @@ quality, then speed.</p>
 </tr>
 </tbody></table></div>
 <p>&quot;Works in the browser build&quot; is about whether the provider allows direct requests from a web
-page. The desktop and self-hosted builds relay around this automatically; the hosted website
-cannot. See <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
-<h2 id="defaults">Defaults</h2>
+page. The desktop and self-hosted builds relay around this automatically, and the Android app
+reaches a model on your own network directly; the hosted website cannot. See
+<a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
+<p class="beta-note"><b>On beta, the desktop app has a sixth kind: Your own Agent.</b> It plays on
+a subscription you already pay for instead of an API key. Your own Claude Code, Codex, OpenCode or
+Antigravity CLI, opened in the game's Agent folder, answers what you start — a time skip, the
+advisor, your diplomatic messages, the Game Master, interactive events — when you type
+<code>/answer</code>. The game never starts the agent itself, so what the game does on its own,
+such as Background AI, goes to the entries below it in your list. The models are chosen inside
+your agent, not in the game.</p><h2 id="defaults">Defaults</h2>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -187,7 +194,7 @@ cannot. See <a href="/wiki/ai-setup/">connecting an AI provider</a>.</p>
 </tr>
 <tr>
 <td>OpenAI</td>
-<td><code>gpt-5.6-luna</code></td>
+<td><code>gpt-6-luna</code></td>
 </tr>
 <tr>
 <td>OpenAI Compatible</td>
@@ -215,7 +222,12 @@ on, the model may look things up before it answers — two rounds at most, so a 
 more than three. Diplomacy, the advisor and <strong>Background AI</strong> (countries writing to
 you unprompted, forces repositioning, extra agent reports — capped at 30 a day by default) cost
 extra on top. Settings → AI → <strong>AI requests</strong> shows today&#39;s count and what your last skip used.</p>
-<p>Rough guidance rather than a price list:</p>
+<p class="beta-note"><b>On beta, the wars on the battlefields are fought by the game itself</b>,
+not by the model: troops move and fight in the engine, and the skip's single request tells the
+story of how it went. What costs a request is what you ask for — talking to your generals in the
+War Room, and each new <b>Listen in</b> feed, which is asked only when you open a place with
+nothing kept for that day or ask for more (turn it off in a game's Features tab). In a shared
+game every time skip runs on the host's computer and the host's key.</p><p>Rough guidance rather than a price list:</p>
 <ul>
 <li><strong>Gemini free tier</strong> genuinely covers solo play. Watch the rate limits on the larger models —
 hitting one mid-jump stalls the turn. A
@@ -235,6 +247,14 @@ structured output, and you will see turns fall back to canned events. <strong>7�
 are a sensible floor. Larger is better if your hardware allows it.</p>
 <p>If your hardware does not, the Gemini free tier will give you a better game than a very small
 local model.</p>
+<p>Mind the <strong>context window</strong> too. A time skip on the built-in scenario is about 47,000 tokens, more
+with a long history, so a model loaded with a 32K window cannot take it. A cloud model that
+refuses a request for its size is remembered, and the game does not send it one too big again but
+moves to the next model in your list. A model on your own machine or network is different: its
+window is whatever you loaded it with, so nothing learned from its refusals is held against it,
+and loading it again with a bigger window takes effect at once. Settings → AI → the model&#39;s entry
+→ <strong>This model only</strong> → <strong>Context window (tokens)</strong> shows what the game knows, takes a figure of
+your own, and <strong>Forget this window</strong> clears what it learned.</p>
 <h2 id="expert-controls">Expert controls</h2>
 <p>You do not need any of these to play.</p>
 <p><strong>Model reasoning</strong> enables extended thinking on models that support it. Slower and more
@@ -253,13 +273,13 @@ measures silence rather than elapsed time. Recommended with local models.</p>
 can have custom parameters of its own and <strong>How the AI answers</strong>, which picks the structured-output
 method to try first. See <a href="/wiki/ai-setup/#adding-backups">adding backups</a>.</p>
 <p class="beta-note"><b>On beta the game sets a temperature per task.</b> Tasks that match or
-classify — placing a name on a region, choosing the next speaker — are asked at 0.1; the ones that
-reconcile or summarise at 0.2; stat sheets and intelligence readings at 0.3. Anything written to be
+classify — placing a name on a region, reading a leader's answer to a demand — are asked at 0.1;
+the ones that reconcile or summarise at 0.2; stat sheets and intelligence readings at 0.3. Anything written to be
 read in character (time skips, diplomacy, the advisor) is left at the provider's default. A
 temperature in your own custom parameters still wins, and a model that refuses one (an OpenAI
 reasoning model, say) is remembered and asked without it.</p><h2 id="seeing-what-the-ai-did">Seeing what the AI did</h2>
 <p><img src="/wiki/img/debug-console.jpg" alt="The AI debug console">
-<em>The debug console: every call with its task, model, token counts and latency. These two are idleDiplomacy firing on its own.</em></p>
+<em>The debug console: every call with its task, model, token counts and latency. These two are idle diplomacy firing on its own.</em></p>
 <p>The <strong>AI debug console</strong> (☰ → Tools) shows every call with its full prompt, answer, model, token
 counts, latency and validation verdict, with analytics per task and model and a JSON or CSV
 export. It keeps the last 200 calls across sessions while <strong>Record AI telemetry</strong> is on.</p>
@@ -278,7 +298,7 @@ where to look.</p>
         <a class="next" href="/wiki/troubleshooting/"><span>Next →</span><b>Troubleshooting</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>

@@ -88,7 +88,7 @@
         </li>
         <li class="sec">
           <span>Game systems</span>
-          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/" class="on" aria-current="page">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
+          <ul><li><a href="/wiki/diplomacy/">Diplomacy</a></li><li><a href="/wiki/war/">Relations, treaties &amp; war</a></li><li><a href="/wiki/territory/">Territory</a></li><li><a href="/wiki/military/">Military &amp; combat</a></li><li><a href="/wiki/war-room/">The War Room <em>beta</em></a></li><li><a href="/wiki/war-at-sea/">War at sea <em>beta</em></a></li><li><a href="/wiki/espionage/">Espionage</a></li><li><a href="/wiki/projects/">Projects &amp; operations</a></li><li><a href="/wiki/statistics/">National statistics</a></li><li><a href="/wiki/countries/">Countries &amp; identity</a></li><li><a href="/wiki/cities/" class="on" aria-current="page">Cities &amp; structures</a></li><li><a href="/wiki/advisor/">The advisor</a></li></ul>
         </li>
         <li class="sec">
           <span>Tools</span>
@@ -116,13 +116,14 @@
     <p>Two kinds of thing are drawn on top of the political map: <strong>cities</strong>, which come with the world,
 and <strong>structures</strong>, which get built during a campaign.</p>
 <h2 id="cities">Cities</h2>
-<p>Cities come from the scenario. Modern Day&#39;s <a href="/wiki/new-game/">hand-drawn map</a> carries its own list
-of about 2,500 cities, with their 2014 populations. A scenario on the stock world map uses a stock
-set of roughly seventy thousand; a custom scenario can ship its own, or import from the same
-database. A scenario with no cities shows none.</p>
-<p>They appear from about zoom 3.4 and get denser as you zoom in. Click one for its name,
-population, whether it is a capital, and its tier.</p>
-<h3 id="cities-change">Cities change</h3>
+<p>Cities come from the scenario. Modern Day carries its own list of about 2,500 cities. A scenario
+on the stock world map uses a stock set of roughly seventy thousand; a custom scenario can ship
+its own, or import from the same database. A scenario with no cities shows none.</p>
+<p>The stock cities appear from about zoom 3.4, the biggest first, and get denser as you zoom in. A
+scenario&#39;s own cities show by their tier: capitals first, towns only when you are close in.
+Click one for its name, population, whether it is a capital, and its tier.</p>
+<p class="beta-note"><b>On beta a city's card leads on.</b> It names the region the city stands
+in, and clicking that name opens the region's card.</p><h3 id="cities-change">Cities change</h3>
 <p>The world can rename a city and change its population, and it does both for real reasons:</p>
 <p><strong>Renaming</strong> happens when a city is renamed after a leader or an ideology, when a capital is
 re-designated, or when a conqueror gives a captured city their own name. It works on any city on
@@ -132,12 +133,19 @@ bombing or an evacuation shrinking a city; an industrial boom, a resettlement pr
 refugee influx growing one. The world always writes the new <em>total</em>, not the change.</p>
 <p>That means a long campaign leaves a visible demographic trace on the map, which is one of the
 quieter pleasures of playing one.</p>
-<h2 id="structures">Structures</h2>
+<p class="beta-note"><b>On beta, cities follow their country, and can change by the year.</b>
+When a country's population moves — its statistics are brought up to date, or a war costs it men —
+its cities move by the same share, once the change comes to half a per cent or more. A city an
+event has just changed keeps what the event says that turn, and follows its country from there,
+so a city bombed flat starts again from what was left. A scenario can also give a city its
+population <b>by year</b> (in the map editor's city card, <b>Population by year</b>), and the map
+reads the figure for the game's year, between the two years around it, until the world or the
+Game Master sets one of its own.</p><h2 id="structures">Structures</h2>
 <p>Structures are markers placed during play: military bases, ports, embassies, airfields,
 research facilities, landmarks — the kind is free-form, so the world names whatever it needs.</p>
-<p>Each has a name, a kind, an owner, a position, a status — planned, under construction or
-active — and optionally a note and a founding date. The game places a new structure by the place
-its event names and keeps it off other markers.</p>
+<p>Each has a name, a kind, an owner, a position, a status — planned, under construction, active,
+damaged, inactive, abandoned or destroyed — and optionally a note and a founding date. The game
+places a new structure by the place its event names and keeps it off other markers.</p>
 <h3 id="structures-never-move-borders">Structures never move borders</h3>
 <p>This is the rule worth knowing. A structure&#39;s owner is <strong>whoever runs the facility</strong>, not who
 owns the ground it stands on.</p>
@@ -146,21 +154,28 @@ the sending country. Building a port in an allied country annexes nothing.</p>
 <p>If you want the ground, that is a <a href="/wiki/territory/">territorial change</a>, and it has to happen
 as one.</p>
 <h3 id="building-and-losing-them">Building and losing them</h3>
-<p>Structures appear when an event founds or constructs one, and disappear when one is destroyed.
-Building something with the same name as an existing structure replaces it rather than stacking
-a second one on the same spot.</p>
+<p>Structures appear when an event founds or constructs one, change status as events damage,
+abandon or destroy them, and are taken off the map when one ceases to exist. Building something
+under the name of a structure that already exists — or a name it once had — does not add a second
+one: the existing one stays. A structure that is renamed keeps its old name as an alias, so later
+events can still find it.</p>
 <p>You get structures by ordering them — <em>&quot;begin construction of a naval base at Gdynia&quot;</em> — and by
 the world building its own. Watching foreign bases appear near your borders is a genuinely
 useful early-warning system.</p>
-<p class="beta-note"><b>On beta, what an event builds is put on the map.</b> After each skip a
-check — <b>Put new structures on the map</b> in Settings → AI — places the bases, shipyards, data
-centres and ground stations the events said were built; a structure it could not place says where
-it was sent instead. One credited to a country with no land goes to whoever holds the ground.
-Structures are also drawn half again as large.</p><h2 id="placing-them-yourself">Placing them yourself</h2>
+<p class="beta-note"><b>On beta, what an event builds is put on the map.</b> The checks after each
+time skip read its events for what was built — bases, shipyards, data centres, ground stations —
+and put up to five new structures a turn on the map. A structure whose place is not on the map is
+placed in its country, near a place the map does have, and its card says so; on your own
+structures, and your puppets', <b>Accept</b> keeps that place and <b>Move</b> lets you put it where
+it belongs. One credited to a country with no land goes to whoever holds the ground. A
+structure's card also lists the latest events that built or changed it, the names it had before,
+and the region it stands in. Structures are drawn half again as large.</p><h2 id="placing-them-yourself">Placing them yourself</h2>
 <p>The <a href="/wiki/cheats/">cheats panel</a> has map-feature tools: edit an existing city or structure, add
 a new one, or clear out ones that have accumulated and stopped mattering.</p>
-<p>Adding your first custom city to a scenario flips it into custom-cities mode, after which the
-scenario carries its own city list rather than the stock one.</p>
+<p>In a scenario with its own city list, a city you add joins that list, with its population and
+tier. The stock world cities cannot be changed in play, so in a scenario that uses them a new city
+is placed as a map marker instead, without a population or tier. <strong>Clear Map Features</strong> can also
+switch a scenario from its own cities back to the standard world list.</p>
 <p>For authoring a whole world&#39;s cities, use <a href="/wiki/editor/">the map editor</a>, which can import from
 the full city database or place them by hand.</p>
 <h2 id="next">Next</h2>
@@ -175,7 +190,7 @@ the full city database or place them by hand.</p>
         <a class="next" href="/wiki/advisor/"><span>Next →</span><b>The advisor</b></a>
       </nav>
     <p class="wiki-stale">Open Historia is under active development on two channels, and this
-      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-09-24</b> · main <code>e62a1c55</code> · beta <code>2f48a6c2</code>. If something
+      wiki is written by hand — a page can fall behind a release. Last checked against the game on <b>2026-10-25</b> · main <code>6e6239c4</code> · beta <code>d7e8fa85</code>. If something
       here does not match what you see in the game, trust the game and
       <a href="https://discord.gg/QaqAK7fQAg" target="_blank" rel="noopener">say so on Discord</a>.</p>
   </main>
