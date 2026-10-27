@@ -1072,7 +1072,11 @@ const WorldMap = ({ isGlobe = false }) => {
         }
         : {
           source: "city",
-          name: props.city || props.name || "",
+          name: (() => {
+            const raw = props.city || props.name || "";
+            const renames = getWorldStateSnapshot()?.cityRenames;
+            return (renames && raw && renames[raw.toLowerCase()]) || raw;
+          })(),
           // The drawn figure is already the year's (Cities.jsx); one the AI set
           // by hand is the city's population from then on.
           population: effectiveCityPopulation(props, {
@@ -2916,7 +2920,10 @@ const WorldMap = ({ isGlobe = false }) => {
   useEffect(() => {
     const mapInstance = map?.getMap ? map.getMap() : map;
     if (!mapInstance?.on || !regionTypeStyles.size) return undefined;
-    const update = () => setRegionTypeZoom(regionTypeZoomKey(regionTypeStyles, mapInstance.getZoom()));
+    const update = () => {
+      const nextKey = regionTypeZoomKey(regionTypeStyles, mapInstance.getZoom());
+      setRegionTypeZoom((prev) => (prev === nextKey ? prev : nextKey));
+    };
     update();
     mapInstance.on("zoom", update);
     return () => mapInstance.off("zoom", update);

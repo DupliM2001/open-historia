@@ -55,22 +55,23 @@ export const directionFromLngLat = (lng, lat) => {
   ];
 };
 
-const transformPoint = (matrix, point) => [
-  matrix[0] * point[0] + matrix[4] * point[1] + matrix[8] * point[2] + matrix[12],
-  matrix[1] * point[0] + matrix[5] * point[1] + matrix[9] * point[2] + matrix[13],
-  matrix[2] * point[0] + matrix[6] * point[1] + matrix[10] * point[2] + matrix[14],
-  matrix[3] * point[0] + matrix[7] * point[1] + matrix[11] * point[2] + matrix[15],
-];
-
 export const projectCelestialDirection = ({ direction, matrix, width, height }) => {
   if (!matrix || !direction || width <= 0 || height <= 0) return null;
-  const clip = transformPoint(matrix, direction.map((value) => value * CELESTIAL_RADIUS));
-  if (!Number.isFinite(clip[3]) || clip[3] <= 0) return null;
+  const d0 = direction[0] * CELESTIAL_RADIUS;
+  const d1 = direction[1] * CELESTIAL_RADIUS;
+  const d2 = direction[2] * CELESTIAL_RADIUS;
+  const clipW = matrix[3] * d0 + matrix[7] * d1 + matrix[11] * d2 + matrix[15];
+  if (!Number.isFinite(clipW) || clipW <= 0) return null;
 
-  const inverseW = 1 / clip[3];
-  const normalizedX = clip[0] * inverseW;
-  const normalizedY = clip[1] * inverseW;
-  if (Math.abs(normalizedX) > 4 || Math.abs(normalizedY) > 4) return null;
+  const inverseW = 1 / clipW;
+  const clipX = matrix[0] * d0 + matrix[4] * d1 + matrix[8] * d2 + matrix[12];
+  const normalizedX = clipX * inverseW;
+  if (Math.abs(normalizedX) > 4) return null;
+
+  const clipY = matrix[1] * d0 + matrix[5] * d1 + matrix[9] * d2 + matrix[13];
+  const normalizedY = clipY * inverseW;
+  if (Math.abs(normalizedY) > 4) return null;
+
   const x = (normalizedX * 0.5 + 0.5) * width;
   const y = (0.5 - normalizedY * 0.5) * height;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;

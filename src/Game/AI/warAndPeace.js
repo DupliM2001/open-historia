@@ -255,6 +255,7 @@ export const makePeace = (world, { warId = "", from = "", to = "", terms = null,
     peaceTreaties: normalizePeaceTreaties([...list(next.peaceTreaties).filter((entry) => entry?.id !== treaty.id), treaty]),
     // Whatever was offered in that war is answered by its ending.
     peaceOffers: normalizePeaceOffers(list(next.peaceOffers).map((offer) => (clean(offer?.warId) === clean(warId) && offer.status === "open" ? { ...offer, status: "lapsed", answeredRound: turn } : offer))),
+    callsToArms: normalizeCallsToArms(list(next.callsToArms).map((call) => (clean(call?.warId) === clean(warId) && call.status === "open" ? { ...call, status: "lapsed", answeredRound: turn } : call))),
   };
 };
 

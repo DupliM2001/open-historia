@@ -856,6 +856,7 @@ function World({ mapRef, projection: requestedProjection, terrainEnabled, onInit
   const emitMapMotion = useCallback((active) => {
     if (typeof window === "undefined") return;
     const moving = Boolean(active);
+    if (window.__OH_MAP_MOVING__ === moving) return;
     window.__OH_MAP_MOVING__ = moving;
     window.dispatchEvent(new CustomEvent("oh:map-motion", {
       detail: { active: moving },

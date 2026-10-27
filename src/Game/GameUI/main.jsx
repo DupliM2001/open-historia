@@ -658,7 +658,7 @@ const Main = ({
   useActiveFeatures();
   // Nobody is playing a game that has not been opened: no country, so no war.
   const playerCountry = gameEntered ? activeGame?.country || "" : "";
-  const warFronts = useRuntimeState("world", (world) => playerFrontsKey(world?.battlefields, playerCountry), playerCountry);
+  const warFronts = useRuntimeState("world", (world) => playerFrontsKey(world?.battlefields, playerCountry, world?.wars), playerCountry);
   const atWar = Boolean(warFronts) && isActiveFeatureEnabled("fronts");
   // For the music, at war is wider than the war room's button: the player's
   // country on a side of a war being fought (the war ledger), whether or not

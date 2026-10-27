@@ -223,7 +223,7 @@ const WarRoomPanel = ({ open, onClose, width, onResize, onResizeEnd }) => {
   const deployCount = useWarRoom((state) => state.deployCount);
 
   // ---- which battlefield ---------------------------------------------------------------
-  const fronts = useMemo(() => playerFronts(world?.battlefields, game.country), [world?.battlefields, game.country]);
+  const fronts = useMemo(() => playerFronts(world?.battlefields, game.country, world?.wars), [world?.battlefields, game.country, world?.wars]);
   const front = fronts.find((entry) => foldBattlefieldName(entry.name) === foldBattlefieldName(shown)) ?? fronts[0] ?? null;
   const record = useMemo(() => {
     if (!front) return null;

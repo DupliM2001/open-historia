@@ -281,7 +281,7 @@ const ListenInPhone = () => {
   // The place the phone was opened on, and whether it shows that place or, for
   // a region, the country it is in.
   const [target, setTarget] = useState(null);
-  const [nationwide, setNationwide] = useState(false);
+  const [nationwide, setNationwide] = useState(true);
   const [session, setSession] = useState(null);
   const [store, setStore] = useState(null);
   // By request key: what this opening has asked for, what is being written,
@@ -311,7 +311,7 @@ const ListenInPhone = () => {
     const next = listenInPlace(place);
     if (!next || !enabled) return;
     setTarget(next);
-    setNationwide(false);
+    setNationwide(true);
     setSession(null);
     setStore(null);
     setAsked({});
@@ -469,8 +469,8 @@ const ListenInPhone = () => {
       {/* A region's phone can turn to the whole country and back. */}
       {country && (
         <div role="tablist" style={{ borderBottom: `1px solid ${LINE}`, display: "flex", flex: "0 0 auto" }}>
-          <button type="button" role="tab" aria-selected={!nationwide} className="oh-tap-row" onClick={() => setNationwide(false)} style={tabStyle(!nationwide)}>{target.regionName}</button>
           <button type="button" role="tab" aria-selected={nationwide} className="oh-tap-row" onClick={() => setNationwide(true)} style={tabStyle(nationwide)}>{country.polity}</button>
+          <button type="button" role="tab" aria-selected={!nationwide} className="oh-tap-row" onClick={() => setNationwide(false)} style={tabStyle(!nationwide)}>{target.regionName}</button>
         </div>
       )}
 

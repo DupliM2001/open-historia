@@ -53,6 +53,37 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-globe-and-renames",
+    kind: "minor",
+    date: "2026-10-27",
+    banners: [
+      {
+        title: "A smoother globe",
+        items: [
+          "Globe rotation and celestial star rendering run smoother with fewer frame drops.",
+          "A city renamed in your game shows its new name in its place popup as well as on the map.",
+          "A city renamed by an event is renamed on the map more reliably.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "2026-10-peace-and-weariness",
+    kind: "minor",
+    date: "2026-10-26",
+    banners: [
+      {
+        title: "Peace, weariness and the phone",
+        items: [
+          "Once a war ends in peace, the War Room button for it goes away straight away.",
+          "Calls to arms in a war that has ended lapse, so leaving one unanswered no longer costs you reputation.",
+          "Peace terms show your own country's war weariness beside your enemy's, with a word for how weary each is.",
+          "Listening in on a region now opens on its country's feed first.",
+        ],
+      },
+    ],
+  },
+  {
     // A player at war with Ireland had no War Room: the war was kept as Britain and Ireland against "1" and "2"
     // (battle-of-europe-session-2, 2026-10-25).
     id: "2026-10-war-sides",
