@@ -53,6 +53,26 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // "make it so you can do all the map controls with 2 fingers on a trackpad, and make it so mouse you can just
+    // right click to do them"; "make it so on track pad, a one finger click and drag pans but 2 finger drag turns
+    // tilts and rotates" (the owner, 2026-10-27).
+    id: "2026-10-turn-and-tilt",
+    kind: "minor",
+    date: "2026-10-27",
+    channel: "beta",
+    banners: [
+      {
+        title: "Turn and tilt the map",
+        items: [
+          "Drag with the right mouse button to turn and tilt the map: sideways turns it, up and down tilts it.",
+          "On a trackpad, a two-finger drag now turns and tilts the map, both at once, instead of zooming. Pinch to zoom.",
+          "A one-finger click and drag still moves the map, and a mouse wheel still zooms.",
+          "It works the same in the War Room, and Shift with the arrow keys still turns and tilts the map too.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-globe-and-renames",
     kind: "minor",
     date: "2026-10-27",

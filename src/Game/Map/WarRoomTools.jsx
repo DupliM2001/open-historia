@@ -15,8 +15,8 @@
 //
 // While a tool is in hand a sheet lies over the map and takes the pointer, so
 // the map does not pan under a drag and a region is not opened by the click
-// that ends one; the wheel still zooms. With no tool in hand (Pan) there is no
-// sheet and the map is the map.
+// that ends one; the wheel and a right-button drag still work the map, as off
+// the sheet. With no tool in hand (Pan) there is no sheet and the map is the map.
 //
 // Nothing is written here. A way that has been drawn is reported
 // (warRoomStore.js reportWarRoomWay) and the panel does the rest.
@@ -30,6 +30,7 @@ import { frameBounds, projectorOf, unwrapLng } from "../../runtime/fronts/frame.
 import { foldBattlefieldName, normalizeBattlefield } from "../../runtime/fronts/record.js";
 import { useRuntimeState } from "../../runtime/useRuntimeState.js";
 import { lineColour } from "./warRoomMarks.js";
+import { passToMap } from "./mapGestures.js";
 import { getWarRoom, reportWarRoomWay, setWarRoom, takeTool, useWarRoom } from "./warRoomStore.js";
 
 const NONE = Object.freeze([]);
@@ -302,25 +303,36 @@ const WarRoomTools = () => {
       held = null;
       setDraft(null);
     };
-    // The wheel still zooms the map, about the pointer.
+    // The wheel, and a right-button press, are handed to the map under the
+    // sheet (mapGestures.js passToMap): a mouse wheel or a pinch zooms about
+    // the pointer, two fingers on a trackpad turn and tilt the map, and a
+    // right-button drag turns and tilts it, as anywhere else on the map.
     const wheel = (event) => {
       event.preventDefault();
-      const [x, y] = at(event);
-      try {
-        map.easeTo({ zoom: map.getZoom() - event.deltaY / 420, around: map.unproject([x, y]), duration: 0 });
-      } catch { /* the map is between styles */ }
+      passToMap(map, event);
     };
+    const button = (event) => {
+      if (event.button === 2) passToMap(map, event);
+    };
+    // The browser's menu is kept off the sheet, as MapLibre keeps it off the map.
+    const menu = (event) => event.preventDefault();
     sheet.addEventListener("pointerdown", down);
     sheet.addEventListener("pointermove", move);
     sheet.addEventListener("pointerup", up);
     sheet.addEventListener("pointercancel", cancel);
     sheet.addEventListener("wheel", wheel, { passive: false });
+    sheet.addEventListener("mousedown", button);
+    sheet.addEventListener("mouseup", button);
+    sheet.addEventListener("contextmenu", menu);
     return () => {
       sheet.removeEventListener("pointerdown", down);
       sheet.removeEventListener("pointermove", move);
       sheet.removeEventListener("pointerup", up);
       sheet.removeEventListener("pointercancel", cancel);
       sheet.removeEventListener("wheel", wheel);
+      sheet.removeEventListener("mousedown", button);
+      sheet.removeEventListener("mouseup", button);
+      sheet.removeEventListener("contextmenu", menu);
       // A tool put down in the middle of a drag leaves nothing half drawn.
       setDraft(null);
     };
