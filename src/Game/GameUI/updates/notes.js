@@ -53,6 +53,20 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-zoom-keys",
+    kind: "minor",
+    date: "2026-10-27",
+    banners: [
+      {
+        title: "Zoom in and out",
+        items: [
+          "On a computer, Ctrl and = (or +) now makes everything larger again, as Ctrl and - makes it smaller.",
+          "Ctrl and 0 puts the size back to normal. On a Mac, use Cmd.",
+        ],
+      },
+    ],
+  },
+  {
     // "make it so you can do all the map controls with 2 fingers on a trackpad, and make it so mouse you can just
     // right click to do them"; "make it so on track pad, a one finger click and drag pans but 2 finger drag turns
     // tilts and rotates" (the owner, 2026-10-27).

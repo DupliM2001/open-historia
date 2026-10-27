@@ -20,6 +20,7 @@ const { recommendBeta } = require("./betaRecommendation.cjs");
 const { BETA_APP_NAME, readChannel } = require("./channel.cjs");
 const { MULTIPLAYER_APP_NAME } = require("./channel.cjs");
 const { createLayeredUpdater } = require("./layeredUpdate.cjs");
+const { attachZoomKeys } = require("./zoomKeys.cjs");
 const { createPayloadUpdater } = require("./payloadUpdate.cjs");
 const payloadBoot = require("./payloadBoot.cjs");
 const { clearOtherPortsCaches } = require("./staleCaches.cjs");
@@ -809,6 +810,8 @@ const createMainWindow = () => {
     // this window needs a context menu at all is to surface what this enables.
     webPreferences: { spellcheck: true },
   });
+  // Ctrl+= zooms in as Ctrl+- zooms out (zoomKeys.cjs).
+  attachZoomKeys(win.webContents);
   // Links to GitHub/Discord open in the real browser rather than replacing the
   // game with a page the player cannot navigate back from.
   //
