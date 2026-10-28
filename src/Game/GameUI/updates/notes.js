@@ -53,6 +53,25 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // What a real-key test of the game found (2026-10-28).
+    id: "2026-10-ai-mended",
+    kind: "minor",
+    date: "2026-10-28",
+    channel: "beta",
+    banners: [
+      {
+        title: "The AI, mended",
+        items: [
+          "The Game Master can start wars again: a unit's orders put in other words, or an answer sent back in an odd format, no longer spoil the preview.",
+          "A battlefield the AI named with a code is called by its sides instead, such as \"France - Italy front\", in new games and saved ones.",
+          "A war's name no longer carries part of its cause after it.",
+          "The AI console now shows how many tokens each of your advisor's answers used.",
+          "Your advisor no longer measures a country's military strength by how many regions it holds.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-spies-with-reason",
     kind: "minor",
     date: "2026-10-28",

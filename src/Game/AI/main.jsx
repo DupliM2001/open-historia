@@ -86,7 +86,7 @@ import { createModeObserver, nextStructuredMode, startingStructuredMode } from "
 import { createTemperatureMemory, temperatureBody, temperatureRefusalKey } from "./sampling.js";
 import { nativeHttpAvailable, nativeHttpFetch } from "../../runtime/native/http.js";
 import { createRelayOnlyOrigins } from "./relayOrigins.js";
-import { createFirstByteTimer, normalizeUsage, sumUsage } from "./usageStats.js";
+import { createFirstByteTimer, createStreamUsage, normalizeUsage, sumUsage } from "./usageStats.js";
 import { toGeminiSchema } from "./geminiSchema.js";
 import { buildAnswerFormatBlock } from "./schemaOutline.js";
 import {
@@ -866,6 +866,9 @@ async function streamTextSSE(response, extractDelta, onChunk, onFrame = null, on
     // The provider said the reply was over (frameEndsReply, or the [DONE] line).
     let finished = false;
     const sample = [];
+    // What the provider said the answer cost (usageStats.js createStreamUsage),
+    // handed back as the envelope a buffered answer is read from.
+    const streamUsage = createStreamUsage();
     try {
         for (;;) {
             const { done, value } = await reader.read();
@@ -883,6 +886,7 @@ async function streamTextSSE(response, extractDelta, onChunk, onFrame = null, on
                 try { json = JSON.parse(payload); } catch { continue; }
                 frames += 1;
                 if (frameEndsReply(json)) finished = true;
+                streamUsage.note(json);
                 // A chat that may call a lookup function (chatLookupsFor) hands
                 // every frame to the reducer assembling those calls as well.
                 if (onFrame) { try { onFrame(json); } catch { /* a collector must not break the stream */ } }
@@ -931,6 +935,7 @@ async function streamTextSSE(response, extractDelta, onChunk, onFrame = null, on
         frames,
         streamError,
         sample,
+        usage: streamUsage.envelope(),
     };
 }
 
@@ -1288,6 +1293,8 @@ async function callGemini(systemPrompt, history, {
             }
             const callState = chatTools.length && !requireOutputTool ? createGeminiStreamState() : null;
             const streamResult = await streamTextSSE(response, geminiStreamDelta, onChunk, callState ? (frame) => applyGeminiFrame(callState, frame) : null, onUnmarkedEnd);
+            // The usage goes on the call's record as a buffered answer's does.
+            if (streamResult.usage) onUsage?.(streamResult.usage);
             const chatCalls = callState ? lookupCallsFromGemini(finishGeminiStream(callState), "") : [];
             if (chatCalls.length) return { chatText: streamResult.text, lookupCalls: chatCalls };
             if (streamResult.text) return streamResult.text;
@@ -1819,6 +1826,7 @@ async function callOpenAIStyleChatCompletions({
                 hearKoboldCpp(frame);
                 if (callState) applyOpenAIFrame(callState, frame);
             }, onUnmarkedEnd);
+            if (streamResult.usage) onUsage?.(streamResult.usage);
             const { text: streamed, reasoning: streamedReasoning, streamError } = streamResult;
             const chatCalls = callState ? lookupCallsFromOpenAI(finishOpenAIStream(callState), "") : [];
             if (chatCalls.length) return { chatText: streamed, lookupCalls: chatCalls };
@@ -2312,6 +2320,7 @@ async function callAnthropic(systemPrompt, history, {
         if (onChunk && !tool && String(response.headers.get("content-type") || "").includes("text/event-stream")) {
             const callState = chatTools.length && !requireOutputTool ? createAnthropicStreamState() : null;
             const streamResult = await streamTextSSE(response, anthropicStreamDelta, onChunk, callState ? (frame) => applyAnthropicFrame(callState, frame) : null, onUnmarkedEnd);
+            if (streamResult.usage) onUsage?.(streamResult.usage);
             const chatCalls = callState ? lookupCallsFromAnthropic(finishAnthropicStream(callState), "") : [];
             if (chatCalls.length) return { chatText: streamResult.text, lookupCalls: chatCalls };
             if (streamResult.text) return streamResult.text;
@@ -2590,6 +2599,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
         if (onChunk && !tool && String(response.headers.get("content-type") || "").includes("text/event-stream")) {
             const callState = chatTools.length && !requireOutputTool ? createAnthropicStreamState() : null;
             const streamResult = await streamTextSSE(response, anthropicStreamDelta, onChunk, callState ? (frame) => applyAnthropicFrame(callState, frame) : null, onUnmarkedEnd);
+            if (streamResult.usage) onUsage?.(streamResult.usage);
             const chatCalls = callState ? lookupCallsFromAnthropic(finishAnthropicStream(callState), "") : [];
             if (chatCalls.length) return { chatText: streamResult.text, lookupCalls: chatCalls };
             if (streamResult.text) return streamResult.text;
@@ -3397,6 +3407,15 @@ Example:
 // defaultPrompts.json's [Forces on the Map] carries ${ALL_FORCES_POSTURE} in the
 // technical text every game composes from, so it is never repeated here.
 
+// Military power never counts regions (the owner's rule, 2026-10-16:
+// runtime militaryPower.js). The advisor is handed a region count for every
+// power (promptContext.js buildWorldSummary), and with nothing telling it what
+// that count is, it answered "Germany holds 16 regions" when asked how strong
+// Germany is (a real-key test, 2026-10-28). Said here, at call time, and not in
+// the shipped template, so an author's own advisor text is not overruled.
+const ADVISOR_MILITARY_STRENGTH_DIRECTIVE = `[Military Strength]
+How many regions a power holds says how much land it has, never how strong it is: never measure, rank or compare military power by regions, and never give a region count as a sign of strength. Judge it from the forces on the map, the figures you are given, the record of its wars and what is known of its armed forces, and say when it is an estimate.`;
+
 // Lets the advisor turn "put two divisions on the eastern frontier" into a real
 // button that places the unit, instead of the player reading coordinates off the
 // screen and clicking the map themselves. Appended at call time, like the two
@@ -3718,6 +3737,7 @@ async function buildAdvisorSystemPrompt() {
         // contradicted the panel the player was looking at. A country with no
         // sheet yet is told to estimate, and to say so.
         describeOurFigures(worldData, gameData?.country || "", { statistics: officialStats }),
+        ADVISOR_MILITARY_STRENGTH_DIRECTIVE,
         advisorTerritory,
         describeWeatherForAdvisor({ world: worldData, player: gameData?.country || "", date: gameData?.gameDate || "" }),
         // (The seasons and the weather, which the map shows with no words:

@@ -2349,6 +2349,12 @@ export const GAME_MASTER_SCHEMA = {
 // deliberately shallow tool contract. Each subsystem is JSON array text, decoded
 // immediately and then validated against GAME_MASTER_SCHEMA before any preview
 // is accepted.
+//
+// Being text, the events reach the model with none of their enums. A real-key
+// test (2026-10-28) had the GM start a war with a unit's posture "offensive",
+// which no posture is, and the preview was refused for it: the one enum a GM
+// event most often gets wrong is named on the field itself.
+const GM_EVENTS_POSTURE_NOTE = `A unit's posture (impacts.unitOps) is one of: ${unitSchema.properties.posture.enum.join(", ")}.`;
 export const GAME_MASTER_TRANSPORT_SCHEMA = {
   type: "object",
   description: "Compact provider transport for a previewable native GM transaction.",
@@ -2358,7 +2364,7 @@ export const GAME_MASTER_TRANSPORT_SCHEMA = {
       enum: ["direct", "exact-event", "world-intervention"],
     },
     summary: textSchema("Concise explanation of what the transaction would change if applied."),
-    eventsJson: textSchema("JSON array text for canonical event objects. Use [] when none."),
+    eventsJson: textSchema(`JSON array text for canonical event objects. ${GM_EVENTS_POSTURE_NOTE} Use [] when none.`),
     territorialScopesJson: textSchema("JSON array text for exhaustive rendered base-geography territorial scopes. Use [] when none."),
     countryStatPatchesJson: textSchema("JSON array text for authoritative country Stats patches. Use [] when none."),
     storylineUpdatesJson: textSchema("JSON array text for persistent canonical world.storylines updates. Use [] when none."),
@@ -2410,6 +2416,24 @@ const GAME_MASTER_TRANSPORT_FIELDS = Object.freeze([
   ["diplomaticOutreachJson", "diplomaticOutreach"],
 ]);
 
+// Escaped text read as the JSON string it would be inside quotes, then parsed:
+// null when either step fails.
+const parseUnescapedOnce = (text) => {
+  let unescaped;
+  try {
+    unescaped = JSON.parse(`"${text}"`);
+  } catch {
+    // A raw line break or a lone backslash is not valid inside a JSON string;
+    // the escapes a model doubles are its quotes and backslashes.
+    unescaped = text.replace(/\\(["\\])/g, "$1");
+  }
+  try {
+    return JSON.parse(unescaped);
+  } catch {
+    return extractJsonArray(unescaped);
+  }
+};
+
 const parseGameMasterTransportArray = (value, field) => {
   if (Array.isArray(value)) return value;
   const text = String(value ?? "").trim();
@@ -2418,13 +2442,20 @@ const parseGameMasterTransportArray = (value, field) => {
   let strictError = null;
   try {
     parsed = JSON.parse(text);
+    // The array escaped once too often and written as a JSON string
+    // ("\"[{\\\"date\\\"…]\""): what the string holds is the array text.
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
   } catch (error) {
     strictError = error;
+    // The array escaped once too often without the quotes round it
+    // (`[{\"date\":…}]`): a real-key GM retry (2026-10-28) answered so and the
+    // transaction was lost. Unescaped once, never more, and only after the
+    // strict parse failed, so well-formed text is never touched.
+    parsed = text.includes('\\"') ? parseUnescapedOnce(text) : null;
     // The same salvage the task runner gives a whole answer (jsonSalvage.js):
     // a trailing remark after the array, a smart quote, a trailing comma or a
-    // second array must not cost the whole transaction. Only after the strict
-    // parse failed, so well-formed text is never touched.
-    parsed = extractJsonArray(text);
+    // second array must not cost the whole transaction.
+    if (parsed === null) parsed = extractJsonArray(text);
     if (parsed === null) {
       throw new Error(`$.${field} must contain valid JSON array text: ${strictError?.message || strictError}.`);
     }
@@ -2437,15 +2468,19 @@ const parseGameMasterTransportArray = (value, field) => {
 
 // The transport shows the GM no schema for a chat, so its countries arrive as
 // names or as {name} objects; the schema it is validated against takes names.
+// Nor for a unit's posture: a posture said in other words ("offensive") reads
+// as the one it means, as on a time skip (normalizeUnitOperationShape).
 const normalizeGameMasterChats = (payload) => {
   if (!isPlainRecord(payload)) return payload;
   const next = { ...payload };
   if (Array.isArray(next.events)) {
-    next.events = next.events.map((event) => (
-      isPlainRecord(event) && isPlainRecord(event.impacts) && Array.isArray(event.impacts.createdChats)
-        ? { ...event, impacts: { ...event.impacts, createdChats: normalizeChatList(event.impacts.createdChats) } }
-        : event
-    ));
+    next.events = next.events.map((event) => {
+      if (!isPlainRecord(event) || !isPlainRecord(event.impacts)) return event;
+      const impacts = { ...event.impacts };
+      if (Array.isArray(impacts.createdChats)) impacts.createdChats = normalizeChatList(impacts.createdChats);
+      if (Array.isArray(impacts.unitOps)) impacts.unitOps = impacts.unitOps.map(normalizeUnitOperationShape);
+      return { ...event, impacts };
+    });
   }
   if (Array.isArray(next.diplomaticOutreach)) next.diplomaticOutreach = normalizeChatList(next.diplomaticOutreach);
   return next;
@@ -3855,7 +3890,7 @@ export const getGameplayToolForCustomStatSheet = (taskKey, rows, { custom = fals
       `JSON array text for canonical event objects. This scenario uses a custom National Stats sheet. `
       + `If an event changes Stats through impacts.polityChanges[].stats, numeric Stats MUST be under customStats `
       + `using only these exact machine keys: ${keyList}. Do not use population, economy, indices, stability, or gdpBreakdown. `
-      + "Use [] when there are no events.";
+      + `${GM_EVENTS_POSTURE_NOTE} Use [] when there are no events.`;
 
     return {
       ...tool,
@@ -4150,13 +4185,42 @@ const normalizeMarkerOperationShape = (entry) => {
 const UNIT_STATUSES = new Set(unitSchema.properties.status.enum);
 const UNIT_POSTURES = new Set(unitSchema.properties.posture.enum);
 
+// A posture said in other words reads as the posture it means. The GM, whose
+// events are JSON text and never see the enum, started a war with "offensive"
+// (2026-10-28) and the whole preview was refused for that one word. A word that
+// is none of these is left for the schema to name.
+const UNIT_POSTURE_SYNONYMS = new Map([
+  ...["offensive", "offense", "attack", "attacking", "assault", "advance", "advancing", "counteroffensive", "counter-offensive"].map((word) => [word, "assaulting"]),
+  ...["defensive", "defense", "defence", "defending", "defend", "hold", "holding position", "dug in", "entrenched"].map((word) => [word, "holding"]),
+  ...["mass", "massed", "staging", "concentrating", "mobilizing", "mobilising"].map((word) => [word, "massing"]),
+  ...["patrolling", "patrols", "on patrol"].map((word) => [word, "patrol"]),
+  ...["moving", "in transit", "en route", "redeploying", "deploying"].map((word) => [word, "transit"]),
+  ...["exercises", "on exercise", "drill", "drills", "training"].map((word) => [word, "exercise"]),
+  ...["blockading"].map((word) => [word, "blockade"]),
+  ...["withdraw", "withdrawal", "retreat", "retreating", "falling back"].map((word) => [word, "withdrawing"]),
+]);
+const canonicalPosture = (value) => {
+  if (typeof value !== "string") return value;
+  const word = value.trim().toLowerCase();
+  if (UNIT_POSTURES.has(word)) return word;
+  return UNIT_POSTURE_SYNONYMS.get(word) ?? value;
+};
+
 const normalizeUnitOperationShape = (entry) => {
-  if (!isPlainRecord(entry) || !isPlainRecord(entry.unit) || entry.unit.status === undefined) return entry;
-  const status = String(entry.unit.status ?? "").trim().toLowerCase();
-  if (UNIT_STATUSES.has(status)) return { ...entry, unit: { ...entry.unit, status } };
-  const { status: _status, ...unit } = entry.unit;
+  if (!isPlainRecord(entry)) return entry;
+  let next = entry;
+  // A move carries its posture beside the unit's name; a spawn inside the unit.
+  if (next.posture !== undefined && canonicalPosture(next.posture) !== next.posture) next = { ...next, posture: canonicalPosture(next.posture) };
+  if (!isPlainRecord(next.unit)) return next;
+  if (next.unit.posture !== undefined && canonicalPosture(next.unit.posture) !== next.unit.posture) {
+    next = { ...next, unit: { ...next.unit, posture: canonicalPosture(next.unit.posture) } };
+  }
+  if (next.unit.status === undefined) return next;
+  const status = String(next.unit.status ?? "").trim().toLowerCase();
+  if (UNIT_STATUSES.has(status)) return { ...next, unit: { ...next.unit, status } };
+  const { status: _status, ...unit } = next.unit;
   if (UNIT_POSTURES.has(status) && unit.posture === undefined) unit.posture = status;
-  return { ...entry, unit };
+  return { ...next, unit };
 };
 
 // A chat's countries are names. A model working from an older prompt copy (or

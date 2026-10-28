@@ -80,6 +80,21 @@ test("a start's note can name the war; the rest of it is the cause", () => {
   assert.deepEqual(splitWarStartNote("The title: a pretext"), { title: "", cause: "The title: a pretext" }, "only a leading Title: names the war");
 });
 
+// A real-key test (2026-10-28): "Title: Franco-Italian War~Dispute over…" was kept whole as the name.
+test("a war's name ends at a tilde or a bar as well as a semicolon", () => {
+  assert.deepEqual(splitWarStartNote("Title: Franco-Italian War~Dispute over Nice"), { title: "Franco-Italian War", cause: "Dispute over Nice" });
+  assert.deepEqual(splitWarStartNote("Title: Alpine War | Dispute over Nice"), { title: "Alpine War", cause: "Dispute over Nice" });
+  const named = applyWarUpdates({
+    world,
+    updates: "war-france-germany-1914~start~Germany~France~1~Title: The Great War~The ultimatum to Paris expired",
+    events: declaration(),
+    stopDate: "1914-08-31",
+    round: 2,
+  });
+  assert.equal(named.wars[0].title, "The Great War");
+  assert.equal(named.wars[0].cause, "The ultimatum to Paris expired");
+});
+
 test("Round-Zero baseline wars do not require a duplicate historical event link", () => {
   for (const id of ["war-uac-apla", "sec-us-civil-war-apla", "russo-ukrainian-war"]) {
     const result = validatePregameWarBootstrap({

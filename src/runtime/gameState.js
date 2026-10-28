@@ -64,7 +64,7 @@ import {
   wrapLng,
 } from "./unitMotion.js";
 import { compareGameDates, normalizeGameDate } from "./gameDates.js";
-import { normalizeBattlefields } from "./fronts/record.js";
+import { normalizeBattlefields, withWarIdFrontsRenamed } from "./fronts/record.js";
 import { normalizeTransports } from "./fronts/transports.js";
 import { normalizeStrikes } from "./strikes.js";
 import { battlefieldHeldClaimants } from "./fronts/heldRegions.js";
@@ -3967,7 +3967,13 @@ const normalizeWorldWar = (entry, index = 0) => {
   const status = WORLD_WAR_STATUS_SET.has(rawStatus) ? rawStatus : "active";
   const sourceEventIds = [...new Set(normalizeActionParticipants(entry.sourceEventIds))].slice(-24);
   const storylineIds = [...new Set(normalizeActionParticipants(entry.storylineIds))].slice(-12);
-  const title = normalizeOptionalString(entry.title) || `${sideA[0]}–${sideB[0]} War`;
+  // A name saved with its cause run on after a "~" or "|" ("Franco-Italian
+  // War~Dispute over…"): a start's note was cut only at a ";" until 2026-10-28
+  // (nativeWarLedger.js splitWarStartNote). The name is what comes before it,
+  // and the rest is the cause where none was kept.
+  const [savedTitle, ...runOn] = normalizeOptionalString(entry.title).split(/\s*[~|]\s*/);
+  const title = savedTitle || `${sideA[0]}–${sideB[0]} War`;
+  const cause = normalizeTextLike(entry.cause) || runOn.join(" ").trim();
 
   return {
     id,
@@ -3978,7 +3984,7 @@ const normalizeWorldWar = (entry, index = 0) => {
     startedDate: canonicalizeDateString(entry.startedDate),
     endedDate: status === "ended" ? canonicalizeDateString(entry.endedDate || entry.lastUpdatedDate) : "",
     lastUpdatedDate: canonicalizeDateString(entry.lastUpdatedDate || entry.startedDate),
-    cause: normalizeTextLike(entry.cause),
+    cause,
     note: normalizeTextLike(entry.note),
     sourceEventIds,
     storylineIds,
@@ -4248,7 +4254,9 @@ const withFormerSceneKeyMoved = (world) => {
 };
 
 export const normalizeWorldState = (world) => {
-  const nextWorld = withFormerSceneKeyMoved(world && typeof world === "object" ? world : {});
+  // A battlefield saved under a war's id is renamed, and what names it follows
+  // (fronts/record.js withWarIdFrontsRenamed), before anything below reads them.
+  const nextWorld = withWarIdFrontsRenamed(withFormerSceneKeyMoved(world && typeof world === "object" ? world : {}));
   const polityOverrides = Object.fromEntries(
     Object.entries(nextWorld.polityOverrides ?? {})
       .map(([key, value]) => [key, normalizePolityOverride(key, value)])
