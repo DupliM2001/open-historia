@@ -293,6 +293,11 @@ const WarRoomButton = ({ open, isMobile, onToggle }) => (
         ? "0 0 0 2px rgba(255,255,255,0.85), 0 3px 12px rgba(0,0,0,0.55)"
         : "0 3px 12px rgba(0,0,0,0.55)",
       transition: "left 0.3s ease, bottom 0.3s ease, box-shadow 0.15s ease",
+      // Under an open Actions, Projects or Diplomacy panel (9998), as the
+      // advisor's button is: on a phone it stands where their foot is, over the
+      // Submit button ("it covers the submit action button in the action tab",
+      // a player, 2026-10-28). Over everything while the war room is open.
+      zIndex: open ? 9999 : 9997,
     }}
   >
     <WarRoomIcon />

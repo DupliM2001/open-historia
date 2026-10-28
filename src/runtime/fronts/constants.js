@@ -239,6 +239,9 @@ export const TROOPS_FACTOR_MOST = 4;
 // (The troops a deployment drawn in the war room calls up are held only by the
 // men there are and the line's room: engine.js callUpDeployed.)
 export const REINFORCE_ORDER = "reinforce";
+// A REGION THE STORY SAYS WAS TAKEN (engine.js marchInto): how many of the
+// taker's nearest troops stand in it from that day, counting those already there.
+export const STORY_TAKERS = 3;
 // THE MEN TROOPS ARE RAISED FROM (manpower.js). A formation at full strength
 // is this many men, by era (before 1500, 1500 to 1849, 1850 to 1944, from
 // 1945), and a country can have this share of its people under arms at once:

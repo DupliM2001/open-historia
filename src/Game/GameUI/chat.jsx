@@ -4274,15 +4274,15 @@ const ChatPanel = ({ isOpen, onClose, requestedCountry, requestedDraft = "", onC
                         onMouseEnter={e => { e.currentTarget.style.color = "white"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
                         onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "none"; }}>✕</button>
                     </div>
-                    {/* Three tabs are wider than a phone's header: there the
-                        last one wraps under rather than being cut off. */}
-                    <div style={{ display: "flex", gap: ".35rem", marginTop: ".55rem", ...(isTouch ? { flexWrap: "wrap" } : {}) }}>
+                    {/* Three tabs are wider than a phone's header: there they
+                        stay one row that scrolls sideways, not two. */}
+                    <div style={{ display: "flex", gap: ".35rem", marginTop: isTouch ? ".4rem" : ".55rem", ...(isTouch ? { flexWrap: "nowrap", overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } : {}) }}>
                         {[
                             ["chats", "contacts", "Contacts", chatUnreadCount],
                             ["institutions", "institutions", "Institutions", institutionUnreadCount],
                             ...(espionageOn ? [["spy", "intelligence", "Intelligence", 0]] : []),
                         ].map(([key, iconType, label, count]) => (
-                            <button key={key} className="oh-tap-row" onClick={() => setView(key)} style={{ display: "flex", alignItems: "center", gap: ".38rem", padding: ".34rem .68rem", borderRadius: "8px", fontSize: ".72rem", fontWeight: 750, cursor: "pointer", fontFamily: "sans-serif", border: "1px solid " + (currentView === key ? "var(--oh-grey-border-strong)" : "rgba(255,255,255,.07)"), background: currentView === key ? "var(--oh-grey-selected)" : "rgba(255,255,255,.025)", color: currentView === key ? "white" : "rgba(255,255,255,0.48)" }}>
+                            <button key={key} className="oh-tap-row" onClick={() => setView(key)} style={{ flex: "0 0 auto", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: ".38rem", padding: isTouch ? ".3rem .58rem" : ".34rem .68rem", borderRadius: "8px", fontSize: ".72rem", fontWeight: 750, cursor: "pointer", fontFamily: "sans-serif", border: "1px solid " + (currentView === key ? "var(--oh-grey-border-strong)" : "rgba(255,255,255,.07)"), background: currentView === key ? "var(--oh-grey-selected)" : "rgba(255,255,255,.025)", color: currentView === key ? "white" : "rgba(255,255,255,0.48)" }}>
                                 <span aria-hidden="true" style={{ display: "inline-flex", opacity: .8 }}><WorkspaceTabIcon type={iconType} size={13} /></span>
                                 <span>{label}</span>
                                 {Number(count) > 0 && <span style={{ minWidth: "1.05rem", height: "1.05rem", padding: "0 .25rem", borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", background: currentView === key ? "rgba(255,255,255,.14)" : "rgba(96,165,250,.16)", color: currentView === key ? "#fff" : "#93c5fd", fontSize: ".57rem", fontWeight: 800 }}>{count}</span>}

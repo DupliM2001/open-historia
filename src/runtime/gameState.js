@@ -2985,6 +2985,30 @@ export const resumeStandingOrders = (world, { round = 0, previousSystem = "" } =
 // How many rounds a story ship stays on the map when no arrival removes it.
 export const STORY_VESSEL_ROUNDS = 10;
 
+// The unit on the map a spawned one already is: the same name and the same
+// owner, folded. A unit with no name of its own ("Unit") is never matched.
+const unitNameKey = (value) => normalizeOptionalString(value).toLowerCase().replace(/\s+/g, " ");
+const sameFormationOnMap = (units, unit) => {
+  const name = unitNameKey(unit?.name);
+  const owner = unitNameKey(unit?.ownerCode);
+  if (!name || name === "unit" || !owner) return null;
+  return units.find((entry) => unitNameKey(entry.name) === name && unitNameKey(entry.ownerCode) === owner && entry.strength > 0) ?? null;
+};
+
+// A save that already has such a twin: a unit the AI raised with the name,
+// owner and kind of one the player placed is that unit's copy, and is dropped;
+// the player's own stays where the player put it.
+export const withoutTwinsOfPlayerUnits = (units) => {
+  const list = normalizeArray(units);
+  const placed = new Set(list
+    .filter((unit) => unit?.source === "player" && unitNameKey(unit?.name) && unitNameKey(unit?.name) !== "unit")
+    .map((unit) => `${unitNameKey(unit.name)}|${unitNameKey(unit.ownerCode)}|${unitNameKey(unit.type)}`));
+  if (placed.size === 0) return list;
+  const kept = list.filter((unit) => unit?.source === "player"
+    || !placed.has(`${unitNameKey(unit?.name)}|${unitNameKey(unit?.ownerCode)}|${unitNameKey(unit?.type)}`));
+  return kept.length === list.length ? list : kept;
+};
+
 export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
   const {
     gameDate = "", elapsedDays = null, round = 0, extraAnchors = [], eventId = "", era = null,
@@ -3012,6 +3036,11 @@ export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
       // op batch can't duplicate a unit (mirrors the event-restatement de-dup).
       const spawnId = op.unit?.id;
       if (spawnId && next.some((unit) => unit.id === spawnId)) continue;
+      // Nor can it raise a second of a formation already there: a spawn named as
+      // one of its owner's units on the map is that unit, said again. A player
+      // marked his oil and gas sites with units ("GSI Arzew", "Hub Sud"), and
+      // each skip that told of them raised a twin beside or far from it.
+      if (sameFormationOnMap(next, op.unit)) continue;
 
       const unit = { ...op.unit };
       // A story ship is a ship whatever the model called it, unlisted because
@@ -4368,7 +4397,7 @@ export const normalizeWorldState = (world) => {
       .filter(([code, sheet]) => code && sheet && typeof sheet === "object"),
   );
 
-  const units = normalizeUnits(nextWorld.units);
+  const units = withoutTwinsOfPlayerUnits(normalizeUnits(nextWorld.units));
 
   // The ledgers resolve their polity names against the overrides computed above,
   // not the raw input, so a renamed polity folds onto one identity.

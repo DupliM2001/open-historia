@@ -100,15 +100,17 @@ const InstitutionRow = ({ row, selected, unread = false, onClick }) => {
   </button>;
 };
 
-export const Facts = ({ view }) => {
+// On a phone the three are one slim row, so the institution's own business
+// starts above the fold.
+export const Facts = ({ view, compact = false }) => {
   const rule = view?.charterView?.defaultRule?.label || "unspecified";
   const items = [
     ["Members", `${view?.memberSummary?.active || 0}/${view?.memberSummary?.total || 0}`],
     ["Your role", view?.member ? institutionMembershipDisplayLabel(view.member) : "not a member"],
     ["Decision rule", rule],
   ];
-  return <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: ".45rem" }}>
-    {items.map(([label, value]) => <div key={label} style={{ ...panel, padding: ".62rem .72rem", background: "rgba(20,20,24,.72)" }}><div style={{ fontSize: ".62rem", textTransform: "uppercase", letterSpacing: ".065em", color: "rgba(255,255,255,.4)" }}>{label}</div><div style={{ marginTop: ".18rem", fontSize: ".76rem", fontWeight: 740, color: "rgba(255,255,255,.88)", textTransform: label === "Your role" ? "capitalize" : "none" }}>{value}</div></div>)}
+  return <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: compact ? ".3rem" : ".45rem" }}>
+    {items.map(([label, value]) => <div key={label} style={{ ...panel, padding: compact ? ".34rem .45rem" : ".62rem .72rem", background: "rgba(20,20,24,.72)", minWidth: 0 }}><div style={{ fontSize: compact ? ".52rem" : ".62rem", textTransform: "uppercase", letterSpacing: compact ? ".04em" : ".065em", color: "rgba(255,255,255,.4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div><div style={{ marginTop: compact ? ".1rem" : ".18rem", fontSize: compact ? ".68rem" : ".76rem", fontWeight: 740, color: "rgba(255,255,255,.88)", textTransform: label === "Your role" ? "capitalize" : "none", overflowWrap: "anywhere" }}>{value}</div></div>)}
   </div>;
 };
 
@@ -389,6 +391,7 @@ const FoundInstitutionForm = ({ value, onChange, onCancel, onSubmit, busy, polit
 export default function InstitutionsWorkspace({ panelOpen = true, world = {}, playerCountry = "", gameDate = "", chats = [], unreadIds = new Set(), onAdoptResult, onOpenCouncil, onOpenLifecycleChat, onRequestCouncilTurn, councilAutomation = [], onCouncilVisibleChange, renderCouncil, focusRequest = null }) {  const [showAll, setShowAll] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [section, setSection] = useState("overview");
+  const compact = useIsMobile();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [proposalTitle, setProposalTitle] = useState("");
@@ -721,16 +724,17 @@ export default function InstitutionsWorkspace({ panelOpen = true, world = {}, pl
   const activeCouncilAutomation = list(councilAutomation).find((entry) => lower(entry?.institutionId) === lower(institution.id));
   const tabs = [["overview", "Overview"], ["council", "Council"], ["agenda", `Agenda${selectedView.activeProposals?.length ? ` (${selectedView.activeProposals.length})` : ""}`], ["decisions", "Decisions"], ["charter", "Charter"], ["members", "Members"], ["documents", `Documents${readableDocs.length ? ` (${readableDocs.length})` : ""}`]];
   return <div data-institution-shell="persistent" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-    <div data-institution-header="persistent" style={{ display: "flex", alignItems: "center", gap: ".85rem", padding: ".9rem 1rem .78rem", borderBottom: "1px solid rgba(255,255,255,.055)", flexShrink: 0 }}>
-      <button className="oh-tap" onClick={() => { setSelectedId(""); setError(""); }} style={{ border: 0, background: "transparent", color: "rgba(255,255,255,.55)", cursor: "pointer", fontSize: "1.08rem" }} aria-label="Back to institutions">‹</button>
-      <Emblem institution={institution} size={56} />
+    <div data-institution-header="persistent" style={{ display: "flex", alignItems: "center", gap: compact ? ".5rem" : ".85rem", padding: compact ? ".5rem .7rem .45rem .35rem" : ".9rem 1rem .78rem", borderBottom: "1px solid rgba(255,255,255,.055)", flexShrink: 0 }}>
+      <button className="oh-tap" onClick={() => { setSelectedId(""); setError(""); }} style={{ border: 0, background: "transparent", color: "rgba(255,255,255,.55)", cursor: "pointer", fontSize: "1.08rem", flex: "0 0 auto", padding: compact ? ".2rem .3rem" : undefined }} aria-label="Back to institutions">‹</button>
+      <Emblem institution={institution} size={compact ? 42 : 56} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", gap: ".5rem", alignItems: "center", flexWrap: "wrap" }}><strong style={{ fontSize: "1.04rem", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{institution.name || institution.id}</strong><SmallPill tone={lower(institution.status || "active") === "active" ? "good" : "neutral"}>{institution.status || "active"}</SmallPill></div>
+        <div style={{ display: "flex", gap: ".5rem", alignItems: "center", flexWrap: "wrap" }}><strong style={{ fontSize: compact ? ".9rem" : "1.04rem", lineHeight: 1.2, ...(compact ? { overflowWrap: "anywhere" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{institution.name || institution.id}</strong><SmallPill tone={lower(institution.status || "active") === "active" ? "good" : "neutral"}>{institution.status || "active"}</SmallPill></div>
         <div style={{ marginTop: ".2rem", fontSize: ".65rem", color: "rgba(255,255,255,.45)" }}>{clean(institution.kind || "institution").replace(/[-_]/g, " ")}{institution.foundedDate ? ` · founded ${institution.foundedDate}` : ""}</div>
-        {overviewPurpose && <div style={{ marginTop: ".3rem", maxWidth: "44rem", fontSize: ".7rem", lineHeight: 1.4, color: "rgba(255,255,255,.62)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{overviewPurpose}</div>}
+        {overviewPurpose && !compact && <div style={{ marginTop: ".3rem", maxWidth: "44rem", fontSize: ".7rem", lineHeight: 1.4, color: "rgba(255,255,255,.62)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{overviewPurpose}</div>}
       </div>    </div>
-    <div data-institution-facts="persistent" style={{ padding: ".65rem 1rem .7rem", flexShrink: 0 }}><Facts view={selectedView} /></div>
-    <div data-institution-tabs="persistent" style={{ display: "flex", flexWrap: "wrap", gap: ".08rem", padding: "0 .78rem", borderBottom: "1px solid rgba(255,255,255,.06)", flexShrink: 0 }}>{tabs.map(([key, label]) => <button className="oh-tap-row" key={key} onClick={() => key === "council" && selectedRow.member ? openCouncil() : setSection(key)} disabled={key === "council" && Boolean(busy)} style={{ flex: "0 0 auto", border: 0, borderBottom: `2px solid ${section === key ? "rgba(231,231,234,.72)" : "transparent"}`, background: "transparent", color: section === key ? "var(--oh-grey-text)" : "rgba(255,255,255,.52)", padding: ".58rem .68rem .62rem", fontSize: ".68rem", fontWeight: 730, cursor: key === "council" && busy ? "wait" : "pointer" }}>{key === "council" && busy === "council" ? "Opening…" : label}</button>)}</div>    {error && <div style={{ margin: ".5rem 1rem 0", padding: ".45rem .6rem", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", color: "#fca5a5", fontSize: ".62rem", flexShrink: 0 }}>{error}</div>}
+    <div data-institution-facts="persistent" style={{ padding: compact ? ".4rem .7rem .45rem" : ".65rem 1rem .7rem", flexShrink: 0 }}><Facts view={selectedView} compact={compact} /></div>
+    {/* On a phone the sections are one row that scrolls sideways, not three rows of wrapped tabs. */}
+    <div data-institution-tabs="persistent" style={{ display: "flex", flexWrap: compact ? "nowrap" : "wrap", overflowX: compact ? "auto" : undefined, gap: ".08rem", padding: compact ? "0 .45rem" : "0 .78rem", borderBottom: "1px solid rgba(255,255,255,.06)", flexShrink: 0, ...(compact ? { scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } : {}) }}>{tabs.map(([key, label]) => <button className="oh-tap-row" key={key} onClick={() => key === "council" && selectedRow.member ? openCouncil() : setSection(key)} disabled={key === "council" && Boolean(busy)} style={{ flex: "0 0 auto", whiteSpace: "nowrap", border: 0, borderBottom: `2px solid ${section === key ? "rgba(231,231,234,.72)" : "transparent"}`, background: "transparent", color: section === key ? "var(--oh-grey-text)" : "rgba(255,255,255,.52)", padding: ".58rem .68rem .62rem", fontSize: ".68rem", fontWeight: 730, cursor: key === "council" && busy ? "wait" : "pointer" }}>{key === "council" && busy === "council" ? "Opening…" : label}</button>)}</div>    {error && <div style={{ margin: ".5rem 1rem 0", padding: ".45rem .6rem", borderRadius: 8, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", color: "#fca5a5", fontSize: ".62rem", flexShrink: 0 }}>{error}</div>}
     {section === "council" && selectedPendingActions > 0 && <button className="oh-tap-row" type="button" onClick={() => setSection("agenda")} style={{ margin: ".55rem 1rem 0", padding: ".58rem .7rem", display: "flex", alignItems: "center", gap: ".7rem", border: "1px solid rgba(245,158,11,.28)", borderRadius: 10, background: "rgba(245,158,11,.08)", color: "#fde68a", cursor: "pointer", textAlign: "left", flexShrink: 0 }}>
       <span style={{ flex: 1 }}><span style={{ display: "block", fontSize: ".59rem", fontWeight: 850, letterSpacing: ".07em", textTransform: "uppercase", color: "rgba(253,230,138,.7)" }}>Action required</span><span style={{ display: "block", marginTop: ".12rem", fontSize: ".62rem", fontWeight: 700 }}>{selectedPendingBallots ? `${selectedPendingBallots} ballot${selectedPendingBallots === 1 ? "" : "s"} awaiting you` : ""}{selectedPendingBallots && selectedPendingAmendments ? " · " : ""}{selectedPendingAmendments ? `${selectedPendingAmendments} amendment review${selectedPendingAmendments === 1 ? "" : "s"}` : ""}</span></span>
       <strong style={{ fontSize: ".64rem" }}>Review agenda →</strong>    </button>}
