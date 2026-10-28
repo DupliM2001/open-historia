@@ -216,6 +216,9 @@ import { withTurnStrikes } from "../../runtime/strikes.js";
 import { playerDiplomacy, turnDays, turnWarAndPeace } from "./warAndPeace.js";
 import { PEACE_BLOCK_HEADING, buildPeaceBlock } from "./peacePrompt.js";
 import { kmBetween } from "../../runtime/fronts/worldGrid.js";
+import { takersFor } from "../../runtime/fronts/constants.js";
+import { pointInFrame } from "../../runtime/fronts/frame.js";
+import { normalizeBattlefields } from "../../runtime/fronts/record.js";
 import { readWarRoomAnswer, warRoomRequest, warRoomStanding, warRoomVariables } from "./warRoomContext.js";
 import { bindFrontOrdersToEvents, describeDroppedFrontOrders, frontOrderProseLines, screenFrontOrders } from "./nativeFrontLedger.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
@@ -2818,7 +2821,7 @@ ${describeTravelPace(game?.gameDate, eraSettingOf(world))}`);
   // on a battlefield the taker's nearest troops stand in it and the other side's fall back (fronts/engine.js
   // marchInto); off one, its nearest formation marches in (marchCapturersIn).
   blocks.push(`[Taking Ground]
-An army may take a region in this period wherever what has led up to it makes that likely, or where history took it at this time and nothing in this game has turned that aside. Tell it in the event that takes it, and put the region in the taker's hands on that event: a regionControlOps control entry, basis occupation, the region by name. Move the formation that took it there in the same event when it has one on the map. From that event's date the map follows: the taker's nearest troops stand in the region, and the other side's fall back out of it.`);
+An army may take a region in this period wherever what has led up to it makes that likely, or where history took it at this time and nothing in this game has turned that aside. Tell it in the event that takes it, and put the region in the taker's hands on that event: a regionControlOps control entry, basis occupation, the region by name. Move the formation that took it there in the same event when it has one on the map. A region is taken only where enough of the taker's troops stand near it, more for a larger region: where too few do, move them up first, in an earlier event, or the region stays where it was. From that event's date the map follows: the taker's nearest troops stand in the region, and the other side's fall back out of it.`);
 
   // A folded skip keeps the board itself (projectsDirective.js); otherwise the
   // board is context, and its own pass moves it.
@@ -7507,15 +7510,20 @@ const completeNarratedCaptures = async (containers, world, { receipt = null, ren
   return added;
 };
 
-// A REGION AN EVENT SAYS WAS TAKEN, AND NO TROOPS SENT. "make sure the
+// A REGION AN EVENT SAYS WAS TAKEN, AWAY FROM ANY BATTLEFIELD. "make sure the
 // simulation ai is able to say that a region is taken by an army which causes
 // the nearest troops to move accordingly so when that event happens, the region
-// has been taken" (the owner, 2026-10-28). An event with a control operation
-// that gives a region to a power, and that moves or raises none of that power's
-// land formations into it, has the power's nearest land formation (not a
-// garrison, not covert, not fighting on a battlefield: the front engine moves
-// those, engine.js marchInto) march into it, within STORY_MARCH_KM. Mutates the
-// events' impacts; returns how many were moved.
+// has been taken"; "the max number of nearby units redirected should be based
+// on the size of the region. there should also be a minimum number and if that
+// minimum is not met then the region transfer fails" (the owner, 2026-10-28).
+// A control operation giving a region to a power asks as many of its land
+// formations (not garrisons, not covert, not fighting on a battlefield) as the
+// region's size does (fronts/constants.js takersFor): those already in it, those
+// the event itself sends there, and those within STORY_MARCH_KM. With fewer than
+// the least, the operation comes off the event and the region is not taken;
+// otherwise the nearest march in, up to the most. A region on an open
+// battlefield the taker fights on is the front engine's (engine.js
+// captureRefused, marchInto). Mutates the events' impacts; returns how many moved.
 const STORY_MARCH_KM = 800;
 const STORY_MARCHERS = new Set(["infantry", "armor", "artillery"]);
 const marchCapturersIn = async (containers, world, { receipt = null, renderedRegions = null, lookupContext = null } = {}) => {
@@ -7538,6 +7546,13 @@ const marchCapturersIn = async (containers, world, { receipt = null, renderedReg
     ? [Number(unit.lng), Number(unit.lat)] : null);
   const inside = (row, point) => Boolean(point) && point[0] >= row.bbox[0] && point[0] <= row.bbox[2] && point[1] >= row.bbox[1] && point[1] <= row.bbox[3]
     && pointInGeometry(point, row.geometry);
+  // The open battlefields, by their frames, and who fights on each.
+  const fronts = normalizeBattlefields(world?.battlefields).filter((record) => record.status === "active" && record.frame);
+  const onFront = (row, taker) => {
+    const middle = row.centroid ?? [(row.bbox[0] + row.bbox[2]) / 2, (row.bbox[1] + row.bbox[3]) / 2];
+    return fronts.some((record) => pointInFrame(record.frame, middle[0], middle[1])
+      && record.sides.some((members) => members.some((member) => samePower(member, taker))));
+  };
   const sent = new Set();
   let moved = 0;
   for (const { event, impacts, path } of pending) {
@@ -7553,43 +7568,76 @@ const marchCapturersIn = async (containers, world, { receipt = null, renderedReg
       }
       return null;
     }).filter(Boolean);
+    const refused = [];
     for (const op of normalizeArray(impacts.regionControlOps)) {
       if (normalizeString(op?.op).toLowerCase() !== "control" || op?.wholeCountry === true) continue;
       const row = rowById.get(normalizeString(op.regionId));
       const taker = normalizeString(op.toCode);
-      if (!row || !taker) continue;
-      if (ownMoves.some(({ unit, point }) => samePower(unit.ownerCode, taker) && LAND_UNIT_TYPES.has(normalizeString(unit.type).toLowerCase()) && inside(row, point))) continue;
-      if (units.some((unit) => samePower(unit.ownerCode, taker) && STORY_MARCHERS.has(unit.type) && inside(row, pointOf(unit)))) continue;
+      if (!row || !taker || onFront(row, taker)) continue;
       const centre = nearestInteriorPoint(row.geometry, row.centroid ?? [(row.bbox[0] + row.bbox[2]) / 2, (row.bbox[1] + row.bbox[3]) / 2]);
       if (!centre) continue;
-      let best = null;
-      let bestKm = STORY_MARCH_KM;
-      for (const unit of units) {
-        if (sent.has(unit.id) || !STORY_MARCHERS.has(unit.type) || unit.covert || normalizeString(unit.committedTo) || !samePower(unit.ownerCode, taker)) continue;
-        if (ownMoves.some((entry) => entry.unit?.id === unit.id)) continue;
-        const from = pointOf(unit);
-        const km = from ? placementDistanceKm(from, centre) : Infinity;
-        if (km < bestKm) {
-          bestKm = km;
-          best = { unit, from };
-        }
-      }
-      if (!best) continue;
-      const to = nearestInteriorPoint(row.geometry, best.from) ?? centre;
-      sent.add(best.unit.id);
-      impacts.unitOps = [...normalizeArray(impacts.unitOps), {
-        op: "move", unitId: best.unit.id, toLng: to[0], toLat: to[1],
-        note: `Into ${row.name}, which it took.`,
-      }];
-      moved += 1;
+      const { least, most } = takersFor(geometryAreaKm2(row.geometry));
+      const arriving = ownMoves.filter(({ unit, point }) => samePower(unit.ownerCode, taker) && LAND_UNIT_TYPES.has(normalizeString(unit.type).toLowerCase()) && inside(row, point)).length;
+      const standing = units.filter((unit) => samePower(unit.ownerCode, taker) && STORY_MARCHERS.has(unit.type) && inside(row, pointOf(unit))).length;
+      const near = units
+        .filter((unit) => !sent.has(unit.id) && STORY_MARCHERS.has(unit.type) && !unit.covert && !normalizeString(unit.committedTo) && samePower(unit.ownerCode, taker)
+          && !ownMoves.some((entry) => entry.unit?.id === unit.id) && !inside(row, pointOf(unit)))
+        .map((unit) => ({ unit, from: pointOf(unit) }))
+        .map((entry) => ({ ...entry, km: entry.from ? placementDistanceKm(entry.from, centre) : Infinity }))
+        .filter((entry) => entry.km <= STORY_MARCH_KM)
+        .sort((a, b) => a.km - b.km);
       const title = normalizeString(event?.title);
-      noteReceipt(receipt, "adjusted",
-        `${title ? `Event "${title}": ` : ""}${row.name} was taken by ${labelOf(taker)} and none of its forces went there, `
-        + `so its nearest formation, ${best.unit.name}, marched in (${Math.round(bestKm)} km). Move the formation that takes a place in the event that takes it.`);
-      console.info(`[story capture] ${path}: ${best.unit.name} (${labelOf(taker)}) into ${row.name}, ${Math.round(bestKm)} km.`);
+      if (arriving + standing + near.length < least) {
+        refused.push(op);
+        noteReceipt(receipt, "dropped",
+          `${title ? `Event "${title}": ` : ""}${labelOf(taker)} could not take ${row.name}: too few of its troops near `
+          + `(${arriving + standing + near.length} of the ${least} a region that size needs). A region is taken only where enough of the taker's troops stand near it, more for a larger region: move them up first, in an earlier event.`);
+        console.info(`[story capture] ${path}: ${row.name} not taken by ${labelOf(taker)}, ${arriving + standing + near.length} of ${least} near.`);
+        continue;
+      }
+      for (const { unit, from, km } of near.slice(0, Math.max(0, most - arriving - standing))) {
+        const to = nearestInteriorPoint(row.geometry, from) ?? centre;
+        sent.add(unit.id);
+        impacts.unitOps = [...normalizeArray(impacts.unitOps), {
+          op: "move", unitId: unit.id, toLng: to[0], toLat: to[1],
+          note: `Into ${row.name}, which it took.`,
+        }];
+        moved += 1;
+        noteReceipt(receipt, "adjusted",
+          `${title ? `Event "${title}": ` : ""}${row.name} was taken by ${labelOf(taker)}, `
+          + `so its formation ${unit.name} marched in (${Math.round(km)} km). Move the formation that takes a place in the event that takes it.`);
+        console.info(`[story capture] ${path}: ${unit.name} (${labelOf(taker)}) into ${row.name}, ${Math.round(km)} km.`);
+      }
     }
+    if (refused.length) impacts.regionControlOps = normalizeArray(impacts.regionControlOps).filter((op) => !refused.includes(op));
   }
   return moved;
+};
+
+// A region's area in km², near enough: each ring's own shoelace on a plane
+// scaled to the ring's latitude, holes taken off.
+const geometryAreaKm2 = (geometry) => {
+  const polygons = geometry?.type === "Polygon" ? [geometry.coordinates] : geometry?.type === "MultiPolygon" ? geometry.coordinates : [];
+  const ringKm2 = (ring) => {
+    const points = normalizeArray(ring);
+    if (points.length < 3) return 0;
+    const lat = points.reduce((sum, point) => sum + Number(point?.[1] || 0), 0) / points.length;
+    const kx = 111.32 * Math.cos((lat * Math.PI) / 180);
+    let twice = 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const [x1, y1] = points[index];
+      const [x2, y2] = points[(index + 1) % points.length];
+      twice += (x1 * kx) * (y2 * 110.57) - (x2 * kx) * (y1 * 110.57);
+    }
+    return Math.abs(twice) / 2;
+  };
+  let total = 0;
+  for (const polygon of normalizeArray(polygons)) {
+    normalizeArray(polygon).forEach((ring, index) => {
+      total += index === 0 ? ringKm2(ring) : -ringKm2(ring);
+    });
+  }
+  return Math.max(0, total);
 };
 
 // Where the places a turn's strikes name are (runtime/strikes.js), found on the

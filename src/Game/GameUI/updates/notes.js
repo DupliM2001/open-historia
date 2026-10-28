@@ -60,7 +60,7 @@ const NEW_UPDATES = [
       {
         title: "Fixes from your reports",
         items: [
-          "When an event says an army took a region, the region changes hands on that date, the army's nearest troops move in, and the other side's troops there fall back.",
+          "When an event says an army took a region, the region changes hands on that date if enough of that army's troops are nearby (more for a larger region): its nearest troops move in, and the other side's troops there fall back.",
           "Countries no longer run out of men after a front or two: drafts, reinforcements and the troops a deployment calls up come in again.",
           "When an event or your action makes a country another's puppet, vassal or protectorate, it now becomes one, and freeing, annexing or a revolt is recorded too.",
           "A time skip no longer makes a second copy of a unit already on the map; copies already in a save are removed, and deleting one removes only that one.",
