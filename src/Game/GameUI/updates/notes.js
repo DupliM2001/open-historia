@@ -66,6 +66,7 @@ const NEW_UPDATES = [
           "A time skip no longer makes a second copy of a unit already on the map; copies already in a save are removed, and deleting one removes only that one.",
           "On a map you drew yourself, real-world countries no longer creep into the country list. On phones, the Diplomacy panel's institutions fit the screen and the War Room button no longer covers the Actions panel.",
           "Scripted events are written in your language, and Antarctica's snow is no longer cut into by triangles when zoomed out.",
+          "A time skip on a map with many countries finishes sooner: working out each country's statistics no longer rereads the whole map for every name.",
         ],
       },
     ],
