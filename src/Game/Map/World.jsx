@@ -14,6 +14,8 @@ import { loadNatGeoDarkStyle } from "./natGeoDarkStyle.js";
 
 import { isMapPerfVerbose, recordMapFreeze, recordMapTrace } from "../../runtime/mapPerfTrace.js";
 import { attachMapInstrumentation } from "./mapInstrumentation.js";
+import { attachMapGestures } from "./mapGestures.js";
+import { reduceMotionEnabled } from "../../runtime/mapSettings.js";
 import {
   DEFAULT_BASEMAP_ID,
   TERRAIN_TILE_TEMPLATE,
@@ -856,6 +858,7 @@ function World({ mapRef, projection: requestedProjection, terrainEnabled, onInit
   const emitMapMotion = useCallback((active) => {
     if (typeof window === "undefined") return;
     const moving = Boolean(active);
+    if (window.__OH_MAP_MOVING__ === moving) return;
     window.__OH_MAP_MOVING__ = moving;
     window.dispatchEvent(new CustomEvent("oh:map-motion", {
       detail: { active: moving },
@@ -1100,6 +1103,29 @@ function World({ mapRef, projection: requestedProjection, terrainEnabled, onInit
     };
   }, [handleBasemapTileLoading, handleSourceLoaded, mapInstanceKey, mapRef, stopLoadingToast]);
 
+  // Two fingers on a trackpad turn and tilt the map, and a mouse wheel still
+  // zooms (mapGestures.js). Put on each map instance, as the listeners above.
+  React.useEffect(() => {
+    let disposed = false;
+    let frame = 0;
+    let detach = null;
+    const attach = () => {
+      if (disposed) return;
+      const mapInstance = mapRef?.current?.getMap?.() || null;
+      if (!mapInstance?.getCanvasContainer || mapInstance._removed) {
+        frame = requestAnimationFrame(attach);
+        return;
+      }
+      detach = attachMapGestures(mapInstance, { still: reduceMotionEnabled });
+    };
+    attach();
+    return () => {
+      disposed = true;
+      if (frame) cancelAnimationFrame(frame);
+      detach?.();
+    };
+  }, [mapInstanceKey, mapRef]);
+
 
   return (
     // Stars and the single projected sun sit behind the transparent MapLibre
@@ -1159,9 +1185,19 @@ function World({ mapRef, projection: requestedProjection, terrainEnabled, onInit
         ]}
         cursor="default"
         attributionControl={false}
-        dragRotate={false}
+        // A right-button drag turns the map (sideways) and tilts it (up and
+        // down), and two fingers on a trackpad do the same (mapGestures.js,
+        // which turns only while dragRotate is on). MapLibre keeps the
+        // browser's menu off the map, as it did, so a right-button click
+        // without a drag still does nothing. The tilt stops at 60°, MapLibre's
+        // own limit and the native app's.
+        dragRotate={true}
+        pitchWithRotate={true}
+        maxPitch={60}
+        // Touch screens as before: a pinch zooms, a twist turns, and two
+        // fingers do not tilt. Asked for trackpads and mice; a tilted map
+        // reaches far more tiles, and phones are where memory runs out.
         touchPitch={false}
-        pitchWithRotate={false}
         dragPan={{
           linearity: 0.1,
           deceleration: 5000,

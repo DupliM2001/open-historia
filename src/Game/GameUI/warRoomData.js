@@ -12,12 +12,14 @@ const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 // [{ name, side, status }]. A battlefield counts while a war is being fought
 // on it or is frozen there by a ceasefire; a border that is only fortified is
 // no conflict, and one that has closed is over.
-export const playerFronts = (battlefields, player) => {
+export const playerFronts = (battlefields, player, wars = null) => {
   const name = clean(player);
   if (!name || !Array.isArray(battlefields)) return NONE;
+  const ended = new Set((Array.isArray(wars) ? wars : []).filter((war) => clean(war?.status).toLowerCase() === "ended").map((war) => clean(war?.id)));
   const found = [];
   for (const row of battlefields) {
     if (!row || !isOpenBattlefield(row) || !Array.isArray(row.sides)) continue;
+    if (clean(row.warId) && ended.has(clean(row.warId))) continue;
     const sides = row.sides.map((members) => (Array.isArray(members) ? members.map(clean) : []));
     const side = battlefieldSideOf({ sides }, name);
     if (side === 0 || side === 1) found.push({ name: clean(row.name), side, status: row.status });
@@ -27,7 +29,7 @@ export const playerFronts = (battlefields, player) => {
 
 // The same as one line of text, for a selector that must hand back a value
 // that is equal while nothing has changed.
-export const playerFrontsKey = (battlefields, player) => playerFronts(battlefields, player).map((front) => `${front.side}:${front.name}`).join("\n");
+export const playerFrontsKey = (battlefields, player, wars = null) => playerFronts(battlefields, player, wars).map((front) => `${front.side}:${front.name}`).join("\n");
 
 // ---- words ---------------------------------------------------------------------------
 

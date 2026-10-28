@@ -91,6 +91,10 @@ const GlobeEffects = ({ active }) => {
     let starsVisible = false;
     let lightingVisible = false;
     let autoRotationActive = false;
+    let lastSunCalculation = -Infinity;
+    const activeCelestialFrameMs = isConstrainedDevice()
+      ? 1000 / 18
+      : CELESTIAL_FRAME_MS_ACTIVE;
     const activeLightingFrameMs = isConstrainedDevice()
       ? LIGHTING_FRAME_MS_ACTIVE_CONSTRAINED
       : LIGHTING_FRAME_MS_ACTIVE;
@@ -103,7 +107,10 @@ const GlobeEffects = ({ active }) => {
       lastInteraction = performance.now();
       autoRotationActive = false;
     };
-    const interactionEvents = ["dragstart", "zoomstart", "rotatestart", "pitchstart", "wheel"];
+    // The ends too: a turn of the globe (a right-button drag, or two fingers on
+    // a trackpad, Map/mapGestures.js) can outlast the grace, and the spin
+    // should wait out the grace after it, not set off the moment it ends.
+    const interactionEvents = ["dragstart", "zoomstart", "rotatestart", "pitchstart", "rotateend", "pitchend", "wheel"];
     for (const event of interactionEvents) mapInstance.on(event, markInteraction);
     const interruptAutoRotation = () => {
       markInteraction();
@@ -115,13 +122,16 @@ const GlobeEffects = ({ active }) => {
 
     const syncVisuals = (forceLighting = false) => {
       if (disposed || contextLost || !mapInstance.style) return;
-      // Track the real sun every draw — a dozen trig ops, far cheaper than the
-      // canvas work below, and it keeps the terminator honest while rendering.
-      sunWorldPosition = subsolarPoint();
+      const now = performance.now();
+      // The real Earth's terminator creeps ~0.25°/minute; recalculating the sun
+      // ephemeris every 10 seconds is imperceptible but saves per-frame Date/trig work.
+      if (now - lastSunCalculation > 10000) {
+        lastSunCalculation = now;
+        sunWorldPosition = subsolarPoint();
+      }
       const canvas = mapInstance.getCanvas();
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
-      const now = performance.now();
       const matrix = mapInstance.transform?.modelViewProjectionMatrix;
       const projectionTransition = globeTransitionOpacity(
         mapInstance.transform
@@ -141,7 +151,7 @@ const GlobeEffects = ({ active }) => {
       const isIdle = !isMorphing
         && (autoRotationActive
           || (!mapInstance.isMoving() && now - lastInteraction > INTERACTION_GRACE_MS));
-      const celestialFrameMs = isIdle ? CELESTIAL_FRAME_MS_IDLE : CELESTIAL_FRAME_MS_ACTIVE;
+      const celestialFrameMs = isIdle ? CELESTIAL_FRAME_MS_IDLE : activeCelestialFrameMs;
       const lightingFrameMs = isIdle ? LIGHTING_FRAME_MS_IDLE : activeLightingFrameMs;
       if (projectionTransition > 0
         && (forceLighting || now - lastCelestialDraw >= celestialFrameMs)) {

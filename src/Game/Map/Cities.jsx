@@ -408,6 +408,7 @@ const useCityNameTranslations = (source, customData) => {
         }
         const translations = new Map();
         const seen = new Set();
+        let debounceTimer = 0;
         const collect = () => {
             if (!map.style || !map.getSource?.("cities-source")) return;
             const names = [];
@@ -420,12 +421,19 @@ const useCityNameTranslations = (source, customData) => {
             }
             if (addCityNameTranslations(translations, names, lookupLabel)) setStockTranslations(new Map(translations));
         };
+        const debouncedCollect = () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(collect, 150);
+        };
         const onSourceData = (event) => {
-            if (event?.sourceId === "cities-source" && event.isSourceLoaded) collect();
+            if (event?.sourceId === "cities-source" && event.isSourceLoaded) debouncedCollect();
         };
         map.on("sourcedata", onSourceData);
         collect();
-        return () => map.off("sourcedata", onSourceData);
+        return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            map.off("sourcedata", onSourceData);
+        };
     }, [mapRef, source, labelEpoch]);
 
     return source === "custom" ? customTranslations : stockTranslations;

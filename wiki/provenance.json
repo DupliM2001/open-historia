@@ -133,7 +133,8 @@
       "src/Game/GameUI/other.jsx",
       "src/Game/GameUI/MapModeSelector.jsx",
       "src/multiplayer/ui/LobbiesTab.jsx",
-      "src/Game/GameUI/updates"
+      "src/Game/GameUI/updates",
+      "src/Game/Map/mapGestures.js"
     ],
     "play/world-map.md": [
       "src/Game/Map/World.jsx",
@@ -159,7 +160,8 @@
       "src/Game/Map/FrontLayers.jsx",
       "src/Game/Map/AirLayers.jsx",
       "src/Game/Map/SeaBattleLayers.jsx",
-      "src/Game/Map/StrikeLayers.jsx"
+      "src/Game/Map/StrikeLayers.jsx",
+      "src/Game/Map/mapGestures.js"
     ],
     "play/time.md": [
       "src/Game/GameUI/time.jsx",

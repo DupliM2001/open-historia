@@ -25,7 +25,7 @@ import { openCallsFor, TREATY_BROKEN_REPUTATION } from "../../runtime/alliances.
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { TERRITORY_AS_HELD, TERRITORY_RESTORED, normalizeReparations, openOffersFor } from "../../runtime/peaceTerms.js";
 import { useRuntimeState } from "../../runtime/useRuntimeState.js";
-import { wearinessOf } from "../../runtime/warWeariness.js";
+import { wearinessOf, wearinessWord } from "../../runtime/warWeariness.js";
 import { inSharedGame, requestFromHost } from "../../multiplayer/client/sharedGameBridge.js";
 import { answerDiplomacy } from "../AI/gameplayLazy.js";
 import { TURN_RUNNING_NOTE, isSimulationBusy } from "../AI/simulationStatus.js";
@@ -202,6 +202,15 @@ const fieldStyle = { backgroundColor: "rgba(0,0,0,0.35)", border: "1px solid rgb
 //   war      the war as the pane lists it ({ id, status, sideA, sideB })
 //   world    the world
 //   viewer   the player's country
+const WearyWord = ({ value }) => {
+  const word = wearinessWord(value);
+  return word === "exhausted" ? <>exhausted</>
+    : word === "war-weary" ? <>war-weary</>
+      : word === "strained" ? <>strained</>
+        : word === "uneasy" ? <>uneasy</>
+          : null;
+};
+
 export const PeaceControls = ({ war, world, viewer }) => {
   const [open, setOpen] = useState(false);
   const [territory, setTerritory] = useState(TERRITORY_RESTORED);
@@ -211,8 +220,11 @@ export const PeaceControls = ({ war, world, viewer }) => {
   const sides = [Array.isArray(war?.sideA) ? war.sideA : NONE, Array.isArray(war?.sideB) ? war.sideB : NONE];
   const mine = sides.findIndex((members) => members.some((member) => fold(member) === fold(viewer)));
   const leads = [clean(sides[0][0]), clean(sides[1][0])].filter(Boolean);
-  const weary = leads.map((name) => ({ name, value: Math.round(wearinessOf(world?.warWeariness, name)) })).filter((entry) => entry.value > 0);
   const theirs = mine >= 0 ? clean(sides[1 - mine][0]) : "";
+  const own = mine >= 0 ? clean(sides[mine].find((member) => fold(member) === fold(viewer))) : "";
+  const weary = (mine >= 0 ? [own, theirs].filter(Boolean) : leads)
+    .map((name) => ({ name, value: Math.round(wearinessOf(world?.warWeariness, name)) }))
+    .filter((entry) => entry.value > 0);
   const fought = ["active", "ceasefire"].includes(fold(war?.status || "active"));
   const propose = async () => {
     if (busy) return;
@@ -229,7 +241,13 @@ export const PeaceControls = ({ war, world, viewer }) => {
       {weary.length > 0 ? (
         <div style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.61rem" }}>
           <span>War weariness: </span>
-          <span data-no-translate>{weary.map((entry) => `${entry.name} ${entry.value}`).join(" · ")}</span>
+          {weary.map((entry, at) => (
+            <React.Fragment key={entry.name}>
+              {at > 0 ? " · " : null}
+              <span data-no-translate>{`${entry.name} ${entry.value}`}</span>
+              {wearinessWord(entry.value) ? <> (<WearyWord value={entry.value} />)</> : null}
+            </React.Fragment>
+          ))}
         </div>
       ) : null}
       {mine >= 0 && fought && theirs ? (

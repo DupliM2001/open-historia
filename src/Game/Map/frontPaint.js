@@ -29,8 +29,6 @@ export const FILL_DAYS = 0.75;
 // way from all one side's to all the other's.
 const EDGE_HALF_WIDTH = 0.1;
 const LONG_AGO = -1e6;
-// How many cells across a patch of ground that is redrawn alone is.
-const SWAY_BLOCK = 6;
 
 const isPaint = (value) => value !== PAINT_OWN_A && value !== PAINT_OWN_B && value !== PAINT_WALL;
 
@@ -43,8 +41,6 @@ const isPaint = (value) => value !== PAINT_OWN_A && value !== PAINT_OWN_B && val
 //   bounds        the cells that are painted at any time in the run, as
 //                 { minCol, maxCol, minRow, maxRow }, or null when none is
 //   sideOf(state) which side a state is the ground of: 0 or 1
-//   sway(...)     lays ground that is for the moment changing hands over the
-//                 ground as it stands (frontSkirmish.js)
 export const createPaintPlayer = (view) => {
   const { cols, rows } = view.frame;
   const paint = view.replay?.paint ?? null;
@@ -76,21 +72,7 @@ export const createPaintPlayer = (view) => {
     for (let index = 0; index < paint.cells.length; index += 1) if (paint.cells[index] < size) reach(paint.cells[index]);
   }
 
-  // Cells that are for the moment partly another state, with what each really
-  // is: nothing of this is the run's, and all of it is undone before the
-  // ground is brought to another day.
-  const swayed = new Map();
-  const unsway = () => {
-    for (const [cell, kept] of swayed) {
-      state[cell] = kept.state;
-      was[cell] = kept.was;
-      since[cell] = kept.since;
-    }
-    swayed.clear();
-  };
-
   const reset = () => {
-    swayed.clear();
     if (paint) state.set(paint.began.subarray(0, size));
     else state.fill(PAINT_WALL);
     was.set(state);
@@ -137,59 +119,9 @@ export const createPaintPlayer = (view) => {
     },
     get bounds() { return bounds; },
     get day() { return day; },
-    // Lays over the ground as it stands the cells that are for the moment
-    // turning to another state: `cells`, the state each is turning to, and how
-    // far it has turned (0 to 1). What was laid over it before and is not
-    // among them goes back to what it really is. Returns the cells whose look
-    // has changed, as a list of { minCol, maxCol, minRow, maxRow }: a box for
-    // each small patch of the ground with a change in it, so that a front a
-    // thousand km long with a skirmish here and there is redrawn in a few
-    // small parts and not as one great rectangle.
-    sway(cells, states, turned) {
-      const boxes = new Map();
-      const mark = (cell) => {
-        const col = cell % cols;
-        const row = (cell - col) / cols;
-        const key = Math.floor(row / SWAY_BLOCK) * 4096 + Math.floor(col / SWAY_BLOCK);
-        const box = boxes.get(key);
-        if (!box) boxes.set(key, { minCol: col, maxCol: col, minRow: row, maxRow: row });
-        else {
-          if (col < box.minCol) box.minCol = col;
-          if (col > box.maxCol) box.maxCol = col;
-          if (row < box.minRow) box.minRow = row;
-          if (row > box.maxRow) box.maxRow = row;
-        }
-      };
-      const now = new Set();
-      for (let index = 0; index < cells.length; index += 1) {
-        const cell = cells[index];
-        if (!(cell >= 0 && cell < size) || state[cell] === PAINT_WALL) continue;
-        let kept = swayed.get(cell);
-        if (!kept) {
-          kept = { state: state[cell], was: was[cell], since: since[cell] };
-          swayed.set(cell, kept);
-        }
-        now.add(cell);
-        was[cell] = kept.state;
-        state[cell] = states[index];
-        since[cell] = (Number.isFinite(day) ? day : 0) - Math.max(0, Math.min(1, turned[index])) * FILL_DAYS;
-        reach(cell);
-        mark(cell);
-      }
-      for (const [cell, kept] of swayed) {
-        if (now.has(cell)) continue;
-        state[cell] = kept.state;
-        was[cell] = kept.was;
-        since[cell] = kept.since;
-        swayed.delete(cell);
-        mark(cell);
-      }
-      return [...boxes.values()];
-    },
     // Brings the ground to a day of the run (a fraction of a day is fine).
     seek(to) {
       if (!paint) return;
-      if (swayed.size > 0) unsway();
       if (to < day) reset();
       day = to;
       const tick = to * PAINT_TICKS_PER_DAY;

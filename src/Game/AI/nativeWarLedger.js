@@ -26,13 +26,16 @@ const canonicalPolity = (value) => {
 
 const polityKey = (value) => canonicalPolity(value).toLocaleLowerCase();
 
+// A polity's name has a letter in it: "1" and "2" in a side are event numbers written a field early.
+const hasLetter = (value) => /\p{L}/u.test(value);
+
 const uniquePolities = (value, limit = 12) => {
   const seen = new Set();
   const result = [];
   for (const raw of normalizeArray(value)) {
     const polity = canonicalPolity(raw);
     const key = polity.toLocaleLowerCase();
-    if (!polity || seen.has(key)) continue;
+    if (!polity || !hasLetter(polity) || seen.has(key)) continue;
     seen.add(key);
     result.push(polity);
     if (result.length >= limit) break;
@@ -67,12 +70,16 @@ export const splitWarStartNote = (note) => {
     : { title: "", cause: text };
 };
 
+// A war kept with both its parties on one side and no name on the other (a start record whose event numbers were
+// written where the opponents go: "United Kingdom,Ireland~1,2"): the first is one side and the second the other.
+export const splitOneSidedWar = (sideA, sideB) => (sideB.length === 0 && sideA.length === 2 ? [[sideA[0]], [sideA[1]]] : [sideA, sideB]);
+
 const normalizeWar = (entry, index = 0) => {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
   const id = normalizeString(entry.id) || `war-${index}`;
-  const sideA = uniquePolities(entry.sideA);
-  const sideAKeys = new Set(sideA.map(polityKey));
-  const sideB = uniquePolities(entry.sideB).filter((name) => !sideAKeys.has(polityKey(name)));
+  const read = uniquePolities(entry.sideA);
+  const readKeys = new Set(read.map(polityKey));
+  const [sideA, sideB] = splitOneSidedWar(read, uniquePolities(entry.sideB).filter((name) => !readKeys.has(polityKey(name))));
   if (!id || !sideA.length || !sideB.length) return null;
 
   const rawStatus = normalizeString(entry.status).toLowerCase();
@@ -337,12 +344,24 @@ const parseWarUpdateRecord = (line, index = 0) => {
   while (fields.length < 5) fields.push("");
   fields.push(rest);
 
-  const [idRaw, opRaw, actorsRaw, opponentsRaw, eventNumbersRaw, noteRaw] = fields;
+  let [idRaw, opRaw, actorsRaw, opponentsRaw, eventNumbersRaw, noteRaw] = fields;
+  // The event numbers written where the opponents go, and everything after them one field early
+  // ("war-uk-ireland-2016~start~United Kingdom,Ireland~1,2~Title|cause"): read back into their places, and a start's
+  // two parties, written together, as the side that starts it and the side it is started on.
+  const numbersOnly = (text) => /^\s*\d+(\s*,\s*\d+)*\s*$/.test(String(text ?? ""));
+  let actors = parseCsv(actorsRaw);
+  let opponents = parseCsv(opponentsRaw);
+  if (numbersOnly(opponentsRaw) && !numbersOnly(eventNumbersRaw)) {
+    noteRaw = normalizeString(noteRaw) ? noteRaw : eventNumbersRaw;
+    eventNumbersRaw = opponentsRaw;
+    opponents = [];
+    if (normalizeString(opRaw).toLowerCase() === "start") [[...actors], [...opponents]] = splitOneSidedWar(actors, opponents);
+  }
   return {
     id: normalizeString(idRaw) || `war-${index}`,
     op: normalizeString(opRaw).toLowerCase(),
-    actors: parseCsv(actorsRaw),
-    opponents: parseCsv(opponentsRaw),
+    actors,
+    opponents,
     eventIndexes: parseEventNumbers(eventNumbersRaw),
     eventIds: [],
     // Internal Round-Zero metadata only. The compact normal-turn line transport

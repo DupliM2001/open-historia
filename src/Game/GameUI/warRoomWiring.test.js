@@ -50,7 +50,7 @@ test("the war room is the player's when his troops are on a battlefield with a w
 });
 
 test("the button is there only while there is a war, beside the dock where Search otherwise is", () => {
-  assert.match(main, /const warFronts = useRuntimeState\("world", \(world\) => playerFrontsKey\(world\?\.battlefields, playerCountry\), playerCountry\);/);
+  assert.match(main, /const warFronts = useRuntimeState\("world", \(world\) => playerFrontsKey\(world\?\.battlefields, playerCountry, world\?\.wars\), playerCountry\);/);
   assert.match(main, /const atWar = Boolean\(warFronts\) && isActiveFeatureEnabled\("fronts"\);/);
   assert.match(main, /\{\(atWar \|\| isWarRoomOpen\) && \(\s*<WarRoomButton open=\{warRoomShown\} isMobile=\{isMobile\} onToggle=\{toggleWarRoom\} \/>\s*\)\}/);
   // It takes Search's place, and Search begins beyond it.

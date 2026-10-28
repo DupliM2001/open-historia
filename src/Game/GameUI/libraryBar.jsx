@@ -279,8 +279,8 @@ const ButtonIcon = ({ kind, size = 15, strokeWidth = 1.9 }) => {
     case "refresh":
       return (
         <svg aria-hidden="true" {...common}>
-          <path d="M20 11a8 8 0 1 0 2.1 5.4" />
-          <path d="M20 4v7h-7" />
+          <path d="M20 12a8 8 0 1 1-8-8c2.24 0 4.38.89 6 2.44L20 8.5" />
+          <path d="M20 4v4.5h-4.5" />
         </svg>
       );
     case "import":

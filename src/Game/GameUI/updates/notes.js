@@ -53,6 +53,107 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // "make it so you can do all the map controls with 2 fingers on a trackpad, and make it so mouse you can just
+    // right click to do them"; "make it so on track pad, a one finger click and drag pans but 2 finger drag turns
+    // tilts and rotates" (the owner, 2026-10-27).
+    id: "2026-10-turn-and-tilt",
+    kind: "minor",
+    date: "2026-10-27",
+    channel: "beta",
+    banners: [
+      {
+        title: "Turn and tilt the map",
+        items: [
+          "Drag with the right mouse button to turn and tilt the map: sideways turns it, up and down tilts it.",
+          "On a trackpad, a two-finger drag now turns and tilts the map, both at once, instead of zooming. Pinch to zoom.",
+          "A one-finger click and drag still moves the map, and a mouse wheel still zooms.",
+          "It works the same in the War Room, and Shift with the arrow keys still turns and tilts the map too.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "2026-10-globe-and-renames",
+    kind: "minor",
+    date: "2026-10-27",
+    banners: [
+      {
+        title: "A smoother globe",
+        items: [
+          "Globe rotation and celestial star rendering run smoother with fewer frame drops.",
+          "A city renamed in your game shows its new name in its place popup as well as on the map.",
+          "A city renamed by an event is renamed on the map more reliably.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "2026-10-peace-and-weariness",
+    kind: "minor",
+    date: "2026-10-26",
+    banners: [
+      {
+        title: "Peace, weariness and the phone",
+        items: [
+          "Once a war ends in peace, the War Room button for it goes away straight away.",
+          "Calls to arms in a war that has ended lapse, so leaving one unanswered no longer costs you reputation.",
+          "Peace terms show your own country's war weariness beside your enemy's, with a word for how weary each is.",
+          "Listening in on a region now opens on its country's feed first.",
+        ],
+      },
+    ],
+  },
+  {
+    // A player at war with Ireland had no War Room: the war was kept as Britain and Ireland against "1" and "2"
+    // (battle-of-europe-session-2, 2026-10-25).
+    id: "2026-10-war-sides",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Wars have the right sides",
+        items: [
+          "A war you declared could be recorded with you and your enemy on the same side, so no front opened and the War Room button never appeared.",
+          "Such a war is now read the right way round when your game opens: its front opens on the next time skip, and with it the War Room.",
+          "New wars can no longer be recorded that way.",
+        ],
+      },
+    ],
+  },
+  {
+    // "get rid of the idle troop animation that makes it look like they are at war or battling" (the owner, 2026-10-25).
+    id: "2026-10-still-fronts",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Quiet fronts stay quiet",
+        items: [
+          "Between time skips, troops on a front no longer push forward and fall back, and the ground along it no longer flickers between the two sides' colours.",
+          "A front now stands still until the next time skip, when what really happened is played out on the map as before.",
+          "Nothing about the fighting itself has changed.",
+        ],
+      },
+    ],
+  },
+  {
+    // "the ai is mistaking itself as being the player country talking to the united states (its talking to washington
+    // but it is playing the united states)" (the owner, 2026-10-25).
+    id: "2026-10-own-voice",
+    kind: "minor",
+    date: "2026-10-25",
+    banners: [
+      {
+        title: "Countries speak for themselves",
+        items: [
+          "Countries that write to you, or answer you in a conversation, are now told plainly which country they are and that you are the one they are writing to.",
+          "A message shown as another country's should no longer read as your side of the exchange, such as the United States telling Washington to back off.",
+          "This covers replies in your conversations, notes sent after events, and notes sent between turns.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-interactive-offers",
     kind: "minor",
     date: "2026-10-25",
