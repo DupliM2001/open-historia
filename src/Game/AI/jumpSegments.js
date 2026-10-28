@@ -254,6 +254,10 @@ export const mergeSegmentPayloads = (payloads, { targetDate = "" } = {}) => {
   // The battlefields' orders (nativeFrontLedger.js), carried the same way.
   const frontOrders = [];
   const storylineUpdates = [];
+  // The polities the model says would try to plant an agent in the player
+  // (gameplay.js espionageCandidatesAgainst): their names, once each; null when
+  // no segment answered it at all.
+  let spiesOnPlayer = null;
   const summaries = [];
   let clearActions = true;
   let stopDate = "";
@@ -267,6 +271,12 @@ export const mergeSegmentPayloads = (payloads, { targetDate = "" } = {}) => {
     puppetUpdates.push(...asLedgerRecords(payload.puppetUpdates));
     frontOrders.push(...asLedgerRecords(payload.frontOrders));
     storylineUpdates.push(...asLedgerRecords(payload.storylineUpdates));
+    if (typeof payload.spiesOnPlayer === "string" || Array.isArray(payload.spiesOnPlayer)) {
+      const named = (Array.isArray(payload.spiesOnPlayer) ? payload.spiesOnPlayer : String(payload.spiesOnPlayer).split(/[,\n;]/))
+        .map(normalizeString)
+        .filter(Boolean);
+      spiesOnPlayer = [...new Set([...(spiesOnPlayer ?? []), ...named])];
+    }
     const summary = normalizeString(payload.summary);
     if (summary) summaries.push(summary);
     clearActions = payload.clearActions !== false;
@@ -285,6 +295,7 @@ export const mergeSegmentPayloads = (payloads, { targetDate = "" } = {}) => {
     stopDate: stopDate || normalizeString(targetDate),
     storylineUpdates,
     warUpdates,
+    spiesOnPlayer,
     summary: summaries.join("\n\n"),
   };
 };

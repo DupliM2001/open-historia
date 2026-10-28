@@ -236,3 +236,13 @@ test("the receipt names every block type that drew nothing", () => {
   assert.match(problems[1], /^in your institutiondraft block, entry 1/);
   assert.match(problems[2], /^in your deploy block, "1st Air Wing"/);
 });
+
+// The advisor queued "Hask to load at dusk 13 September" twice, word for word,
+// when the player had only asked how things stood.
+test("an order the advisor already gave is not queued again, and the advisor is told", () => {
+  const repeatOf = (next, title) => next.find((action) => action.title === title && action.status === "planned") || null;
+  const { next, items, problems } = planAdvisorActionEdits(queue(), [{ title: "Raise taxes", text: "Raise taxes again" }, { title: "Build roads" }], normalize, { repeatOf });
+  assert.deepEqual(next.map((action) => action.title), ["Raise taxes", "Deploy request: 3rd Army", "Deploy request: 1st Fleet", "Build roads"]);
+  assert.deepEqual(items.map((item) => item.title), ["Build roads"]);
+  assert.match(problems[0], /"Raise taxes" is already queued \(a1\)/);
+});

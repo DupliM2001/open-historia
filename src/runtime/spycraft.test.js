@@ -118,8 +118,8 @@ test("over many rounds a weak service against a strong one loses its agent, and 
   assert.ok(planted, "a hostile 95 service gets an agent into a 20 service within forty rounds");
   // A public expulsion is an event the AI will see; a turning is silent.
   const mine = normalizeSpies(world.spies).find((s) => s.owner === P);
-  if (mine.status === "exposed") assert.ok(allEvents.some((e) => /rolled up in Germany/.test(e.title)));
-  if (mine.status === "turned") assert.ok(!allEvents.some((e) => /rolled up in Germany/.test(e.title)));
+  if (mine.status === "exposed") assert.ok(allEvents.some((e) => /Germany/.test(e.title)));
+  if (mine.status === "turned") assert.ok(!allEvents.some((e) => /Germany/.test(e.title) && !/^Doubts/.test(e.title)));
 });
 
 test("a caught foreign agent waits for the PLAYER's decision and stops reporting", () => {
@@ -134,7 +134,7 @@ test("a caught foreign agent waits for the PLAYER's decision and stops reporting
   assert.ok(caught, "a 0-vs-100 agent is caught");
   const [spy] = foreignSpies(world, P);
   assert.equal(spy.status, "discovered");
-  assert.ok(caught.events.some((e) => /uncovers a Germany agent/.test(e.title)));
+  assert.ok(caught.events.some((e) => /Germany/.test(e.title)));
   // Nothing is decided for the player: the next round leaves it waiting.
   const next = resolveEspionage(world, { round: 99, date: "d", playerPolity: P });
   assert.equal(normalizeSpies(next.spies)[0].status, "discovered");
@@ -326,4 +326,31 @@ test("foreign deployment odds read graded hostility, and the legacy boolean maps
   assert.equal(foreignDeployChance(50, { hostile: true }), foreignDeployChance(50, { hostility: 0.75 }));
   assert.equal(foreignDeployChance(50, { hostile: true, hostility: 0 }), base);
   assert.equal(foreignDeployChance(100, { hostility: 1 }), 0.32);
+});
+
+// "Counter-intelligence uncovers a The Giants agent": the one fixed sentence put
+// "a" before every polity name, and it read the same every time.
+test("spy events name a polity grammatically and do not all read alike", () => {
+  const titles = new Set();
+  for (let index = 1; index <= 40; index += 1) {
+    const world = {
+      intelligence: { "House Stark": 100, "The Giants": 0, Pentos: 100 },
+      spies: [
+        { id: `g-${index}`, owner: "The Giants", target: "House Stark", status: "active" },
+        { id: `s-${index}`, owner: "House Stark", target: "Pentos", status: "active" },
+      ],
+    };
+    for (let round = 1; round <= 40; round += 1) {
+      const out = resolveEspionage(world, { round, date: "d", playerPolity: "House Stark" });
+      out.events.forEach((event) => titles.add(event.title));
+      world.spies = out.spies;
+      if (!world.spies.some((spy) => spy.status === "active")) break;
+    }
+  }
+  const all = [...titles];
+  assert.ok(all.length > 0);
+  assert.ok(!all.some((title) => /\ba The\b|\ban? [A-Z][\w' ]+ agent\b/.test(title)), all.join(" | "));
+  assert.ok(all.filter((title) => /Giants/.test(title)).every((title) => /the Giants/.test(title)), "mid-sentence 'The' is lower-cased");
+  assert.ok(new Set(all.filter((title) => /Giants/.test(title)).map((title) => title.replace(/the Giants/, "X"))).size >= 2, "more than one wording");
+  assert.ok(new Set(all.filter((title) => /Pentos/.test(title)).map((title) => title.replace(/Pentos|House Stark/g, "X"))).size >= 2, "more than one wording");
 });

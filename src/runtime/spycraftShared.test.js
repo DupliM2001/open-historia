@@ -50,7 +50,7 @@ test("an agent caught in a second person's country waits for that person, and on
     // Single player: Germany is the AI's and settles it on the spot. Shared: Germany's player decides.
     assert.notEqual(solo.spies[0].status, "discovered");
     assert.equal(shared.spies[0].status, "discovered");
-    assert.deepEqual(shared.events.map((event) => [event.title, event.audience]), [[`Counter-intelligence uncovers a ${ITALY} agent`, [GERMANY]]]);
+    assert.deepEqual(shared.events.map((event) => [event.title.includes(ITALY), event.audience]), [[true, [GERMANY]]]);
     assert.match(shared.events[0].description, /^Germany's security service .* is Germany's decision\.$/);
   }
   assert.ok(caught > 5, "the rolls catch it often enough for the test to mean something");
@@ -102,7 +102,7 @@ test("a public exposure stays public", () => {
   for (const round of rounds) {
     const shared = resolveEspionage(world([spy("s", GERMANY, ITALY)]), { round, date: "d", playerPolity: FRANCE, playerPolities: [FRANCE, GERMANY] });
     for (const event of shared.events) {
-      if (/rolled up/.test(event.title)) assert.equal("audience" in event, false);
+      if (/has expelled/.test(event.description)) assert.equal("audience" in event, false);
     }
   }
 });

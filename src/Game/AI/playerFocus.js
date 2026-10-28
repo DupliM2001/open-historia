@@ -289,20 +289,37 @@ export const citeNarratedOrders = (actions, events, { isPlayerEvent = () => fals
     : event));
 };
 
-export const settleOrders = (actions, events) => {
+export const settleOrders = (actions, events, { round } = {}) => {
   const answered = new Set(asArray(events).flatMap((event) => asArray(event?.impacts?.actionIds)).map(asText).filter(Boolean));
+  // The round an order was carried out in, so the advisor can tell an order it
+  // just gave from one it gave months ago (repeatedOrder below).
+  const stamp = Number.isInteger(round) ? { resolvedRound: round } : {};
   return asArray(actions).map((action) => {
     if (asText(action?.status) !== "planned") return action;
     if (!actionNeedsEvent(action)) {
       const { overdue: _overdue, ...rest } = action;
-      return { ...rest, status: "resolved" };
+      return { ...rest, status: "resolved", ...stamp };
     }
     if (answered.has(asText(action.id))) {
       const { overdue: _overdue, ...rest } = action;
-      return { ...rest, status: "resolved" };
+      return { ...rest, status: "resolved", ...stamp };
     }
     return action.overdue === true ? action : { ...action, overdue: true };
   });
+};
+
+// The order already given under this title: one still queued, or one carried
+// out in the last two skips. The advisor re-queued orders word for word when the
+// player only asked how things stood; a second copy is not a second order. An
+// order settled before rounds were recorded cannot be dated, so it never blocks.
+export const repeatedOrder = (actions, title, { round } = {}) => {
+  const wanted = fold(title).replace(/\s+/g, " ").trim();
+  if (!wanted) return null;
+  const recent = (action) => Number.isInteger(action?.resolvedRound)
+    && Number.isInteger(round) && action.resolvedRound >= round - 1;
+  return asArray(actions).find((action) =>
+    fold(action?.title).replace(/\s+/g, " ").trim() === wanted
+    && (asText(action?.status) === "planned" || (asText(action?.status) === "resolved" && recent(action)))) || null;
 };
 
 // --- After the jump: milestones ---

@@ -14,7 +14,8 @@ import { uiString } from "../../runtime/translator.js";
 import { applyProjectOpsToWorld, normalizeActionEntry, readActionsState, readAdvisorMessages, readWorldState, viewAsSeen, writeActionsState, writeWorldState } from "../../runtime/gameState.js";
 import StorageProblemNotice from "./storageProblemNotice.jsx";
 import { describeReplyProblems, extractFencedJson, looksLikeProjectOps, planAdvisorActionEdits } from "./advisorBlocks.js";
-import { splitAtBlockquotes } from "./advisorDrafts.js";
+import { sentLetterDate, splitAtBlockquotes } from "./advisorDrafts.js";
+import { repeatedOrder } from "../AI/playerFocus.js";
 import { institutionDraftButtonLabel } from "./advisorInstitutionDrafts.js";
 import { parseAdvisorReply } from "./advisorReply.js";
 import { ADVISOR_SLIDE } from "./advisorSlide.js";
@@ -62,13 +63,15 @@ const ThinkingDots = () => {
 // above runs on every re-render and must stay a pure read.
 // `problems` collects, in sentences, what the advisor asked for and did not get
 // — its receipt, told to it before the next question (advisorBlocks.js).
-const applyAdvisorActions = async (proposal, problems = []) => {
+const applyAdvisorActions = async (proposal, problems = [], round = 0) => {
     if (!Array.isArray(proposal) || proposal.length === 0) return null;
 
     const current = await readActionsState({ force: true });
     // The edits themselves are worked out in advisorBlocks.js, where they are
     // tested; this applies them.
-    const plan = planAdvisorActionEdits(current, proposal, normalizeActionEntry);
+    const plan = planAdvisorActionEdits(current, proposal, normalizeActionEntry, {
+        repeatOf: (queue, title) => repeatedOrder(queue, title, { round: Number(round) || 0 }),
+    });
     problems.push(...plan.problems);
     if (plan.items.length === 0) return null;
     // In a shared game the queue is the host's (multiplayer/): each change the
@@ -411,6 +414,9 @@ const AdvisorActionsCard = ({ items, onOpenActions }) => {
 // to fail: at worst the chat opens with the text waiting in it.
 const AdvisorDraftSend = ({ draft, onDraft }) => {
     const [handedOff, setHandedOff] = useState(false);
+    // The same letter already in the chat with that country (advisorDrafts.js):
+    // the advisor re-drafts letters the player has sent, and nothing said so.
+    const sentOn = useRuntimeState("chat", (chats) => sentLetterDate(draft, chats));
     const resetTimer = useRef(null);
 
     useEffect(() => () => clearTimeout(resetTimer.current), []);
@@ -438,6 +444,11 @@ const AdvisorDraftSend = ({ draft, onDraft }) => {
         }}>
         {handedOff ? "✓ In Diplomacy — press send there" : `✉️ Draft to ${draft.targetType === "institution-council" ? `Council · ${draft.institutionId}` : draft.targetType === "institution-lifecycle" ? `hearing · ${draft.country || draft.institutionId}` : draft.country}`}
         </button>
+        {sentOn && (
+            <div style={{ color: "rgba(253,230,138,0.9)", fontFamily: "sans-serif", fontSize: "0.7rem", marginTop: "0.25rem" }}>
+            Already sent to {draft.country}{sentOn === "earlier" ? "" : ` on ${formatGameDateReadable(sentOn) || sentOn}`}.
+            </div>
+        )}
         </div>
     );
 };
@@ -1278,7 +1289,7 @@ const AdvisorPanel = ({ isAdvisorOpen, mapRef, onClose, width, onResize, onResiz
             const { chartProblem, draftProblems, institutionDraftProblems, deployProblems } = parseAdvisorReply(reply, {
                 allowedUnitTypes: Array.isArray(moment.world?.allowedUnitTypes) ? moment.world.allowedUnitTypes : null,
             });
-            const actionsSummary = await applyAdvisorActions(actionsProposal, actionsProblems).catch((error) => {
+            const actionsSummary = await applyAdvisorActions(actionsProposal, actionsProblems, gameRound).catch((error) => {
                 console.error("Failed to apply advisor-proposed actions:", error);
                 return null;
             });

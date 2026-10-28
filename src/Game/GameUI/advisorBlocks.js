@@ -427,7 +427,12 @@ export const describeReplyProblems = (message) => {
 //     caller undoes on the map as the Actions panel's delete does (#368). A
 //     placed deployment whose order left the queue otherwise stayed on the map
 //     for good, and the simulation was never told about it.
-export const planAdvisorActionEdits = (current, proposal, normalize) => {
+//
+// `repeatOf(next, title)` (optional) names the order already given under that
+// title (AI/playerFocus.js repeatedOrder): the advisor re-queued orders word
+// for word when the player only asked how things stood, so such an entry is not
+// queued a second time, and the advisor is told why.
+export const planAdvisorActionEdits = (current, proposal, normalize, { repeatOf } = {}) => {
   let next = Array.isArray(current) ? [...current] : [];
   const items = [];
   const problems = [];
@@ -479,6 +484,13 @@ export const planAdvisorActionEdits = (current, proposal, normalize) => {
     // new proposal, or the model referencing a stale/already-resolved id. Both
     // land as a fresh queued action rather than being silently dropped — and
     // the second is said, because the advisor believes it edited something.
+    const already = typeof repeatOf === "function" && raw.title ? repeatOf(next, String(raw.title)) : null;
+    if (already) {
+      problems.push(already.status === "resolved"
+        ? `"${already.title}" was carried out in a recent skip, so it was not queued again`
+        : `"${already.title}" is already queued (${already.id}), so it was not queued again`);
+      continue;
+    }
     const created = normalize({
       title: raw.title,
       text: raw.text,

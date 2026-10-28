@@ -1721,6 +1721,15 @@ const routineMilitaryNoDeltaReason = (event) => {
   if (CLEARLY_NON_MILITARY_TITLE_RE.test(title)) return "";
   if (!ROUTINE_MILITARY_CUE_RE.test(text)) return "";
   if (STRONG_MILITARY_CONSEQUENCE_RE.test(text)) return "";
+  // Burning the dead destroys them, which a patrol that only looked does not:
+  // "Rangers of the Night's Watch Burn Twenty-Two Wights Beside Whitetree" was
+  // hidden as routine in a Game of Thrones skip. Not "burning", which is fires
+  // seen in the distance.
+  if (/\bburn(?:s|ed|t)?\b/i.test(text)) return "";
+  // A chapter of a storyline is not routine, however quiet: the story it belongs
+  // to is the reason it was written. (The administrative rule below already
+  // spares them.)
+  if (normalizeArray(event?.storylineIds).length) return "";
   // The cue is single words, so it fires on a noun in passing: a drone
   // programme's "unmanned surface patrol vessels" hid a Project milestone as
   // "routine military activity". Something finished or brought into service is

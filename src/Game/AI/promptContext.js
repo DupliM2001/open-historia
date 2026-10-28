@@ -1387,7 +1387,12 @@ export const buildProjectsSummaryText = (world, game) => {
       + `${next}${warnings.length ? ` [${warnings.join("; ")}]` : ""}`;
   };
 
-  const open = projects.filter((project) => OPEN.has(project.status));
+  // A stalled project has had its news: it stalled. It waits on the player now,
+  // apart from the running ones and off the work list below. The White Harbor
+  // fishing boats stalled in April and a skip still reported "no keel laid"
+  // every few weeks, because the work list asked about them every time.
+  const stalled = projects.filter((project) => project.status === "stalled");
+  const open = projects.filter((project) => OPEN.has(project.status) && project.status !== "stalled");
   const closed = projects.filter((project) => !OPEN.has(project.status));
   // Most recently touched first, so the detail budget goes to live work.
   const ranked = [...open].sort((a, b) =>
@@ -1395,9 +1400,12 @@ export const buildProjectsSummaryText = (world, game) => {
   const detailed = ranked.slice(0, FULL_DETAIL_PROJECTS);
   const brief = ranked.slice(FULL_DETAIL_PROJECTS);
 
-  const sections = [detailed.map(full).join("\n")];
+  const sections = detailed.length > 0 ? [detailed.map(full).join("\n")] : [];
   if (brief.length > 0) {
     sections.push(`Also running (same rules apply — use these ids to update them):\n${brief.map(compact).join("\n")}`);
+  }
+  if (stalled.length > 0) {
+    sections.push(`Stalled, waiting on the player — leave these alone: no event and no projectOps about them, unless an order this period names one (then use its id):\n${stalled.map(compact).join("\n")}`);
   }
   if (closed.length > 0) {
     sections.push(`Finished or abandoned — do not re-open these:\n${closed.map(compact).join("\n")}`);

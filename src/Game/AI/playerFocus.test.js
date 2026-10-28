@@ -13,6 +13,7 @@ import {
   createPlayerEventTest,
   normalizePlayerFocus,
   playerFocusShortfall,
+  repeatedOrder,
   settleOrders,
   trimWorldForFocus,
   slipPassedMilestones,
@@ -158,6 +159,33 @@ test("an order resolves only when an event answered it; the rest stay queued, ma
   ]);
   const later = settleOrders(settled, [{ impacts: { actionIds: ["a3"] } }]);
   assert.deepEqual(later.find((action) => action.id === "a3"), { id: "a3", status: "resolved", text: "Recall the ambassador" });
+});
+
+test("an order settled by a skip remembers the round it was carried out in", () => {
+  const queue = [
+    { id: "a1", status: "planned", text: "Fund the shipyard" },
+    { id: "a2", status: "resolved", text: "Old", resolvedRound: 3 },
+  ];
+  const settled = settleOrders(queue, [{ impacts: { actionIds: ["a1"] } }], { round: 9 });
+  assert.equal(settled[0].resolvedRound, 9);
+  assert.equal(settled[1].resolvedRound, 3, "an order settled before keeps its own round");
+});
+
+// The advisor queued "Hask to load at dusk 13 September" twice, word for word,
+// thirteen minutes apart, when the player had only asked how things stood.
+test("repeatedOrder finds the same order still queued, or carried out in the last two skips", () => {
+  const actions = [
+    { id: "q", status: "planned", title: "Hask to load at dusk 13 September" },
+    { id: "r1", status: "resolved", title: "Raven to White Harbor", resolvedRound: 56 },
+    { id: "r2", status: "resolved", title: "Stock the Wall before winter", resolvedRound: 54 },
+    { id: "r3", status: "resolved", title: "Keep Robb at Winterfell" },
+  ];
+  assert.equal(repeatedOrder(actions, "  hask to load at DUSK 13 september ", { round: 57 })?.id, "q");
+  assert.equal(repeatedOrder(actions, "Raven to White Harbor", { round: 57 })?.id, "r1");
+  assert.equal(repeatedOrder(actions, "Stock the Wall before winter", { round: 57 }), null, "older orders may be given again");
+  assert.equal(repeatedOrder(actions, "Keep Robb at Winterfell", { round: 57 }), null, "an order with no round cannot be dated");
+  assert.equal(repeatedOrder(actions, "A new order", { round: 57 }), null);
+  assert.equal(repeatedOrder(actions, "", { round: 57 }), null);
 });
 
 test("a milestone whose date passed with no outcome slips; reached ones, later ones and closed Projects are left alone", () => {

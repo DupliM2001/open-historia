@@ -183,3 +183,34 @@ test("the live preview gives a streamed card the screen's own verdict", () => {
   assert.equal(previewScreenedEvent(routinePatrol(["order-frontier-patrol"])), null);
   assert.equal(previewScreenedEvent(null), null);
 });
+
+// A Game of Thrones skip hid "Rangers of the Night's Watch Burn Twenty-Two Wights
+// Beside Whitetree" as routine military activity: rangers on patrol, nothing
+// captured. Burning the dead destroys them; that is a consequence.
+const rangerPatrol = (over = {}) => ({
+  id: "rangers",
+  date: "0298-09-22",
+  kind: "world",
+  playerRelated: false,
+  title: "Rangers of the Night's Watch Burn Twenty-Two Wights Beside Whitetree",
+  description: "A patrol of rangers from Castle Black came on twenty-two wights in the trees beside Whitetree and burned them where they lay, as Mance Rayder's host passed eleven hundred cookfires.",
+  impacts: {},
+  ...over,
+});
+
+test("an enemy burned or destroyed on patrol is not routine", () => {
+  const screened = screenGeneratedWorldEvents({ events: [rangerPatrol()] });
+  assert.equal(screened.events.length, 1);
+  assert.deepEqual(screened.hidden, []);
+});
+
+test("an event that belongs to a storyline is not hidden as routine", () => {
+  const quiet = rangerPatrol({
+    title: "Rangers Patrol the Haunted Forest's Edge",
+    description: "A patrol of rangers from Castle Black rode the edge of the Haunted Forest and reported the camps unchanged.",
+  });
+  assert.equal(screenGeneratedWorldEvents({ events: [quiet] }).hidden.length, 1, "on its own it is routine");
+  const told = screenGeneratedWorldEvents({ events: [{ ...quiet, storylineIds: ["storyline-the-dead"] }] });
+  assert.equal(told.events.length, 1);
+  assert.deepEqual(told.hidden, []);
+});

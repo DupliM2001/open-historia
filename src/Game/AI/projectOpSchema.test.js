@@ -205,7 +205,9 @@ test("the board no longer costs the jump anything", () => {
   // raised it by 200, on purpose, for polityChanges[].military (~160 chars,
   // its five keys named in words): a country's military figures move with the
   // story, not in a re-rating request of their own.
-  assert.ok(jumpChars < 28200, `the jump schema grew back to ${jumpChars} chars`);
+  // spiesOnPlayer raised it by 100, on purpose (~90 chars): the skip names the
+  // polities that would plant an agent in the player, which asks nothing more.
+  assert.ok(jumpChars < 28300, `the jump schema grew back to ${jumpChars} chars`);
 
   // ...and the game master, which has no second pass to hand the board to, keeps
   // it on its authored events (the provider sees a shallow transport; the

@@ -3358,6 +3358,8 @@ ${plannedActionsWithIds}`;
 const ADVISOR_MESSAGE_DRAFT_DIRECTIVE = `[Drafting Messages to Send]
 Whenever you draft an actual diplomatic message the player could send right now — not a summary or paraphrase, but the literal message text — write it as a markdown blockquote (a line starting with "> "), and quote nothing else in the reply that way. Immediately after all such blockquotes, append one fenced \`\`\`senddraft block containing a JSON array with one entry per drafted message, in the SAME ORDER the blockquotes appear. Do not repeat the message text in JSON.
 
+Before drafting, check the player's correspondence with that recipient. A letter the player has already sent is done: do not draft it again, even reworded, unless the player asks for it to be sent again. Refer to it by its date and draft only what is new, such as a reply to their answer or the next step.
+
 Every draft MUST carry an explicit destination:
 - Private bilateral: {"targetType":"private","country":"<exact recipient polity name>"}.
 - Institution Council: {"targetType":"institution-council","institutionId":"<exact institution id>","country":"<optional display recipient>"}.
