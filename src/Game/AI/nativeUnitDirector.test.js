@@ -293,3 +293,68 @@ test("every turn clears the map after its wars and borders are applied, before a
   assert.ok(prune < apply.indexOf("await writeCanonicalTurnState("), "before the write");
   assert.match(apply, /heldBefore: landHolders\(baseWorld\),\s+heldAfter: landHolders\(worldWithImpacts\),/);
 });
+
+// A Game of Thrones campaign (298 AC): 98 events moved a host, a khalasar or a
+// ship, and only 25 moved a counter. The director only looked at events in a
+// modern army's words, so "the khalasar rides west" never reached it.
+const gotEvent = (title, description = "") => ({ title, description, kind: "world", impacts: {} });
+
+test("fantasy and historical movement reaches the unit director", () => {
+  const moving = [
+    "Khal Drogo's Khalasar Rides On West Along the Velvet Road With Daenerys at His Side",
+    "Khal Drogo's Khalasar Moves On to the Next Grazing With Daenerys at His Side",
+    "Mance Rayder's Host Breaks Camp at the Fist of the First Men and Turns West Along the Milkwater",
+    "The Lysene Galley Swift Hesper Clears White Harbor to Search the Stepstones Line",
+    "Balon Greyjoy Launches the Iron Fleet From Pyke to Patrol the Iron Islands' Waters",
+    "Lord Cerwyn's northern levy marches on along the Kingsroad past Last Hearth",
+  ];
+  for (const title of moving) {
+    assert.ok(buildUnitDirectorInput({ events: [gotEvent(title)], world: {} }), title);
+  }
+});
+
+test("everyday words that look like movement do not wake the director", () => {
+  const still = [
+    "Brazil hosts a trade summit and reaches a deal on tariffs",
+    "Winterfell's maester rides out the winter fever in his tower",
+    "Iron Bank factors send the Crown's default account to Braavos by the next ship",
+  ];
+  for (const title of still) {
+    assert.equal(buildUnitDirectorInput({ events: [gotEvent(title)], world: {} }), null, title);
+  }
+});
+
+test("a story ship leaves the map once its ten rounds are up", () => {
+  const ship = { id: "ship-1", name: "Lantern Grace", ownerCode: "House Stark", storyVessel: true, expiresRound: 43 };
+  const kept = pruneWarUnits({ units: [ship], round: 43 });
+  assert.equal(kept.units.length, 1);
+  const gone = pruneWarUnits({ units: [ship], orders: [{ unitId: "ship-1" }], round: 44 });
+  assert.deepEqual(gone.units, []);
+  assert.deepEqual(gone.orders, []);
+  assert.equal(gone.removed[0].reason, "voyage-ended");
+});
+
+test("a player's story ship setting sail reaches the unit director; someone else's merchant does not", () => {
+  const sailing = {
+    title: "Lantern Grace Sails From Pentos With the Stolen Dragon Egg Before Noon",
+    description: "The cog Lantern Grace cleared the outer quay at Pentos with the sealed chest aboard and set her course for White Harbor.",
+    kind: "player",
+    playerRelated: true,
+    impacts: {},
+  };
+  assert.ok(buildUnitDirectorInput({ events: [sailing], world: {} }));
+  assert.equal(buildUnitDirectorInput({ events: [{ ...sailing, playerRelated: false }], world: {} }), null);
+});
+
+// The army of the dead grows with every kill (the scenario's rule), but the
+// wight counters stayed at 40 and 96 while events said the host passed two
+// hundred: a host growing was not something the director was shown.
+test("a host that grows, or the slain rising to join it, reaches the unit director", () => {
+  for (const title of [
+    "The Dead Overrun Frozen Shore Riders on the Hardhome Headland and the Fallen Rise to Join Them",
+    "Wights at the Haunted Forest's Edge Climb the Hardhome Headland as the Host Grows to Near Two Hundred and Forty",
+    "Mance Rayder's Host Swells at the Fist of the First Men as Its Scouts Test the Passes",
+  ]) {
+    assert.ok(buildUnitDirectorInput({ events: [gotEvent(title)], world: {} }), title);
+  }
+});

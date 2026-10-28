@@ -2835,6 +2835,14 @@ ${brief}`);
     }
     const covert = normalizeString(variables.covertOperations);
     if (covert) blocks.push(covert);
+    // Who tries to plant an agent in the player is the model's to say, from the world as it stands: "right now it
+    // seems like spys are coming from random countries, instead make it so the ai makes them come from sources that
+    // make sense" (the owner, 2026-10-28). The game rolls only for the polities named here (spycraft.js).
+    const spiedOn = normalizeString(game?.country);
+    if (spiedOn) {
+      blocks.push(`[Who Spies on the Player]
+Write spiesOnPlayer: the polities, by exact name and comma-separated, that would really try to place an agent in ${spiedOn} this period. Choose them as the world stands: enemies and rivals, powers with a real stake in ${spiedOn}'s affairs, a patron keeping watch on a client. A polity with no reason to, no reach, or no intelligence service to speak of sends nobody. An empty string when none would.`);
+    }
   }
 
   try {
@@ -3067,7 +3075,7 @@ const buildTaskSystemPrompt = async (taskKey, { variables, lookups = null, remin
     const board = projects && !projects.startsWith("No projects")
       ? `\n\nThe board as it stands:\n${projects}`
       : "";
-    systemPrompt = `${systemPrompt}\n\n[Projects & Operations]\nThe player keeps a board of long-running efforts - research and industrial programmes, construction projects, military and covert operations, sustained political campaigns - each with a status, progress, timeline and next milestone. Keep it in step with what you narrate, using impacts.projectOps.\nWhen an event advances, delays, funds, starves, exposes or ends one of the efforts below, that SAME event must carry a projectOps entry moving it: op update for progress or a change of status, op milestone when a checkpoint is reached or missed, op complete when it finishes. Copy the id and name EXACTLY as they appear below - an op that names something not on the board is dropped. When an event STARTS a new multi-round effort (a power lays down a programme, opens a construction project, mounts an operation), open it with op create, including a foreign power's programme the player's services have learned of - set ownerCode to that country's full name.\nBe proportionate. A programme does not move every jump, and inventing progress is worse than reporting none: if nothing happened to it this period, leave it alone. A long jump should move the things that plausibly advanced over that span; a six-hour jump almost never moves any of them. Never open a project for an internal act - a rename, a recolour, a flag, a title, a proclamation, a reshuffle - or for a transfer the other side has already agreed to: those are enacted outright by the event that narrates them (see [Sovereign Acts and What Needs Consent]), and a progress bar for one is always wrong.${board}
+    systemPrompt = `${systemPrompt}\n\n[Projects & Operations]\nThe player keeps a board of long-running efforts - research and industrial programmes, construction projects, military and covert operations, sustained political campaigns - each with a status, progress, timeline and next milestone. Keep it in step with what you narrate, using impacts.projectOps.\nWhen an event advances, delays, funds, starves, exposes or ends one of the efforts below, that SAME event must carry a projectOps entry moving it: op update for progress or a change of status, op milestone when a checkpoint is reached or missed, op complete when it finishes. A checkpoint is reached when it happens, not on its date: the FIRST event that reports a pending checkpoint done carries op milestone for it, even weeks early, and once the board's Last reported line says a checkpoint is done, its date arriving later is not news - never narrate it a second time. Copy the id and name EXACTLY as they appear below - an op that names something not on the board is dropped. When an event STARTS a new multi-round effort (a power lays down a programme, opens a construction project, mounts an operation), open it with op create, including a foreign power's programme the player's services have learned of - set ownerCode to that country's full name.\nBe proportionate. A programme does not move every jump, and inventing progress is worse than reporting none: if nothing happened to it this period, leave it alone. A long jump should move the things that plausibly advanced over that span; a six-hour jump almost never moves any of them. Never open a project for an internal act - a rename, a recolour, a flag, a title, a proclamation, a reshuffle - or for a transfer the other side has already agreed to: those are enacted outright by the event that narrates them (see [Sovereign Acts and What Needs Consent]), and a progress bar for one is always wrong.${board}
 
 Whose project it is. Entries marked THEIRS belong to another power; everything else is the player's own. A foreign programme moves because ITS OWNER moved it and the player's services observed as much - never because the player wished it stopped or ordered it stopped. The player has no priority dial and no cancel over another government's work, so an order of theirs is not a reason to touch a foreign entry: if their orders this period were aimed at a rival's programme, what happens is that THEIR OWN counter-effort advances - the sabotage, the embargo, the covert operation, the race to build first - and the rival's entry then moves only insofar as that effort actually bit, narrated as an event with the consequences that follow. Retaliation is the same rule, not an exception to it: a wrecked programme is wrecked by an event that says who did what and at what cost, and if the operation failed then the rival's programme carries right on. Never close, cancel or deprioritise a foreign entry to satisfy an instruction; close it only when the story genuinely ended it, and say what ended it.
 
@@ -9002,7 +9010,7 @@ const applySimulationResult = async ({
   // vanished. Only when the skip resolved the queue at all: a scene or a check
   // that leaves the orders planned has not answered them.
   let nextActions = result.clearActions
-    ? settleOrders(normalizeActions(baseActions), freshEvents)
+    ? settleOrders(normalizeActions(baseActions), freshEvents, { round: nextGame.round })
     : normalizeActions(baseActions);
   // An order the skip narrated but never CITED stays queued, because nothing in
   // the answer says it was carried out. The model is told at the top of its next
@@ -9306,14 +9314,20 @@ const applySimulationResult = async ({
   const espionageIdentityIndex = buildPolityIdentityIndex(worldWithImpacts);
   const canonicalEspionagePolity = (name) => canonicalCampaignPolity(name, worldWithImpacts, espionageIdentityIndex);
   // Worked out against one polity: the player's, and in a shared game each
-  // other person's in turn (resolveEspionage's candidatesFor).
-  const espionageCandidatesAgainst = (playerLedgerPolity) => [...new Set([
-    ...Object.keys(worldWithImpacts.polityOverrides ?? {}),
-    ...Object.keys(worldWithImpacts.intelligence ?? {}),
-    ...Object.values(worldWithImpacts.regionOwnershipOverrides ?? {}),
-    ...normalizeChats(baseChats).flatMap((chat) => chat.countries.map((country) => normalizeString(country.name))),
-    ...normalizeArray(worldWithImpacts.wars).flatMap((war) => [...normalizeArray(war?.sideA), ...normalizeArray(war?.sideB)]),
-    ...normalizeArray(worldWithImpacts.relations).flatMap((relation) => [relation?.a, relation?.b]),
+  // other person's in turn (resolveEspionage's candidatesFor). Who tries is the
+  // model's to say for the player (spiesOnPlayer, "[Who Spies on the Player]"):
+  // only those it named, each at least as keen as a bitter rival. Where it said
+  // nothing (an older prompt, a canned turn), and for the other people of a
+  // shared game, only polities the ledgers set against that person: never every
+  // polity on the map, which sent agents from places with no reason to.
+  const spiesNamed = Array.isArray(result.spiesOnPlayer) ? result.spiesOnPlayer : null;
+  const NAMED_SPY_KEENNESS = 0.5;
+  const espionageCandidatesAgainst = (playerLedgerPolity, named = null) => [...new Set([
+    ...(named ?? [
+      ...normalizeArray(worldWithImpacts.wars).flatMap((war) => [...normalizeArray(war?.sideA), ...normalizeArray(war?.sideB)]),
+      ...normalizeArray(worldWithImpacts.relations).flatMap((relation) => [relation?.a, relation?.b]),
+      ...Object.keys(worldWithImpacts.internationalReputation ?? {}),
+    ]),
   ].map(canonicalEspionagePolity).filter((name) => name && name !== playerLedgerPolity))].map((polity) => {
     let hostility = 0;
     for (const war of normalizeArray(worldWithImpacts.wars)) {
@@ -9335,10 +9349,11 @@ const applySimulationResult = async ({
       }
       if (Number(worldWithImpacts.internationalReputation?.[polity] ?? 50) <= 30) hostility = Math.max(hostility, 0.35);
     }
+    if (named) hostility = Math.max(hostility, NAMED_SPY_KEENNESS);
     return { polity, hostility, hostile: hostility >= 0.75 };
-  });
+  }).filter((candidate) => named || candidate.hostility > 0);
   const espionageCandidatesFor = (person) => espionageCandidatesAgainst(canonicalEspionagePolity(person));
-  const espionageCandidates = espionageCandidatesFor(baseGame.country);
+  const espionageCandidates = espionageCandidatesAgainst(canonicalEspionagePolity(baseGame.country), spiesNamed);
   // With espionage switched off for this game nothing is rolled: the agents
   // already in the world stay where they are, silent, and no new one arrives.
   const espionage = isActiveFeatureEnabled("espionage")
@@ -9477,10 +9492,11 @@ const applySimulationResult = async ({
       wars: worldWithImpacts.wars,
       heldBefore: landHolders(baseWorld),
       heldAfter: landHolders(worldWithImpacts),
+      round: nextGame.round,
     });
     if (pruned.removed.length) {
       worldWithImpacts = { ...worldWithImpacts, units: pruned.units, pendingUnitOrders: pruned.orders };
-      logDebugEvent("turn", `${pruned.removed.length} unit${pruned.removed.length === 1 ? "" : "s"} left the map: ${pruned.removed.map(({ unit, reason }) => `${unit.name} (${reason === "war-ended" ? "its war ended" : `${unit.ownerCode} holds no land`})`).join(", ")}.`);
+      logDebugEvent("turn", `${pruned.removed.length} unit${pruned.removed.length === 1 ? "" : "s"} left the map: ${pruned.removed.map(({ unit, reason }) => `${unit.name} (${reason === "war-ended" ? "its war ended" : reason === "voyage-ended" ? "its voyage is over" : `${unit.ownerCode} holds no land`})`).join(", ")}.`);
     }
   }
   // Each segment was checked on its own; this is the merged round. A finished
@@ -17223,6 +17239,12 @@ const UNIT_DIRECTOR_INSTRUCTION =
   // A player's order to place a garrison became a march of the one
   // armoured division there (2026-09-29): a garrison is fixed where it is put.
   + "A garrison placed, stationed or established at a named place is likewise new: spawn it there with type \"garrison\"; never march an existing field formation in its place. "
+  // The Lantern Grace carried a stolen dragon egg and was never on the map
+  // (a Game of Thrones save, 298 AC): only warships became counters.
+  // The army of the dead grew with every kill in a Game of Thrones save and its
+  // counters never changed: a host growing was nobody's operation.
+  + "A force that GROWS in an event (recruits arrive, a host swells, the slain rise to join it) gains strength: raise its unit with op strength, and when that unit is already at full strength spawn a second formation of the same power beside it. This holds even when the fighting itself is not part of any war. "
+  + "A candidate marked storyShip is the player's own story ship (a hired cog, a courier, a ship carrying a prize), not a warship: when it sets sail, spawn it with storyVessel true, type \"naval\", for the player, where it sails from; move it as later events carry it; remove it when it arrives and unloads. "
   // A player asked for it (2026-09-29), and placement enforces it (militaryPosts.js).
   + "On the power's own land a garrison is placed directly. On another power's land it is placed too, and one of the power's formations holds it: when none stands there, move one there in the same event. "
   // Seen in a player's Game (2026-09-30): Russia invaded Ukraine and fought
@@ -17906,6 +17928,7 @@ const finishTimelineJump = async ({ context, signal, state }) => {
     agreementUpdates: merged.agreementUpdates,
     puppetUpdates: merged.puppetUpdates,
     frontOrders: merged.frontOrders,
+    spiesOnPlayer: merged.spiesOnPlayer,
     // How long a skip was asked for: what the front engine runs for where the
     // scenario's calendar is not one the game can count days on.
     requestedDays: context.safeDays,

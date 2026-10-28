@@ -21,10 +21,14 @@ const cloneValue = (value) => {
 };
 
 const MILITARY_EVENT_PATTERN =
-  /\b(battle|clash|combat|skirmish|firefight|shootout|gunfire|exchange(?:s|d)? of fire|opens? fire|comes? under fire|armed border incident|border incident|frontier incident|military incident|offensive|counteroffensive|attack|assault|advanc(?:e|es|ed|ing)|retreat|withdraw|withdrawal|mobiliz(?:e|es|ed|ation)|deploy|deployment|redeploy|redeployment|siege|invad(?:e|es|ed|ing|er|ers)|invasion|garrison(?:ed|ing)?|bombard|blockade|landing|breakthrough|encircle|engag(?:e|es|ed|ement)|make(?:s)? contact|made contact|surrender|capitulat|reinforc|maneuver|manoeuvre|march(?:es|ed|ing)?|cross(?:es|ed|ing) the|storm(?:s|ed|ing))\b/i;
+  /\b(battle|clash|combat|skirmish|firefight|shootout|gunfire|exchange(?:s|d)? of fire|opens? fire|comes? under fire|armed border incident|border incident|frontier incident|military incident|offensive|counteroffensive|attack|assault|advanc(?:e|es|ed|ing)|retreat|withdraw|withdrawal|mobiliz(?:e|es|ed|ation)|deploy|deployment|redeploy|redeployment|siege|invad(?:e|es|ed|ing|er|ers)|invasion|garrison(?:ed|ing)?|bombard|blockade|landing|breakthrough|encircle|engag(?:e|es|ed|ement)|make(?:s)? contact|made contact|surrender|capitulat|reinforc|maneuver|manoeuvre|march(?:es|ed|ing)?|cross(?:es|ed|ing) the|storm(?:s|ed|ing)|overrun(?:s|ning)?|overran)\b/i;
 
+// The older and stranger words for a force too: a khalasar, a horde, a levy, a
+// host or column (only as a noun: "Mance Rayder's host", not "hosts a summit").
+// A Game of Thrones campaign moved 25 counters for 98 events about moving
+// forces, because only a modern army's words were heard.
 const MILITARY_FORMATION_PATTERN =
-  /\b(army|armies|forces?|troops?|legions?|fleet|flotilla|division|corps|brigade|regiment|battalion|cavalry|infantry|artillery|garrison|war elephants?|navy|naval|air force|squadrons?|warships?|frigates?|destroyers?|submarines?|carriers?)\b/i;
+  /\b(army|armies|forces?|troops?|legions?|fleet|flotilla|division|corps|brigade|regiment|battalion|cavalry|infantry|artillery|garrison|war elephants?|navy|naval|air force|squadrons?|warships?|frigates?|destroyers?|submarines?|carriers?|khalasars?|hordes?|war ?bands?|levy|levies|knights|spearmen|galleys?|longships?)\b|(?:'s|\bthe) (?:[\w-]+ )?(?:host|column)\b/i;
 
 // R3.7: the expensive Unit Director is only useful when prose describes an
 // operational change that could actually move/spawn/fight/reinforce/remove a
@@ -32,7 +36,7 @@ const MILITARY_FORMATION_PATTERN =
 // readiness coordination and procurement can remain military events without
 // paying an AI unit-state pass.
 const OPERATIONAL_UNIT_DELTA_PATTERN =
-  /\b(?:battle|clash|combat|skirmish|firefight|opens? fire|comes? under fire|offensive|counteroffensive|attack|assault|advanc(?:e|es|ed|ing)|retreat|withdraw(?:s|al|n|ing)?|mobiliz(?:e|es|ed|ation)|deploy(?:s|ed|ment|ing)?\s+(?:troops?|forces?|brigade|division|corps|army|battalion|regiment|units?)|redeploy(?:s|ed|ment|ing)?|siege|invad(?:e|es|ed|ing)|invasion|garrison(?:s|ed|ing)?|bombard(?:s|ed|ment|ing)?|blockade|landing|breakthrough|encircl(?:e|es|ed|ement)|engag(?:e|es|ed|ement)|surrender|capitulat|reinforcements? (?:arrive|deployed|sent)|reserve(?:s)? (?:activated|mobilized|called up)|march(?:es|ed|ing)?(?:\s+(?:toward|to|into|across))?|cross(?:es|ed|ing)|enter(?:s|ed|ing)?|reach(?:es|ed|ing)?|arriv(?:e|es|ed|ing)|embark(?:s|ed|ing)?|sail(?:s|ed|ing)?|maneuver(?:s|ed|ing)?|manoeuv(?:re|res|red|ring)|encamp(?:s|ed|ing)?|establish(?:es|ed|ing)?\s+(?:camp|encampment|winter quarters?|positions?)|relocat(?:e|es|ed|ing)|fall(?:s|ing)?\s+back)\b/i;
+  /\b(?:battle|clash|combat|skirmish|firefight|opens? fire|comes? under fire|offensive|counteroffensive|attack|assault|advanc(?:e|es|ed|ing)|retreat|withdraw(?:s|al|n|ing)?|mobiliz(?:e|es|ed|ation)|deploy(?:s|ed|ment|ing)?\s+(?:troops?|forces?|brigade|division|corps|army|battalion|regiment|units?)|redeploy(?:s|ed|ment|ing)?|siege|invad(?:e|es|ed|ing)|invasion|garrison(?:s|ed|ing)?|bombard(?:s|ed|ment|ing)?|blockade|landing|breakthrough|encircl(?:e|es|ed|ement)|engag(?:e|es|ed|ement)|surrender|capitulat|reinforcements? (?:arrive|deployed|sent)|reserve(?:s)? (?:activated|mobilized|called up)|march(?:es|ed|ing)?(?:\s+(?:toward|to|into|across))?|cross(?:es|ed|ing)|enter(?:s|ed|ing)?|reach(?:es|ed|ing)?|arriv(?:e|es|ed|ing)|embark(?:s|ed|ing)?|sail(?:s|ed|ing)?|maneuver(?:s|ed|ing)?|manoeuv(?:re|res|red|ring)|encamp(?:s|ed|ing)?|establish(?:es|ed|ing)?\s+(?:camp|encampment|winter quarters?|positions?)|relocat(?:e|es|ed|ing)|fall(?:s|ing)?\s+back|rid(?:e|es|ing)\s+(?:on|out|off|east|west|north|south|toward|towards|to|into|across|along|through)|rode\s+(?:on|out|off|east|west|north|south|toward|towards|to|into|across|along|through)|mov(?:e|es|ed|ing)\s+(?:on|out|off|east|west|north|south|toward|towards|to|into|across|along|its|their)|br(?:eaks?|oke)\s+camp|turns?\s+(?:its\s+|their\s+)?(?:[\w-]+\s+)?(?:east|west|north|south|back)|halts?|climbs?|clears?\s+(?:the\s+)?(?:[\w'-]+\s+){0,2}(?:harbou?r|quay|port)|puts?\s+(?:in|to\s+sea)|sets?\s+sail|launch(?:es|ed|ing)?\s+(?:the\s+|its\s+)?(?:[\w'-]+\s+){0,2}fleet|swell(?:s|ed|ing)?|grows?\s+to|ris(?:e|es|en|ing)\s+to\s+join|join(?:s|ed)?\s+(?:the|its|their)\s+(?:host|ranks|army|column|horde))\b/i;
 
 // A formation that comes into being by being built, delivered or stood up
 // rather than raised from reserves: a warship commissioned, a submarine
@@ -157,8 +161,16 @@ const opKey = (op) => {
   return `${kind}|${JSON.stringify(op)}`;
 };
 
+// A ship the player's story follows, sailing, landing or putting in: the hired
+// cog with the stolen egg is no warship, but the player wants to see it go. Only
+// the player's own events: every merchant afloat is not a counter.
+const STORY_VESSEL_PATTERN =
+  /\b(?:ship|cog|vessel|galley|barge|carrack|caravel|longship|boat)s?\b[^.!?]{0,80}\b(?:sail(?:s|ed|ing)?|set(?:s)? sail|clear(?:s|ed|ing)?|puts? (?:in|to sea)|put (?:in|to sea)|dock(?:s|ed)?|land(?:s|ed)?|arriv(?:e|es|ed)|reach(?:es|ed)?|unload(?:s|ed)?)\b/i;
+const storyShipSails = (event) => event?.playerRelated === true && STORY_VESSEL_PATTERN.test(eventText(event));
+
 const hasMilitaryContent = (event) => {
   if (normalizeArray(event?.impacts?.unitOps).length > 0) return true;
+  if (storyShipSails(event)) return true;
   const text = eventText(event);
   const explicitlyMilitary =
     normalizeString(event?.kind).toLowerCase() === "military"
@@ -174,7 +186,7 @@ export const eventNeedsNativeUnitDirector = (event) => {
   if (!event || typeof event !== "object") return false;
   const text = eventText(event);
   return OPERATIONAL_UNIT_DELTA_PATTERN.test(text) || SERVICE_FORMATION_PATTERN.test(text) || RAISED_FORMATION_PATTERN.test(text)
-    || orderedForces(event);
+    || orderedForces(event) || storyShipSails(event);
 };
 
 const makeWorkingUnitMap = (units) =>
@@ -509,8 +521,10 @@ export const landHolders = (world) => new Set(
 //   - Every unit of a power that held land when the turn began and holds none
 //     now: an annexed or conquered country keeps no armies. A power that never
 //     held land (a host, a horde, a company of exiles) is not touched.
+//   - A story ship (storyVessel) whose expiresRound has passed: its voyage is
+//     over even if no event said it arrived.
 // Their standing orders go with them. Pure.
-export const pruneWarUnits = ({ units = [], orders = [], wars = [], heldBefore = new Set(), heldAfter = new Set() } = {}) => {
+export const pruneWarUnits = ({ units = [], orders = [], wars = [], heldBefore = new Set(), heldAfter = new Set(), round = 0 } = {}) => {
   const active = new Set(normalizeArray(wars).filter(isActiveWar).map((war) => normalizeString(war?.id)).filter(Boolean));
   const kept = [];
   const removed = [];
@@ -519,7 +533,10 @@ export const pruneWarUnits = ({ units = [], orders = [], wars = [], heldBefore =
     const owner = normalizeString(unit?.ownerCode).toLowerCase();
     const warOver = Boolean(war) && !active.has(war);
     const fallen = Boolean(owner) && heldBefore.has(owner) && !heldAfter.has(owner);
-    if (warOver || fallen) removed.push({ unit, reason: warOver ? "war-ended" : "lost-all-land" });
+    const voyageOver = unit?.storyVessel === true && Number.isInteger(unit?.expiresRound) && Number(round) > unit.expiresRound;
+    if (warOver) removed.push({ unit, reason: "war-ended" });
+    else if (fallen) removed.push({ unit, reason: "lost-all-land" });
+    else if (voyageOver) removed.push({ unit, reason: "voyage-ended" });
     else kept.push(unit);
   }
   const gone = new Set(removed.map(({ unit }) => normalizeString(unit?.id)));
@@ -565,6 +582,7 @@ const unitDirectorAnalyzerInput = (candidates, units, pendingUnitOrders = [], wa
         existingUnitOps: cloneValue(normalizeArray(event?.impacts?.unitOps)),
         ...(unrepresented.length ? { combatantsWithoutUnits: unrepresented } : {}),
         ...(war?.id ? { warId: normalizeString(war.id) } : {}),
+        ...(storyShipSails(event) ? { storyShip: true } : {}),
       };
     }),
     units: ordered.slice(0, UNIT_DIRECTOR_UNIT_LIMIT).map((unit) => summarizeUnit(unit, orderByUnit.get(unit.id) ?? null)),

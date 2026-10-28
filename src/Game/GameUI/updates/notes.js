@@ -53,6 +53,20 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-spies-with-reason",
+    kind: "minor",
+    date: "2026-10-28",
+    banners: [
+      {
+        title: "Spies with a reason",
+        items: [
+          "Foreign agents in your country now come from those with a reason to send them: your enemies and rivals, and powers with a real stake in your affairs.",
+          "A country with no interest in you, or no spy service to speak of, no longer plants agents in your country.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-zoom-keys",
     kind: "minor",
     date: "2026-10-27",

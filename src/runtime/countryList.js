@@ -82,6 +82,15 @@ export const mergeCountryOverrides = (countries, polityOverrides) => {
     .sort((left, right) => left.name.localeCompare(right.name));
 };
 
+// A world drawn on its own regions rather than the stock ones: custom regions,
+// and not one owner override keyed to a stock region id. A world painted over
+// the stock map (a Roman scenario, the default world) is not hand-drawn.
+export const isHandDrawnWorld = (world) => {
+  if (!world?.customRegions) return false;
+  const ids = Object.keys(world?.regionOwnershipOverrides ?? {});
+  return ids.length > 0 && !ids.some((id) => STOCK_REGION_ID.test(clean(id)));
+};
+
 // Merges the stock country list (read from the tiles: { code: "RUS", name:
 // "Russia" }) with the campaign's declared polities so a picker lists each
 // polity ONCE, under the name the scenario gave it.
@@ -118,9 +127,21 @@ export const mergeStockAndDeclaredPolities = (
     declaredByStockCode.set(code, declaredByStockCode.has(code) ? null : stableKey);
   }
 
+  // A hand-drawn map (Game of Thrones) is not the Earth the tiles describe:
+  // China and Ghana listed beside House Stark in its pickers, its GM panel and
+  // the AI's lookups. There a stock country is listed only when this map gives
+  // it land or the scenario declares it.
+  const handDrawn = isHandDrawnWorld(world);
+  const landed = new Set([
+    ...Object.values(world?.regionOwnershipOverrides ?? {}),
+    ...Object.values(world?.regionSovereigntyOverrides ?? {}),
+  ].map(norm).filter(Boolean));
+
   const merged = new Map();
   for (const entry of Array.isArray(countries) ? countries : []) {
     if (!entry) continue;
+    if (handDrawn && !landed.has(norm(entry.name)) && !landed.has(norm(entry.code))
+      && !(entry.code && declaredByStockCode.get(entry.code))) continue;
     const token = entry.name || entry.code;
     const declared = entry.code ? declaredByStockCode.get(entry.code) : null;
     const resolved = declared

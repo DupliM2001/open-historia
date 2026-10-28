@@ -405,6 +405,27 @@ const normalizePlannedOperation = (entry) => {
 // one's candidates; without it only the player's own are known). What one
 // government alone has found out is marked for it alone (`audience`): with
 // one player there is nobody to keep it from, and nothing is marked.
+//
+// The headlines. One fixed sentence put "a" before every name ("uncovers a The
+// Giants agent") and read the same every time, so each spy gets one of a few
+// wordings, picked by its id so a replay writes the same one.
+const inSentence = (name) => String(name ?? "").trim().replace(/^The\s/, "the ");
+const startSentence = (name) => {
+  const text = String(name ?? "").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+const CAUGHT_IN_PLAYER = [
+  (owner) => `Counter-intelligence uncovers an agent of ${owner}`,
+  (owner, player) => `${startSentence(player)}'s security service catches a spy working for ${owner}`,
+  (owner) => `A spy in the pay of ${owner} is taken into custody`,
+];
+const EXPELLED_BY_TARGET = [
+  (target) => `Spy ring rolled up in ${inSentence(target)}`,
+  (target, owner) => `${startSentence(target)} expels an agent of ${owner}`,
+  (target, owner) => `${startSentence(target)} unmasks a spy working for ${owner}`,
+];
+const pickWording = (key, wordings) => wordings[Math.floor(draw(`${key}:wording`) * wordings.length)];
+
 export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "", playerPolities = [], candidates = [], candidatesFor = null, operations = [] } = {}) => {
   const player = String(playerPolity ?? "").trim();
   const people = [...new Set([player, ...(Array.isArray(playerPolities) ? playerPolities : []).map((name) => String(name ?? "").trim())].filter(Boolean))];
@@ -474,7 +495,7 @@ export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "
           notices.push({ kind: "discovered", spyId: spy.id, owner: spy.owner });
           events.push({
             date, kind: "world", source: "espionage",
-            title: `Counter-intelligence uncovers a ${spy.owner} agent`,
+            title: pickWording(spy.id, CAUGHT_IN_PLAYER)(inSentence(spy.owner), spy.target),
             description: `${spy.target}'s security service has identified an agent working for ${spy.owner}. The agent is in custody; how to use them is ${spy.target}'s decision.`,
             ...onlyFor(spy.target),
           });
@@ -486,7 +507,7 @@ export const resolveEspionage = (world, { round = 0, date = "", playerPolity = "
         }
         events.push({
           date, kind: "world", source: "espionage",
-          title: `Spy ring rolled up in ${spy.target}`,
+          title: pickWording(spy.id, EXPELLED_BY_TARGET)(spy.target, inSentence(spy.owner)),
           description: `${spy.target} has expelled an agent working for ${spy.owner}, and made the arrest public. Relations with ${spy.owner} are strained.`,
         });
         notices.push({ kind: "exposed", spyId: spy.id, target: spy.target });

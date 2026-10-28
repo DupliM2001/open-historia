@@ -1313,6 +1313,10 @@ export const JUMP_FORWARD_SCHEMA = {
     // (SPY_INTERCEPT_SCHEMA) when it is filed, so a malformed one costs that
     // report and never the turn. The contract a skip is SENT declares the shape
     // in full, and only when an agent is due (foldJumpTool).
+    spiesOnPlayer: {
+      type: "string",
+      description: "Spies; format in prompt. Empty if none.",
+    },
     [AGENT_REPORTS_FIELD]: {
       type: "array",
       description: "The player's agents' reports: one per agent listed under [Agents' Reports], and only when that block is present.",
@@ -2684,6 +2688,31 @@ export const TIMELINE_CURATOR_SCHEMA = {
 // The unit director's answer: unit operations to attach to the military events
 // the jump already wrote, keyed by the supplied event index. Native code
 // sanitizes every op before it reaches an event.
+// The unit director alone can mark a spawn as a story ship: the jump never
+// needs it, and the jump's contract is kept small on purpose
+// (projectOpSchema.test.js).
+const directorUnitOpSchema = {
+  ...unitOpSchema,
+  anyOf: unitOpSchema.anyOf.map((branch) => (branch.properties?.op?.enum?.[0] === "spawn"
+    ? {
+      ...branch,
+      properties: {
+        ...branch.properties,
+        unit: {
+          ...unitSchema,
+          properties: {
+            ...unitSchema.properties,
+            storyVessel: {
+              type: "boolean",
+              description: "Only for a ship that is NOT a warship but carries something the player's story turns on (a cargo, a passenger, a prize), on a candidate marked storyShip. The engine keeps it unlisted and takes it off the map after ten rounds if no arrival removes it first.",
+            },
+          },
+        },
+      },
+    }
+    : branch)),
+};
+
 export const UNIT_DIRECTOR_SCHEMA = {
   type: "object",
   description:
@@ -2699,7 +2728,7 @@ export const UNIT_DIRECTOR_SCHEMA = {
           eventIndex: { type: "integer", minimum: 0 },
           unitOps: {
             type: "array",
-            items: unitOpSchema,
+            items: directorUnitOpSchema,
           },
           reason: textSchema("Short reason these operations are needed for map/state continuity."),
         },

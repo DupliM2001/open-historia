@@ -149,7 +149,7 @@ test("a caught agent is not always identified, from either side, and an unidenti
       assert.ok(event);
       assert.doesNotMatch(event.description, /Italy/);
     }
-    if (theirs.status === "discovered") assert.ok(out.events.some((e) => /uncovers a Italy agent/.test(e.title)));
+    if (theirs.status === "discovered") assert.ok(out.events.some((e) => e.source === "espionage" && /Italy/.test(e.title)));
   }
   assert.ok(lostAbroad > 0 && lostAtHome > 0 && exposed > 0, `${lostAbroad} lost abroad, ${lostAtHome} at home, ${exposed} exposed`);
 });

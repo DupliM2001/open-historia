@@ -715,3 +715,30 @@ test("without the queue, an orphan is left alone", () => {
   const world = { units: [unit({ id: "orphan", status: "pending" })] };
   assert.equal(confirmResolvedDeployments(world, []), world);
 });
+
+// ---- story ships ----------------------------------------------------------
+// The Lantern Grace carried a stolen dragon egg from Pentos to White Harbor and
+// was never on the map: only military formations became counters.
+
+test("a story ship is spawned as a covert naval counter that lasts ten rounds", () => {
+  const result = applyUnitOpBatch(
+    [],
+    [],
+    [spawnOp({ name: "Lantern Grace", type: "infantry", ownerCode: "House Stark", composition: "1 hired cog", storyVessel: true })],
+    { gameDate: "0298-09-15", round: 33 },
+  );
+  const [ship] = result.units;
+  assert.equal(ship.storyVessel, true);
+  assert.equal(ship.type, "naval");
+  assert.equal(ship.covert, true);
+  assert.equal(ship.expiresRound, 43);
+});
+
+test("an ordinary spawn is not a story ship and does not expire", () => {
+  const [normalized] = normalizeUnits([unit()]);
+  assert.equal(normalized.storyVessel, undefined);
+  assert.equal(normalized.expiresRound, undefined);
+  const [kept] = normalizeUnits([unit({ storyVessel: true, expiresRound: 43 })]);
+  assert.equal(kept.storyVessel, true);
+  assert.equal(kept.expiresRound, 43);
+});

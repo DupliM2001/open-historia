@@ -130,6 +130,39 @@ export const buildMessageDrafts = (draftsRaw, sourceText, problems = []) => {
         .filter(Boolean);
 };
 
+// When a drafted private letter has already gone to its recipient: the date of
+// the player's own message in a one-to-one chat with that country that says the
+// same thing, or "" when none does. The advisor drafted Winterfell's acceptance
+// of the Tyrell barley offer again a week after it was sent, and the player sent
+// it a second time. "The same thing" is word overlap (Dice) of 0.9 or more: the
+// repeats in that game scored 1.0, while distinct letters to the same house,
+// all opening "My lord Tyrell, Winterfell...", scored 0.77 at most.
+const SAME_LETTER = 0.9;
+const letterWords = (text) => new Set(String(text ?? "").toLowerCase()
+    .replace(/[^\p{L}\p{N} ]+/gu, " ").split(/\s+/).filter((word) => word.length > 2));
+const overlap = (left, right) => {
+    const a = letterWords(left);
+    const b = letterWords(right);
+    if (!a.size || !b.size) return 0;
+    let shared = 0;
+    a.forEach((word) => { if (b.has(word)) shared += 1; });
+    return (2 * shared) / (a.size + b.size);
+};
+export const sentLetterDate = (draft, chats) => {
+    if (String(draft?.targetType || "private") !== "private") return "";
+    const recipient = String(draft?.country ?? "").trim().toLowerCase();
+    if (!recipient) return "";
+    for (const chat of Array.isArray(chats) ? chats : []) {
+        const countries = Array.isArray(chat?.countries) ? chat.countries : [];
+        if (chat?.institutionId || countries.length !== 1) continue;
+        if (String(countries[0]?.name ?? "").trim().toLowerCase() !== recipient) continue;
+        const sent = (Array.isArray(chat?.messages) ? chat.messages : [])
+            .filter((message) => message?.role === "user" && overlap(message.text, draft.text) >= SAME_LETTER);
+        if (sent.length) return String(sent.at(-1).time ?? "").trim() || "earlier";
+    }
+    return "";
+};
+
 // Splits a reply into the blockquotes and the prose between them, in order, so
 // each drafted letter's Send button can be rendered directly under the letter
 // instead of collected at the bottom of the message.
