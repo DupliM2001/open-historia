@@ -60,8 +60,10 @@ const deriveWarTitle = (war) => {
 // A start's note may open with the war's own name — "Title: The Winter War;
 // Soviet demands on the Karelian isthmus" — and the rest is its cause. Without
 // it every war the model opened was called "A–B War" and the model's own name
-// for it was lost.
-const WAR_TITLE_NOTE_RE = /^title\s*:\s*([^;]+?)\s*(?:;\s*([\s\S]*))?$/i;
+// for it was lost. The name ends at a ";", or at a "~" or "|" (the record's own
+// separator, or the one a model reaches for): "Title: Franco-Italian War~Dispute
+// over…" was kept whole as the war's name (a real-key test, 2026-10-28).
+const WAR_TITLE_NOTE_RE = /^title\s*:\s*([^;~|]+?)\s*(?:[;~|]\s*([\s\S]*))?$/i;
 export const splitWarStartNote = (note) => {
   const text = normalizeString(note);
   const match = text.match(WAR_TITLE_NOTE_RE);

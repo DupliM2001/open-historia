@@ -80,7 +80,7 @@ import { pointInFrame, projectorOf } from "./frame.js";
 import { landWithin, othersOnWay } from "./invade.js";
 import { draw, formationsLeft, manpowerReport, menOf, menPerFormation, partLeft, sendHome } from "./manpower.js";
 import { applyOrder, assignOrder, landCarried, putAshore, readSieges, setStandingOrder, standingOf } from "./orders.js";
-import { foldBattlefieldName, normalizeBattlefields } from "./record.js";
+import { foldBattlefieldName, isWarIdName, normalizeBattlefields } from "./record.js";
 import { authoredName } from "./scenarioFronts.js";
 import { breakthroughAnswer, sideIsPlayed, staffDecision, staffMayOrder, staffStanding } from "./staff.js";
 import { findPockets } from "./supply.js";
@@ -286,6 +286,14 @@ const nameFor = (run, battle) => {
     const numbered = clean(`${plain} ${count}`, BATTLEFIELD_NAME_MAX);
     if (!taken(numbered)) return numbered;
   }
+};
+
+// The name an order gives a battlefield, as it may be kept: none when it is a
+// war's id (record.js isWarIdName), so the battlefield is called what nameFor
+// calls it ("France - Italy front") and not "WAR-FRANCE-ITALY-2016".
+const givenName = (run, value) => {
+  const name = clean(value, BATTLEFIELD_NAME_MAX);
+  return name && !isWarIdName(name, run.wars.keys()) ? name : "";
 };
 
 // Formations of the world's that stand on a battle and belong to its sides are
@@ -793,8 +801,9 @@ const attackAtObjective = (run, moment, day) => {
   if (fronts.length === 0) return false;
   // The one the place lies on, where there are several.
   const near = fronts.find((entry) => pointInFrame(entry.frame, at.lng, at.lat)) ?? fronts[0];
-  if (near.autoNamed && near.fresh && !run.battles.some((entry) => entry !== near && entry.status !== "closed" && foldBattlefieldName(entry.name) === foldBattlefieldName(moment.battlefield))) {
-    near.name = clean(moment.battlefield, BATTLEFIELD_NAME_MAX);
+  const named = givenName(run, moment.battlefield);
+  if (named && near.autoNamed && near.fresh && !run.battles.some((entry) => entry !== near && entry.status !== "closed" && foldBattlefieldName(entry.name) === foldBattlefieldName(named))) {
+    near.name = named;
     near.autoNamed = false;
   }
   if (!already) for (const front of fronts) tellAttack(run, front, attacker, defender, day);
@@ -838,7 +847,7 @@ const openLandingAt = (run, { war, sideName, lng, lat, name = "", day, carried =
   const frame = contact ? frameForContact(contact, map) : null;
   const arena = frame ? arenaFor(run.cache, map, frame, run.input.regionTypes) : null;
   if (!arena) return null;
-  const opening = { name: clean(name, BATTLEFIELD_NAME_MAX), warId: war.id, sides: war.sides, frame, arena, day };
+  const opening = { name: givenName(run, name), warId: war.id, sides: war.sides, frame, arena, day };
   const battle = openBattle(run, opening) ?? landingGround(run, opening);
   const side = sideOfName(battle, sideName);
   let [x, y] = battle.place.toCell(lng, lat);
@@ -1268,13 +1277,22 @@ const applyOrderMoment = (run, moment, day) => {
   }
   const wanted = foldBattlefieldName(moment.battlefield);
   let battle = wanted ? run.battles.find((entry) => entry.status !== "closed" && foldBattlefieldName(entry.name) === wanted) : null;
+  // A war's id for the name: the order is for that war's battlefield where the
+  // side fights, which keeps its own name.
+  if (!battle && wanted && !givenName(run, moment.battlefield)) {
+    battle = run.battles.find((entry) => entry.status !== "closed" && fold(entry.warId) === wanted && sideOfName(entry, moment.side) >= 0) ?? null;
+    if (battle) moment = { ...moment, battlefield: battle.name };
+  }
   if (!battle && wanted) {
-    // A battlefield that opened by itself this run takes the name its first order gives it.
+    // A battlefield that opened by itself this run takes the name its first
+    // order gives it, unless that name is a war's id.
     battle = run.battles.find((entry) => entry.autoNamed && entry.fresh && entry.status === "active" && sideOfName(entry, moment.side) >= 0) ?? null;
-    if (battle) {
-      battle.name = clean(moment.battlefield, BATTLEFIELD_NAME_MAX);
+    const named = givenName(run, moment.battlefield);
+    if (battle && named) {
+      battle.name = named;
       battle.autoNamed = false;
     }
+    if (battle) moment = { ...moment, battlefield: battle.name };
   }
   if (!battle && wanted && moment.order === "land") {
     battle = openLanding(run, moment, day);
