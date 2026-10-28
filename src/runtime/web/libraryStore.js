@@ -6,6 +6,7 @@
 // Web build only.
 
 import { STORES, idbGet, idbGetAll, idbGetAllKeys, idbPut, idbPutPair, idbDelete, kvGet, kvPut } from "./idb.js";
+import { ASSETS_BASE } from "../assetsBase.js";
 import { serializeWrite } from "./writeQueue.js";
 import { coarsenFeatureCollection } from "../../../server/coarseGeometry.js";
 import { layOutScenarioBundle } from "../../../server/mapProjection.js";
@@ -474,12 +475,10 @@ const builtInCoarseRegionsText = (url) => {
 };
 
 // The STOCK world (the GADM regions the hub's re-ownership presets key their
-// ownership by) is too big to bundle, so fetch it once from the content origin
-// (the Worker proxy → GitHub Release) and cache it for the session. It is what
-// a scenario without a map of its own — and without the built-in stamp — renders on.
-// `?.` because only a Vite build defines import.meta.env: the store's tests
-// load this module as it is (libraryStore.test.js).
-const CONTENT_BASE = (import.meta.env?.VITE_OH_PMTILES_URL || "/assets").replace(/\/$/, "");
+// ownership by), from the build's own assets/ (assetsBase.js), cached for the
+// session. It is what a scenario without a map of its own — and without the
+// built-in stamp — renders on.
+const CONTENT_BASE = ASSETS_BASE;
 let defaultRegionsGeojsonPromise = null;
 const fetchDefaultRegionsGeojson = () => {
   if (!defaultRegionsGeojsonPromise) {
@@ -1309,9 +1308,7 @@ export const getScenarioPmtilesOverride = async (key, rangeHeader) => {
 };
 
 // Whether the active scenario serves its own archive under
-// /api/runtime/pmtiles/<key> — bytes the signed content manifest cannot vouch
-// for, so contentTrust.js neither fetches them from the swarm nor holds them
-// to the manifest.
+// /api/runtime/pmtiles/<key>.
 export const hasScenarioPmtilesOverride = async (key) => {
   if (!PMTILES_ASSET_KEYS.includes(key)) return false;
   const scenario = await getActiveRuntimeScenarioRecord();

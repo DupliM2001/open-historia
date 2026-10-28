@@ -25,8 +25,8 @@ Sibling repos in the same org that the code and docs reference (not part of this
 
 | Repo | Purpose |
 |------|---------|
-| `Open-Historia/open-historia-node` | Community **content node** — caches/serves read-only, checksum-verified map data. |
-| `Open-Historia/open-historia-admin` | Private registry Worker (D1) + signing panel; deploys the website and node directory. |
+| `Open-Historia/open-historia-node` | The retired community **content node**; the game no longer asks one for anything. |
+| `Open-Historia/open-historia-admin` | Private registry Worker (D1) + admin panel; deploys the website. |
 | `Open-Historia/Open-historia-scenarios` | The Scenario Hub — official presets + community scenarios. |
 
 ---

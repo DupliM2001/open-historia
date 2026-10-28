@@ -14,7 +14,6 @@ import { ensureSeeded } from "./libraryStore.js";
 import * as idb from "./idb.js";
 import { bringHttpSavesAcross } from "./saveMove.js";
 import { markEntered, showHomePage, shouldShowHome } from "./homePage.js";
-import { connectBestNode } from "./nodeConnect.js";
 import { isNativeApp, showNativeBoot } from "./nativeBoot.js";
 import { forgetRetiredAccount } from "./retiredAccount.js";
 
@@ -45,7 +44,7 @@ export const installWebBackend = async () => {
   // native splash comes down the moment the WebView has a document, and a white
   // gap where it was is most of the difference between an app and a web page in a
   // shell. Everything after this point is the same on both.
-  const boot = isNativeApp() ? showNativeBoot({ local: Boolean(import.meta.env.VITE_OH_NATIVE) }) : null;
+  const boot = isNativeApp() ? showNativeBoot() : null;
 
   // Saves this browser holds under the site's http address come across first,
   // so the library below already has them (saveMove.js). Never in the app.
@@ -61,28 +60,15 @@ export const installWebBackend = async () => {
   requestPersistentStorage();
   forgetRetiredAccount();
 
-  // Home page: connect to the best content node on entry.
-  // Once the player has entered this tab session, just connect in the background.
+  // The website's home page, once a tab session. The app has no entry screen
+  // and nothing to press: the player already chose to be here by opening it.
+  // Its map is its own (assets/), so there is nothing to wait for; the boot
+  // screen still holds its minimum, so a fast phone does not flash it.
   try {
     if (boot) {
-      // The app has no entry screen and nothing to press: the player already
-      // chose to be here by opening it. Connect on their behalf, let the game
-      // mount behind the boot screen, and let that screen take itself down when
-      // the connection settles — including when it settles on the origin
-      // fallback, which is a playable answer and not an error. A connection that
-      // never settles is handled by the boot screen's own deadline, so a bad
-      // network delays the game rather than withholding it.
       markEntered();
-      if (import.meta.env.VITE_OH_NATIVE) {
-        // The app has the whole world under /assets: there is no node to find
-        // and nothing to wait for. The screen still holds its minimum, so a fast
-        // phone does not flash it.
-        boot.settle({ local: true });
-      } else {
-        connectBestNode().then((node) => boot.settle(node)).catch(() => boot.settle(null));
-      }
+      boot.settle(true);
     } else if (shouldShowHome()) showHomePage();
-    else connectBestNode().catch(() => {});
   } catch (error) {
     if (boot) boot.settle(null);
     console.warn("Home page failed:", error.message);

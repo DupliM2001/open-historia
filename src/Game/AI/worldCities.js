@@ -29,13 +29,12 @@
 // Imports only the name folding and the distance, so it runs under bare node.
 
 import { distanceKm } from "./placement.js";
+import { ASSETS_BASE } from "../../runtime/assetsBase.js";
 import { foldRegionKey, foldRegionKeyOnce } from "./regionMatch.js";
 
 // Where the prompt's city catalog reads it from (promptContext.js
-// CITY_SEED_URL): the content node on web builds, same-origin /assets
-// otherwise. import.meta.env is Vite's; the optional chain keeps this module
-// importable under bare node.
-const WORLD_CITIES_URL = `${(import.meta.env?.VITE_OH_PMTILES_URL || "/assets").replace(/\/$/, "")}/cities-seed.json`;
+// CITY_SEED_URL): the build's own assets/ (assetsBase.js).
+const WORLD_CITIES_URL = `${ASSETS_BASE}/cities-seed.json`;
 
 // One town is on the list up to four times. The list was swept from map tiles
 // at four zoom levels (scripts/extract-cities.mjs), and each level rounds a

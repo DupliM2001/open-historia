@@ -6,8 +6,8 @@ import path from 'node:path'
 
 // The big map binaries live in public/ so the dev server and the Express server can
 // serve them off disk, but NEITHER build serves them from the bundle: the desktop
-// streams them via /api/runtime/pmtiles/:assetKey, and the website fetches them from
-// the content nodes, hash-verified against the signed manifest.
+// streams them via /api/runtime/pmtiles/:assetKey, and the website gets its own
+// smaller copies from scripts/stage-map-assets.mjs, laid in after this drop.
 //
 // Vite copies publicDir wholesale and offers no partial exclude, so it duplicated
 // ~160MB into dist/ and — worse — made `npm run build:site` emit a site Cloudflare
@@ -19,8 +19,8 @@ import path from 'node:path'
 // the copy is the fix; "remember to delete them before deploying" is not.
 // Never wanted in EITHER build: nothing loads a pmtiles archive from the bundle.
 // The desktop streams them off disk via /api/runtime/pmtiles/:assetKey and the
-// website fetches them from the content nodes, hash-verified. Copying them in only
-// broke the Pages deploy at its 25 MiB-per-file limit.
+// website's z8 copies are laid in by scripts/stage-map-assets.mjs. Copying these in
+// only broke the Pages deploy at its 25 MiB-per-file limit.
 const PMTILES = [
   'assets/regions.pmtiles',
   'assets/countries.pmtiles',
@@ -32,9 +32,9 @@ const PMTILES = [
 // — so dropping them there makes /assets/regions-seed.geojson fall through to the
 // SPA fallback, answer with index.html, and the editor open with zero regions.
 //
-// The web build resolves them from VITE_OH_PMTILES_URL instead (see
-// regionImport.js), so it never reads them from the bundle — and it must not carry
-// them: regions-seed.geojson is 52.8MB at z8 and Pages rejects any file over 25MiB.
+// The web build must not carry the desktop's copies: regions-seed.geojson is 52.8MB
+// at z8 and Pages rejects any file over 25MiB. scripts/stage-map-assets.mjs lays the
+// web-sized ones in after this drop.
 const EDITOR_SEEDS = [
   'assets/regions-seed.geojson',
   'assets/cities-seed.json',
@@ -126,7 +126,7 @@ export default defineConfig(({ mode }) => ({
     // a plain truthiness check.
     'import.meta.env.VITE_OH_WEB': JSON.stringify(mode === 'web' || mode === 'android'),
     // The Android app is the web build with everything on the device: the map
-    // under /assets instead of a content node, native file saving, native HTTP
+    // inside the APK, native file saving, native HTTP
     // for a model on the LAN. A second compile-time literal, so those branches
     // are stripped from the website exactly as the web ones are from desktop.
     'import.meta.env.VITE_OH_NATIVE': JSON.stringify(mode === 'android'),

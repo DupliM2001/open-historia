@@ -1,4 +1,5 @@
 import dayjs from "dayjs";
+import { ASSETS_BASE } from "../../runtime/assetsBase.js";
 import { JSON_URLS, getNationTags, loadRegionCatalog, readJson } from "../../runtime/assets.js";
 import { resolveAllCountryTags, resolveCountryTags } from "../../runtime/countryTags.js";
 import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../runtime/ownerNames.js";
@@ -1356,7 +1357,7 @@ let _stockCityCatalogCache = null;
 // node on web builds and same-origin /assets locally.
 // import.meta.env is Vite-only; the optional chain keeps this module importable
 // by the node test runner.
-const CITY_SEED_URL = `${(import.meta.env?.VITE_OH_PMTILES_URL || "/assets").replace(/\/$/, "")}/cities-seed.json`;
+const CITY_SEED_URL = `${ASSETS_BASE}/cities-seed.json`;
 
 const formatCityLine = (name, country, lat, lng, extra = "") =>
   `- ${name}${country ? ` (${country})` : ""}: lat ${Number(lat).toFixed(2)}, lng ${Number(lng).toFixed(2)}${extra}`;

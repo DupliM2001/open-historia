@@ -1,6 +1,6 @@
 /*! Open Historia — fetch the map data the Android app ships © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The world map is not in git (see docs/assets-and-data.md); the desktop
-// downloads it at first launch and the website streams it from a content node.
+// downloads it at first launch and the website carries its own copy.
 // The Android app carries it INSIDE the APK instead, so a phone plays in
 // airplane mode from the first tap. This fetches the six files listed in
 // map-assets.android.json from the map-data GitHub Release into map-cache/

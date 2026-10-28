@@ -40,14 +40,29 @@ test("the website drops it at boot, and asks the registry for no account, sync o
   assert.match(boot, /installWebApiRouter\(\);\s*requestPersistentStorage\(\);\s*forgetRetiredAccount\(\);/);
 
   // The sign-in, the sync engine and the corner chip are gone, and nothing in
-  // the web backend names their routes or the report of which node a signed-in
-  // player was on. Content nodes stay: the directory, the probe and the ping.
+  // the web backend names their routes.
   const files = readdirSync(new URL("./", import.meta.url)).filter((name) => /\.js$/.test(name) && !/\.test\.js$/.test(name));
   for (const gone of ["account.js", "sync.js", "accountWidget.js"]) assert.equal(files.includes(gone), false, `${gone} is back`);
   for (const name of files) {
     const text = readFileSync(new URL(name, import.meta.url), "utf8");
     assert.doesNotMatch(text, /\/account\/|\/sync\/|reportPresence|VITE_OH_ACCOUNT_URL|VITE_OH_GOOGLE_CLIENT_ID|Authorization/, name);
   }
-  const nodes = readFileSync(new URL("./nodeConnect.js", import.meta.url), "utf8");
-  for (const kept of ["/oh/v1/status", "/oh/v1/ping", "/oh/v1/leave", "loadDirectoryNodes"]) assert.ok(nodes.includes(kept), `${kept} is still there`);
+});
+
+// The website carries its own map: no content node, node directory or signed
+// manifest is asked for, and every map file is read from the build's own assets/.
+test("the website asks no content node for anything, and reads its map from its own assets", () => {
+  const files = readdirSync(new URL("./", import.meta.url)).filter((name) => /\.js$/.test(name) && !/\.test\.js$/.test(name));
+  for (const gone of ["nodeConnect.js", "contentTrust.js", "trust.js"]) assert.equal(files.includes(gone), false, `${gone} is back`);
+  for (const name of files) {
+    const text = readFileSync(new URL(name, import.meta.url), "utf8");
+    assert.doesNotMatch(text, /VITE_OH_PMTILES_URL|VITE_OH_DIRECTORY_URL|node-directory|content-manifest|\/oh\/v1\//, name);
+  }
+  const base = readFileSync(new URL("../assetsBase.js", import.meta.url), "utf8");
+  assert.match(base, /import\.meta\.env\.BASE_URL/);
+  const env = readFileSync(new URL("../../../.env.web", import.meta.url), "utf8");
+  assert.doesNotMatch(env, /VITE_OH_PMTILES_URL|VITE_OH_DIRECTORY_URL/);
+  const pkg = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
+  assert.match(pkg.scripts["build:site"], /stage-map-assets\.mjs dist-web/);
+  assert.match(pkg.scripts["build:web"], /stage-map-assets\.mjs dist-web/);
 });

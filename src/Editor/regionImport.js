@@ -13,14 +13,11 @@
 // map; the user re-owns/edits from there.
 
 import GeoJSON from "ol/format/GeoJSON";
+import { ASSETS_BASE } from "../runtime/assetsBase.js";
 import COUNTRY_NAMES from "../runtime/generated/countryNames.js";
 
-// Web build hosts the big seeds on the registry Worker /content proxy
-// (VITE_OH_PMTILES_URL); local/desktop leaves it unset → same-origin /assets
-// (public/assets/, fetched by scripts/fetch-map-assets.mjs). Mirrors
-// runtime/web/libraryStore.js. On Cloudflare Pages /assets/*.geojson would return
-// the SPA-fallback HTML (the seed isn't hosted there), which parses to zero regions.
-const CONTENT_BASE = (import.meta.env.VITE_OH_PMTILES_URL || "/assets").replace(/\/$/, "");
+// The seed is in the build's own assets/ (runtime/assetsBase.js).
+const CONTENT_BASE = ASSETS_BASE;
 export const SEED_URL = `${CONTENT_BASE}/regions-seed.geojson`;
 
 // Fetch + parse the seed FeatureCollection into OL features (EPSG:3857).

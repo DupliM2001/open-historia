@@ -184,8 +184,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Per-IP fixed-window rate limit for requests that arrive over the network, the
-// same shape the content node already uses. Loopback is exempt: the game itself
+// Per-IP fixed-window rate limit for requests that arrive over the network.
+// Loopback is exempt: the game itself
 // polls runtime state briskly and it is not the traffic this is here for. Only
 // meaningful when OH_HOST opens the server up at all, which is exactly when an
 // unauthenticated API benefits from a ceiling on how fast it can be hammered.
