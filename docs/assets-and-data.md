@@ -41,7 +41,7 @@ An asset can be resolved from up to four places. Which one wins depends on the b
 | **App bundle** (`public/assets/`, or `dist/assets/` in a built app; `www/assets/` inside the Android APK) | The shared default `*.pmtiles`, `*-seed.*`, immutable `colors.json` (the Android app ships the z8 trims and the web-sized seeds, pinned in `mobile/map-assets.android.json`) | Desktop / Termux / Android |
 | **`OH_DATA_DIR`** (`server/data/…`, or a writable sandbox on Android) | Per-scenario overrides, per-game state, and — on the embedded server — the downloaded pmtiles under `<DATA_DIR>/assets/` | All node-server builds |
 | **`map-data` GitHub Release** | Canonical copies of every heavy binary, checksum-pinned | Fetched at install/update time |
-| **Cloudflare / content-node swarm** | Byte-identical pmtiles served over HTTP range requests, hash-verified | Web build only |
+| **The website's own `assets/`** (`/play/assets/`) | The z8 pmtiles and the web-sized world files, pinned in `scripts/map-assets.web.json` and laid into the site when it is built | Web build only |
 
 ### `OH_DATA_DIR` and the data-dir resolver
 
@@ -136,7 +136,7 @@ A pure repack: tile bodies are copied across still compressed, byte for byte, so
 | `countries.pmtiles` | 62,739,546 | 12,580,027 | 50.2 MB |
 | `cities.pmtiles` | 1,547,924 | — | nothing; `-zg` already stopped it at z3 |
 
-That is **134.9 MB off the 288.7 MB** a player pulls on first launch. Shipping it is the ordinary release dance and is NOT done by running the script: upload the trimmed archives to the `map-data` release, put their new `bytes`/`sha256` in `scripts/map-assets.json`, regenerate `public/content-manifest.json` (`scripts/build-content-manifest.mjs`) and re-sign it, then re-populate the content nodes. Installs that already have the big archives keep them until `fetch-map-assets.mjs` runs in verify mode.
+That is **134.9 MB off the 288.7 MB** a player pulls on first launch. Shipping it is the ordinary release dance and is NOT done by running the script: upload the trimmed archives to the `map-data` release, put their new `bytes`/`sha256` in `scripts/map-assets.json` (and `scripts/map-assets.web.json`, for the website). Installs that already have the big archives keep them until `fetch-map-assets.mjs` runs in verify mode.
 
 Two things a trimmed archive still says about itself: the metadata blob is preserved verbatim, so `vector_layers[0].maxzoom` and `tilestats` still describe z10 (MapLibre reads the header, not these, so rendering is unaffected — `tippecanoe-decode` and friends would be misled), and `centerZoom` is carried across as it was.
 
@@ -202,7 +202,7 @@ The token also gates the PMTiles cache rotation (`:239`): dropping `binaryValueC
 | Function | Line | Role |
 |---|---|---|
 | `getPmtilesArchive(url)` | `818` | Return cached `PMTiles` or register a new one |
-| `warmPmtilesArchive(url)` | `829` | Download the full archive into `binaryValueCache`, then prime. **Web build** tries the hash-verified node swarm first (`contentTrust.js`), falls through to the origin |
+| `warmPmtilesArchive(url)` | `829` | Download the full archive into `binaryValueCache`, then prime |
 | `primePmtilesArchive(url, buffer)` | `823` | Store the ArrayBuffer and register a `MemorySource`-backed archive |
 | `registerPmtilesArchive(url)` | `390` | `new PMTiles(source, pmtilesCache)` + register on the `Protocol` |
 
@@ -247,12 +247,9 @@ The **web build** uses a parallel key namespace: `buildRuntimeCacheUrl(key)` (`:
 
 Under `import.meta.env.VITE_OH_WEB` there is no node server:
 
-- **Route interception:** `src/runtime/web/router.js:31` installs a `fetch` interceptor for same-origin `/api/*`. `/api/runtime/pmtiles/:key` (`router.js:51`) checks a scenario override in IndexedDB (`getScenarioPmtilesOverride`), else fetches `${VITE_OH_PMTILES_URL || "/assets"}/<key>.pmtiles`. The hosted site sets `VITE_OH_PMTILES_URL` to the **registry Worker's CORS+range proxy**, because Cloudflare Pages can't host the 60–100 MB archives directly (same-origin would 404 to the SPA fallback).
-- **Verified content swarm:** `warmPmtilesArchive` (`assets.js:855`) dynamically imports `src/runtime/web/contentTrust.js` and calls `fetchVerifiedBuffer(url)`. It maps the URL to a manifest asset id (`assetIdFromUrl`, `contentTrust.js:72`), fetches `<node>/oh/v1/content/<sha256>` from the vetted node swarm, and verifies **every byte** against the signed `content-manifest.json` (`:140`). A bad/broken node can at worst force a retry — it can never deliver tampered bytes — and any failure falls through to the canonical origin, so a node outage is invisible. The signed node **directory** (`VITE_OH_DIRECTORY_URL`) is a deny-list/control doc; live addresses come from `nodes-live.json`. This whole block is stripped from the local download.
+- **Route interception:** `src/runtime/web/router.js:31` installs a `fetch` interceptor for same-origin `/api/*`. `/api/runtime/pmtiles/:key` checks a scenario override in IndexedDB (`getScenarioPmtilesOverride`), else fetches `${ASSETS_BASE}/<key>.pmtiles`: the site's own copy (`src/runtime/assetsBase.js`, `/play/assets/` on openhistoria.com), laid in by `scripts/stage-map-assets.mjs` when the site is built. See [Web build §8](web-build.md#8-heavy-content-the-map-files-the-build-carries).
 - **Worker fetches:** the `window.fetch` patch is invisible to workers — MapLibre's tile workers and the political-cartography worker (`src/Game/Map/vnext/polityBoundariesWorker.js`) fetch with their own global — so the scenario's regions GeoJSON is re-served to the `custom-regions-source` and the worker through a `blob:` URL: `prepareWorkerFetchableUrl(url)` (`assets.js`) fetches the runtime URL on the page and stages the bytes as a blob; `useWorkerFetchableUrl` (`src/Game/Map/useWorkerFetchableUrl.js`) hands that URL to `Nations.jsx`, which keeps the runtime URL as the identity for geometry epochs, catalog keys and readiness. MapLibre forwards a non-http(s) URL from its workers to the main thread, and a dedicated worker resolves a blob URL its page created. Copies are released (revoked after a grace period) when the token rotates or the asset is written. The desktop keeps the plain URL.
-- **Origin check:** the origin fallback in `warmPmtilesArchive` is held to the same signed manifest through `verifyOriginBuffer(url, buffer)` (`contentTrust.js`): `checked` is false — the bytes trusted as before — when the manifest is unsigned or missing, does not list the asset, or the active scenario serves its own archive under the runtime URL (`hasScenarioPmtilesOverride`, `libraryStore.js`); a scenario's own archive is never fetched from the swarm either. Only a signed hash that contradicts the bytes fails the archive.
 
-See the [Node network](delivery-and-deploy.md) notes for the swarm/registry architecture.
 
 ---
 
@@ -319,8 +316,8 @@ Raster tiles are warmed via `warmRemoteResources` / `warmRemoteResource` (`asset
 |---|---|
 | `src/runtime/assets.js` | Client asset layer: read/write/warm/prime, caches, derived catalogs, basemap protocols |
 | `src/runtime/preload.js` | 30 s startup warm sequence + progress model |
-| `src/runtime/web/router.js` | Web-build `fetch` interceptor for `/api/*` (pmtiles → `VITE_OH_PMTILES_URL`) |
-| `src/runtime/web/contentTrust.js` | Web-build hash-verified content-node fetch |
+| `src/runtime/web/router.js` | Web-build `fetch` interceptor for `/api/*` (pmtiles → the build's own `assets/`) |
+| `scripts/stage-map-assets.mjs` | Website: lay the files of `scripts/map-assets.web.json` into the build |
 | `scripts/fetch-map-assets.mjs` | Desktop/updater: sync local tree to the `map-data` Release |
 | `scripts/map-assets.json` | The Release manifest (paths, versioned asset names, sha256, bytes) |
 | `mobile/nodejs-project/fetchMapAssets.mjs` | Embedded-server variant → downloads into `OH_DATA_DIR` |

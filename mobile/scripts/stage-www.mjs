@@ -33,8 +33,6 @@ const SITE_ONLY = [
   // The gate that asks before the visit counters load, and the website's fonts.
   // The app counts nothing and never adds the gate (src/runtime/visitCount.js).
   "consent.js", "fonts",
-  "content-manifest.json", "content-manifest.json.sig",
-  "node-directory.json", "node-directory.json.sig",
 ];
 
 if (!existsSync(path.join(source, "index.html"))) {

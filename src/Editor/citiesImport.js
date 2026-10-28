@@ -8,11 +8,10 @@
 // public/assets/cities-seed.json by scripts/extract-cities.mjs.
 
 import { newId } from "./useMapDocument.js";
+import { ASSETS_BASE } from "../runtime/assetsBase.js";
 
-// Web build: seed hosted on the Worker /content proxy (VITE_OH_PMTILES_URL);
-// local/desktop leaves it unset → same-origin /assets. On Pages /assets/*.json
-// would 200-with-SPA-HTML (the seed isn't hosted there).
-const CONTENT_BASE = (import.meta.env.VITE_OH_PMTILES_URL || "/assets").replace(/\/$/, "");
+// The seed is in the build's own assets/ (runtime/assetsBase.js).
+const CONTENT_BASE = ASSETS_BASE;
 const SEED_URL = `${CONTENT_BASE}/cities-seed.json`;
 let _cache = null;
 

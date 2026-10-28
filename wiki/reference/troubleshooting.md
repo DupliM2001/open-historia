@@ -6,9 +6,9 @@ explains the problem immediately, and it is what to attach to a bug report.
 
 ## The map is blank
 
-**In the browser.** The web build streams its map from community-run content nodes. If none is
-reachable you get no map. Reload; if it persists, the node network is having a bad day — try
-again later, or use the desktop or Android app, which keep the map on the device.
+**In the browser.** The map files come from openhistoria.com itself, with the rest of the page.
+Reload; if it persists, clear the site's cache and try again, or use the desktop or Android
+app, which keep the map on the device.
 
 **On desktop.** The map data failed to download on first launch. It is fetched separately from
 the installer, once, behind the **Setting up Open Historia** screen. Restart the app and let that

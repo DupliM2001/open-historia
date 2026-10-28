@@ -29,7 +29,7 @@ The game says so on the screens a scenario leaves it from, and writes it into ev
 
 **[openhistoria.com](https://openhistoria.com)** — nothing to install. Games are saved in
 your browser, and you bring your own AI key (it goes straight to your provider, never to
-us). The world map is served by the community [content-node network](https://github.com/Open-Historia/open-historia-node).
+us). The world map is part of the site.
 
 Local AI (Ollama, LM Studio) needs one extra step in the browser: the server has to allow
 the site's origin, e.g. start Ollama with `OLLAMA_ORIGINS=https://openhistoria.com`. The
@@ -187,16 +187,3 @@ Open any scenario's editor and click **🗺️ Open Map Editor** (or visit
 `http://localhost:3000/?editor=1` for the standalone editor). Draw regions, split and
 merge borders freehand, paint owners, import 70k cities, sign your map, then
 **Apply & Play**.
-
-## 🖥️ Host a server node
-
-Want to help the network? Run a **content node** on your own device to cache and serve
-the game's map data to nearby players so everyone loads faster. It's a one-click install
-and deliberately safe — a node only ever serves **read-only, checksum-verified** map
-files, and never touches anyone's games, accounts, AI keys, or code.
-
-➡️ **[Set up a node → Open-Historia/open-historia-node](https://github.com/Open-Historia/open-historia-node)**
-
-Your node registers itself and starts serving players once an admin accepts it. See the
-[node README](https://github.com/Open-Historia/open-historia-node#readme) for the full
-walkthrough (including a free Cloudflare Tunnel to put it online).
