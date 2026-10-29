@@ -217,6 +217,75 @@ jobs:
         run: |
           node native/macos/smoke-mac.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/probe/Open Historia.pck" "$RUNNER_TEMP/out/smoke-arm64-windowed.log" --windowed
 
+      - name: Tour the windowed app with real input (1440x900)
+        id: tour
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/tour"
+          system_profiler SPDisplaysDataType | tee "$RUNNER_TEMP/tour/displays.txt"
+          node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/1x"
+
+      - name: Look for a Retina (HiDPI) display mode
+        id: retina
+        continue-on-error: true
+        run: |
+          brew install displayplacer >/dev/null 2>&1 || brew install jakehilborn/jakehilborn/displayplacer >/dev/null 2>&1 || true
+          if ! command -v displayplacer >/dev/null; then echo "mode=none" >> "$GITHUB_OUTPUT"; echo "displayplacer is not available"; exit 0; fi
+          displayplacer list | tee "$RUNNER_TEMP/tour/displayplacer-before.txt"
+          id=$(grep -m1 "^Persistent screen id:" "$RUNNER_TEMP/tour/displayplacer-before.txt" | awk '{print $4}')
+          pick=$(grep -E "^ *mode [0-9]+: res:[0-9]+x[0-9]+ .*scaling:on" "$RUNNER_TEMP/tour/displayplacer-before.txt" | awk -F'res:' '{split($2,a,"[x ]"); if (a[1] >= 1440 && a[2] >= 900) print a[1]*a[2], $0}' | sort -n | head -1 | sed -E 's/.*mode ([0-9]+):.*/\1/')
+          if [ -z "$id" ] || [ -z "$pick" ]; then echo "mode=none" >> "$GITHUB_OUTPUT"; echo "no HiDPI mode of at least 1440x900 points is offered by this runner's display"; exit 0; fi
+          displayplacer "id:$id mode:$pick" || true
+          sleep 3
+          displayplacer list | tee "$RUNNER_TEMP/tour/displayplacer-after.txt"
+          system_profiler SPDisplaysDataType | tee "$RUNNER_TEMP/tour/displays-after.txt"
+          echo "mode=$pick" >> "$GITHUB_OUTPUT"
+
+      - name: Tour again at 2x (the real Retina mode if the runner gave one, emulated otherwise)
+        id: tour2x
+        continue-on-error: true
+        run: |
+          echo "HiDPI mode: ${{ steps.retina.outputs.mode }}"
+          node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --scale 2 --only menu,settings,history,game --skip notify,war,gestures --screens c-menu-games,c-hud,c-settings-general
+
+      - name: Read the notifications usernoted delivered
+        if: always()
+        continue-on-error: true
+        run: |
+          log show --last 90m --style compact --predicate 'subsystem == "com.apple.UserNotifications"' 2>/dev/null | grep -i "openhistoria" | tail -80 | tee "$RUNNER_TEMP/tour/usernotifications.txt"
+          grep -h "usernoted\|notifier smoke" "$RUNNER_TEMP/out/notifier-smoke.log" | tail -30 | tee "$RUNNER_TEMP/tour/notifier-smoke-usernoted.txt" || true
+
+      - name: First open of the published zip (quarantine, Gatekeeper, the documented step)
+        id: firstopen
+        continue-on-error: true
+        run: bash native/macos/first-open.sh "$RUNNER_TEMP/tour/first-open"
+
+      - name: The self-updater leaves no quarantine behind (the updater tests on a real .app)
+        id: updaterquarantine
+        continue-on-error: true
+        run: |
+          node --test --test-reporter=spec --test-name-pattern "quarantined" native/sidecar/test/update-mac.test.mjs 2>&1 | tee "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"; test "${PIPESTATUS[0]}" = 0
+          grep -E "^ℹ (tests|pass|fail|skipped)" "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"
+          ! grep -qE "^ℹ (pass 0|fail [1-9])" "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"
+
+      - name: Compose the contact sheets
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
+          for pass in 1x 2x; do
+            if [ -d "$RUNNER_TEMP/tour/$pass/shots" ]; then "$RUNNER_TEMP/venv/bin/python" native/macos/contact-sheet.py "$RUNNER_TEMP/tour/$pass/shots" "$RUNNER_TEMP/tour/contact-sheet-$pass.png" "macOS $(sw_vers -productVersion) $(uname -m) tour $pass"; fi
+          done
+          cat "$RUNNER_TEMP"/tour/*/tour-*summary.json 2>/dev/null || true
+
+      - name: Upload the tour
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open-Historia-Native-macOS-tour
+          path: ${{ runner.temp }}/tour
+          if-no-files-found: warn
+
       - name: Gather the smoke logs
         if: always()
         run: |
@@ -264,6 +333,15 @@ jobs:
           name: Open-Historia-Native-macOS-smoke-logs
           path: ${{ runner.temp }}/logs
           if-no-files-found: warn
+
+      - name: Stop here if a desktop check failed
+        if: always()
+        run: |
+          echo "tour 1x: ${{ steps.tour.outcome }}"
+          echo "tour 2x: ${{ steps.tour2x.outcome }}"
+          echo "first open: ${{ steps.firstopen.outcome }}"
+          echo "updater quarantine: ${{ steps.updaterquarantine.outcome }}"
+          test "${{ steps.tour.outcome }}" = success && test "${{ steps.tour2x.outcome }}" = success && test "${{ steps.firstopen.outcome }}" = success && test "${{ steps.updaterquarantine.outcome }}" = success
 
   intel:
     name: Smoke-test on an Intel Mac
