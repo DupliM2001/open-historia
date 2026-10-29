@@ -43,6 +43,7 @@ jobs:
         with:
           workspaces: native/engine -> target
           key: macos-universal
+          cache-on-failure: true
 
       - name: Build the engine library for both Macs and join them
         working-directory: native/engine
@@ -66,9 +67,9 @@ jobs:
           echo "templates=$templates" >> "$GITHUB_OUTPUT"
           echo "key=godot-4.7.2-${editor:0:16}-${templates:0:16}" >> "$GITHUB_OUTPUT"
 
-      - name: Cache Godot
+      - name: Restore Godot from the cache
         id: godot-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/godot-cache
           key: ${{ steps.godot.outputs.key }}
@@ -89,6 +90,13 @@ jobs:
           unzip -q -j templates.tpz templates/macos.zip templates/version.txt -d ~/godot-cache
           cat ~/godot-cache/version.txt
           rm -rf "$RUNNER_TEMP/godot-dl"
+
+      - name: Save Godot to the cache
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/godot-cache
+          key: ${{ steps.godot.outputs.key }}
 
       - name: Check the Godot tools
         run: |
