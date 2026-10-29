@@ -1,0 +1,133 @@
+name: Native app (Linux) multiplayer guest
+
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: The host's invite code (it is masked and never printed)
+        required: true
+        type: string
+      app_run:
+        description: The Native app (Linux) run whose app to use (empty for the newest green one)
+        required: false
+        type: string
+        default: ""
+  push:
+    branches: [native-linux]
+    paths: [.github/workflows/native-mp-guest.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GODOT_BASE: https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable
+
+jobs:
+  guest:
+    name: Join a native host's game from the cloud
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Read the invite code
+        run: |
+          code=$(jq -r '.inputs.code // ""' "$GITHUB_EVENT_PATH" | tr -d '[:space:]')
+          echo "::add-mask::$code"
+          case "$code" in oh1-*) ;; *) echo "::error::the code input is not an invite code"; exit 1 ;; esac
+          umask 077
+          printf '%s' "$code" > "$RUNNER_TEMP/invite"
+          echo "invite code read (${#code} characters)"
+
+      - uses: actions/checkout@v4
+
+      - name: Download the newest green Linux app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_RUN: ${{ inputs.app_run }}
+        run: |
+          run="$APP_RUN"
+          if [ -z "$run" ]; then
+            run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow native-linux.yml --branch native-linux --status success -L 1 --json databaseId -q '.[0].databaseId')
+          fi
+          echo "app from run $run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run"
+          gh run view -R "$GITHUB_REPOSITORY" "$run" --json headSha,displayTitle -q '"built from " + .headSha + " (" + .displayTitle + ")"'
+          mkdir -p "$RUNNER_TEMP/app-dl" "$RUNNER_TEMP/app"
+          gh run download -R "$GITHUB_REPOSITORY" "$run" -n Open-Historia-Native-Linux -D "$RUNNER_TEMP/app-dl"
+          tar -xzf "$RUNNER_TEMP/app-dl/Open-Historia-Native-Linux-x86_64.tar.gz" -C "$RUNNER_TEMP/app"
+          ls -la "$RUNNER_TEMP/app/Open Historia Native/runtime"
+
+      - name: Read the Godot checksums
+        id: godot
+        run: |
+          curl -fsSL "$GODOT_BASE/SHA512-SUMS.txt" -o "$RUNNER_TEMP/godot-sums.txt"
+          editor=$(awk '$2 == "Godot_v4.7.2-stable_linux.x86_64.zip" {print $1}' "$RUNNER_TEMP/godot-sums.txt")
+          templates=$(awk '$2 == "Godot_v4.7.2-stable_export_templates.tpz" {print $1}' "$RUNNER_TEMP/godot-sums.txt")
+          test ${#editor} -eq 128 && test ${#templates} -eq 128
+          echo "editor=$editor" >> "$GITHUB_OUTPUT"
+          echo "key=godot-linux-4.7.2-${editor:0:16}-${templates:0:16}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Godot from the cache
+        id: godot-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/godot-cache
+          key: ${{ steps.godot.outputs.key }}
+
+      - name: Download the Godot editor (sha512 checked)
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        env:
+          EDITOR_SHA: ${{ steps.godot.outputs.editor }}
+        run: |
+          mkdir -p ~/godot-cache "$RUNNER_TEMP/godot-dl"
+          cd "$RUNNER_TEMP/godot-dl"
+          curl -fsSL --retry 3 "$GODOT_BASE/Godot_v4.7.2-stable_linux.x86_64.zip" -o editor.zip
+          echo "$EDITOR_SHA  editor.zip" | sha512sum -c -
+          unzip -q -o editor.zip -d ~/godot-cache
+          chmod +x ~/godot-cache/Godot_v4.7.2-stable_linux.x86_64
+
+      - name: Build a pack that runs the multiplayer check
+        run: |
+          app="$RUNNER_TEMP/app/Open Historia Native"
+          proj="$RUNNER_TEMP/mp-project"
+          editor="$HOME/godot-cache/Godot_v4.7.2-stable_linux.x86_64"
+          cp -a native/godot "$proj"
+          rm -rf "$proj/.godot"
+          mkdir -p "$proj/bin" "$proj/probes"
+          cp "$app/runtime/liboh_gdext.so" "$app/runtime/libohweb.so" "$proj/bin/"
+          cp "$app/runtime/Open Historia.x86_64" "$RUNNER_TEMP/linux_release.x86_64"
+          cp native/macos/probe/empty.tscn "$proj/probes/empty.tscn"
+          printf 'class_name OhMpCheck\nextends "res://tests/multiplayer_check.gd"\n' > "$proj/probes/mp_loop.gd"
+          sed -i 's|^run/main_scene=.*$|run/main_scene="res://probes/empty.tscn"\nrun/main_loop_type="OhMpCheck"\nrun/flush_stdout_on_print=true|' "$proj/project.godot"
+          sed -i -e 's|^exclude_filter=.*$|exclude_filter=""|' -e "s|^custom_template/release=.*\$|custom_template/release=\"$RUNNER_TEMP/linux_release.x86_64\"|" -e "s|^custom_template/debug=.*\$|custom_template/debug=\"$RUNNER_TEMP/linux_release.x86_64\"|" "$proj/export_presets.cfg"
+          grep -n '^run/' "$proj/project.godot"
+          "$editor" --headless --path "$proj" --import > "$RUNNER_TEMP/import.log" 2>&1 || { tail -40 "$RUNNER_TEMP/import.log"; exit 1; }
+          "$editor" --headless --path "$proj" --export-pack Linux "$RUNNER_TEMP/mp.pck" > "$RUNNER_TEMP/export.log" 2>&1 || { tail -40 "$RUNNER_TEMP/export.log"; exit 1; }
+          ls -la "$RUNNER_TEMP/mp.pck"
+          cp "$RUNNER_TEMP/mp.pck" "$app/runtime/Open Historia.pck"
+
+      - name: Join the host's game as the cloud guest
+        timeout-minutes: 40
+        run: |
+          app="$RUNNER_TEMP/app/Open Historia Native"
+          OH_MP_TOKEN="$(cat "$RUNNER_TEMP/invite")" OH_MP_NAME="Cloud guest" OH_MP_MINUTES=35 "$app/runtime/node" native/linux/mp-guest.mjs "$app" "$RUNNER_TEMP/mp-out"
+
+      - name: Check the uploads hold no address or invite code
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/invite"
+          mkdir -p "$RUNNER_TEMP/mp-out"
+          if grep -rEl 'oh1-[A-Za-z0-9_-]{16,}|\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' "$RUNNER_TEMP/mp-out"; then echo "::error::an address or invite code is left in the uploads"; rm -rf "$RUNNER_TEMP/mp-out"/*; fi
+          ls -la "$RUNNER_TEMP/mp-out"
+
+      - name: Upload the guest's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-mp-guest
+          path: ${{ runner.temp }}/mp-out
+          retention-days: 7
+          if-no-files-found: warn
