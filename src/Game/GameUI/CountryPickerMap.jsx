@@ -13,6 +13,7 @@ import Stroke from "ol/style/Stroke";
 import GeoJSON from "ol/format/GeoJSON";
 import { fromLonLat, transformExtent } from "ol/proj";
 import { boundsFillSquare, normalizeImageBounds } from "../../../server/mapProjection.js";
+import { crispWhenMagnified } from "../../Editor/crispWhenMagnified.js";
 import { defaults as defaultControls } from "ol/control/defaults";
 import { flagEmojiFromGid } from "../../runtime/countryFlags.js";
 import { loadRegionLabelGeometry } from "../../runtime/countryLabels.js";
@@ -104,9 +105,9 @@ const buildBaseLayer = (customBackground) => {
     const imageExtent = bounds && !boundsFillSquare(bounds)
       ? transformExtent([bounds.west, bounds.south, bounds.east, bounds.north], "EPSG:4326", "EPSG:3857")
       : WORLD_IMAGE_EXTENT;
-    return new ImageLayer({
+    return crispWhenMagnified(new ImageLayer({
       source: new ImageStatic({ url: customBackground.imageUrl, imageExtent, projection: "EPSG:3857" }),
-    });
+    }), imageExtent, customBackground.imageUrl);
   }
   if (customBackground?.kind === "vector" && customBackground.geojson) {
     const features = new GeoJSON().readFeatures(customBackground.geojson, { featureProjection: "EPSG:3857" });

@@ -49,7 +49,8 @@ import { loadBackgroundFile, rebuildPersistedBackground, vectorLayerToGeoJSON } 
 import ProjectionPanel from "./ProjectionPanel.jsx";
 import { moveFeatureCoords, moveUnits, planBasemapChange } from "./projectionConvert.js";
 import { reprojectPicture } from "./projectionImage.js";
-import { convertPlane, normalizeProjection, sameProjection } from "../../server/mapProjection.js";
+import { FREEFORM, convertPlane, geoToDisplay, normalizeProjection, sameProjection } from "../../server/mapProjection.js";
+import PictureSetupPanel from "./PictureSetupPanel.jsx";
 import { addBackgroundToLibrary, getBasemapPayload } from "../runtime/basemapLibrary.js";
 import { saveDocument, loadDocument, downloadJson } from "./documentIO.js";
 import { migrateDocumentOwners, OWNER_SCHEMA } from "./documentMigration.js";
@@ -297,14 +298,18 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
   };
 
   // Pick one of the user's saved basemaps: fetch its payload and apply it.
+  // A picture asks how it is drawn first, as an upload does (the library keeps
+  // only the picture, not its projection).
   const selectLibraryBasemap = async (bm) => {
     try {
       const payload = await getBasemapPayload(bm.id);
-      const saved =
-        bm.kind === "vector"
-          ? { kind: "vector", geojson: payload.geojson }
-          : { kind: "image", dataUrl: payload.dataUrl, aspect: bm.aspect };
-      setCustomBg(rebuildPersistedBackground(saved, { persisted: false }));
+      if (bm.kind !== "vector") {
+        setPictureSetupError("");
+        setPendingPicture({ bg: { kind: "image", dataUrl: payload.dataUrl, aspect: bm.aspect }, name: bm.name, libraryId: bm.id });
+        setBasemapPickerOpen(false);
+        return;
+      }
+      setCustomBg(rebuildPersistedBackground({ kind: "vector", geojson: payload.geojson }, { persisted: false }));
       setCustomBgId(bm.id);
     } catch (e) {
       window.alert(`Could not load that basemap: ${e?.message || e}`);
@@ -312,16 +317,67 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
   };
 
   // Upload a new basemap: apply it now AND save it to the library for reuse.
+  // A picture first asks how it is drawn (PictureSetupPanel), the rest applies at once.
   const uploadBasemap = async (file) => {
     if (!file) return;
     const bg = await loadBackgroundFile(file);
+    const name = file.name ? file.name.replace(/\.[^.]+$/, "") : "Custom basemap";
+    if (bg.kind === "image") {
+      setPictureSetupError("");
+      setPendingPicture({ bg, name });
+      setBasemapPickerOpen(false);
+      return;
+    }
+    await applyUploadedBackground(bg, name);
+  };
+
+  const [pendingPicture, setPendingPicture] = useState(null);
+  const [pictureSetupBusy, setPictureSetupBusy] = useState(false);
+  const [pictureSetupError, setPictureSetupError] = useState("");
+  // The picture kept as it is, laid on `bounds`; the map takes its projection.
+  // The provinces, cities and units move into that projection with it, or are
+  // deleted. Not an undo step, as converting the projection is not.
+  const applyPictureSetup = async ({ projection, bounds, deleteProvinces }) => {
+    if (!pendingPicture || !api) return;
+    const { bg, name, libraryId = null } = pendingPicture;
+    setPictureSetupBusy(true);
+    setPictureSetupError("");
+    try {
+      const from = normalizeProjection(d.metadata?.projection);
+      // How the game shows the map (globe, looping) stays as it was.
+      const to = { ...projection, ...(from.globe === false ? { globe: false } : {}), ...(from.wrap === false ? { wrap: false } : {}) };
+      if (deleteProvinces) {
+        api.loadRegions({ type: "FeatureCollection", features: [] });
+        d.setFeatures([]);
+        d.setUnits([]);
+      } else if (!sameProjection(from, to)) {
+        moveMapPlaces(from, to);
+      }
+      d.patchMetadata({ projection: to });
+      setPendingPicture(null);
+      const picture = rebuildPersistedBackground({ kind: "image", dataUrl: bg.dataUrl, aspect: bg.aspect, bounds }, { persisted: false });
+      if (libraryId) {
+        // Already in Your basemaps: applied, not saved again.
+        setCustomBg(picture);
+        setCustomBgId(libraryId);
+      } else {
+        await applyUploadedBackground(picture, name);
+      }
+      api.fitToData?.();
+    } catch (e) {
+      setPictureSetupError(e?.message || String(e));
+    } finally {
+      setPictureSetupBusy(false);
+    }
+  };
+
+  const applyUploadedBackground = async (bg, name) => {
     setCustomBg(bg); // applies immediately (image / vector / raster)
     const normalized = normalizeBackground(bg);
     if (!normalized) {
       setCustomBgId(null); // raster (GeoTIFF/PMTiles) is session-only reference, not saved
       return;
     }
-    const name = file.name ? file.name.replace(/\.[^.]+$/, "") : "Custom basemap";
     try {
       const meta = await addBackgroundToLibrary(normalized, name, { author: d.author || "" });
       setCustomBgId(meta?.id || null);
@@ -348,6 +404,24 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
     image.src = customBg.dataUrl;
     return () => { alive = false; };
   }, [customBg]);
+  // The regions, cities and features, and starting units moved from one
+  // projection's sheet to another's.
+  const moveMapPlaces = (from, to) => {
+    const EARTH = 6378137; // the map's units are metres on the Mercator plane
+    // A new centre moves the map's edge to the meridian opposite it. On a
+    // cylindrical map that meridian is a straight line: cut the regions there.
+    const cylindrical = ["mercator", "equirectangular", "miller", "gall-peters"].includes(from.type);
+    const seamLon = (to.centre ?? 0) - 180;
+    const seamX = cylindrical && to.type !== FREEFORM && (to.centre ?? 0) !== (from.centre ?? 0)
+      ? geoToDisplay(from, seamLon, 0)[0] * (Math.PI / 180) * EARTH
+      : null;
+    api.transformRegions((x, y) => {
+      const [X, Y] = convertPlane(from, to, x / EARTH, y / EARTH);
+      return [X * EARTH, Y * EARTH];
+    }, { seamX });
+    d.setFeatures((list) => moveFeatureCoords(list, from, to));
+    d.setUnits((list) => moveUnits(list, from, to));
+  };
   const [projectionBusy, setProjectionBusy] = useState(false);
   const [projectionError, setProjectionError] = useState("");
   // Regions, cities, units and basemap, each by its own rule
@@ -393,9 +467,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
       } else if (plan.kind === "tiles") {
         nextBg = null;
       }
-      api.transformRegions(moveXY);
-      d.setFeatures((list) => moveFeatureCoords(list, from, to));
-      d.setUnits((list) => moveUnits(list, from, to));
+      moveMapPlaces(from, to);
       // The two switches about how the game shows the map stay as they were.
       d.patchMetadata({ projection: { ...to, ...(from.globe === false ? { globe: false } : {}), ...(from.wrap === false ? { wrap: false } : {}) }, ...(plan.kind === "tiles" ? { customBackground: null } : {}) });
       if (nextBg !== customBg) {
@@ -968,6 +1040,7 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         referenceImage={refImage}
         referenceAdjust={openPanel === "reference" && Boolean(refImage)}
         referencePlaceNonce={refPlaceNonce}
+        onReferenceSnapped={() => setRefImage((current) => (current ? { ...current, locked: true } : current))}
       />
 
       <DocumentsMenu
@@ -1482,6 +1555,20 @@ const MapEditor = ({ onClose, scenarioName, onApplyToScenario, initialMap, revie
         onSelectCustom={selectLibraryBasemap}
         onUpload={uploadBasemap}
       />
+      {pendingPicture && (
+        <PictureSetupPanel
+          name={pendingPicture.name}
+          aspect={pendingPicture.bg.aspect}
+          busy={pictureSetupBusy}
+          error={pictureSetupError}
+          onApply={applyPictureSetup}
+          onChooseAnother={() => {
+            setPendingPicture(null);
+            setBasemapPickerOpen(true);
+          }}
+          onClose={() => setPendingPicture(null)}
+        />
+      )}
 
       <BorderCleanupNote text={cleanupNote} top={isMobile ? 200 : 56} />
       <BorderCleanupOverlay state={borderCleanup} onStop={() => { cleanupStopRef.current = true; }} />
