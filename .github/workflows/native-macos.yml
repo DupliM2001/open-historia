@@ -124,6 +124,9 @@ jobs:
       - name: Install the server packages
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Fetch the Fantasy Map Generator (the pinned, prepared copy the desktop installers ship)
+        run: node scripts/fetch-fmg.mjs --required
+
       - name: Install the sidecar packages with both darwin node-datachannel builds
         working-directory: native/sidecar
         run: |
@@ -166,10 +169,20 @@ jobs:
           app="$RUNNER_TEMP/out/Open Historia Native.app"
           plutil -p "$app/Contents/Info.plist"
           ls -la "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"
-          for bin in "$app/Contents/MacOS/Open Historia" "$app/Contents/Resources/app/runtime/node" "$app/Contents/Resources/app/runtime/liboh_gdext.dylib" "$app/Contents/Resources/app/native/sidecar/imagecodec/oh-imagecodec"; do lipo -info "$bin"; done
+          for bin in "$app/Contents/MacOS/Open Historia" "$app/Contents/Resources/app/runtime/node" "$app/Contents/Resources/app/runtime/liboh_gdext.dylib" "$app/Contents/Resources/app/native/sidecar/imagecodec/oh-imagecodec" "$app/Contents/Helpers/Open Historia Notifier.app/Contents/MacOS/Open Historia Notifier"; do lipo -info "$bin"; done
+          fmg="$app/Contents/Resources/app/fmg/dist"
+          grep -q "open-historia: prepared copy" "$fmg/index.html"
+          test -f "$fmg/oh-native-bridge.html"
+          echo "map generator: $(find "$fmg" -type f | wc -l | tr -d ' ') files, $(du -sh "$fmg" | cut -f1), $(cat "$app/Contents/Resources/app/fmg/.version")"
           codesign --display --verbose=2 "$app" 2>&1
           codesign --verify --deep --strict --verbose=2 "$app"
           du -sh "$app" "$RUNNER_TEMP/out/chunks" "$RUNNER_TEMP"/out/*.zip "$RUNNER_TEMP"/out/*.dmg
+
+      - name: Post a notification with the bundled notifier
+        run: |
+          app="$RUNNER_TEMP/out/Open Historia Native.app"
+          node native/macos/notifier-smoke.mjs "$app" "$RUNNER_TEMP/out/notifier-smoke.log"
+          codesign --verify --deep --strict --verbose=2 "$app"
 
       - name: Read the AVIF samples with the shipped helper
         run: |
@@ -207,7 +220,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           cp "$RUNNER_TEMP"/out/*.log "$RUNNER_TEMP"/out/sidecar-smoke.json "$RUNNER_TEMP"/out/shell.txt "$RUNNER_TEMP/package.log" "$RUNNER_TEMP/sidecar-tests.log" "$RUNNER_TEMP/logs/" 2>/dev/null || true
-          grep -h "smoke summary\|avif smoke" "$RUNNER_TEMP"/logs/*.log 2>/dev/null | tee "$RUNNER_TEMP/logs/summary.txt" || true
+          grep -h "smoke summary\|avif smoke\|notifier smoke" "$RUNNER_TEMP"/logs/*.log 2>/dev/null | tee "$RUNNER_TEMP/logs/summary.txt" || true
           ls -la "$RUNNER_TEMP"/out || true
 
       - name: Stop here if the sidecar tests failed
