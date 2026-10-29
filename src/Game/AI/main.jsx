@@ -1760,6 +1760,27 @@ async function callOpenAICompatible(systemPrompt, history, opts = {}) {
 const ANTHROPIC_MAX_OUTPUT = 64000;
 const anthropicModelMax = new Map(); // model -> learned output ceiling
 
+// Newer Claude models (Sonnet 5.5, Opus 5.5, Fable 5.1; #901) refuse forced tool
+// use and budget_tokens thinking with a 400. Learned from that 400 and kept per
+// model, like anthropicModelMax: a list of model ids would go stale.
+const anthropicAutoToolModels = new Set();
+const anthropicAdaptiveThinkingModels = new Set();
+const isForcedToolRefusal = (message) => /tool_choice/i.test(message) && /not supported/i.test(message);
+const isBudgetThinkingRefusal = (message) => /budget_tokens|thinking/i.test(message) && /adaptive|not supported/i.test(message);
+const anthropicThinking = (model) => (anthropicAdaptiveThinkingModels.has(model) ? { type: "adaptive" } : { type: "enabled", budget_tokens: 4096 });
+// "any" while lookups are allowed (the model picks a lookup or the answer); the
+// answer alone once the round budget is spent; "auto" where forcing is refused.
+const anthropicToolChoice = (model, toolName, lookupsOpen) => {
+    if (anthropicAutoToolModels.has(model)) return { type: "auto" };
+    return lookupsOpen ? { type: "any" } : { type: "tool", name: toolName };
+};
+// With "auto" nothing forces the call, so the prompt asks for it instead.
+const withToolInstruction = (systemPrompt, model, toolName, lookupsOpen, insist = false) => {
+    if (!anthropicAutoToolModels.has(model)) return systemPrompt;
+    const ask = `Answer by calling the ${toolName} function${lookupsOpen ? " (or a lookup function first)" : ""}. Never answer in plain text.`;
+    return `${systemPrompt}\n\n${insist ? `Your last reply did not call ${toolName}. ` : ""}${ask}`;
+};
+
 // Prompt-cache boundary (promptLayout.js): the system prompt goes out as two
 // content blocks — the game-lifetime prefix pinned with an ephemeral
 // cache_control breakpoint, and the per-turn tail uncached. Within an
@@ -1797,8 +1818,10 @@ async function callAnthropic(systemPrompt, history, {
     requireOutputTool = false,
 } = {}) {
     let retriedAfterOverload = false;
+    let insistedOnToolCall = false;
     // Lookup functions (lookupTools.js) declared beside the output function.
     const lookupDeclarations = tool && Array.isArray(lookupTools) ? lookupTools : [];
+    const lookupsOpen = lookupDeclarations.length > 0 && !requireOutputTool;
     // Anthropic tool calls stream (see the request body below); this flips if the
     // endpoint refuses to, so the call retries buffered instead of failing.
     let streamingDisabled = false;
@@ -1850,9 +1873,9 @@ async function callAnthropic(systemPrompt, history, {
         const streamThisRequest = !streamingDisabled;
         const body = {
             model,
-            system: buildAnthropicSystemContent(systemPrompt, staticPrefixEnd),
+            system: buildAnthropicSystemContent(tool ? withToolInstruction(systemPrompt, model, tool.name, lookupsOpen, insistedOnToolCall) : systemPrompt, staticPrefixEnd),
             max_tokens: requestedMaxTokens,
-            ...(reasoning && !tool ? { thinking: { type: "enabled", budget_tokens: 4096 } } : {}),
+            ...(reasoning && !tool ? { thinking: anthropicThinking(model) } : {}),
             // Streamed for BOTH the advisor (onChunk, tokens to the UI) and tool
             // calls. A tool call must stream because the Messages API refuses a
             // non-streaming request whose max_tokens implies a long generation —
@@ -1867,9 +1890,7 @@ async function callAnthropic(systemPrompt, history, {
                     { name: tool.name, description: tool.description, input_schema: tool.schema },
                     ...lookupDeclarations.map((entry) => ({ name: entry.name, description: entry.description, input_schema: entry.schema })),
                 ],
-                // "any" while lookups are allowed (the model picks a lookup or
-                // the answer); the answer alone once the round budget is spent.
-                tool_choice: lookupDeclarations.length && !requireOutputTool ? { type: "any" } : { type: "tool", name: tool.name },
+                tool_choice: anthropicToolChoice(model, tool.name, lookupsOpen),
             } : {}),
         };
         const response = await fetch(`${ANTHROPIC_API_ENDPOINT}/messages`, {
@@ -1894,6 +1915,18 @@ async function callAnthropic(systemPrompt, history, {
             // arrive as errors none of the concessions below can fix.
             const failure = classifyProviderFailure({ status: response.status, payload });
             if (waitingCannotFix(failure)) throw providerFailureError(message, failure);
+            if (response.status === 400 && attempt < retries) {
+                if (tool && isForcedToolRefusal(message) && !anthropicAutoToolModels.has(model)) {
+                    anthropicAutoToolModels.add(model);
+                    console.warn(`[ai] ${model} refuses forced tool use; asking with tool_choice "auto" from now on.`);
+                    continue;
+                }
+                if (!tool && reasoning && isBudgetThinkingRefusal(message) && !anthropicAdaptiveThinkingModels.has(model)) {
+                    anthropicAdaptiveThinkingModels.add(model);
+                    console.warn(`[ai] ${model} refuses budget_tokens thinking; using adaptive thinking from now on.`);
+                    continue;
+                }
+            }
             // The cap was removed on purpose; honor the MODEL's own ceiling. Anthropic 400s
             // "max_tokens: <sent> > <max>, ..." — learn <max>, cache it, and retry at it.
             const capMatch = /max_tokens:\s*\d+\s*>\s*(\d+)/i.exec(message);
@@ -1979,6 +2012,14 @@ async function callAnthropic(systemPrompt, history, {
             // Still refusing: say so, rather than hand back an empty "answer".
             const anthropicToolText = extractAnthropicText(data);
             if (!anthropicToolText && data?.error) throw toolStreamRefusalError("Anthropic", data.error, retriedAfterOverload);
+            // "auto" lets the model answer in prose; when that prose is nothing a
+            // salvage pass could parse, ask once more, by name.
+            if (anthropicAutoToolModels.has(model) && !insistedOnToolCall
+                && (!anthropicToolText || looksLikeDeliberation(anthropicToolText)) && canRetryBeforeDeadline(deadline, 0)) {
+                insistedOnToolCall = true;
+                console.warn(`[ai] ${model} answered without calling ${tool.name}; asking once more.`);
+                continue;
+            }
             return { rawText: anthropicToolText, toolInput: null };
         }
         const text = extractAnthropicText(data);
@@ -2014,6 +2055,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
     let retriedAfterOverload = false;
     // Lookup functions (lookupTools.js) declared beside the output function.
     const lookupDeclarations = tool && Array.isArray(lookupTools) ? lookupTools : [];
+    const lookupsOpen = lookupDeclarations.length > 0 && !requireOutputTool;
     // Same as the native path: tool calls stream, and this flips if the proxy
     // refuses to so the call retries buffered.
     let streamingDisabled = false;
@@ -2092,9 +2134,9 @@ async function callAnthropicCompatible(systemPrompt, history, {
         const streamThisRequest = !streamingDisabled;
         const body = {
             model,
-            system: buildAnthropicSystemContent(requestSystemPrompt, staticPrefixEnd),
+            system: buildAnthropicSystemContent(useToolChannel ? withToolInstruction(requestSystemPrompt, model, tool.name, lookupsOpen) : requestSystemPrompt, staticPrefixEnd),
             max_tokens: requestedMaxTokens,
-            ...(reasoning && !tool ? { thinking: { type: "enabled", budget_tokens: 4096 } } : {}),
+            ...(reasoning && !tool ? { thinking: anthropicThinking(model) } : {}),
             // Streamed for BOTH the advisor (onChunk, tokens to the UI) and tool
             // calls. A tool call must stream because the Messages API refuses a
             // non-streaming request whose max_tokens implies a long generation —
@@ -2109,7 +2151,7 @@ async function callAnthropicCompatible(systemPrompt, history, {
                     { name: tool.name, description: tool.description, input_schema: tool.schema },
                     ...lookupDeclarations.map((entry) => ({ name: entry.name, description: entry.description, input_schema: entry.schema })),
                 ],
-                tool_choice: lookupDeclarations.length && !requireOutputTool ? { type: "any" } : { type: "tool", name: tool.name },
+                tool_choice: anthropicToolChoice(model, tool.name, lookupsOpen),
             } : {}),
         };
         const response = await providerFetch(`${endpoint}/messages`, { headers, payload: body, signal });
@@ -2127,6 +2169,18 @@ async function callAnthropicCompatible(systemPrompt, history, {
             const message = extractErrorMessage(payload, `Anthropic-compatible request failed (${response.status})`);
             const failure = classifyProviderFailure({ status: response.status, payload });
             if (waitingCannotFix(failure)) throw providerFailureError(message, failure);
+            if (response.status === 400 && attempt < retries) {
+                if (tool && isForcedToolRefusal(message) && !anthropicAutoToolModels.has(model)) {
+                    anthropicAutoToolModels.add(model);
+                    console.warn(`[ai] ${model} refuses forced tool use; asking with tool_choice "auto" from now on.`);
+                    continue;
+                }
+                if (!tool && reasoning && isBudgetThinkingRefusal(message) && !anthropicAdaptiveThinkingModels.has(model)) {
+                    anthropicAdaptiveThinkingModels.add(model);
+                    console.warn(`[ai] ${model} refuses budget_tokens thinking; using adaptive thinking from now on.`);
+                    continue;
+                }
+            }
             // Honor the model's own max_tokens ceiling (the cap was removed on purpose).
             const capMatch = /max_tokens:\s*\d+\s*>\s*(\d+)/i.exec(message);
             if (response.status === 400 && capMatch && Number(capMatch[1]) > 0
@@ -3350,10 +3404,10 @@ export async function submitAIBatch({ customId, systemPrompt, history, taskKey, 
         model,
         max_tokens: Math.max(anthropicModelMax.get(model) || ANTHROPIC_MAX_OUTPUT, 1024),
         messages: toAnthropicMessages(history),
-        system: systemPrompt,
+        system: tool ? withToolInstruction(systemPrompt, model, tool.name, false) : systemPrompt,
         ...(tool ? {
             tools: [{ name: tool.name, description: tool.description, input_schema: tool.schema }],
-            tool_choice: { type: "tool", name: tool.name },
+            tool_choice: anthropicToolChoice(model, tool.name, false),
         } : {}),
     };
 
