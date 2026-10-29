@@ -344,3 +344,19 @@ test("the salvage pass leaves a clean answer exactly as it was", () => {
   assert.deepEqual(salvageDiplomaticLedgerPayload(candidate, { world }), []);
   assert.equal(JSON.stringify(candidate), before, "objects stay objects, untouched");
 });
+
+test("chat deals become agreements, and an agreement's due terms are carried out (#798)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const gameplay = readFileSync(new URL("./gameplay.js", import.meta.url), "utf8");
+  const directive = gameplay.slice(gameplay.indexOf("const buildDiplomaticLedgerDirective"), gameplay.indexOf("const IDLE_RELATION_DECISION_MODEL"));
+  assert.match(directive, /A deal both sides accepted in a chat is an agreement from the moment it is made/);
+  assert.match(directive, /The terms of an active agreement are commitments/);
+  assert.match(directive, /a regionTransfers entry for land/);
+  const { buildBoundedDiplomaticContext } = await import("./nativeDiplomaticDirector.js");
+  const terms = `Timor-Leste joins the Indonesian Federation on 1 March 2027 after a referendum. ${"Detail. ".repeat(100)}`;
+  const text = buildBoundedDiplomaticContext({
+    agreements: [{ id: "idn-tls-federation", title: "Federation Treaty", type: "other", status: "active", parties: ["Indonesia", "Timor-Leste"], terms }],
+  }, { playerPolity: "Indonesia" }).text;
+  assert.match(text, /terms: Timor-Leste joins the Indonesian Federation on 1 March 2027/);
+  assert.ok(text.includes(terms.slice(0, 600).trim()) && !text.includes(terms.slice(0, 640)), "terms are shown up to 600 characters");
+});
