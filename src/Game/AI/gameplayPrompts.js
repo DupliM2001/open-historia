@@ -202,6 +202,19 @@ export const PROMPT_SECTION_DEFINITIONS = [
     type: "task",
   },
   {
+    description: "How far the player's standing goal has come, for the Actions panel.",
+    helpers: [
+      "PLAYER_POLITY",
+      "ORIGIN_ROUND_DATE",
+      "HISTORICAL_PRESET_SIMULATION_RULES",
+      "GRAND_MAP_DESCRIPTION",
+      "PREVIOUS_ROUND_EVENTS",
+    ],
+    key: "goalProgress",
+    label: "Goal Progress",
+    type: "task",
+  },
+  {
     description: "Structured national statistics for the selected polity.",
     key: "countryStatSheet",
     label: "Country Stat Sheet",
