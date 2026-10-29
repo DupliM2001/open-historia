@@ -138,11 +138,13 @@ jobs:
 
       - name: Run the sidecar tests
         run: |
+          mkdir -p "$RUNNER_TEMP/out"
           for test in native/sidecar/test/*.test.mjs; do
             echo "::group::$test"
-            node --test "$test"
+            node --test --test-reporter=spec "$test" 2>&1 | tee -a "$RUNNER_TEMP/sidecar-tests.log"
             echo "::endgroup::"
           done
+          grep -E "^ℹ (tests|pass|fail|skipped)|^✔|^✖|﹣" "$RUNNER_TEMP/sidecar-tests.log" | tail -60 || true
 
       - name: Build, sign and package the app
         env:
@@ -194,7 +196,7 @@ jobs:
         if: always()
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
-          cp "$RUNNER_TEMP"/out/*.log "$RUNNER_TEMP"/out/sidecar-smoke.json "$RUNNER_TEMP/package.log" "$RUNNER_TEMP/logs/" 2>/dev/null || true
+          cp "$RUNNER_TEMP"/out/*.log "$RUNNER_TEMP"/out/sidecar-smoke.json "$RUNNER_TEMP"/out/shell.txt "$RUNNER_TEMP/package.log" "$RUNNER_TEMP/sidecar-tests.log" "$RUNNER_TEMP/logs/" 2>/dev/null || true
           grep -h "smoke summary\|avif smoke" "$RUNNER_TEMP"/logs/*.log 2>/dev/null | tee "$RUNNER_TEMP/logs/summary.txt" || true
           ls -la "$RUNNER_TEMP"/out || true
 
