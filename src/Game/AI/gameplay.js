@@ -88,7 +88,7 @@ import { buildOwnerAliasMap, canonicalOwnerName, toCountryName } from "../../run
 import { editDistance, foldRegionKey, matchRegionName, stripRegionAffixes } from "./regionMatch.js";
 import { findUnitByRef, readNameRef } from "./nameRefs.js";
 import { areaRegionsFor, buildAreaIndex, findArea, readAreaName } from "./namedAreas.js";
-import { CAPTURE_REACH_KM, findNarratedCaptures, mayNarrateCapture } from "./narratedCapture.js";
+import { CAPTURE_REACH_KM, findNarratedCaptures, mayNarrateCapture, statedAnnexations, statesCapture } from "./narratedCapture.js";
 import { EVENT_PLACES_RULE, findEventPlaces } from "./eventPlaces.js";
 import { normalizeEventPlaces } from "../../runtime/eventPlaces.js";
 import { describeTravelPace, seaShareOf } from "../../runtime/unitMotion.js";
@@ -6845,6 +6845,49 @@ const completeNarratedCaptures = async (containers, world, { receipt = null, loo
   return added;
 };
 
+// A whole polity an event says was annexed ("Indonesia formally annexes
+// Timor-Leste"), with no transfer written for it (#798). A time skip is one
+// request and is never sent back, so the transfer the words state is written
+// here, as a wholeCountry transfer the resolver below expands to every region
+// the annexed polity holds. Both must be powers on the map, and the event must
+// carry no transfer of its own from the annexed one. Mutates the events'
+// impacts; returns how many were added.
+const completeNarratedAnnexations = async (containers, { receipt = null, lookupContext } = {}) => {
+  const pending = normalizeArray(containers).filter(({ event, impacts }) => impacts && typeof impacts === "object"
+    && /\b(annex|incorporated|absorbed)/i.test(normalizeString(event?.description)));
+  if (!pending.length) return 0;
+  let context;
+  try {
+    context = await lookupContext();
+  } catch (error) {
+    console.warn("[narrated annexation] the map could not be read; nothing was added.", error);
+    return 0;
+  }
+  const powers = [...context.ownerRows.keys()];
+  let added = 0;
+  for (const { event, impacts, path } of pending) {
+    for (const { annexer, annexed, sentence } of statedAnnexations(normalizeString(event?.description), powers)) {
+      const from = context.resolveOwner(annexed);
+      const to = context.resolveOwner(annexer);
+      if (!from || !to || !context.ownerRows.get(from)?.length) continue;
+      const already = normalizeArray(impacts.regionTransfers).some((transfer) =>
+        [transfer?.fromCode, transfer?.regionId].some((value) => context.resolveOwner(normalizeString(value).replace(/^country:\s*/i, "")) === from));
+      if (already) continue;
+      impacts.regionTransfers = [...normalizeArray(impacts.regionTransfers), {
+        regionId: `country: ${from}`, fromCode: from, toCode: to, wholeCountry: true, basis: "annexation",
+        note: `Annexed, as the event tells: ${from} into ${to}.`,
+      }];
+      added += 1;
+      const title = normalizeString(event?.title);
+      noteReceipt(receipt, "adjusted",
+        `${title ? `Event "${title}": ` : ""}the text says ${to} annexed ${from}, but it carried no transfer, so every region ${from} held was given to ${to}. `
+        + "Write the regionTransfers entry yourself for every annexation an event tells of.");
+      console.info(`[narrated annexation] ${path}: ${from} -> ${to}, from "${sentence}".`);
+    }
+  }
+  return added;
+};
+
 // An event's `places`, as the model wrote them ("city: Kharkiv, country:
 // Ukraine"), become the places the map has (runtime/eventPlaces.js). Each is
 // looked up as the kind it was given and nothing else; one with no kind, or
@@ -6970,6 +7013,14 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
     if (normalizeString(project?.id)) knownProjects.set(normalizeString(project.id), name);
   }
 
+  // The map's names, read at most once for everything below that asks.
+  const lookupContext = lazyLookupContext({ world });
+  // An annexation the text states and no transfer carries is written before the
+  // transfers are resolved, so it is expanded like any other. Only on the answer
+  // that is kept: an attempt that can still be sent back is told instead.
+  if (!strict && captureGuard && !resolvedRegionIdsOnly && Array.isArray(candidate?.events)) {
+    await completeNarratedAnnexations(containers, { receipt, lookupContext });
+  }
   const unresolvedTransfers = await resolveRegionTransfers(containers, world, {
     ownershipMode: "sovereignty",
     exactRegionIdsOnly: resolvedRegionIdsOnly,
@@ -7000,8 +7051,6 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
   // that cannot be found is said in the receipt, and the operation keeps any
   // coordinates it came with. Not on the Game Master's apply-time pass, which
   // may not reopen the map's geometry: its preview already placed everything.
-  // The map's names, read at most once for everything below that asks.
-  const lookupContext = lazyLookupContext({ world });
   if (!resolvedRegionIdsOnly) await resolvePlacements(containers, world, { receipt, lookupContext });
   // A capture the text states and the event's own formation shows, with no
   // control operation written for it, is finished here. Only on the answer
@@ -7050,6 +7099,31 @@ export const validateGeneratedWorldChanges = async (candidate, world, {
       const legalEvent = candidate.events.find((event) => LEGAL_TRANSFER_LANGUAGE.test(text(event)));
       if (legalEvent) {
         return `Your events describe a legal territorial settlement (e.g. "${normalizeString(legalEvent.title) || "an event"}") but the payload contains ZERO impacts.regionTransfers. Either add the matching legal transfers (one per region as "region: <name>", or regionId "country: <name>" for a total annexation/unification) or rewrite the event so that no sovereignty changed.`;
+      }
+    }
+    // The same, event by event: one event's operations do not cover another
+    // event that states a capture or an annexation and carries none (#893,
+    // #798). Read on the description only, which states it as a fact.
+    for (const { event, impacts } of containers) {
+      const title = normalizeString(event?.title) || "an event";
+      const description = normalizeString(event?.description);
+      const ownTerritory = normalizeArray(impacts?.regionControlOps).length + normalizeArray(impacts?.regionTransfers).length
+        + normalizeArray(impacts?.groupOps).filter((op) => normalizeArray(op?.regionIds).length).length;
+      const captured = ownTerritory === 0 ? statesCapture(description) : null;
+      if (captured) {
+        return `The event "${title}" states a capture ("${captured}") but carries no territory operation of its own. Either add the regionControlOps control entry to THAT event (regionId "region: <name>" as the map spells it, fromCode = the current controller) or rewrite the sentence so that no place changed hands.`;
+      }
+      if (normalizeArray(impacts?.regionTransfers).length === 0 && /\b(annex|incorporated|absorbed)/i.test(description)) {
+        let powers = [];
+        try {
+          powers = [...(await lookupContext()).ownerRows.keys()];
+        } catch {
+          powers = [];
+        }
+        const annexation = statedAnnexations(description, powers)[0];
+        if (annexation) {
+          return `The event "${title}" states that ${annexation.annexer} annexed ${annexation.annexed} but carries no regionTransfers. Either add the transfer to THAT event (regionId "country: ${annexation.annexed}", fromCode "${annexation.annexed}", toCode "${annexation.annexer}", wholeCountry true, basis "annexation") or rewrite it so that no sovereignty changed.`;
+        }
       }
     }
   }
