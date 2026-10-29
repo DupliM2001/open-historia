@@ -53,6 +53,21 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-native-retina",
+    kind: "minor",
+    date: "2026-10-29",
+    banners: [
+      {
+        title: "Sharp on Retina screens",
+        items: [
+          "On a Mac with a Retina screen the game opens at full size, and its text and panels follow the screen's scale.",
+          "The vault door's wheel no longer turns into a white square after the window changes size.",
+          "On Linux the game's window groups with its applications menu entry, and its notifications carry the game's name.",
+        ],
+      },
+    ],
+  },
+  {
     id: "2026-10-native-faster-and-mac",
     kind: "minor",
     date: "2026-10-29",
