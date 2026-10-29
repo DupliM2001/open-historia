@@ -49,7 +49,7 @@ test("the Android build opens archives through it, and only the Android build", 
   const body = assets.slice(assets.indexOf("const createPmtilesArchive"), assets.indexOf("export const registerPmtilesArchive"));
   // The Android app and, since 2026-10-28, the website (wholeArchivesOnWeb.test.js).
   assert.match(body, /READ_ARCHIVES_WHOLE\s*\?\s*new WholeFileSource\(url, loadWholeArchive\)\s*:\s*url/);
-  assert.match(assets, /const READ_ARCHIVES_WHOLE = Boolean\(import\.meta\.env\.VITE_OH_NATIVE \|\| import\.meta\.env\.VITE_OH_WEB\);/);
+  assert.match(assets, /const READ_ARCHIVES_WHOLE = Boolean\(BUILD_ENV\.VITE_OH_NATIVE \|\| BUILD_ENV\.VITE_OH_WEB\);/);
   assert.match(assets, /const loadWholeArchive = async \(url\) => \{\s*await warmPmtilesArchive\(url\);\s*const buffer = binaryValueCache\.get\(url\);/);
   assert.match(assets, /if \(!buffer\) throw new Error\(`\$\{url\} was released while it was being read\.`\);\s*return buffer;/);
 });

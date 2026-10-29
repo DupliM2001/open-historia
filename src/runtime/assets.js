@@ -243,7 +243,9 @@ export const pmtilesProtocol = new Protocol();
 // regions archive came back as a 200 of 21,106,005 bytes, and pmtiles refused
 // it: "Server returned no content-length header or content-length exceeding
 // request"). The desktop's own server serves ranges and keeps reading them.
-const READ_ARCHIVES_WHOLE = Boolean(import.meta.env.VITE_OH_NATIVE || import.meta.env.VITE_OH_WEB);
+// (Read where import.meta.env may be missing: plain Node, under the tests.)
+const BUILD_ENV = import.meta.env ?? {};
+const READ_ARCHIVES_WHOLE = Boolean(BUILD_ENV.VITE_OH_NATIVE || BUILD_ENV.VITE_OH_WEB);
 // MapLibre asks this protocol for archives by URL, and one it has not been
 // handed yet it opens itself — as a FetchSource, over Range. Where archives are
 // read whole, every archive MapLibre asks for is opened through

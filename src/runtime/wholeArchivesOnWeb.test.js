@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 const assets = readFileSync(new URL("./assets.js", import.meta.url), "utf8");
 
 test("the website and the Android app read map archives whole; the desktop keeps Range", () => {
-  assert.match(assets, /const READ_ARCHIVES_WHOLE = Boolean\(import\.meta\.env\.VITE_OH_NATIVE \|\| import\.meta\.env\.VITE_OH_WEB\);/);
+  assert.match(assets, /const BUILD_ENV = import\.meta\.env \?\? \{\};\r?\nconst READ_ARCHIVES_WHOLE = Boolean\(BUILD_ENV\.VITE_OH_NATIVE \|\| BUILD_ENV\.VITE_OH_WEB\);/);
   assert.match(assets, /if \(\(isNativeBuild\(\) \|\| READ_ARCHIVES_WHOLE\) && pmtilesProtocol\.tiles instanceof Map\) \{/);
   assert.match(assets, /: READ_ARCHIVES_WHOLE\s+\? new WholeFileSource\(url, loadWholeArchive\)/);
 });
