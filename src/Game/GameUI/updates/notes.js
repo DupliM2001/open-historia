@@ -53,6 +53,23 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    id: "2026-10-native-faster-and-mac",
+    kind: "minor",
+    date: "2026-10-29",
+    banners: [
+      {
+        title: "Faster, and on the Mac",
+        items: [
+          "Open Historia Native now runs on the Mac, as one app for Apple Silicon and Intel.",
+          "Updates download only the parts that changed and install themselves when you close the game.",
+          "The game opens faster, starts a campaign in about three seconds, and uses far less power while nothing on the map moves.",
+          "A two-finger scroll zooms the map; hold Shift and scroll with two fingers to tilt and turn it.",
+          "Discord shows what you are playing.",
+        ],
+      },
+    ],
+  },
+  {
     // What a real-key test of the game found (2026-10-28).
     id: "2026-10-ai-mended",
     kind: "minor",
