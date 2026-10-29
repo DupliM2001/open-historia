@@ -97,6 +97,7 @@ import { loadWorldCities } from "./worldCities.js";
 import { countryGidFromIdentity } from "../../runtime/countryFlags.js";
 import { FOOTPRINT_KM, obstaclesOf, spaceOut } from "../../runtime/featureSpacing.js";
 import { LOOKUP_DIRECTIVE, LOOKUP_TOOLS, buildLookupContext, executeLookup, placesNamedIn } from "./lookupTools.js";
+import { WIKIPEDIA_DIRECTIVE, WIKIPEDIA_TOOLS, executeWikipediaLookup } from "./wikipediaLookup.js";
 import {
   BACKGROUND_REQUEST,
   SKIP_SPENDERS,
@@ -3258,7 +3259,7 @@ This live instruction supersedes older frozen country-stat prompts and all earli
   // Lookup functions: tell the model they exist and what they are for. Last,
   // so it stands next to the output contract rather than under the campaign.
   if (!jumpTask && Array.isArray(lookups?.tools) && lookups.tools.length) {
-    systemPrompt = `${systemPrompt}\n\n${LOOKUP_DIRECTIVE}`;
+    systemPrompt = `${systemPrompt}\n\n${lookups.directive ?? LOOKUP_DIRECTIVE}`;
   }
 
   // The scenario author's direction (worldDirection.js), and LAST of all: the end
@@ -11657,6 +11658,16 @@ export const assessPoliticalLandscape = async (target, { signal } = {}) => {
       `IDEOLOGIES AND THEIR SUBIDEOLOGIES:\n${ideologyListText()}`,
     ].filter(Boolean).join("\n\n"),
     variables,
+    lookups: {
+      tools: WIKIPEDIA_TOOLS,
+      directive: WIKIPEDIA_DIRECTIVE,
+      maxRounds: 4,
+      execute: async (tool, args) => {
+        const answer = await executeWikipediaLookup(tool, args, { signal });
+        logDebugEvent("politics", `${name}: ${tool} ${JSON.stringify(args)}${answer.error ? ` failed: ${answer.error}` : ""}`);
+        return answer;
+      },
+    },
   });
   const entry = normalizePoliticalLandscape({ ...payload, asOf: variables.date || "" });
   if (!entry) throw new Error("The answer named no government and no parties.");
