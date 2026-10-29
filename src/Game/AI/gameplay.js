@@ -128,6 +128,7 @@ import {
   unassessedHighPriorityEntries,
 } from "../../runtime/projects.js";
 import { activeSpies, applySpyOps, espionageBrief, intelligenceOf, isIntelligenceRated, normalizeIntelligenceRating, normalizeIntercepts, normalizeSpies, resolveEspionage } from "../../runtime/spycraft.js";
+import { applyPartyOps, describePoliticsForPrompt, ideologyListText, leadersAfterGovernmentChange, normalizePoliticalLandscape } from "../../runtime/politics.js";
 import { buildSpyOrdersDirective } from "./spyOrdersDirective.js";
 import { AGENT_REPORT_EVERY_ROUNDS, agentsDueToReport, agentsReportingWithSkip } from "./agentReports.js";
 import { assignAgentReports, boardOpsOf, liftBoardOps, providerRefusedContract, withoutBoardOps } from "./foldedSkip.js";
@@ -2773,6 +2774,9 @@ ${brief}`);
     }
   }
 
+  const parties = describePoliticsForPrompt(world.politics, { date: normalizeString(game?.gameDate) });
+  if (parties) blocks.push(parties);
+
   try {
     const reportsOnFile = describeReportsForPrompt(world.reports);
     if (reportsOnFile) blocks.push(reportsOnFile);
@@ -4263,7 +4267,7 @@ const withLatestTurnEventIds = (world, rewrite) => {
 // did applied with nothing on the timeline to say so.
 const OWN_CONSEQUENCE_IMPACTS = [
   "regionTransfers", "regionClaims", "regionControlOps", "polityChanges",
-  "createdChats", "unitOps", "markerOps", "spyOps", "groupOps", "actionIds",
+  "createdChats", "unitOps", "markerOps", "spyOps", "partyOps", "groupOps", "actionIds",
 ];
 const eventCarriesOwnConsequence = (event) =>
   OWN_CONSEQUENCE_IMPACTS.some((key) => normalizeArray(event?.impacts?.[key]).length > 0)
@@ -8140,6 +8144,22 @@ const applySimulationResult = async ({
       if (entry.op === "deploy") void ensureCountryAssessed(entry.target, { reason: "agent deployed by order" });
     }
   }
+  // The parties' changes, carried by the events that made them
+  // (impacts.partyOps, runtime/politics.js). Only compiled lists move.
+  const partyOps = normalizeArray(freshEvents).flatMap((event) => normalizeArray(event?.impacts?.partyOps));
+  if (partyOps.length) {
+    const outcome = applyPartyOps(worldWithImpacts.politics, partyOps, { date: nextGame.gameDate });
+    const leaders = leadersAfterGovernmentChange(worldWithImpacts.politics, outcome.politics, worldWithImpacts.countryStats);
+    worldWithImpacts.politics = outcome.politics;
+    if (leaders.changed.length) {
+      worldWithImpacts.countryStats = leaders.countryStats;
+      logDebugEvent("politics", `Stat sheet leader updated: ${leaders.changed.map((entry) => `${entry.polity} ${entry.from} -> ${entry.to}`).join(", ")}`);
+    }
+    if (outcome.applied.length) {
+      logDebugEvent("politics", `Party changes applied: ${outcome.applied.map((entry) => `${entry.op} ${entry.party || entry.changes?.nameEn || ""} (${entry.polity})`).join(", ")}`);
+    }
+    for (const skipped of outcome.rejected) logDebugEvent("politics", `Party change skipped: ${skipped.reason}`, { op: skipped.op });
+  }
   const spySync = [
     // Order matters: provenance first, so an entry stamped this turn can be
     // doubted in the same pass rather than a turn later.
@@ -11607,6 +11627,48 @@ export const ensureCountryStatSheet = (target, { reason = "" } = {}) =>
 // so the service reading can see the numbers it rests on.
 export const ensureCountryAssessed = (target, options = {}) =>
   ensureCountryStatSheet(target, options).then(() => ensureIntelligenceRated(target, options));
+
+// The Politics tab's government and parties for one polity, asked for by the
+// player (runtime/politics.js). It replaces whatever entry the polity had: a
+// refresh is a fresh reading; between readings turns move it (impacts.partyOps).
+export const assessPoliticalLandscape = async (target, { signal } = {}) => {
+  const name = normalizeString(target);
+  if (!name) return null;
+  const campaign = activeCampaignId();
+  await waitForSimulationIdle({ signal });
+  const bundle = await readGameStateBundle({ force: true });
+  const world = normalizeWorldState(bundle.world);
+  const variables = {
+    ...(await buildTemplateVariables(bundle, { taskKey: "politicalLandscape" })),
+    targetPolity: name,
+  };
+  const dossier = await buildTargetDossier(bundle, name, world);
+  const era = normalizeString(world.simulationRules).slice(0, 700);
+  const sheet = world.countryStats?.[name];
+  const previous = world.politics?.[name];
+  const { payload } = await runJsonTask("politicalLandscape", {
+    signal,
+    userMessage: [
+      `Describe the government and the main parties of ${name} as they stand on ${variables.date || "the current date"}.`,
+      era ? `ERA & WORLD RULES:\n${era}` : "",
+      `TARGET DOSSIER:\n${dossier || "(nothing recorded)"}`,
+      sheet ? `STAT SHEET: government ${normalizeString(sheet.government) || "unknown"}; leader ${normalizeString(sheet.leader) || "unknown"}; stability ${sheet.stability ?? "unknown"}/100.` : "",
+      previous ? `PREVIOUS READING (${previous.asOf || "undated"}; keep what the events since have not changed):\n${JSON.stringify(previous.parties.map(({ nameEn, ideology, subideology, leader, role, seats, support }) => ({ nameEn, ideology, subideology, leader, role, seats, support })))}` : "",
+      `IDEOLOGIES AND THEIR SUBIDEOLOGIES:\n${ideologyListText()}`,
+    ].filter(Boolean).join("\n\n"),
+    variables,
+  });
+  const entry = normalizePoliticalLandscape({ ...payload, asOf: variables.date || "" });
+  if (!entry) throw new Error("The answer named no government and no parties.");
+  // Re-read at write time, as assessIntelligenceService does: a turn may have
+  // run, and the campaign in front of the player may have changed.
+  await waitForSimulationIdle({ signal });
+  throwIfAborted(signal);
+  if (activeCampaignId() !== campaign) throw new Error("The campaign changed while the parties were being compiled.");
+  const fresh = normalizeWorldState(await readWorldState({ force: true }));
+  await writeWorldState({ ...fresh, politics: { ...(fresh.politics ?? {}), [name]: entry } });
+  return entry;
+};
 
 const generateScenarioCustomStatSheet = async ({
   bundle,
