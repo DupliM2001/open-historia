@@ -4621,7 +4621,7 @@ const LibraryTopBar = ({ onOpenSettings }) => {
             display: "flex",
             fontFamily: "sans-serif",
             gap: "0.45rem",
-            left: `calc(5rem + ${SAFE_LEFT})`,
+            left: `calc(3.8rem + ${SAFE_LEFT})`,
             position: "fixed",
             top: TOP_BAR_OFFSET,
             zIndex: 9996,
@@ -4631,28 +4631,39 @@ const LibraryTopBar = ({ onOpenSettings }) => {
             style={{
               ...surfaceStyle,
               alignItems: "center",
-              borderRadius: "13px",
+              borderRadius: "12px",
+              boxSizing: "border-box",
               color: "rgba(255,255,255,0.72)",
               display: "flex",
               gap: "0.55rem",
+              height: "2.85rem",
               // Shrinks to nothing before it can reach under the date widget
               // on narrow desktop windows (the widget owns the top right).
               maxWidth: "min(34rem, max(0rem, calc(100vw - 44rem)))",
               overflow: "hidden",
-              padding: "0.42rem 0.7rem",
+              padding: "0 0.75rem",
             }}
           >
-            <img alt="Open Historia" src="/logo.png" style={{ borderRadius: "8px", flexShrink: 0, height: "1.9rem", width: "1.9rem" }} />
-            <div style={{ minWidth: 0, lineHeight: 1.08 }}>
+            <img alt="Open Historia" src="/logo.png" style={{ borderRadius: "7px", flexShrink: 0, height: "1.85rem", width: "1.85rem" }} />
+            <div style={{ minWidth: 0, lineHeight: 1.15 }}>
               <div style={{ color: "rgba(255,255,255,0.94)", fontSize: "0.72rem", fontWeight: 850 }}>Open Historia</div>
-              <div style={{ color: "rgba(226,226,229,0.42)", fontSize: "0.6rem", marginTop: "0.18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summaryText}</div>
+              <div style={{ color: "rgba(226,226,229,0.42)", fontSize: "0.6rem", marginTop: "0.12rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summaryText}</div>
             </div>
           </div>
           <button
             onClick={exitToMenu}
             title="Leave this game and return to the main menu"
             type="button"
-            style={{ ...actionButtonStyle, ...surfaceStyle, borderRadius: "11px", fontSize: "0.68rem", minHeight: "2.85rem", padding: "0 0.85rem" }}
+            style={{
+              ...actionButtonStyle,
+              ...surfaceStyle,
+              borderRadius: "12px",
+              boxSizing: "border-box",
+              fontSize: "0.68rem",
+              height: "2.85rem",
+              minHeight: "2.85rem",
+              padding: "0 0.85rem",
+            }}
           >
             ⌂ Exit Game
           </button>

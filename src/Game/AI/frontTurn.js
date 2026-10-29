@@ -175,7 +175,9 @@ export const planFrontMoments = ({ events = [], frontOrders = [], warsBefore = [
       if (op?.by === FRONT_MARK || fold(op?.op) !== "control" || op?.wholeCountry === true) continue;
       const regionId = clean(op?.regionId);
       const to = clean(op?.toCode);
-      if (regionId && to) moments.push({ day, type: "control", regionId, to, ref: clean(event?.id) });
+      // (A control operation is the story's capture: the engine hands it over only where enough of the taker's troops
+      // stand near, engine.js captureRefused. A transfer is a treaty's, and needs nobody there.)
+      if (regionId && to) moments.push({ day, type: "control", regionId, to, ref: clean(event?.id), capture: true });
     }
     for (const transfer of asArray(impacts.regionTransfers)) {
       if (transfer?.wholeCountry === true) continue;
@@ -801,6 +803,8 @@ const NOTE_TEXT = {
   "too-many-battlefields": () => "No more battlefields can be open at once, so a front that should have opened did not. It opens when another closes.",
   tempo: () => "The fronts stopped moving for the rest of the period: this scenario's ceiling on how fast the map may change was reached.",
   "transport-refused": (notes) => `${one(notes, "detail") ? "A transporter was" : "Transporters were"} not sent (${quoted(notes, "detail")}). One is sent to a place on the map that its kind can reach (a ship to a coast, rail through land its side holds): by a side at war, or in peace to another country's land, which is an attack on it.`,
+  "capture-failed": (notes) => notes.slice(0, 4).map((note) => `${clean(note?.taker)} could not take ${clean(note?.region) || "a region"}: too few of its troops near`).join("; ")
+    + ". A region is taken only where enough of the taker's troops stand near it, more for a larger region: move them up first, in an earlier event.",
   closed: (notes) => `${one(notes, "battlefield") ? "A battlefield" : "Battlefields"} closed (${quoted(notes, "battlefield")}): the fighting there is over. Land a side still holds there that is not its own stays occupied until an event settles it.`,
 };
 
@@ -1361,12 +1365,23 @@ export const runTurnFronts = async ({
   }
   notes.push(...describeFrontNotes(refused));
 
+  // A capture the engine refused (too few of the taker's troops near, engine.js captureRefused) is not made in the
+  // world either: its control operation comes off its event, and the event stays.
+  const failedCaptures = asArray(result.notes).filter((note) => note?.kind === "capture-failed" && clean(note?.ref));
+  const kept = failedCaptures.length === 0 ? list : list.map((event) => {
+    const failed = failedCaptures.filter((note) => clean(note.ref) === clean(event?.id));
+    if (failed.length === 0 || !isRecord(event?.impacts)) return event;
+    const ops = asArray(event.impacts.regionControlOps).filter((op) => !failed.some((note) => clean(op?.regionId) === clean(note.regionId)
+      && fold(nameOf(op?.toCode)) === fold(note.taker)));
+    return { ...event, impacts: { ...event.impacts, regionControlOps: ops } };
+  });
+
   return {
     strikes: strikes.map((strike) => ({ ...strike, owner: nameOf(strike.owner) })),
     transports,
     voyages: asArray(result.voyages),
     underWay: transports.filter(isUnderWay).length,
-    events: attachFrontFlips(list, result.flips, { dayOf, aboutOf }).events,
+    events: attachFrontFlips(kept, result.flips, { dayOf, aboutOf }).events,
     // A battlefield whose period the story was told before it was written says
     // so (brief.told): the next turn has nothing of this one left to tell. One
     // that does not (it opened in this answer, or the turn was asked for the

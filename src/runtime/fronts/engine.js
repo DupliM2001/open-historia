@@ -53,6 +53,7 @@ import {
   REINFORCED_SIZE_MOST,
   REINFORCE_MOST,
   REINFORCE_ORDER,
+  STORY_TAKER_REACH_KM,
   REINFORCE_USUAL_SHARE,
   SCENARIO_MARK,
   WAR_EFFORTS,
@@ -71,6 +72,7 @@ import {
   TROOP_KINDS,
   WITHDRAW_DAYS_MOST,
   WITHDRAW_KM,
+  takersFor,
 } from "./constants.js";
 import { contactAt, findContacts, frameForContact, middleOf } from "./contact.js";
 import { REGIONS_NEEDED, growToHold, prepare, recordDay, settleRegions, simulateDay, startRecorder } from "./day.js";
@@ -79,7 +81,7 @@ import { downhill } from "./ground.js";
 import { pointInFrame, projectorOf } from "./frame.js";
 import { landWithin, othersOnWay } from "./invade.js";
 import { draw, formationsLeft, manpowerReport, menOf, menPerFormation, partLeft, sendHome } from "./manpower.js";
-import { applyOrder, assignOrder, landCarried, putAshore, readSieges, setStandingOrder, standingOf } from "./orders.js";
+import { applyOrder, assignOrder, giveWay, landCarried, putAshore, readSieges, setStandingOrder, standingOf } from "./orders.js";
 import { foldBattlefieldName, isWarIdName, normalizeBattlefields } from "./record.js";
 import { authoredName } from "./scenarioFronts.js";
 import { breakthroughAnswer, sideIsPlayed, staffDecision, staffMayOrder, staffStanding } from "./staff.js";
@@ -1270,6 +1272,12 @@ const orderOnBorder = (run, battle, moment, day) => {
 };
 
 const applyOrderMoment = (run, moment, day) => {
+  // A capture the story stated, as the order the turn drew from it (its ref ends "<event>:<region>",
+  // AI/frontTurn.js statedCaptures), is not made where the same capture was refused (captureRefused).
+  if (moment.result === "captured" && run.capturesRefused?.size > 0) {
+    const ref = clean(moment.ref);
+    for (const key of run.capturesRefused) if (ref.endsWith(key)) return;
+  }
   const border = BORDER.exec(String(moment.battlefield ?? ""));
   if (border) {
     applyBorderMoment(run, moment, day, clean(border[1]), clean(border[2]));
@@ -1384,6 +1392,104 @@ const applyReinforce = (run, moment) => {
   }
 };
 
+// A region on a battlefield, for a story capture: its cells, its area, and the
+// live troops of a side standing in it or within STORY_TAKER_REACH_KM of it
+// (constants.js takersFor).
+const regionTakers = (battle, side, region) => {
+  const { field, arena } = battle;
+  const { cols } = field;
+  const cells = [];
+  for (let index = 0; index < field.size; index += 1) if (field.play[index] && arena.region[index] === region) cells.push(index);
+  const km = battle.frame.km;
+  const reach = STORY_TAKER_REACH_KM / km;
+  const reachSquared = reach * reach;
+  const inside = [];
+  const near = [];
+  for (const troop of side >= 0 ? battle.troops[side] : []) {
+    if (!isLive(troop)) continue;
+    const at = Math.floor(troop.y) * cols + Math.floor(troop.x);
+    if (at >= 0 && at < field.size && arena.region[at] === region) {
+      inside.push(troop);
+      continue;
+    }
+    let closest = Infinity;
+    for (const cell of cells) {
+      const dx = (cell % cols) + 0.5 - troop.x;
+      const dy = Math.floor(cell / cols) + 0.5 - troop.y;
+      const far = dx * dx + dy * dy;
+      if (far < closest) closest = far;
+    }
+    if (closest <= reachSquared) near.push({ troop, far: closest });
+  }
+  near.sort((a, b) => a.far - b.far);
+  return { cells, areaKm2: cells.length * km * km, inside, near };
+};
+
+// Whether a capture the story told cannot be made on any battlefield it falls
+// on: the taker fights there, the other side holds some of the region, and
+// fewer of the taker's troops stand in or near it than the region's size asks
+// (constants.js takersFor). Returns that battlefield and the region's name, or null.
+const captureRefused = (battles, regionId, taker) => {
+  for (const battle of battles) {
+    if (battle.status !== "active" || !battle.arena.indexOf.has(regionId)) continue;
+    const side = sideOfName(battle, taker);
+    if (side < 0) continue;
+    const region = battle.arena.indexOf.get(regionId);
+    const { cells, areaKm2, inside, near } = regionTakers(battle, side, region);
+    if (!cells.some((cell) => battle.field.holders[cell] === 1 - side)) continue;
+    if (inside.length + near.length < takersFor(areaKm2).least) {
+      return { battlefield: battle.name, region: battle.arena.names[region] || regionId };
+    }
+  }
+  return null;
+};
+
+// A REGION THE STORY SAYS WAS TAKEN. "make sure the simulation ai is able to
+// say that a region is taken by an army which causes the nearest troops to move
+// accordingly so when that event happens, the region has been taken" (the
+// owner, 2026-10-28). Once a control moment has given a region to a member of a
+// side (reconcile has painted it theirs), as many of that side's troops as the
+// region's size asks (constants.js takersFor) stand in it, the nearest within
+// STORY_TAKER_REACH_KM first, counting those already there; and the
+// other side's troops left on what is now the taker's ground fall back to their
+// own side's nearest (orders.js giveWay), as after a breakthrough, without loss.
+const marchInto = (run, battle, region, taker, day) => {
+  const side = sideOfName(battle, taker);
+  if (side < 0 || !(region > 0)) return;
+  const { field, arena } = battle;
+  const { cols } = field;
+  const cells = [];
+  for (let index = 0; index < field.size; index += 1) {
+    if (field.play[index] && arena.region[index] === region && field.holders[index] === side) cells.push(index);
+  }
+  if (cells.length > 0) {
+    const takers = regionTakers(battle, side, region);
+    const nearest = takers.near.slice(0, Math.max(0, takersFor(takers.areaKm2).most - takers.inside.length));
+    const used = new Set();
+    for (const { troop } of nearest) {
+      let best = -1;
+      let bestFar = Infinity;
+      for (const cell of cells) {
+        if (used.has(cell)) continue;
+        const dx = (cell % cols) + 0.5 - troop.x;
+        const dy = Math.floor(cell / cols) + 0.5 - troop.y;
+        const far = dx * dx + dy * dy;
+        if (far < bestFar) {
+          bestFar = far;
+          best = cell;
+        }
+      }
+      if (best < 0) break;
+      used.add(best);
+      troop.x = (best % cols) + 0.5;
+      troop.y = Math.floor(best / cols) + 0.5;
+      troop.dig = 0;
+    }
+    if (nearest.length > 0) battle.log.push({ d: run.dateOf(day), k: "whole", s: side, at: `region: ${arena.names[region] || arena.ids[region]}` });
+  }
+  giveWay(battle, 1 - side, 0, run.dateOf(day), field.cols + field.rows);
+};
+
 // Applies every moment dated up to a day, in the order they were given.
 const applyMoments = (run, day) => {
   while (run.cursor < run.moments.length && run.moments[run.cursor].day <= day) {
@@ -1395,10 +1501,19 @@ const applyMoments = (run, day) => {
     else if (moment.type === "control") {
       // Someone other than the engine changed who controls a region: the world wins.
       const id = clean(moment.regionId);
+      // Unless the story said an army took it and too few of its troops stand near to (captureRefused).
+      const refused = moment.capture === true ? captureRefused(run.battles, id, moment.to) : null;
+      if (refused) {
+        run.notes.push({ kind: "capture-failed", regionId: id, region: refused.region, taker: clean(moment.to), battlefield: refused.battlefield, ...(moment.ref !== undefined ? { ref: moment.ref } : {}) });
+        if (clean(moment.ref)) (run.capturesRefused ??= new Set()).add(`${clean(moment.ref)}:${id}`);
+        continue;
+      }
       run.setController(id, moment.to);
       for (const battle of run.battles) {
         if (battle.status === "closed" || !battle.arena.indexOf.has(id)) continue;
         reconcile(battle, run);
+        // And the troops follow: the taker's nearest stand in it, the other side's fall back out of it.
+        if (battle.status === "active") marchInto(run, battle, battle.arena.indexOf.get(id), moment.to, day);
         battle.planKey = "";
         battle.touched = true;
       }

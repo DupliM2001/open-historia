@@ -442,7 +442,7 @@ export const servingOf = (battle, troop) => {
 
 // Troops left standing on ground that is no longer their side's fall back onto
 // their own, at a cost; one with none of its own within `reach` cells is lost.
-const giveWay = (battle, side, lossShare, date, reach = OVERRUN_CELLS) => {
+export const giveWay = (battle, side, lossShare, date, reach = OVERRUN_CELLS) => {
   const { field, arena } = battle;
   for (const troop of battle.troops[side]) {
     if (!isLive(troop) || stands(field, side, troop.x, troop.y)) continue;

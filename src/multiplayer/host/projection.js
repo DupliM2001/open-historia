@@ -58,7 +58,7 @@ export const PUBLIC_WORLD_KEYS = Object.freeze([
   "groupAreas", "groups", "internationalReputation", "labelFont", "labelHaloColor",
   "labelTextColor", "language", "lastJumpMode", "lastJumpTargetDate", "mapCredit", "markers",
   "ownBasemaps", "ownerCodes", "ownerSchema", "polityOverrides", "powerStatus", "regionClaimants",
-  "regionOwnershipOverrides", "regionSovereigntyOverrides", "settledRegionClaims",
+  "regionOwnershipOverrides", "regionRenames", "regionSovereigntyOverrides", "settledRegionClaims",
   "simulationRules", "startingTimelineText", "unitSystem", "wars", "agreements",
   // Transporters are seen as fleets are: what crosses the sea is not hidden.
   "transports",

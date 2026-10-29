@@ -85,6 +85,40 @@ const NEW_UPDATES = [
     ],
   },
   {
+    id: "2026-10-renamed-regions",
+    kind: "minor",
+    date: "2026-10-28",
+    channel: "beta",
+    banners: [
+      {
+        title: "Renamed regions and a tidier top bar",
+        items: [
+          "A region renamed by an event shows its new name on its place card and in each country's list of territory, for every player in a shared game.",
+          "On a computer, the menu button at the top left is now the same height as the game's name and the Exit Game button beside it.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "2026-10-fixes-from-reports",
+    kind: "minor",
+    date: "2026-10-28",
+    banners: [
+      {
+        title: "Fixes from your reports",
+        items: [
+          "When an event says an army took a region, the region changes hands on that date if enough of that army's troops are nearby (more for a larger region): its nearest troops move in, and the other side's troops there fall back.",
+          "Countries no longer run out of men after a front or two: drafts, reinforcements and the troops a deployment calls up come in again.",
+          "When an event or your action makes a country another's puppet, vassal or protectorate, it now becomes one, and freeing, annexing or a revolt is recorded too.",
+          "A time skip no longer makes a second copy of a unit already on the map; copies already in a save are removed, and deleting one removes only that one.",
+          "On a map you drew yourself, real-world countries no longer creep into the country list. On phones, the Diplomacy panel's institutions fit the screen and the War Room button no longer covers the Actions panel.",
+          "Scripted events are written in your language, and Antarctica's snow is no longer cut into by triangles when zoomed out.",
+          "A time skip on a map with many countries finishes sooner: working out each country's statistics no longer rereads the whole map for every name.",
+        ],
+      },
+    ],
+  },
+  {
     // What a real-key test of the game found (2026-10-28).
     id: "2026-10-ai-mended",
     kind: "minor",

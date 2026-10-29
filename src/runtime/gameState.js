@@ -144,6 +144,9 @@ export const WORLD_DEFAULTS = {
   // lowercased original city name -> new display name. world.markers cities are
   // renamed in place by applyMarkerOps; this is the override layer for the rest.
   cityRenames: {},
+  // AI renames of map regions/provinces (stock regions live in PMTiles level 1):
+  // lowercased original region name or GADM id -> new display name.
+  regionRenames: {},
   // AI changes to a city's POPULATION, same override shape as cityRenames and for
   // the same reason: stock cities live in PMTiles and cannot be edited in place.
   // Lowercased original city name -> number. Applies to authored cities too, so a
@@ -2985,6 +2988,30 @@ export const resumeStandingOrders = (world, { round = 0, previousSystem = "" } =
 // How many rounds a story ship stays on the map when no arrival removes it.
 export const STORY_VESSEL_ROUNDS = 10;
 
+// The unit on the map a spawned one already is: the same name and the same
+// owner, folded. A unit with no name of its own ("Unit") is never matched.
+const unitNameKey = (value) => normalizeOptionalString(value).toLowerCase().replace(/\s+/g, " ");
+const sameFormationOnMap = (units, unit) => {
+  const name = unitNameKey(unit?.name);
+  const owner = unitNameKey(unit?.ownerCode);
+  if (!name || name === "unit" || !owner) return null;
+  return units.find((entry) => unitNameKey(entry.name) === name && unitNameKey(entry.ownerCode) === owner && entry.strength > 0) ?? null;
+};
+
+// A save that already has such a twin: a unit the AI raised with the name,
+// owner and kind of one the player placed is that unit's copy, and is dropped;
+// the player's own stays where the player put it.
+export const withoutTwinsOfPlayerUnits = (units) => {
+  const list = normalizeArray(units);
+  const placed = new Set(list
+    .filter((unit) => unit?.source === "player" && unitNameKey(unit?.name) && unitNameKey(unit?.name) !== "unit")
+    .map((unit) => `${unitNameKey(unit.name)}|${unitNameKey(unit.ownerCode)}|${unitNameKey(unit.type)}`));
+  if (placed.size === 0) return list;
+  const kept = list.filter((unit) => unit?.source === "player"
+    || !placed.has(`${unitNameKey(unit?.name)}|${unitNameKey(unit?.ownerCode)}|${unitNameKey(unit?.type)}`));
+  return kept.length === list.length ? list : kept;
+};
+
 export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
   const {
     gameDate = "", elapsedDays = null, round = 0, extraAnchors = [], eventId = "", era = null,
@@ -3012,6 +3039,11 @@ export const applyUnitOpBatch = (units, orders, ops, context = {}) => {
       // op batch can't duplicate a unit (mirrors the event-restatement de-dup).
       const spawnId = op.unit?.id;
       if (spawnId && next.some((unit) => unit.id === spawnId)) continue;
+      // Nor can it raise a second of a formation already there: a spawn named as
+      // one of its owner's units on the map is that unit, said again. A player
+      // marked his oil and gas sites with units ("GSI Arzew", "Hub Sud"), and
+      // each skip that told of them raised a twin beside or far from it.
+      if (sameFormationOnMap(next, op.unit)) continue;
 
       const unit = { ...op.unit };
       // A story ship is a ship whatever the model called it, unlisted because
@@ -4368,7 +4400,7 @@ export const normalizeWorldState = (world) => {
       .filter(([code, sheet]) => code && sheet && typeof sheet === "object"),
   );
 
-  const units = normalizeUnits(nextWorld.units);
+  const units = withoutTwinsOfPlayerUnits(normalizeUnits(nextWorld.units));
 
   // The ledgers resolve their polity names against the overrides computed above,
   // not the raw input, so a renamed polity folds onto one identity.
@@ -4511,6 +4543,11 @@ export const normalizeWorldState = (world) => {
     } : {}),
     cityRenames: Object.fromEntries(
       Object.entries(nextWorld.cityRenames && typeof nextWorld.cityRenames === "object" ? nextWorld.cityRenames : {})
+        .map(([key, value]) => [normalizeString(key).toLowerCase(), normalizeString(value)])
+        .filter(([key, value]) => key && value),
+    ),
+    regionRenames: Object.fromEntries(
+      Object.entries(nextWorld.regionRenames && typeof nextWorld.regionRenames === "object" ? nextWorld.regionRenames : {})
         .map(([key, value]) => [normalizeString(key).toLowerCase(), normalizeString(value)])
         .filter(([key, value]) => key && value),
     ),
@@ -5973,16 +6010,23 @@ export const applyEventImpactsToWorld = ({
         eventId: event.id,
         gameDate: event.date || "",
       });
-      // A rename that matched no existing structure is a STOCK-map city rename (stock
-      // cities live in PMTiles, not world.markers) — record it as an override layer so
-      // the label layer can show the new name (see Cities.jsx / cityRenames).
+      // A rename that matched no existing structure is a STOCK-map city or region rename (stock
+      // cities and regions live in PMTiles, not world.markers) — record it as an override layer so
+      // the label layer and region inspector show the new name (see Cities.jsx and regionNameFixes.js).
       for (const raw of normalizeArray(event.impacts.markerOps)) {
         const op = normalizeMarkerOp(raw);
         if (!op || !op.name) continue;
         const matched = before.some((m) =>
           op.markerId ? m.id === op.markerId : m.name.toLowerCase() === op.name.toLowerCase());
         if (op.op === "rename" && !matched) {
-          nextWorld.cityRenames = { ...(nextWorld.cityRenames || {}), [op.name.toLowerCase()]: op.newName };
+          const rawName = String(op.name).trim();
+          const isRegion = /^region:\s*/i.test(rawName);
+          const cleanName = rawName.replace(/^region:\s*/i, "").trim().toLowerCase();
+          if (isRegion) {
+            nextWorld.regionRenames = { ...(nextWorld.regionRenames || {}), [cleanName]: op.newName };
+          } else {
+            nextWorld.cityRenames = { ...(nextWorld.cityRenames || {}), [cleanName]: op.newName };
+          }
         }
         // Population is recorded in the override for EVERY city, matched or not.
         // A built marker keeps its own population field, but the map reads the
