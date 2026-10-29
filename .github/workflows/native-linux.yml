@@ -38,7 +38,7 @@ jobs:
       - name: Install the build and display tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq meson ninja-build nasm cmake pkg-config zlib1g-dev xvfb xauth libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libxkbcommon-x11-0 libxext6 libxrender1 libdbus-1-3 fontconfig fonts-dejavu-core libfontconfig1 >/dev/null
+          sudo apt-get install -y -qq meson ninja-build nasm cmake pkg-config zlib1g-dev xvfb xauth libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libxkbcommon-x11-0 libxext6 libxrender1 libdbus-1-3 fontconfig fonts-dejavu-core libfontconfig1 libwebkit2gtk-4.1-dev patchelf >/dev/null
           meson --version; ninja --version; nasm --version; cmake --version | head -1; ldd --version | head -1
 
       - name: Install the Rust toolchain
@@ -55,9 +55,13 @@ jobs:
       - name: Build the engine library
         working-directory: native/engine
         run: |
-          cargo build -p oh_gdext --release
-          file target/release/liboh_gdext.so
+          cargo build -p oh_gdext -p ohweb --release
+          file target/release/liboh_gdext.so target/release/libohweb.so
           objdump -T target/release/liboh_gdext.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+          objdump -p target/release/liboh_gdext.so | grep NEEDED
+          objdump -p target/release/libohweb.so | grep NEEDED
+          if objdump -p target/release/liboh_gdext.so | grep NEEDED | grep -qiE 'webkit|gtk|soup'; then echo "::error::liboh_gdext.so must not link WebKitGTK; the web view lives in libohweb.so"; exit 1; fi
+          ls -la target/release/liboh_gdext.so target/release/libohweb.so
 
       - name: Restore the AVIF reader's libraries from the cache
         id: codec-cache
@@ -184,7 +188,7 @@ jobs:
         run: |
           app="$RUNNER_TEMP/out/Open Historia Native"
           ls -la "$app" "$app/runtime" "$app/native/sidecar/imagecodec"
-          for bin in "$app/runtime/Open Historia.x86_64" "$app/runtime/liboh_gdext.so" "$app/runtime/node" "$app/native/sidecar/imagecodec/oh-imagecodec" "$app/native/sidecar/node_modules/@node-datachannel/linux-x64-gnu/node_datachannel.node"; do
+          for bin in "$app/runtime/Open Historia.x86_64" "$app/runtime/liboh_gdext.so" "$app/runtime/libohweb.so" "$app/runtime/node" "$app/native/sidecar/imagecodec/oh-imagecodec" "$app/native/sidecar/node_modules/@node-datachannel/linux-x64-gnu/node_datachannel.node"; do
             file "$bin"
             echo "  needs $(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
           done
@@ -229,6 +233,15 @@ jobs:
       - name: Smoke-test the app in a window under Xvfb
         run: |
           LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1440x900x24" node native/linux/smoke-linux.mjs "$RUNNER_TEMP/out/Open Historia Native" "$RUNNER_TEMP/out/probe/Open Historia.pck" "$RUNNER_TEMP/out/smoke-windowed.log" --windowed
+
+      - name: Smoke-test the browser fallback when WebKitGTK is missing
+        run: |
+          mkdir -p "$RUNNER_TEMP/nowebkit"
+          cp "$RUNNER_TEMP/out/Open Historia Native/runtime/libohweb.so" "$RUNNER_TEMP/nowebkit/libohweb.so"
+          patchelf --replace-needed libwebkit2gtk-4.1.so.0 libwebkit2gtk-4.1-not-installed.so.0 "$RUNNER_TEMP/nowebkit/libohweb.so"
+          objdump -p "$RUNNER_TEMP/nowebkit/libohweb.so" | grep NEEDED | grep webkit
+          OH_PROBE_HOLD=2 OH_WEBPANEL_LIB="$RUNNER_TEMP/nowebkit/libohweb.so" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1440x900x24" node native/linux/smoke-linux.mjs "$RUNNER_TEMP/out/Open Historia Native" "$RUNNER_TEMP/out/probe/Open Historia.pck" "$RUNNER_TEMP/out/smoke-no-webkit.log" --windowed --webpanel unavailable
+          grep "WEBPANEL" "$RUNNER_TEMP/out/smoke-no-webkit.log"
 
       - name: Publish dry run
         env:

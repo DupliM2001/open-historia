@@ -55,6 +55,8 @@ jobs:
           mkdir -p target/universal-apple-darwin/release
           lipo -create target/aarch64-apple-darwin/release/liboh_gdext.dylib target/x86_64-apple-darwin/release/liboh_gdext.dylib -output target/universal-apple-darwin/release/liboh_gdext.dylib
           lipo -info target/universal-apple-darwin/release/liboh_gdext.dylib
+          ls -la target/aarch64-apple-darwin/release/liboh_gdext.dylib target/x86_64-apple-darwin/release/liboh_gdext.dylib target/universal-apple-darwin/release/liboh_gdext.dylib
+          otool -L target/universal-apple-darwin/release/liboh_gdext.dylib | grep -E "WebKit|AppKit"
 
       - name: Read the Godot checksums
         id: godot
