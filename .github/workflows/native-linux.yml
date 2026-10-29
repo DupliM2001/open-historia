@@ -38,7 +38,7 @@ jobs:
       - name: Install the build and display tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq meson ninja-build nasm cmake pkg-config zlib1g-dev xvfb xauth libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libxkbcommon-x11-0 libxext6 libxrender1 libdbus-1-3 fontconfig fonts-dejavu-core libfontconfig1 libwebkit2gtk-4.1-dev patchelf openbox dunst libnotify-bin dbus-x11 x11-utils xdotool imagemagick desktop-file-utils xdg-utils python3-venv >/dev/null
+          sudo apt-get install -y -qq meson ninja-build nasm cmake pkg-config zlib1g-dev xvfb xauth libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libxkbcommon-x11-0 libxext6 libxrender1 libdbus-1-3 fontconfig fonts-dejavu-core libfontconfig1 libwebkit2gtk-4.1-dev patchelf openbox dunst libnotify-bin dbus-x11 x11-utils xdotool imagemagick desktop-file-utils xdg-utils python3-venv fonts-liberation fonts-noto-color-emoji >/dev/null
           meson --version; ninja --version; nasm --version; cmake --version | head -1; ldd --version | head -1
 
       - name: Install the Rust toolchain

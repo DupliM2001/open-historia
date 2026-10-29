@@ -217,47 +217,63 @@ jobs:
         run: |
           node native/macos/smoke-mac.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/probe/Open Historia.pck" "$RUNNER_TEMP/out/smoke-arm64-windowed.log" --windowed
 
-      - name: Tour the windowed app with real input (1440x900)
-        id: tour
+      - name: Give the runner's screen room for a 1440x900 window
+        id: screen
         continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/tour"
-          system_profiler SPDisplaysDataType | tee "$RUNNER_TEMP/tour/displays.txt"
-          node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/1x"
+          brew install displayplacer >/dev/null 2>&1 || brew install jakehilborn/jakehilborn/displayplacer >/dev/null 2>&1 || true
+          displayplacer list | tee "$RUNNER_TEMP/tour/displayplacer-runner.txt"
+          node native/macos/display-setup.mjs physical 1920x1080 | tee "$RUNNER_TEMP/tour/display-setup-1x.txt"; test "${PIPESTATUS[0]}" = 0
+          system_profiler SPDisplaysDataType | tee "$RUNNER_TEMP/tour/displays-1x.txt"
 
-      - name: Look for a Retina (HiDPI) display mode
+      - name: Tour the windowed app with real input (1440x900)
+        id: tour
+        continue-on-error: true
+        run: node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/1x"
+
+      - name: Add a virtual Retina display (1600x1000 points at 2x) and make it the main one
         id: retina
         continue-on-error: true
         run: |
-          brew install displayplacer >/dev/null 2>&1 || brew install jakehilborn/jakehilborn/displayplacer >/dev/null 2>&1 || true
-          if ! command -v displayplacer >/dev/null; then echo "mode=none" >> "$GITHUB_OUTPUT"; echo "displayplacer is not available"; exit 0; fi
-          displayplacer list | tee "$RUNNER_TEMP/tour/displayplacer-before.txt"
-          id=$(grep -m1 "^Persistent screen id:" "$RUNNER_TEMP/tour/displayplacer-before.txt" | awk '{print $4}')
-          pick=$(grep -E "^ *mode [0-9]+: res:[0-9]+x[0-9]+ .*scaling:on" "$RUNNER_TEMP/tour/displayplacer-before.txt" | awk -F'res:' '{split($2,a,"[x ]"); if (a[1] >= 1440 && a[2] >= 900) print a[1]*a[2], $0}' | sort -n | head -1 | sed -E 's/.*mode ([0-9]+):.*/\1/')
-          if [ -z "$id" ] || [ -z "$pick" ]; then echo "mode=none" >> "$GITHUB_OUTPUT"; echo "no HiDPI mode of at least 1440x900 points is offered by this runner's display"; exit 0; fi
-          displayplacer "id:$id mode:$pick" || true
-          sleep 3
-          displayplacer list | tee "$RUNNER_TEMP/tour/displayplacer-after.txt"
-          system_profiler SPDisplaysDataType | tee "$RUNNER_TEMP/tour/displays-after.txt"
-          echo "mode=$pick" >> "$GITHUB_OUTPUT"
+          clang -fobjc-arc -O2 -framework Foundation -framework CoreGraphics native/macos/hidpi-display.m -o "$RUNNER_TEMP/hidpi-display"
+          nohup "$RUNNER_TEMP/hidpi-display" 1600 1000 > "$RUNNER_TEMP/tour/hidpi-display.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/hidpi-display.pid"
+          sleep 5
+          cat "$RUNNER_TEMP/tour/hidpi-display.log"
+          displayplacer list | tee "$RUNNER_TEMP/tour/displayplacer-retina.txt"
+          node native/macos/display-setup.mjs retina 1600x1000 | tee "$RUNNER_TEMP/tour/display-setup-2x.txt"; test "${PIPESTATUS[0]}" = 0
+          system_profiler SPDisplaysDataType | tee "$RUNNER_TEMP/tour/displays-2x.txt"
 
-      - name: Tour again at 2x (the real Retina mode if the runner gave one, emulated otherwise)
+      - name: Tour again on the Retina display (or at an emulated 2x if no Retina display could be made)
         id: tour2x
         continue-on-error: true
         run: |
-          echo "HiDPI mode: ${{ steps.retina.outputs.mode }}"
-          node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --scale 2 --only menu,settings,history,game --skip notify,war,gestures --screens c-menu-games,c-hud,c-settings-general
+          if [ "${{ steps.retina.outcome }}" = success ]; then
+            node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --only menu,settings,history,game --skip notify,war --screens c-menu-games,c-hud,c-settings-general,c-ai-setup,g-2-shift-tilt
+          else
+            node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --scale 2 --size 960x500 --only menu,settings,history,game --skip notify,war --screens c-menu-games,c-hud,c-settings-general
+          fi
+
+      - name: Remove the virtual display
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/hidpi-display.pid" ]; then kill "$(cat "$RUNNER_TEMP/hidpi-display.pid")" 2>/dev/null || true; fi
+          sleep 2
+          displayplacer list 2>/dev/null | grep -E "^(Persistent screen id|Type|Resolution|Scaling):" || true
 
       - name: Read the notifications usernoted delivered
         if: always()
         continue-on-error: true
         run: |
-          log show --last 90m --style compact --predicate 'subsystem == "com.apple.UserNotifications"' 2>/dev/null | grep -i "openhistoria" | tail -80 | tee "$RUNNER_TEMP/tour/usernotifications.txt"
+          log show --last 90m --style compact --predicate 'subsystem == "com.apple.UserNotifications" OR process == "usernoted"' 2>/dev/null | grep -i "openhistoria" | grep -iE "Adding|Added|Delivering|Presenting|scheduled|Authorization|Requested" | tail -60 | tee "$RUNNER_TEMP/tour/usernotifications.txt"
           grep -h "usernoted\|notifier smoke" "$RUNNER_TEMP/out/notifier-smoke.log" | tail -30 | tee "$RUNNER_TEMP/tour/notifier-smoke-usernoted.txt" || true
 
       - name: First open of the published zip (quarantine, Gatekeeper, the documented step)
         id: firstopen
         continue-on-error: true
+        timeout-minutes: 15
         run: bash native/macos/first-open.sh "$RUNNER_TEMP/tour/first-open"
 
       - name: The self-updater leaves no quarantine behind (the updater tests on a real .app)
