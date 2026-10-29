@@ -145,6 +145,8 @@ jobs:
           echo "lockfile darwin-x64 $version $integrity"
 
       - name: Run the sidecar tests
+        id: tests
+        continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/out"
           for test in native/sidecar/test/*.test.mjs; do
@@ -207,6 +209,12 @@ jobs:
           cp "$RUNNER_TEMP"/out/*.log "$RUNNER_TEMP"/out/sidecar-smoke.json "$RUNNER_TEMP"/out/shell.txt "$RUNNER_TEMP/package.log" "$RUNNER_TEMP/sidecar-tests.log" "$RUNNER_TEMP/logs/" 2>/dev/null || true
           grep -h "smoke summary\|avif smoke" "$RUNNER_TEMP"/logs/*.log 2>/dev/null | tee "$RUNNER_TEMP/logs/summary.txt" || true
           ls -la "$RUNNER_TEMP"/out || true
+
+      - name: Stop here if the sidecar tests failed
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::error::the sidecar tests failed; see sidecar-tests.log in the smoke logs"
+          exit 1
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
