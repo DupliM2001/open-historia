@@ -73,5 +73,6 @@ export const consolidateHistoryNow = async (...args) => (await gameplay()).conso
 // --- Stats and intelligence -------------------------------------------------
 export const ensureIntelligenceRated = async (...args) => (await gameplay()).ensureIntelligenceRated(...args);
 export const assessPoliticalLandscape = async (...args) => (await gameplay()).assessPoliticalLandscape(...args);
+export const assessGoalProgress = async (...args) => (await gameplay()).assessGoalProgress(...args);
 export const generateCountryStatSheet = async (...args) => (await gameplay()).generateCountryStatSheet(...args);
 export const generateCountryStats = async (...args) => (await gameplay()).generateCountryStats(...args);

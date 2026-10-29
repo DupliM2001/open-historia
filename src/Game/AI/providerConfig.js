@@ -214,6 +214,7 @@ export const AI_TASK_ROUTING = [
     { key: "idleDiplomacy", label: "Idle diplomacy", hint: "Small/mid-tier model", group: "Player" },
     { key: "countryStatSheet", label: "Stat sheet", hint: "Mid-tier model", group: "Player" },
     { key: "politicalLandscape", label: "Political parties", hint: "Mid-tier model", group: "Player" },
+    { key: "goalProgress", label: "Goal progress", hint: "Mid-tier model", group: "Player" },
     { key: "interactiveCreation", label: "Interactive event creation", hint: "Mid-tier model", group: "Player" },
     { key: "interactiveExecutor", label: "Interactive event execution", hint: "Mid-tier model", group: "Player" },
     { key: "interactiveSummary", label: "Interactive event summary", hint: "Small model", group: "Player" },

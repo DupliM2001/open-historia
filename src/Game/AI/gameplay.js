@@ -280,7 +280,7 @@ import { getActiveWorldDirection, idleDiplomacyChancePerMinute, isActiveFeatureE
 import { describeIntervention, journalTurn, truncateTurn } from "./intervene.js";
 import { applyChatActionBatch, describeChatActionFeedback } from "./chatActions.js";
 import { gmChangesForRound, normalizeReminders, recordGmChange, renderGmChangeNarration, renderReminders } from "../../runtime/gmChanges.js";
-import { describeGoalForSimulation, describeGoalForSuggestions, playerGoalOf } from "../../runtime/playerGoal.js";
+import { describeGoalForSimulation, describeGoalForSuggestions, playerGoalEntryOf, playerGoalOf, withGoalProgress } from "../../runtime/playerGoal.js";
 import { createSkipPhases, describeReviewJobs, formatSkipPhases } from "./skipPhases.js";
 import { createStreamedEventReader } from "./streamedEvents.js";
 import { deliveryEventId, documentExchange, documentNote, documentNotices, isDocumentExchange, markIntercepted, planReportDeliveries, withoutOrphanedDocuments, withoutOrphanedNotices } from "../../runtime/reportDelivery.js";
@@ -11754,6 +11754,44 @@ export const assessPoliticalLandscape = async (target, { signal } = {}) => {
   const fresh = normalizeWorldState(await readWorldState({ force: true }));
   await writeWorldState({ ...fresh, politics: { ...(fresh.politics ?? {}), [name]: entry } });
   return entry;
+};
+
+// How far the player's standing goal has come (runtime/playerGoal.js), read on
+// demand from the Actions panel and kept with the goal. Out of turn, like the
+// parties above: it waits for the simulation and re-reads before it writes.
+export const assessGoalProgress = async ({ signal } = {}) => {
+  const campaign = activeCampaignId();
+  await waitForSimulationIdle({ signal });
+  const bundle = await readGameStateBundle({ force: true });
+  const world = normalizeWorldState(bundle.world);
+  const player = normalizeString(bundle.game?.country);
+  const goal = playerGoalEntryOf(world, player);
+  if (!goal) throw new Error("There is no standing goal to assess.");
+  const variables = {
+    ...(await buildTemplateVariables(bundle, { taskKey: "goalProgress" })),
+    goalText: goal.text,
+  };
+  const dossier = await buildTargetDossier(bundle, player, world);
+  const sheet = world.countryStats?.[player];
+  const previous = goal.progress;
+  const { payload } = await runJsonTask("goalProgress", {
+    signal,
+    userMessage: [
+      `Assess how far ${player} has come toward its standing goal on ${variables.date || "the current date"}: "${goal.text}".`,
+      `${player.toUpperCase()} DOSSIER:\n${dossier || "(nothing recorded)"}`,
+      sheet ? `STAT SHEET:\n${JSON.stringify(sheet).slice(0, 2500)}` : "",
+      previous ? `PREVIOUS READING (${previous.asOf || "undated"}): ${previous.progress}/100. ${previous.summary}` : "",
+    ].filter(Boolean).join("\n\n"),
+    variables,
+  });
+  await waitForSimulationIdle({ signal });
+  throwIfAborted(signal);
+  if (activeCampaignId() !== campaign) throw new Error("The campaign changed while the goal was being assessed.");
+  const fresh = normalizeWorldState(await readWorldState({ force: true }));
+  const next = withGoalProgress(fresh, player, goal.text, { ...payload, asOf: variables.date || "", round: bundle.game?.round });
+  if (next === fresh) throw new Error("The goal was changed while it was being assessed.");
+  await writeWorldState(next);
+  return playerGoalEntryOf(next, player)?.progress ?? null;
 };
 
 const generateScenarioCustomStatSheet = async ({

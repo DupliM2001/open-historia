@@ -2814,10 +2814,27 @@ const POLITICAL_LANDSCAPE_SCHEMA = {
   additionalProperties: false,
 };
 
+// How far the player's standing goal has come, for the Actions panel;
+// normalized and stored by runtime/playerGoal.js.
+const GOAL_PROGRESS_SCHEMA = {
+  type: "object",
+  description: "An honest reading of how far the player's government has come toward its standing goal, on the current date.",
+  properties: {
+    progress: { type: "integer", minimum: 0, maximum: 100, description: "0 = nothing done, 100 = the goal is achieved. Judge what is true in the world, not what was ordered." },
+    summary: nonEmptyTextSchema("Two or three sentences: where things stand and why."),
+    achieved: { type: "array", maxItems: 5, items: textSchema("A milestone already reached, one short line.") },
+    obstacles: { type: "array", maxItems: 4, items: textSchema("What stands in the way, one short line.") },
+    nextSteps: { type: "array", maxItems: 3, items: textSchema("A concrete step that would bring the goal nearer, one short line.") },
+  },
+  required: ["progress", "summary", "achieved", "obstacles", "nextSteps"],
+  additionalProperties: false,
+};
+
 export const GAMEPLAY_SCHEMAS = Object.freeze({
   spyIntercept: SPY_INTERCEPT_SCHEMA,
   intelligenceAssessment: INTELLIGENCE_ASSESSMENT_SCHEMA,
   politicalLandscape: POLITICAL_LANDSCAPE_SCHEMA,
+  goalProgress: GOAL_PROGRESS_SCHEMA,
   actions: ACTIONS_SCHEMA,
   jumpForward: JUMP_FORWARD_SCHEMA,
   autoJumpForward: AUTO_JUMP_FORWARD_SCHEMA,
@@ -3044,10 +3061,17 @@ export const POLITICAL_LANDSCAPE_TOOL = makeTool(
   POLITICAL_LANDSCAPE_SCHEMA,
 );
 
+export const GOAL_PROGRESS_TOOL = makeTool(
+  "submit_goal_progress",
+  "Submit the reading of how far the standing goal has come.",
+  GOAL_PROGRESS_SCHEMA,
+);
+
 export const GAMEPLAY_TOOLS = Object.freeze({
   spyIntercept: SPY_INTERCEPT_TOOL,
   intelligenceAssessment: INTELLIGENCE_ASSESSMENT_TOOL,
   politicalLandscape: POLITICAL_LANDSCAPE_TOOL,
+  goalProgress: GOAL_PROGRESS_TOOL,
   actions: ACTIONS_TOOL,
   jumpForward: JUMP_FORWARD_TOOL,
   autoJumpForward: AUTO_JUMP_FORWARD_TOOL,
