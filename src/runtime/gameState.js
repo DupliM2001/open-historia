@@ -447,6 +447,9 @@ export const normalizeActionEntry = (entry, index = 0) => {
     text: text || rawInput || title,
     title: title || rawInput || text,
     ...(unitRevert ? { unitRevert } : {}),
+    // Turns that ended with no event carrying this order out (gameplay.js
+    // settleActionsAfterTurn); it stays queued, and flagged, until the limit.
+    ...(Number(entry.missedTurns) > 0 ? { missedTurns: Math.trunc(Number(entry.missedTurns)) } : {}),
   };
 };
 
@@ -454,6 +457,31 @@ export const normalizeActions = (actions) =>
   normalizeArray(actions)
     .map((entry, index) => normalizeActionEntry(entry, index))
     .filter(Boolean);
+
+// How many turns an order may go undone before it is let go.
+export const MAX_MISSED_TURNS = 2;
+
+// The player's queue after a turn. An order an event cites in actionIds (by its
+// id, or by its title, which is what a model writes when it has no id) is
+// resolved. One no event cites stays queued, counted, so the next turn is told
+// it is still outstanding (#798: an annexation the treaty promised was cleared
+// with every other order and silently never happened); at the limit it is let
+// go. A chat order opens its chat when it is queued, and is resolved as before.
+export const settleActionsAfterTurn = (actions, events) => {
+  const cited = new Set(normalizeArray(events)
+    .flatMap((event) => normalizeArray(event?.impacts?.actionIds))
+    .map((value) => normalizeString(value).toLowerCase())
+    .filter(Boolean));
+  return normalizeActions(actions).map((action) => {
+    if (action.status !== "planned") return action;
+    const done = action.kind === "chat"
+      || cited.has(action.id.toLowerCase())
+      || cited.has(normalizeString(action.title).toLowerCase());
+    if (done) return { ...action, status: "resolved" };
+    const missedTurns = (action.missedTurns || 0) + 1;
+    return missedTurns >= MAX_MISSED_TURNS ? { ...action, status: "resolved", missedTurns } : { ...action, missedTurns };
+  });
+};
 
 const normalizeInteractiveChoice = (entry, index = 0) => {
   if (typeof entry === "string") {

@@ -188,6 +188,7 @@ import {
   normalizeActionEntry,
   normalizeEventEntry,
   normalizeActions,
+  settleActionsAfterTurn,
   normalizeChatEntry,
   normalizeChats,
   normalizeEvents,
@@ -1651,7 +1652,7 @@ const FOLDED_SKIP_CONSEQUENCES = [
   "• Units. Check the event against Current Military Units. A formation the text has advancing, retreating, redeploying, massing on a border or going into action is MOVED: its name in unitId, an `at`, and the posture it now has (fighting is a move into contact with posture assaulting). Losses, attrition, reinforcement or refit change its strength; destruction or disbandment removes it. Reuse the formation that already exists before raising another: the army that fought last month is the army fighting this month. A ship, submarine or squadron commissioned, delivered or stood up, and a division raised or mobilised, is a NEW formation: spawn it for the power that raised it, at its named port or base, even when that power already has units. A war is fought by formations the map shows, on BOTH sides, whether or not the player is in it: when an event has a power or a group attacking, defending, besieging or falling back somewhere and it has no formation there among Current Military Units, spawn one where the event puts it (a group's formation carries the group's exact name as ownerCode), and move it in later events as the front moves.",
   "• Structures. Anything physical and fixed that the text says was built, opened, completed, commissioned, activated or begun (a base, shipyard, port, airfield, factory, plant, reactor, laboratory, data centre, radar or ground station, launch site, depot, embassy, fortification) is a markerOps build: a specific name, a short lowercase kind, its owner's full name, `at` the place the event names, and a status of planned, under_construction or active. A meeting, study, budget or plan builds nothing; nothing in orbit is a structure, though the ground station that serves it is; a ship or an aircraft is a unit; and nothing already on the map is built twice.",
   EVENT_PLACES_RULE,
-  "• Orders. An event that gives one of the player's orders its outcome lists that order's id in actionIds.",
+  "• Orders. An event that gives one of the player's orders its outcome lists that order's id in actionIds, copied from its [id ...] tag. An order no event cites stays queued and comes back next turn marked NOT YET CARRIED OUT.",
   "• The board. An event that moved one of the player's projects or operations carries its projectOps, as [Projects & Operations] says.",
   "An event whose text changes nothing material carries no ops, and that is correct: never invent one to fill a field. But an event that says a town fell, a fleet sailed or a base opened, with nothing in its impacts, leaves the player looking at a map that contradicts the story.",
   "Nothing takes a repeat or a filler event off the timeline afterwards either. Do not write an event that restates the record, or one that reports a meeting, a review or a statement with no outcome.",
@@ -7357,6 +7358,7 @@ const fallbackJumpSimulation = async ({ bundle, days, mode, targetDate }) => {
               : [],
           polityChanges: [],
           regionTransfers: [],
+          actionIds: [action.id],
         },
         importance: index === firstThreeActions.length - 1 ? "major" : "minor",
         kind: action.kind === "chat" ? "diplomacy" : "player",
@@ -7923,10 +7925,7 @@ const applySimulationResult = async ({
     round: (baseGame.round || 1) + 1,
   });
   const plannedActionSnapshot = normalizeActions(baseActions).filter((action) => action.status === "planned");
-  let nextActions = normalizeActions(baseActions).map((action) => ({
-    ...action,
-    status: action.status === "planned" && result.clearActions ? "resolved" : action.status,
-  }));
+  let nextActions = result.clearActions ? settleActionsAfterTurn(baseActions, freshEvents) : normalizeActions(baseActions);
   const nextChats = [...normalizeChats(baseChats)];
   // Chats this turn CREATED, kept apart from the pre-turn snapshot. A turn takes a
   // while to generate and the player can edit the chat list while it runs, so the

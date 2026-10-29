@@ -858,7 +858,13 @@ export const buildActionHistoryText = (actions, { includeResolved = false, limit
   const renderAction = (action) => {
     const kindLabel = action.kind === "chat" ? "chat" : "action";
     const statusLabel = action.status !== "planned" ? ` [${action.status}]` : "";
-    return `- (${kindLabel}) ${action.title}${statusLabel}: ${buildActionDisplayText(action)}`;
+    // A queued order carries its id, which is what an event cites in actionIds;
+    // one a past turn left undone says so.
+    const idLabel = action.status === "planned" ? ` [id ${action.id}]` : "";
+    const missedLabel = action.status === "planned" && action.missedTurns
+      ? ` [NOT YET CARRIED OUT: ordered ${action.missedTurns + 1} turns ago; carry it out now or show why it fails]`
+      : "";
+    return `- (${kindLabel}) ${action.title}${idLabel}${missedLabel}: ${buildActionDisplayText(action)}`;
   };
 
   if (!includeResolved) {
