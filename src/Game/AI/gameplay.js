@@ -206,6 +206,7 @@ import {
   validateGameplayPayload,
   withEventAudience,
   withFrontOrders,
+  withPartyOps,
   withIntelligenceRating,
   withoutGroupOps,
 } from "./gameplaySchemas.js";
@@ -276,6 +277,7 @@ import {
   unassessedHighPriorityEntries,
 } from "../../runtime/projects.js";
 import { activeSpies, applySpyOps, espionageBrief, intelligenceOf, isIntelligenceRated, normalizeIntelligenceRating, normalizeIntercepts, normalizeSpies, planCovertOperations, redactText, resolveEspionage, signalClarity } from "../../runtime/spycraft.js";
+import { applyPartyOps, describePoliticsForPrompt, ideologyListText, leadersAfterGovernmentChange, normalizePoliticalLandscape } from "../../runtime/politics.js";
 import { buildSpyOrdersDirective } from "./spyOrdersDirective.js";
 import { collectionOrders, covertOperationsBlock, untracedTargets } from "./covertOperationsDirective.js";
 import { AGENT_REPORT_EVERY_ROUNDS, agentsDueToReport, agentsReportingWithSkip } from "./agentReports.js";
@@ -2710,9 +2712,9 @@ const JUMP_LIVE_STATE_BANNER = [
 // Master's contract without the lines that teach them, built once.
 // Fronts on (frontsGate.js): a time skip's tool with the battlefields' orders
 // in it (gameplaySchemas.js withFrontOrders).
-const forActiveFeatures = (tool) => {
+const forActiveFeatures = (tool, { parties = false } = {}) => {
   const grouped = isActiveFeatureEnabled("groups") ? tool : withoutGroupOps(tool);
-  const shown = withEventAudience(grouped, hostingSharedGame());
+  const shown = withPartyOps(withEventAudience(grouped, hostingSharedGame()), parties);
   return frontsOn() ? withFrontOrders(shown) : shown;
 };
 let gameMasterPromptNoGroups = null;
@@ -2879,6 +2881,9 @@ ${brief}`);
 Write spiesOnPlayer: the polities, by exact name and comma-separated, that would really try to place an agent in ${spiedOn} this period. Choose them as the world stands: enemies and rivals, powers with a real stake in ${spiedOn}'s affairs, a patron keeping watch on a client. A polity with no reason to, no reach, or no intelligence service to speak of sends nobody. An empty string when none would.`);
     }
   }
+
+  const parties = describePoliticsForPrompt(world.politics, { date: normalizeString(game?.gameDate) });
+  if (parties) blocks.push(parties);
 
   try {
     const reportsOnFile = describeReportsForPrompt(world.reports);
@@ -3618,7 +3623,7 @@ const runJsonTask = async (taskKey, {
   if (!sync && typeof onBatchResult === "function" && batchBackgroundTasksEnabled()) {
     const batchTool = forActiveFeatures(customFullStatSheet
       ? getGameplayToolForCustomStatSheet(taskKey, customStatRows, { custom: true })
-      : getGameplayToolForStatIndices(taskKey, statIndexRows, { custom: customStatIndices }));
+      : getGameplayToolForStatIndices(taskKey, statIndexRows, { custom: customStatIndices }), { parties: Boolean(variables?.partiesTracked) });
     if (batchTool && providerSupportsBatch(taskKey)) {
       const customId = `oh_${taskKey}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
       const submitted = await submitAIBatch({
@@ -3669,7 +3674,7 @@ const runJsonTask = async (taskKey, {
   );
   const featureTool = forActiveFeatures(customFullStatSheet
     ? getGameplayToolForCustomStatSheet(taskKey, customStatRows, { custom: true })
-    : getGameplayToolForStatIndices(taskKey, statIndexRows, { custom: customStatIndices }));
+    : getGameplayToolForStatIndices(taskKey, statIndexRows, { custom: customStatIndices }), { parties: Boolean(variables?.partiesTracked) });
   // The players' advice, asked of the time skip whose prompt asks for it.
   const taskTool = JUMP_TASK_KEYS.has(taskKey) && normalizeString(variables?.seatAdviceDirective) ? withSeatAdvice(featureTool) : featureTool;
   // A first reading's sheet can carry the service's rating, in the same request
@@ -9778,6 +9783,22 @@ const applySimulationResult = async ({
       if (entry.op === "deploy") void ensureCountryAssessed(entry.target, { reason: "agent deployed by order" });
     }
   }
+  // The parties' changes, carried by the events that made them
+  // (impacts.partyOps, runtime/politics.js). Only compiled lists move.
+  const partyOps = normalizeArray(freshEvents).flatMap((event) => normalizeArray(event?.impacts?.partyOps));
+  if (partyOps.length) {
+    const outcome = applyPartyOps(worldWithImpacts.politics, partyOps, { date: nextGame.gameDate });
+    const leaders = leadersAfterGovernmentChange(worldWithImpacts.politics, outcome.politics, worldWithImpacts.countryStats);
+    worldWithImpacts.politics = outcome.politics;
+    if (leaders.changed.length) {
+      worldWithImpacts.countryStats = leaders.countryStats;
+      logDebugEvent("politics", `Stat sheet leader updated: ${leaders.changed.map((entry) => `${entry.polity} ${entry.from} -> ${entry.to}`).join(", ")}`);
+    }
+    if (outcome.applied.length) {
+      logDebugEvent("politics", `Party changes applied: ${outcome.applied.map((entry) => `${entry.op} ${entry.party || entry.changes?.nameEn || ""} (${entry.polity})`).join(", ")}`);
+    }
+    for (const skipped of outcome.rejected) logDebugEvent("politics", `Party change skipped: ${skipped.reason}`, { op: skipped.op });
+  }
   const spySync = [
     // Order matters: provenance first, so an entry stamped this turn can be
     // doubted in the same pass rather than a turn later.
@@ -14360,6 +14381,48 @@ export const pendingCountryStatSheet = (target) => {
 // asks on its own when the sheet's answer did not carry a usable rating.
 export const ensureCountryAssessed = (target, options = {}) =>
   ensureCountryStatSheet(target, { ...options, rateIntelligence: true }).then(() => ensureIntelligenceRated(target, options));
+
+// The Politics tab's government and parties for one polity, asked for by the
+// player (runtime/politics.js). It replaces whatever entry the polity had: a
+// refresh is a fresh reading; between readings turns move it (impacts.partyOps).
+export const assessPoliticalLandscape = async (target, { signal } = {}) => {
+  const name = normalizeString(target);
+  if (!name) return null;
+  const campaign = activeCampaignId();
+  await waitForSimulationIdle({ signal });
+  const bundle = await readGameStateBundle({ force: true });
+  const world = normalizeWorldState(bundle.world);
+  const variables = {
+    ...(await buildTemplateVariables(bundle, { taskKey: "politicalLandscape" })),
+    targetPolity: name,
+  };
+  const dossier = await buildTargetDossier(bundle, name, world);
+  const era = normalizeString(world.simulationRules).slice(0, 700);
+  const sheet = world.countryStats?.[name];
+  const previous = world.politics?.[name];
+  const { payload } = await runJsonTask("politicalLandscape", {
+    signal,
+    userMessage: [
+      `Describe the government and the main parties of ${name} as they stand on ${variables.date || "the current date"}.`,
+      era ? `ERA & WORLD RULES:\n${era}` : "",
+      `TARGET DOSSIER:\n${dossier || "(nothing recorded)"}`,
+      sheet ? `STAT SHEET: government ${normalizeString(sheet.government) || "unknown"}; leader ${normalizeString(sheet.leader) || "unknown"}; stability ${sheet.stability ?? "unknown"}/100.` : "",
+      previous ? `PREVIOUS READING (${previous.asOf || "undated"}; keep what the events since have not changed):\n${JSON.stringify(previous.parties.map(({ nameEn, ideology, subideology, leader, role, seats, support }) => ({ nameEn, ideology, subideology, leader, role, seats, support })))}` : "",
+      `IDEOLOGIES AND THEIR SUBIDEOLOGIES:\n${ideologyListText()}`,
+    ].filter(Boolean).join("\n\n"),
+    variables,
+  });
+  const entry = normalizePoliticalLandscape({ ...payload, asOf: variables.date || "" });
+  if (!entry) throw new Error("The answer named no government and no parties.");
+  // Re-read at write time, as assessIntelligenceService does: a turn may have
+  // run, and the campaign in front of the player may have changed.
+  await waitForSimulationIdle({ signal });
+  throwIfAborted(signal);
+  if (activeCampaignId() !== campaign) throw new Error("The campaign changed while the parties were being compiled.");
+  const fresh = normalizeWorldState(await readWorldState({ force: true }));
+  await writeWorldState({ ...fresh, politics: { ...(fresh.politics ?? {}), [name]: entry } });
+  return entry;
+};
 
 const generateScenarioCustomStatSheet = async ({
   bundle,
