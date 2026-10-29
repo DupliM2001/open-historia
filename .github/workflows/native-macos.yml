@@ -250,7 +250,7 @@ jobs:
         continue-on-error: true
         run: |
           if [ "${{ steps.retina.outcome }}" = success ]; then
-            node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --only menu,settings,history,game --skip notify,war --screens c-menu-games,c-hud,c-settings-general,c-ai-setup,g-2-shift-tilt
+            node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --only menu,settings,history,game,gestures --skip notify,war --screens c-menu-games,c-hud,c-settings-general,c-ai-setup,g-2-shift-tilt
           else
             node native/macos/tour.mjs "$RUNNER_TEMP/out/Open Historia Native.app" "$RUNNER_TEMP/out/tour/Open Historia.pck" "$RUNNER_TEMP/tour/2x" --tag x2- --scale 2 --size 960x500 --only menu,settings,history,game --skip notify,war --screens c-menu-games,c-hud,c-settings-general
           fi
@@ -280,7 +280,7 @@ jobs:
         id: updaterquarantine
         continue-on-error: true
         run: |
-          node --test --test-reporter=spec --test-name-pattern "quarantined" native/sidecar/test/update-mac.test.mjs 2>&1 | tee "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"; test "${PIPESTATUS[0]}" = 0
+          node --test --test-reporter=spec --test-name-pattern "tools build|unquarantined" native/sidecar/test/update-mac.test.mjs 2>&1 | tee "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"; test "${PIPESTATUS[0]}" = 0
           grep -E "^ℹ (tests|pass|fail|skipped)" "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"
           ! grep -qE "^ℹ (pass 0|fail [1-9])" "$RUNNER_TEMP/tour/first-open/updater-quarantine.txt"
 
