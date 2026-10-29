@@ -809,7 +809,11 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
                 gap: "0.5rem",
                 // Uncapped when the whole body scrolls: a box that scrolls on
                 // its own inside one that scrolls catches the thumb halfway.
-                ...(scrollAsOne ? { flexShrink: 0 } : { maxHeight: "9rem", overflowY: "auto" }),
+                // Otherwise as tall as the suggestions need, giving way only
+                // down to 6rem so the submitted list keeps its 12rem below: a
+                // fixed 9rem showed one and a half cards, and queuing every
+                // suggestion meant scrolling for each.
+                ...(scrollAsOne ? { flexShrink: 0 } : { flex: "0 1 auto", minHeight: "6rem", overflowY: "auto" }),
                 scrollbarWidth: "none",
             }}
             >
