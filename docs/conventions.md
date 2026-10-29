@@ -25,7 +25,6 @@ Sibling repos in the same org that the code and docs reference (not part of this
 
 | Repo | Purpose |
 |------|---------|
-| `Open-Historia/open-historia-node` | The retired community **content node**; the game no longer asks one for anything. |
 | `Open-Historia/open-historia-admin` | Private registry Worker (D1) + admin panel; deploys the website. |
 | `Open-Historia/Open-historia-scenarios` | The Scenario Hub — official presets + community scenarios. |
 
@@ -243,7 +242,7 @@ The gitignored / release-hosted files:
 Rules of thumb:
 - **Never `git add`** any `*.pmtiles`, the seed geojson/json, or the default scenario's `regions.geojson`. They're gitignored; don't `-f` them in.
 - **To change a map file:** upload the new asset to the `map-data` release, then update its `sha256` + `bytes` in `scripts/map-assets.json`. `fetch-map-assets.mjs` re-downloads any listed file that's missing or hash-mismatched.
-- **The builds actively drop these from the bundle** — `vite.config.ts`'s `dropMapBinaries` plugin deletes the pmtiles (and, for web, the editor seeds) after copy, because Cloudflare Pages rejects any file over 25 MiB and nothing loads a pmtiles archive from the bundle anyway (the desktop streams them off disk via `/api/runtime/pmtiles/:assetKey`; the web build fetches them from content nodes, hash-verified). Don't defeat this plugin. See [Assets & data](assets-and-data.md).
+- **The builds actively drop these from the bundle** — `vite.config.ts`'s `dropMapBinaries` plugin deletes the pmtiles (and, for web, the editor seeds) after copy, because Cloudflare Pages rejects any file over 25 MiB and nothing loads a pmtiles archive from the bundle anyway (the desktop streams them off disk via `/api/runtime/pmtiles/:assetKey`; the website build lays its own copies under `assets/` after Vite, scripts/stage-map-assets.mjs). Don't defeat this plugin. See [Assets & data](assets-and-data.md).
 
 Related gitignored-but-not-in-LFS runtime artifacts you also shouldn't commit: `/fmg/` (the game's copy of the Fantasy Map Generator, fetched and prepared by `scripts/fetch-fmg.mjs`; the desktop installers pack it), `/src/runtime/web/generated/` (web seed), `/node-content/` (content-node store), and the offline signing keys `trust/*.key.pem` / `*.key` (**never commit a signing key**).
 

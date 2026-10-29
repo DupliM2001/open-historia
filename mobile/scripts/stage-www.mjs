@@ -1,15 +1,13 @@
 /*! Open Historia — stage the Android build into the Capacitor shell © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
 // The Android app is the web bundle built with `--mode android`
 // (npm run build:android → dist-android/), plus the world map inside the APK.
-// It used to be the website's bundle verbatim, which connected to a community
-// content node for every tile; now everything the game needs is on the phone,
-// and what still uses the network is the community hub, the player's own AI
+// Everything the game needs is on the phone, and what still uses the network is the community hub, the player's own AI
 // provider, the update check, and what a map draws from other services
 // (imagery, flags, place search). public/privacy/index.html lists them.
 //
 // This copies dist-android/ into mobile/www/ (Capacitor's webDir), drops the
 // website-only files that ride along in the output (marketing pages, the
-// sitemap, the signed node directory nobody consults here), and lays the
+// sitemap), and lays the
 // verified map data from map-cache/ under www/assets/. Nothing in mobile/www is
 // committed except its .gitignore.
 

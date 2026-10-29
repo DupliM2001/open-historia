@@ -237,18 +237,18 @@ Builds from before the change still call the Worker, so it still answers them, f
 
 It rides the site deploy from the admin panel (§6.1).
 
-### 7.2 Node registry — `open-historia-admin/registry/`
+### 7.2 Registry Worker — `open-historia-admin/registry/`
 
-The web-mode control plane (source of truth: the admin repo). Hosts the hub proxy, and the older node directory and `/content` map proxy, which the game no longer calls: the website carries its own map ([web-build.md §8](web-build.md#8-heavy-content-the-map-files-the-build-carries)). Worker name `open-historia-registry`. The game itself no longer calls the account, sync or presence routes: accounts were removed from the web build (see [web-build.md §10](web-build.md#10-accounts-and-sync-removed)).
+The web-mode control plane (source of truth: the admin repo). Hosts the hub proxy; the website carries its own map ([web-build.md §8](web-build.md#8-heavy-content-the-map-files-the-build-carries)). Worker name `open-historia-registry`. The game itself no longer calls the account, sync or presence routes: accounts were removed from the web build (see [web-build.md §10](web-build.md#10-accounts-and-sync-removed)).
 
 | Binding | Kind | Purpose |
 |---|---|---|
 | `NODES` | KV | Small hot keys + TTL items (magic-link tokens, sessions via `acct:`/`magic:`/`sess:` prefixes) |
-| `OH_ACCOUNTS` | D1 (`oh-accounts`) | Nodes table, users, sessions, wrapped account keys, encrypted sync blobs; schema in `registry/schema.sql` |
+| `OH_ACCOUNTS` | D1 (`oh-accounts`) | Users, sessions, wrapped account keys, encrypted sync blobs; schema in `registry/schema.sql` |
 | `IMPORT_COUNTER` | Service binding → `oh-import-counter` | For the older builds' `/hub/import-log` and `/hub/import-counts` (§7.1; this build calls neither). A direct binding because a Worker can't reach another same-account Worker via its public `workers.dev` URL (subrequest silently never arrives) |
 | `EMAIL` | Email Sending | Magic-link emails, sent by the Worker itself |
 
-The **admin panel** (`open-historia-admin/panel/server.js`) is the human interface to the registry. For the nodes the game no longer uses, it lists them, accepts/pauses/bans/rate-limits/redirects them, and after **any** change rebuilds the node directory, signs it with the offline root key (`oh-root.key.pem`), and POSTs it to the registry, which serves it live to players and nodes (`panel/server.js:66`). No game rebuild is needed for a directory change.
+The **admin panel** (`open-historia-admin/panel/server.js`) is the human interface to the registry and deploys the site.
 
 The web game points at the registry through build-time env (`.env.web`):
 
@@ -279,7 +279,7 @@ The Android app has no server of its own: it is the `--mode android` web bundle,
 | Script | What it does |
 |---|---|
 | `stage-map-assets.mjs` (`npm run map`) | Downloads the six files in `mobile/map-assets.android.json` from the `map-data` release into `mobile/map-cache/` and verifies size + sha256; a file already present and correct is skipped. The archives are the z8 trims (`scripts/trim-pmtiles.mjs`): regions 21.1 MB, countries 12.6 MB — the map never renders past z8 — plus `cities.pmtiles`, the 12.8 MB `default-regions.geojson`, `regions-seed.geojson` and `cities-seed.json`. The 55 MB desktop-only variants never ship. |
-| `stage-www.mjs` (`npm run www`) | Copies `dist-android/` into `mobile/www/`, prunes the website-only files (marketing pages, screenshots, sitemap, the signed node directory), and lays `map-cache/*` under `www/assets/`. |
+| `stage-www.mjs` (`npm run www`) | Copies `dist-android/` into `mobile/www/`, prunes the website-only files (marketing pages, screenshots, sitemap), and lays `map-cache/*` under `www/assets/`. |
 
 `build.gradle` stores `*.pmtiles` uncompressed (`androidResources { noCompress 'pmtiles' }`) so a Range read never inflates from byte 0; `versionCode`/`versionName` come from `OH_ANDROID_BUILD`; the `release` type signs with `OH_ANDROID_KEYSTORE` when set and the debug key otherwise. See [mobile.md](mobile.md).
 
@@ -310,7 +310,6 @@ It reads only from `server/seed/default`, which **is** committed (map included) 
 | **Website** | `main` | `dist-site/` | Admin-panel 🚀 button → clean `upstream/main` worktree → `build:site` → `wrangler pages deploy` (or legacy `deploy-site.yml`) | Nothing — next page load |
 | **Import counter Worker** (retired, §7.1) | `main` | `tools/import-counter/worker.js` | Rides the admin-panel site deploy from the same worktree | — |
 | **Registry Worker** | admin repo | `registry/worker.js` | Rides the site deploy from the admin repo dir | — |
-| **Node directory** | *runtime data* | signed JSON | Admin panel re-signs + POSTs to the registry on any node change | Live, no rebuild |
 | **Map binaries** | *manual* | Release assets | Uploaded to `map-data`; fetched by `fetch-map-assets.mjs` at launch/update/bundle | Downloaded on first run |
 
 Key asymmetries a newcomer should internalize:

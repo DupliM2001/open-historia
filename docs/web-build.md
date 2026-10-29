@@ -243,10 +243,6 @@ About 69 MB in all. The archives are the z8 trims (the map mounts both at `maxzo
 
 A browser cannot read a GitHub release asset: neither the release download nor the API route sends an `Access-Control-Allow-Origin` header on the file, and the API route is limited to 60 requests an hour without a token. The host must answer byte-range requests for static files; Cloudflare Pages does.
 
-### What it replaced
-
-The website used to fetch the archives and the two world files at run time from the registry Worker's `/content` proxy (`VITE_OH_PMTILES_URL`), try community content nodes first (a signed node directory, `VITE_OH_DIRECTORY_URL`), and check the bytes against a signed manifest. None of it is in the game any more: `src/runtime/web/nodeConnect.js`, `contentTrust.js` and `trust.js`, `public/content-manifest.json` and `public/node-directory.json` with their signatures, the signing and node scripts (`scripts/build-content-manifest.mjs`, `sign-release.mjs`, `gen-signing-key.mjs`, `node-updater.mjs`, `populate-node.mjs`), `server/node.js`, `server/trust.js`, `trust/`, the `@noble/ed25519` dependency and the tests workflow's manifest-expiry step are removed. The node software ([Open-Historia/open-historia-node](https://github.com/Open-Historia/open-historia-node)) and the Worker's `/content` route live elsewhere and are no longer asked for anything.
-
 Community hub downloads still go through the Worker (`VITE_OH_HUB_URL`, `/hub/file`, §3): community bundles are files on GitHub, and the same limit applies to them.
 
 ---
