@@ -37,7 +37,6 @@ import { institutionPortfolioForPolity } from "../../runtime/institutionLifecycl
 import { TURN_RUNNING_NOTE, isSimulationBusy } from "../AI/simulationStatus.js";
 import { useTurnRunning } from "./useTurnRunning.js";
 import { PARTY_ROLE_LABELS, findIdeology, isListedSubideology } from "../../runtime/politics.js";
-import { isSimulationBusy } from "../AI/simulationStatus.js";
 import { validateGameplayPayload } from "../AI/gameplaySchemas.js";
 import {
     appendCountryStatHistorySample,
