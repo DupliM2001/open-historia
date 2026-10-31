@@ -53,6 +53,23 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // The phone layout: the main menu, the library's cards and the in-game buttons (PR #918, 2026-10-31).
+    id: "2026-10-phone-layout",
+    kind: "minor",
+    date: "2026-10-31",
+    channel: "beta",
+    banners: [
+      {
+        title: "A tidier phone layout",
+        items: [
+          "On a phone, the main menu's tabs and buttons line up evenly, and searching and sorting the library take a row each.",
+          "Game cards in the library are more compact on small screens.",
+          "In a game on a phone, the menu, date and search buttons match in size, the advisor's button sits clear of the map switch, and the War Room button is smaller.",
+        ],
+      },
+    ],
+  },
+  {
     // Peace offered through the diplomatic chats, when the AI decides it, with each country's war in its diplomacy (2026-10-30).
     id: "2026-10-peace-in-the-chats",
     kind: "minor",
