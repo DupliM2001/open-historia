@@ -53,6 +53,23 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // Group diplomacy: countries added to a conversation, conversations renamed, members tagged (PR #917, 2026-10-31).
+    id: "2026-10-group-diplomacy",
+    kind: "minor",
+    date: "2026-10-31",
+    channel: "beta",
+    banners: [
+      {
+        title: "Group diplomacy",
+        items: [
+          "Add countries to a diplomatic conversation with Add Country in its header.",
+          "Rename a conversation with the pencil beside its title.",
+          "In a group conversation, tag countries with the @ chips above the message box: only the countries you tag answer.",
+        ],
+      },
+    ],
+  },
+  {
     // The phone layout: the main menu, the library's cards and the in-game buttons (PR #918, 2026-10-31).
     id: "2026-10-phone-layout",
     kind: "minor",
