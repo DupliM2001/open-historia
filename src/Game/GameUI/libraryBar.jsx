@@ -1337,17 +1337,17 @@ const GameCard = ({ active, busy, game, onActivate, onArchive, onClone, onDelete
       style={{
         ...themeSurfaceStyle,
         borderColor: active ? `${game.accentColor}88` : "rgba(255,255,255,0.09)",
-        borderRadius: isMobile ? "18px" : "24px",
+        borderRadius: "24px",
         boxShadow: active ? `0 0 0 1px ${game.accentColor}66, 0 16px 38px rgba(0,0,0,0.55)` : "0 14px 32px rgba(0,0,0,0.45)",
         display: "flex",
         flex: `0 0 ${SHELF_CARD_WIDTH}`,
         flexDirection: "column",
-        minHeight: isMobile ? "auto" : "22rem",
+        minHeight: "22rem",
         overflow: "visible",
         position: "relative",
       }}
     >
-      <div style={{ borderRadius: isMobile ? "18px 18px 0 0" : "24px 24px 0 0", height: isMobile ? "7.5rem" : "9.6rem", overflow: "hidden", position: "relative", width: "100%" }}>
+      <div style={{ borderRadius: "24px 24px 0 0", height: isMobile ? "7.5rem" : "9.6rem", overflow: "hidden", position: "relative", width: "100%" }}>
         <div
           style={{
             background:
