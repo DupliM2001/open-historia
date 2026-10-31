@@ -38,7 +38,9 @@ const smallButton = {
   cursor: "pointer",
 };
 
-const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false, busy = false, error = "", onConvert, onView, onClose }) => {
+// `blocked`: why the map cannot be converted at all (a detailed map,
+// projectionConvert.js), shown in place of the button's offer.
+const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false, busy = false, error = "", blocked = "", onConvert, onView, onClose }) => {
   const current = normalizeProjection(projection);
   const [type, setType] = useState(current.type);
   const [shape, setShape] = useState(() => formatAspect(current.type === FREEFORM ? current.aspect : pictureAspect || 2));
@@ -47,15 +49,13 @@ const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false,
   const aspect = parseAspect(shape);
   const chosen = type === FREEFORM ? (aspect ? projectionChoice(type, aspect) : null) : projectionChoice(type);
   const changed = Boolean(chosen) && !sameProjection(current, chosen);
+  const canConvert = changed && !busy && !blocked;
   // "Already drawn for it" only means something for a picture going to a world
   // projection: to freeform a picture is never redrawn anyway.
   const offersKeep = hasPicture && type !== FREEFORM && current.type !== FREEFORM;
 
   return (
     <Panel title="Projection" icon="layers" onClose={onClose} width={320}>
-      <p style={note}>
-        How the map is laid on the screen, here and in the game. Mercator is what every map starts as. Freeform is a flat sheet of any shape, with no globe behind it.
-      </p>
       <Row label="Projection">
         <SelectField
           value={type}
@@ -82,20 +82,18 @@ const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false,
           <Row label="The picture is already drawn for it">
             <Toggle value={keepPicture} onChange={setKeepPicture} />
           </Row>
-          <p style={note}>
-            Off: the basemap picture is redrawn in the new projection. On: the picture is kept as it is, and only the regions, cities and units are moved.
-          </p>
         </>
       )}
       <p style={note}>
         Converting moves every region, city and unit together with the basemap. Undo does not reach back past it: convert again to return.
       </p>
       {error ? <p style={{ ...note, color: "#ffb4a8" }}>{error}</p> : null}
+      {blocked && changed ? <p style={{ ...note, color: "#ffb4a8" }}>{blocked}</p> : null}
       <button
         type="button"
-        disabled={!changed || busy}
-        style={button(changed && !busy)}
-        onClick={() => changed && !busy && onConvert?.(chosen, { keepPicture: offersKeep && keepPicture })}
+        disabled={!canConvert}
+        style={button(canConvert)}
+        onClick={() => canConvert && onConvert?.(chosen, { keepPicture: offersKeep && keepPicture })}
       >
         {busy ? "Converting the map…" : changed ? "Convert the map" : "The map is in this projection"}
       </button>
@@ -105,9 +103,6 @@ const ProjectionPanel = ({ projection, pictureAspect = null, hasPicture = false,
       <Row label="Disable map looping">
         <Toggle value={current.wrap === false} onChange={(off) => onView?.({ wrap: !off })} />
       </Row>
-      <p style={note}>
-        Both are for the game. With the globe disabled, players cannot switch this map to the 3D globe. With looping disabled, the map ends at its edges instead of repeating sideways.
-      </p>
     </Panel>
   );
 };

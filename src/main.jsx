@@ -10,14 +10,22 @@ import {
     setDebugLogContext,
     withConsoleCaptureMuted,
 } from "./runtime/debugLog.js";
+import { buildLabel } from "./runtime/buildLabel.js";
 import { countVisit } from "./runtime/visitCount.js";
+import { startMusic } from "./runtime/ambientMusic.js";
 // Registers the Logging file's settings snapshot (every setting's current value).
 import "./runtime/settingsLog.js";
 import App from "./App.jsx";
+import { installRemoteRuntime } from "./multiplayer/client/remoteRuntime.js";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";
 
+// The website and the local server (a normal browser tab that can be installed
+// as an app) register public/sw.js. The Android app does not: mobile/scripts/
+// stage-www.mjs leaves sw.js out of the APK as website-only, so registering it
+// there was a 404 and a "registration failed" line opening every phone's log.
 const registerServiceWorker = () => {
+    if (import.meta.env.VITE_OH_NATIVE) return;
     if (!import.meta.env.DEV && "serviceWorker" in navigator) {
         window.addEventListener("load", () => {
             navigator.serviceWorker.register("/sw.js").catch((error) => {
@@ -59,7 +67,7 @@ const mount = () => {
 // console the packaged app has no way to open.
 installDebugLogCapture();
 setDebugLogContext({
-    build: import.meta.env.VITE_OH_WEB ? "web" : (import.meta.env.DEV ? "dev" : "desktop/local"),
+    build: buildLabel(import.meta.env),
     language: typeof navigator !== "undefined" ? navigator.language : "",
 });
 logDebugEvent("app", "Open Historia started.");
@@ -69,6 +77,14 @@ logDebugEvent("app", "Open Historia started.");
 // analytics: asked here, so that its build carries none of the counter.
 if (!import.meta.env.VITE_OH_NATIVE) void countVisit({ env: import.meta.env });
 
+// The music (runtime/ambientMusic.js): it waits for the player's first click
+// or key press, and asks for a file only when it is about to play and only
+// while music is on. The game's screen tells it where the player is.
+startMusic({ env: import.meta.env });
+
+// A shared game's documents are answered from the host's view
+// (multiplayer/client/remoteRuntime.js). Installed after the website's own /api
+// router so it sees each request first; it does nothing until a shared game begins.
 if (import.meta.env.VITE_OH_WEB) {
     // Web build (the hosted website): install the IndexedDB-backed /api
     // interceptor before anything makes a request, then mount. This whole
@@ -77,7 +93,11 @@ if (import.meta.env.VITE_OH_WEB) {
     import("./runtime/web/index.js")
         .then(({ installWebBackend }) => installWebBackend())
         .catch((error) => console.error("Web backend failed to install:", error))
-        .finally(mount);
+        .finally(() => {
+            installRemoteRuntime();
+            mount();
+        });
 } else {
+    installRemoteRuntime();
     mount();
 }

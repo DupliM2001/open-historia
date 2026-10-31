@@ -49,6 +49,23 @@ test("a server told not to be counted says so, in the app or out of it", () => {
   assert.deepEqual(appKindOf({ node: "22.0.0" }, { OH_VISIT_COUNT: "1" }), { app: "local" });
 });
 
+// "vault door by default only after a new update" (the owner, 2026-10-14): the
+// page learns the desktop app's build here (src/runtime/buildId.js).
+test("inside the desktop app it says which build is running, when the build is stamped", () => {
+  const electron = { node: "22.0.0", electron: "38.0.0" };
+  assert.deepEqual(appKindOf(electron, { OH_CHANNEL: "beta", OH_DESKTOP_BUILD: "18123456789" }), { app: "desktop", channel: "beta", build: "18123456789" });
+  assert.deepEqual(appKindOf(electron, { OH_DESKTOP_BUILD: " 42 " }), { app: "desktop", channel: "stable", build: "42" });
+  // Unstamped (a development run, the multiplayer build): nothing is said.
+  assert.deepEqual(appKindOf(electron, { OH_DESKTOP_BUILD: "" }), { app: "desktop", channel: "stable" });
+  // Told not to be counted, it still says its build: the door is not a counter.
+  assert.deepEqual(appKindOf(electron, { OH_VISIT_COUNT: "0", OH_DESKTOP_BUILD: "42" }), { app: "uncounted", build: "42" });
+  // A server started by hand is no desktop build, whatever its environment says.
+  assert.deepEqual(appKindOf({ node: "22.0.0" }, { OH_DESKTOP_BUILD: "42" }), { app: "local" });
+  assert.deepEqual(appKindOf({ node: "22.0.0" }, { OH_VISIT_COUNT: "0", OH_DESKTOP_BUILD: "42" }), { app: "uncounted" });
+  // And electron/main.cjs is where the stamp is read.
+  assert.ok(read("../electron/main.cjs").includes("process.env.OH_DESKTOP_BUILD = String("));
+});
+
 test("the server answers it from what it already knows", () => {
   const server = read("./server.js");
   assert.ok(server.includes('import { appKindOf } from "./appKind.js";'));

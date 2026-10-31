@@ -12,14 +12,25 @@
 export const APP_CHANNELS = Object.freeze(["stable", "beta", "multiplayer"]);
 
 // OH_VISIT_COUNT=0: no visit counter, neither Google Analytics nor Umami, on
-// the game page or on the pages served beside it (the wiki, the privacy
+// the game page or on the pages served beside it (the guides, the privacy
 // policy). Both go through one gate (public/consent.js), which loads nothing
 // for an application that answers "uncounted". For a test server, and for
 // anybody running the server who would rather not be counted.
+//
+// `build`: the desktop app's own build id, `env.OH_DESKTOP_BUILD`, which
+// electron/main.cjs read from the release's electron/build-id.json. The page
+// has no other way to learn it, and it tells an update from the build that ran
+// before (src/runtime/buildId.js: the vault door shows the first time the game
+// opens after an update). Only inside the app and only when the build is
+// stamped: a development run and the multiplayer build have none, and say
+// nothing. It stays on this computer: the visit counters read `app` and
+// `channel` alone.
 
 export const appKindOf = (versions = {}, env = {}) => {
-  if (String(env?.OH_VISIT_COUNT ?? "") === "0") return { app: "uncounted" };
+  const build = versions?.electron ? String(env?.OH_DESKTOP_BUILD ?? "").trim() : "";
+  const stamped = (kind) => (build ? { ...kind, build } : kind);
+  if (String(env?.OH_VISIT_COUNT ?? "") === "0") return stamped({ app: "uncounted" });
   if (!versions?.electron) return { app: "local" };
   const channel = String(env?.OH_CHANNEL || "stable");
-  return { app: "desktop", channel: APP_CHANNELS.includes(channel) ? channel : "stable" };
+  return stamped({ app: "desktop", channel: APP_CHANNELS.includes(channel) ? channel : "stable" });
 };

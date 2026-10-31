@@ -37,6 +37,11 @@ export const DOCK_WIDTH = `${DOCK_WIDTH_REM}rem`;
 export const DOCK_RIGHT_EDGE_REM = tidy(DOCK_LEFT_REM + DOCK_WIDTH_REM);
 export const BESIDE_DOCK_LEFT = `${tidy(DOCK_RIGHT_EDGE_REM + 0.5)}rem`;
 
+// The war room's button (main.jsx) stands beside the dock, as tall as the pill,
+// while the player's troops are on a battlefield; Search then begins beyond it.
+export const WAR_ROOM_BUTTON_REM = DOCK_HEIGHT_REM;
+export const BESIDE_WAR_ROOM_LEFT = `${tidy(DOCK_RIGHT_EDGE_REM + 0.5 + WAR_ROOM_BUTTON_REM + 0.5)}rem`;
+
 // The bottom edge of the launcher BUTTONS, not of the pill: a smaller control
 // beside them looks deliberate when it lines up with the buttons, and looks
 // like a mistake when it lines up with nothing.

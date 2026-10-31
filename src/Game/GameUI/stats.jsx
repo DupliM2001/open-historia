@@ -4,18 +4,39 @@ import { APP_HEIGHT, SAFE_BOTTOM, SAFE_LEFT, SAFE_RIGHT, SAFE_TOP, useTouchPrima
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { useBackToClose } from "../../runtime/backToClose.js";
 import { createPortal } from "react-dom";
-import { JSON_URLS, getNationFlags, readJson, reportPerfOperation } from "../../runtime/assets.js";
+import { JSON_URLS, getNationFlags, getNationTags, getPrimedScenarioRegionCatalog, readJson, reportPerfOperation } from "../../runtime/assets.js";
+import { useActiveFeatures } from "../../runtime/gameFeatures.js";
+import { groupsOnTerritory } from "../../runtime/groups.js";
+import { extendBounds } from "./eventFocus.js";
+import { showEventOnTimeline, warTimelineEventId, warTimelineEventOpensWar } from "./turnReveal.js";
 import { isPolityLandless, readGameData, readWorldState, readWorldStateView, writeWorldState } from "../../runtime/gameState.js";
 import { useLibraryState } from "../../runtime/library.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
 import { resolvePolityIdentity } from "../../runtime/polityIdentity.js";
+import { buildHistoricalTrackingCandidateRows, buildHistoricalTrackingIndex, filterHistoricalTrackingCandidateRows, historySamplesInRange } from "./statsHistoricalTracking.js";
+import { buildPlayerPoliticalKnowledgeView, buildPublicPoliticalView } from "../../runtime/politicalKnowledge.js";
+import { resolveCountryTags } from "../../runtime/countryTags.js";
+import { powerTierForPolity } from "../../runtime/powerStatus.js";
+import { livePuppetsFor, puppetKindLabel, puppetSummaryFor } from "../../runtime/puppets.js";
 import { intelligenceOf } from "../../runtime/spycraft.js";
-import { flagImageUrlFromGid } from "../../runtime/countryFlags.js";
+import { bundledFlagUrl, flagImageUrlFromGid } from "../../runtime/countryFlags.js";
 import COUNTRY_NAMES from "../../runtime/generated/countryNames.js";
-import { setRegionClickObserver } from "../Selection/Regions.jsx";
-import { assessPoliticalLandscape, ensureIntelligenceRated, generateCountryStatSheet } from "../AI/gameplayLazy.js";
+import { REGION_SELECTED_EVENT } from "../Selection/Regions.jsx";
+import { assessPoliticalLandscape, ensureCountryAssessed, ensureIntelligenceRated, ensureMilitaryFigures, generateCountryStatSheet, pendingCountryStatSheet, readOpenedIntercepts } from "../AI/gameplayLazy.js";
+import { wantsRating } from "../AI/militaryRating.js";
+import { militaryLookup } from "../../runtime/militaryStats.js";
+import PoliticalOverview from "./PoliticalOverview.jsx";
+import { buildRanking, openingMetric, rankingMetricsFor } from "./countryRanking.js";
+import { MANPOWER_PERCENT, militaryProfile } from "../../runtime/militaryPower.js";
+import { RESOURCES_SHORT_FROM } from "../../runtime/warResources.js";
+import { attritionOf } from "../../runtime/attrition.js";
+import { warSettingsOf } from "../../runtime/warSettings.js";
+import { PeaceControls, ReparationsNote } from "./warAndPeace.jsx";
+import { WarReportsList } from "./afterAction.jsx";
+import { institutionPortfolioForPolity } from "../../runtime/institutionLifecycleCore.js";
+import { TURN_RUNNING_NOTE, isSimulationBusy } from "../AI/simulationStatus.js";
+import { useTurnRunning } from "./useTurnRunning.js";
 import { PARTY_ROLE_LABELS, findIdeology, isListedSubideology } from "../../runtime/politics.js";
-import { isSimulationBusy } from "../AI/simulationStatus.js";
 import { validateGameplayPayload } from "../AI/gameplaySchemas.js";
 import {
     appendCountryStatHistorySample,
@@ -23,15 +44,16 @@ import {
     COUNTRY_STATS_POPULATION_CALIBRATION_VERSION,
     COUNTRY_STATS_TRACKING_INTERVALS,
     COUNTRY_STATS_TRACKING_MAX_POLITIES,
-    countryStatsTrackingIntervalLabel,
     finalizeCountryStatSheet,
     isCompleteCountryStatSheet,
     isCompleteCustomCountryStatSheet,
+    isTrackedStatSheetReady,
     mergeCountryStatPatch,
     mergeCountryStatsHistory,
     normalizeCountryStatHistorySample,
     normalizeCountryStatsHistory,
     normalizeCountryStatsTracking,
+    withCurrentCountryStatSample,
 } from "../../runtime/countryStats.js";
 import { compareGameDates, formatGameDateReadable, gameDateDayNumber, parseGameDate } from "../../runtime/gameDates.js";
 import {
@@ -68,6 +90,12 @@ if (typeof window !== "undefined") {
 }
 onMemoryPressure(() => memoryCache.clear());
 
+const POWER_TIER_LABELS = Object.freeze({
+    "major-power": "Major power",
+    "regional-power": "Regional power",
+    "minor-power": "Minor power",
+});
+
 const readTrackingSettingsFallback = (gameKey, playerCountry = "") => {
     if (!gameKey) return normalizeCountryStatsTracking({}, { playerCountry });
     try {
@@ -89,12 +117,22 @@ const storeTrackingSettingsFallback = (gameKey, value, playerCountry = "") => {
     }
 };
 
+// A sheet as the model's schema (gameplaySchemas.js countryStatSheet) knows it: without the military figures the
+// game keeps on it in the backend (runtime/militaryStats.js), which the schema does not list. Checked with them, every
+// sheet that had them "failed validation: $.military is not allowed" and the Economy tab could not open.
+const withoutBackendFields = (sheet) => {
+    if (!sheet || typeof sheet !== "object" || !("military" in sheet)) return sheet;
+    const checked = { ...sheet };
+    delete checked.military;
+    return checked;
+};
+
 const isValidStatSheet = (value, definition) => {
     const sheet = finalizeCountryStatSheet(value);
     if (definition?.custom) {
         return isCompleteCustomCountryStatSheet(sheet, statSheetKeys(definition));
     }
-    return isCompleteCountryStatSheet(sheet) && validateGameplayPayload("countryStatSheet", sheet).valid;
+    return isCompleteCountryStatSheet(sheet) && validateGameplayPayload("countryStatSheet", withoutBackendFields(sheet)).valid;
 };
 
 // 8B.2.16 compatibility repair: one older Stats path could plan >64 live-map
@@ -153,6 +191,33 @@ const storeSheet = (key, entry) => {
     } catch {
         // Quota errors just mean no persistence — the memory cache still works.
     }
+};
+
+// The auto-refresh cadence in words. Whole phrases written in this screen's own
+// file, so the language packs carry them: built in countryStats.js they were
+// never collected and showed in English inside translated sentences.
+const countryStatsTrackingIntervalLabel = (months) => {
+    const count = Math.max(0, Math.trunc(Number(months) || 0));
+    if (!count) return "Manual only";
+    return count === 1 ? "Every month" : `Every ${count} months`;
+};
+
+const refreshMenuButtonStyle = {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: "8px",
+    color: "#e7e7e9",
+    cursor: "pointer",
+    fontSize: "0.74rem",
+    fontWeight: 750,
+    padding: "0.4rem 0.7rem",
+};
+
+const refreshMenuHintStyle = {
+    color: "rgba(255,255,255,0.42)",
+    fontSize: "0.64rem",
+    lineHeight: 1.4,
+    marginTop: "0.25rem",
 };
 
 const clamp01 = (value) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
@@ -300,11 +365,21 @@ const CustomStatCard = ({ stat, value }) => {
     );
 };
 
-const CustomStatsSheet = ({ definition, sheet }) => {
+// The custom-sheet row the default layout calls "Intelligence service" is a
+// separate value generated with the sheet. Beside the live rating espionage
+// actually uses (world.intelligence, IntelligenceServiceCard) it would show a
+// second, different number under the same name, so it is not drawn then.
+const LIVE_INTELLIGENCE_STAT_KEYS = Object.freeze(["intelligenceService"]);
+
+// `hiddenKeys`: stat keys not to draw. A section left with nothing is skipped.
+const CustomStatsSheet = ({ definition, sheet, hiddenKeys = [] }) => {
     const values = sheet?.customStats || {};
+    const sections = definition.sections
+        .map((section) => ({ ...section, stats: section.stats.filter((stat) => !hiddenKeys.includes(stat.key)) }))
+        .filter((section) => section.stats.length > 0);
     return (
         <>
-            {definition.sections.map((section, sectionIndex) => (
+            {sections.map((section, sectionIndex) => (
                 <React.Fragment key={section.key}>
                     <div style={{ ...sectionTitleStyle, marginTop: sectionIndex === 0 ? "1rem" : sectionTitleStyle.marginTop }}>
                         {section.icon || "◆"} {section.label}
@@ -320,12 +395,132 @@ const CustomStatsSheet = ({ definition, sheet }) => {
     );
 };
 
+// The polity's intelligence service as espionage reads it (world.intelligence),
+// on the standard and on a custom sheet alike: the pane asks for a first
+// reading of it either way.
+const IntelligenceServiceCard = ({ value, style }) => (
+    <div style={{ ...cardStyle, ...style }}>
+        <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", marginBottom: "0.45rem" }}>
+            <span style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.68rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                🕵 Intelligence service
+            </span>
+            <span data-no-translate style={{ fontSize: "0.85rem", fontWeight: 800 }}>{value}/100</span>
+        </div>
+        <Bar value={value} color="#38bdf8" />
+    </div>
+);
+
+// ---- the Military card ---------------------------------------------------------------
+// "All 4 of these backend stats (quality, technology, manpower share,
+// weariness) should decide what the country's overall frontend military power
+// is", and land, sea and air are "ANOTHER set of stats that affect the overall
+// front end military strength". The card shows the power (runtime/
+// militaryPower.js, the figure the Ranking tab ranks by) and the figures it is
+// read from, each as a bar with a mark where every country stands: a figure
+// of the country's own (its scenario's author's, its sheet's) in the accent,
+// one it shares with every country in grey, and any weariness in amber.
+
+const MILITARY_FIGURE_LABELS = Object.freeze({
+    quality: "Troop quality",
+    technology: "Technology",
+    manpowerShare: "Manpower share",
+    weariness: "War weariness",
+    resources: "War resources",
+    land: "Land",
+    sea: "Naval",
+    air: "Air",
+    spending: "Spending",
+});
+const MILITARY_FIGURE_ORDER = Object.freeze(["quality", "technology", "spending", "manpowerShare", "weariness", "resources", "land", "sea", "air"]);
+const MILITARY_OWN_COLOR = "#2bc1f3";
+const MILITARY_SHARED_COLOR = "rgba(255,255,255,0.32)";
+const MILITARY_WEARY_COLOR = "#f59e0b";
+
+// Where every country stands on each figure, for the hairline on its bar (none
+// for weariness: every country begins a war at none).
+// For war resources, where running low begins to tell (runtime/warResources.js).
+const MILITARY_FIGURE_MARKS = Object.freeze({ quality: 50, technology: 50, spending: 50, manpowerShare: MANPOWER_PERCENT, resources: RESOURCES_SHORT_FROM, land: 50, sea: 50, air: 50 });
+
+// A figure's bar, 0 to 100, and a hairline where every country stands.
+const MilitaryBar = ({ value, mark, color }) => (
+    <div style={{ backgroundColor: "rgba(255,255,255,0.1)", borderRadius: "999px", height: "6px", overflow: "hidden", position: "relative" }}>
+    <div style={{ backgroundColor: color, borderRadius: "999px", height: "100%", width: `${clamp01(value)}%` }} />
+    {mark !== undefined && <div style={{ backgroundColor: "rgba(255,255,255,0.55)", height: "100%", left: `${clamp01(mark)}%`, position: "absolute", top: 0, width: "1px" }} />}
+    </div>
+);
+
+const MilitaryCard = ({ world, country, style }) => {
+    const profile = useMemo(() => {
+        if (!world || !country) return null;
+        return militaryProfile(world, country);
+    }, [world, country]);
+    // A country with no people known, or figures never rated, is rated against the others now that it is looked at
+    // (militaryRating.js): "if it is not pregenerated, it should just generate it whenever it is needed for the game
+    // for a country" (the owner, 2026-10-16). Background AI, once a sitting.
+    const unrated = Boolean(profile) && (profile.power === null || (profile.counted && wantsRating(militaryLookup(world)(country))));
+    useEffect(() => {
+        if (unrated) void ensureMilitaryFigures([country], { reason: "its Military card" });
+    }, [unrated, country]);
+    if (!profile) return null;
+    const { figures, own } = profile;
+    // What attrition has cost it in its war (runtime/attrition.js), where the scenario counts it.
+    const worn = warSettingsOf(world).mechanics.attrition ? attritionOf(world?.attrition, country) : null;
+    const power = profile.power === null ? "—" : (Math.round(profile.power * 10) / 10).toLocaleString();
+    return (
+        <div style={{ ...cardStyle, ...style }}>
+            <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", marginBottom: "0.2rem" }}>
+                <span style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.68rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                    Military power
+                </span>
+                <span data-no-translate style={{ fontSize: "1.05rem", fontWeight: 800 }}>{power}</span>
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.42)", fontSize: "0.64rem", lineHeight: 1.4, marginBottom: "0.55rem" }}>
+                What it weighs in a land war, by its people and what its forces have to spend, through the figures below.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                {MILITARY_FIGURE_ORDER.filter((key) => key !== "resources" || profile.supplied).map((key) => {
+                    const value = figures[key];
+                    const low = (key === "weariness" && value > 0) || (key === "resources" && value < RESOURCES_SHORT_FROM);
+                    const color = low ? MILITARY_WEARY_COLOR : own[key] ? MILITARY_OWN_COLOR : MILITARY_SHARED_COLOR;
+                    const text = key === "manpowerShare" ? `${Math.round(value * 10) / 10}%` : `${Math.round(value)}/100`;
+                    return (
+                        <div key={key} style={{ alignItems: "center", display: "grid", gap: "0.5rem", gridTemplateColumns: "6.4rem minmax(0, 1fr) 3.2rem" }}>
+                            <span style={{ color: own[key] ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.6)", fontSize: "0.72rem" }}>{MILITARY_FIGURE_LABELS[key]}</span>
+                            <MilitaryBar value={value} mark={MILITARY_FIGURE_MARKS[key]} color={color} />
+                            <span data-no-translate style={{ fontSize: "0.72rem", fontVariantNumeric: "tabular-nums", fontWeight: 800, textAlign: "right" }}>{text}</span>
+                        </div>
+                    );
+                })}
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.62rem", lineHeight: 1.4, marginTop: "0.55rem" }}>
+                {profile.counted
+                    ? "In colour: its own figures. In grey: what every country has. The mark on a bar is where every country stands."
+                    : "This scenario does not count countries' own military figures: every country fights with the same."}
+            </div>
+            {worn && (
+                <div data-oh-attrition="" style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.62rem", lineHeight: 1.4, marginTop: "0.3rem" }}>
+                    {`Lost to attrition, the weather and being cut off: ${worn.lastMen.toLocaleString()} men last turn, ${worn.warMen.toLocaleString()} in this war.`}
+                </div>
+            )}
+            {profile.supplied && profile.refill !== null && (
+                <div data-oh-war-resources-refill="" style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.62rem", lineHeight: 1.4, marginTop: "0.3rem" }}>
+                    {`Its economy refills its war resources by about ${profile.refill} a month, less under a blockade.`}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const stabilityColor = (value) => (value < 40 ? "#ef4444" : value < 70 ? "#f59e0b" : "#22c55e");
 
 const cleanText = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 const lowerText = (value) => cleanText(value).toLocaleLowerCase();
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
+// One-off resolution against a world the pane does not hold (a rollback
+// snapshot, a fresh read before a write). Anything that resolves many names in
+// the pane's own world uses its identity index instead (polityIndex below):
+// each call here builds the whole polity identity index again.
 const canonicalPolityKey = (value, world) => {
     const raw = cleanText(value);
     if (!raw) return "";
@@ -341,17 +536,6 @@ const canonicalPolityKey = (value, world) => {
         // Diplomacy UI must remain readable even if an old save contains a stale name.
     }
     return raw;
-};
-
-const polityDisplayName = (world, value) => {
-    const key = canonicalPolityKey(value, world);
-    if (!key) return "Unknown polity";
-    const direct = world?.polityOverrides?.[key];
-    if (cleanText(direct?.name)) return cleanText(direct.name);
-    for (const [candidateKey, candidate] of Object.entries(world?.polityOverrides || {})) {
-        if (lowerText(candidateKey) === lowerText(key)) return cleanText(candidate?.name) || cleanText(candidateKey);
-    }
-    return key;
 };
 
 // Match the canonical 7B rule: score is authoritative and the semantic
@@ -411,6 +595,14 @@ const agreementStatusTone = (status) => {
 
 const warStatusTone = (status) => (lowerText(status) === "active" ? "#f87171" : "#fbbf24");
 
+// A war the engine opened from a battle the model narrated records that fact as
+// its cause (nativeWarLedger.js reconcileCombatWarState), which is bookkeeping,
+// not a reason a player can read.
+const warCauseForDisplay = (cause) => {
+    const text = cleanText(cause);
+    return /^native bootstrap\b/i.test(text) ? "" : text;
+};
+
 const RelationMeter = ({ score, tone }) => {
     const value = Math.max(-100, Math.min(100, Number(score) || 0));
     const width = `${Math.abs(value) / 2}%`;
@@ -431,17 +623,91 @@ const DiplomacyMetric = ({ label, value, tone = "#e7e7e9" }) => (
     </div>
 );
 
-const DiplomacySection = ({ world, targetCountry }) => {
+// The groups holding ground on this country's regions (runtime/groups.js
+// groupsOnTerritory), or, for a player leading a group, that group's own area.
+// A row flies the map to the regions it counts. Not shown while groups are
+// switched off for this game.
+const GroupsOnTerritory = ({ world, targetCountry, isPlayer, mapRef }) => {
+    const groupsOn = useActiveFeatures().groups?.enabled !== false;
+    const rows = useMemo(() => {
+        if (!groupsOn || !world || !targetCountry) return [];
+        const catalog = new Map((getPrimedScenarioRegionCatalog() ?? []).map((entry) => [entry.id, entry]));
+        const ownerOf = (regionId) => world.regionOwnershipOverrides?.[regionId] || catalog.get(regionId)?.country || "";
+        return groupsOnTerritory(world, targetCountry, { ownerOf }).map((row) => {
+            let bounds = null;
+            for (const regionId of row.regionIds) {
+                const entry = catalog.get(regionId);
+                const box = entry?.bounds
+                    ?? (Number.isFinite(entry?.lng) && Number.isFinite(entry?.lat) ? [[entry.lng, entry.lat], [entry.lng, entry.lat]] : null);
+                bounds = extendBounds(bounds, box);
+            }
+            return { ...row, bounds };
+        });
+    }, [groupsOn, world, targetCountry]);
+
+    const show = useCallback((bounds) => {
+        const map = mapRef?.current?.getMap?.() ?? mapRef?.current;
+        if (!bounds || !map?.fitBounds) return;
+        try {
+            map.fitBounds(bounds, { duration: 1400, essential: true, maxZoom: 6.8, padding: 48 });
+        } catch {
+            // A camera that cannot fit (a canvas too small for the padding) stays where it is.
+        }
+    }, [mapRef]);
+
+    if (!rows.length) return null;
+
+    return (
+        <>
+        <div style={sectionTitleStyle}>{isPlayer ? "👥 Groups on our territory" : "👥 Groups on its territory"}</div>
+        <div style={{ ...cardStyle, padding: 0, overflow: "hidden" }}>
+        {rows.map((row, index) => {
+            const count = row.regionIds.length;
+            const held = count === 0 ? "Controls no area yet" : count === 1 ? "Controls 1 region" : `Controls ${count} regions`;
+            const canShow = Boolean(row.bounds);
+            return (
+                <button
+                key={row.name}
+                type="button"
+                className="oh-tap-row"
+                disabled={!canShow}
+                onClick={() => show(row.bounds)}
+                title={canShow ? "Show on the map" : undefined}
+                style={{ alignItems: "flex-start", background: "none", border: "none", borderTop: index ? "1px solid rgba(255,255,255,0.07)" : "none", color: "inherit", cursor: canShow ? "pointer" : "default", display: "flex", gap: "0.55rem", padding: "0.55rem 0.65rem", textAlign: "left", width: "100%" }}
+                >
+                <span aria-hidden="true" style={{ background: row.color, borderRadius: "2px", boxShadow: "0 0 0 1px rgba(0,0,0,0.55)", flexShrink: 0, height: "10px", marginTop: "0.2rem", width: "10px" }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ color: "rgba(255,255,255,0.88)", display: "block", fontSize: "0.74rem", fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.name}</span>
+                <span style={{ color: "rgba(255,255,255,0.45)", display: "block", fontSize: "0.62rem", marginTop: "0.12rem" }}>{held}</span>
+                {row.description && (
+                    <span style={{ WebkitBoxOrient: "vertical", WebkitLineClamp: 2, color: "rgba(255,255,255,0.38)", display: "-webkit-box", fontSize: "0.62rem", lineHeight: 1.4, marginTop: "0.2rem", overflow: "hidden" }}>{row.description}</span>
+                )}
+                </span>
+                {row.own && isPlayer && <span style={statusBadgeStyle("#2bc1f3")}>Our group</span>}
+                </button>
+            );
+        })}
+        </div>
+        </>
+    );
+};
+
+// `identity`: the pane's identity index for this world (buildHistoricalTrackingIndex),
+// built once per world. Resolving every relation, party and war side through
+// resolvePolityIdentity alone rebuilt that index for each name, hundreds of times
+// on every world update.
+const DiplomacySection = ({ world, identity, targetCountry, viewerPolity }) => {
     const diplomacy = useMemo(() => {
-        if (!world || !targetCountry) return null;
-        const target = canonicalPolityKey(targetCountry, world);
+        if (!world || !identity || !targetCountry) return null;
+        const { canonicalKey, displayName } = identity;
+        const target = canonicalKey(targetCountry);
         const targetKey = lowerText(target);
         if (!targetKey) return null;
 
         const relations = asArray(world.relations)
             .map((relation) => {
-                const a = canonicalPolityKey(relation?.a, world);
-                const b = canonicalPolityKey(relation?.b, world);
+                const a = canonicalKey(relation?.a);
+                const b = canonicalKey(relation?.b);
                 const aKey = lowerText(a);
                 const bKey = lowerText(b);
                 if (aKey !== targetKey && bKey !== targetKey) return null;
@@ -449,7 +715,7 @@ const DiplomacySection = ({ world, targetCountry }) => {
                 return {
                     ...relation,
                     counterpart,
-                    counterpartName: polityDisplayName(world, counterpart),
+                    counterpartName: displayName(counterpart),
                     displayStatus: relationStatusForScore(relation?.score),
                 };
             })
@@ -458,11 +724,11 @@ const DiplomacySection = ({ world, targetCountry }) => {
 
         const agreements = asArray(world.agreements)
             .map((agreement) => {
-                const parties = asArray(agreement?.parties).map((party) => canonicalPolityKey(party, world)).filter(Boolean);
+                const parties = asArray(agreement?.parties).map((party) => canonicalKey(party)).filter(Boolean);
                 if (!parties.some((party) => lowerText(party) === targetKey)) return null;
                 const counterparts = parties
                     .filter((party) => lowerText(party) !== targetKey)
-                    .map((party) => polityDisplayName(world, party));
+                    .map((party) => displayName(party));
                 return { ...agreement, counterparts };
             })
             .filter(Boolean)
@@ -475,24 +741,58 @@ const DiplomacySection = ({ world, targetCountry }) => {
         const currentWars = asArray(world.wars)
             .filter((war) => ["active", "ceasefire"].includes(lowerText(war?.status)))
             .map((war) => {
-                const sideA = asArray(war?.sideA).map((party) => canonicalPolityKey(party, world)).filter(Boolean);
-                const sideB = asArray(war?.sideB).map((party) => canonicalPolityKey(party, world)).filter(Boolean);
+                const sideA = asArray(war?.sideA).map((party) => canonicalKey(party)).filter(Boolean);
+                const sideB = asArray(war?.sideB).map((party) => canonicalKey(party)).filter(Boolean);
                 const onA = sideA.some((party) => lowerText(party) === targetKey);
                 const onB = sideB.some((party) => lowerText(party) === targetKey);
                 if (!onA && !onB) return null;
-                const opponents = (onA ? sideB : sideA).map((party) => polityDisplayName(world, party));
-                return { ...war, opponents };
+                const opponents = (onA ? sideB : sideA).map((party) => displayName(party));
+                const allies = (onA ? sideA : sideB)
+                    .filter((party) => lowerText(party) !== targetKey)
+                    .map((party) => displayName(party));
+                // Its first event the Events panel still keeps (turnReveal.js).
+                const timelineEventId = warTimelineEventId(war, world.simulationHistory);
+                return {
+                    ...war,
+                    opponents,
+                    allies,
+                    causeText: warCauseForDisplay(war?.cause),
+                    startedLabel: formatGameDateReadable(war?.startedDate, "D MMM YYYY") || cleanText(war?.startedDate),
+                    timelineEventId,
+                    timelineIsFirst: warTimelineEventOpensWar(war, world.simulationHistory, timelineEventId),
+                };
             })
             .filter(Boolean)
             .sort((left, right) => compareGameDates(right.lastUpdatedDate || right.startedDate || "", left.lastUpdatedDate || left.startedDate || ""));
+
+        // Puppet truth stays in the canonical relationship ledger, but player-facing diplomacy must
+        // never read that ledger directly. The shared resolver enforces covert
+        // knowledge and loyalty visibility consistently with the map, Advisor
+        // and diplomatic chat. Unknown covert arrangements therefore leave no
+        // trace in this drawer.
+        const viewer = canonicalKey(viewerPolity) || cleanText(viewerPolity);
+        const subordination = viewer ? puppetSummaryFor(world, viewer, target) : null;
+        const subordinates = viewer
+            ? livePuppetsFor(world, viewer)
+                .filter((row) => lowerText(canonicalKey(row?.overlord)) === targetKey)
+                .map((row) => ({
+                    ...row,
+                    puppetKey: canonicalKey(row?.puppet) || cleanText(row?.puppet),
+                    puppetName: displayName(row?.puppet),
+                    kindLabel: puppetKindLabel(row?.kind),
+                }))
+                .sort((left, right) => left.puppetName.localeCompare(right.puppetName))
+            : [];
 
         return {
             relations,
             agreements,
             currentWars,
+            subordination,
+            subordinates,
             activeAgreements: agreements.filter((agreement) => lowerText(agreement.status) === "active").length,
         };
-    }, [world, targetCountry]);
+    }, [world, identity, targetCountry, viewerPolity]);
 
     if (!diplomacy) return null;
 
@@ -504,6 +804,51 @@ const DiplomacySection = ({ world, targetCountry }) => {
         <DiplomacyMetric label="Active agreements" value={diplomacy.activeAgreements} tone="#34d399" />
         <DiplomacyMetric label="Conflicts" value={diplomacy.currentWars.length} tone={diplomacy.currentWars.length ? "#f87171" : "#94a3b8"} />
         </div>
+
+        {diplomacy.subordination && (
+            <div style={{ ...cardStyle, marginTop: "0.55rem", padding: "0.65rem" }}>
+            <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.56rem", fontWeight: 850, letterSpacing: "0.05em", textTransform: "uppercase" }}>Subordination</div>
+            <div style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.78rem", fontWeight: 850, marginTop: "0.28rem" }}>{diplomacy.subordination.headline}</div>
+            <div style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.66rem", lineHeight: 1.45, marginTop: "0.22rem" }}>{diplomacy.subordination.meaning}</div>
+            {diplomacy.subordination.facts.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.28rem", marginTop: "0.45rem" }}>
+                {diplomacy.subordination.facts.map((fact) => (
+                    <span key={fact} style={{ backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "999px", color: "rgba(255,255,255,0.68)", fontSize: "0.58rem", padding: "0.15rem 0.38rem" }}>{fact}</span>
+                ))}
+                </div>
+            )}
+            {diplomacy.subordination.provenance && (
+                <div style={{ color: "rgba(255,255,255,0.36)", fontSize: "0.58rem", fontStyle: "italic", lineHeight: 1.4, marginTop: "0.4rem" }}>{diplomacy.subordination.provenance}</div>
+            )}
+            </div>
+        )}
+
+        {diplomacy.subordinates.length > 0 && (
+            <div style={{ ...cardStyle, marginTop: "0.55rem", padding: 0, overflow: "hidden" }}>
+            <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.72rem", fontWeight: 800, padding: "0.55rem 0.65rem" }}>Subordinate states</div>
+            {diplomacy.subordinates.map((row) => {
+                const facts = [
+                    row.loyaltyBand,
+                    row.startedDate ? `Since ${row.startedDate}` : "",
+                    row.secrecy === "covert" ? "Covert" : "Openly known",
+                    row.fromIntelligence ? "From intelligence" : "",
+                ].filter(Boolean);
+                return (
+                    <div key={row.id || `${row.overlord}-${row.puppetKey}`} style={{ borderTop: "1px solid rgba(255,255,255,0.07)", padding: "0.55rem 0.65rem" }}>
+                    <div style={{ alignItems: "flex-start", display: "flex", gap: "0.55rem", justifyContent: "space-between" }}>
+                    <div style={{ minWidth: 0 }}>
+                    <div style={{ color: "rgba(255,255,255,0.86)", fontSize: "0.72rem", fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.puppetName}</div>
+                    {facts.length > 0 && (
+                        <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.6rem", lineHeight: 1.4, marginTop: "0.14rem" }}>{facts.join(" · ")}</div>
+                    )}
+                    </div>
+                    <span style={statusBadgeStyle(row.secrecy === "covert" ? "#d4d4d8" : "#60a5fa")}>{prettyToken(row.kindLabel)}</span>
+                    </div>
+                    </div>
+                );
+            })}
+            </div>
+        )}
 
         <div style={{ ...cardStyle, marginTop: "0.55rem", padding: 0, overflow: "hidden" }}>
         <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", padding: "0.55rem 0.65rem" }}>
@@ -576,6 +921,9 @@ const DiplomacySection = ({ world, targetCountry }) => {
         </div>
         {diplomacy.currentWars.length ? diplomacy.currentWars.map((war, index) => {
             const tone = warStatusTone(war.status);
+            // The date as a date, under the name the line has always used, so
+            // it stays the catalogued sentence.
+            const startedDate = war.startedLabel;
             return (
                 <div key={war.id || `${war.title}-${index}`} style={{ borderTop: "1px solid rgba(255,255,255,0.07)", padding: "0.55rem 0.65rem" }}>
                 <div style={{ alignItems: "flex-start", display: "flex", gap: "0.55rem", justifyContent: "space-between" }}>
@@ -584,8 +932,32 @@ const DiplomacySection = ({ world, targetCountry }) => {
                 vs {war.opponents.length ? war.opponents.join(" · ") : "Unknown opponent"}
                 </div>
                 <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.61rem", marginTop: "0.14rem" }}>
-                {war.title || "Canonical conflict"}{war.startedDate ? ` · since ${war.startedDate}` : ""}
+                {war.title || "Canonical conflict"}{startedDate ? ` · since ${startedDate}` : ""}
                 </div>
+                {war.allies.length ? (
+                    <div style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.61rem", marginTop: "0.14rem" }}>
+                    {`Fighting alongside ${war.allies.join(" · ")}`}
+                    </div>
+                ) : null}
+                {war.causeText ? (
+                    <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.61rem", lineHeight: 1.35, marginTop: "0.14rem" }}>
+                    {`Why it began: ${war.causeText}`}
+                    </div>
+                ) : null}
+                {war.timelineEventId ? (
+                    // Opens the Events panel on the war's first event it still
+                    // keeps, on whichever kept turn holds it (time.jsx).
+                    <button
+                    type="button"
+                    className="oh-tap-row"
+                    onClick={() => showEventOnTimeline(war.timelineEventId)}
+                    style={{ background: "none", border: "none", color: "#2bc1f3", cursor: "pointer", display: "block", font: "inherit", fontSize: "0.61rem", fontWeight: 700, marginTop: "0.22rem", padding: 0, textAlign: "left" }}
+                    >
+                    {war.timelineIsFirst ? "See how it began on the timeline" : "See it on the timeline"}
+                    </button>
+                ) : null}
+                {/* How weary each side is, and, in a war of the player's own, terms of their own (warAndPeace.jsx). */}
+                <PeaceControls war={war} world={world} viewer={viewerPolity} />
                 </div>
                 <span style={statusBadgeStyle(tone)}>{prettyToken(war.status || "active")}</span>
                 </div>
@@ -597,6 +969,9 @@ const DiplomacySection = ({ world, targetCountry }) => {
             </div>
         )}
         </div>
+        {/* The reports of the wars it fought on battlefields that have closed, to read again (afterAction.jsx). */}
+        <WarReportsList world={world} country={viewerPolity} style={{ ...cardStyle, marginTop: "0.55rem", padding: 0, overflow: "hidden" }} />
+        <ReparationsNote world={world} target={targetCountry} />
         </>
     );
 };
@@ -606,8 +981,8 @@ const ROLE_TONES = {
     coalition: "#fcd34d",
     opposition: "#93c5fd",
     extraParliamentary: "#94a3b8",
-    underground: "#a78bfa",
-    exile: "#a78bfa",
+    underground: "#9aa1ab",
+    exile: "#9aa1ab",
     banned: "#f87171",
 };
 
@@ -1129,10 +1504,7 @@ const AdvancedStatsModal = ({
 
     const selectedMetrics = metricKeys.map((key) => metricsByKey[key]).filter(Boolean);
     const selectedUnit = selectedMetrics[0]?.unit || "gdp";
-    const latestMs = samples.reduce((max, sample) => Math.max(max, historyDateMs(sample.date) || 0), 0);
-    const years = range === "1y" ? 1 : range === "5y" ? 5 : range === "10y" ? 10 : null;
-    const cutoff = years && latestMs ? latestMs - years * 365.2425 * 24 * 60 * 60 * 1000 : null;
-    const visibleSamples = cutoff ? samples.filter((sample) => historyDateMs(sample.date) >= cutoff) : samples;
+    const visibleSamples = historySamplesInRange(samples, range);
     const first = visibleSamples[0];
     const last = visibleSamples[visibleSamples.length - 1];
 
@@ -1160,7 +1532,7 @@ const AdvancedStatsModal = ({
             <div style={{ background: "rgba(20,20,22,0.995)", border: "1px solid var(--oh-hud-border)", borderRadius: "18px", boxShadow: "var(--oh-hud-shadow)", display: "flex", flexDirection: "column", height: `min(880px, calc(${APP_HEIGHT} - 2.4rem))`, maxWidth: "1380px", minHeight: "580px", overflow: "hidden", width: "min(96vw, 1380px)", ...(isMobile ? phoneSheetStyle : fit ? { minHeight: 0 } : null) }}>
                 <div style={{ alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: "0.75rem", padding: "0.85rem 1rem" }}>
                     <div style={{ alignItems: "center", backgroundColor: "rgba(59,130,246,0.12)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "9px", display: "flex", flexShrink: 0, height: "2.25rem", justifyContent: "center", overflow: "hidden", width: "2.25rem" }}>
-                        {flagUrl ? <img alt="" src={flagUrl} style={{ height: "100%", objectFit: "cover", width: "100%" }} /> : <span style={{ color: "#93c5fd", fontSize: "0.72rem", fontWeight: 900 }}>{flagFallback}</span>}
+                        {flagUrl ? <img alt="" src={bundledFlagUrl(flagUrl)} style={{ height: "100%", objectFit: "cover", width: "100%" }} /> : <span style={{ color: "#93c5fd", fontSize: "0.72rem", fontWeight: 900 }}>{flagFallback}</span>}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ alignItems: "baseline", display: "flex", flexWrap: "wrap", gap: "0.35rem 0.65rem" }}>
@@ -1258,7 +1630,7 @@ const AdvancedStatsModal = ({
                         <div style={{ backgroundColor: "rgba(59,130,246,0.07)", border: "1px solid rgba(96,165,250,0.14)", borderRadius: "9px", marginTop: "0.85rem", padding: "0.6rem 0.65rem" }}>
                             <div style={{ color: "#bfdbfe", fontSize: "0.63rem", fontWeight: 850 }}>Campaign history</div>
                             <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.58rem", lineHeight: 1.45, marginTop: "0.2rem" }}>
-                                {persistentCount} permanent sample{persistentCount === 1 ? "" : "s"}{recoveredCount > 0 ? ` · ${recoveredCount} recovered from rollback snapshots` : ""}. New completed turns are recorded automatically.
+                                {persistentCount} permanent sample{persistentCount === 1 ? "" : "s"}{recoveredCount > 0 ? ` · ${recoveredCount} recovered from rollback snapshots` : ""}. A completed turn that changes these figures is recorded automatically.
                             </div>
                         </div>
                     </aside>
@@ -1269,14 +1641,19 @@ const AdvancedStatsModal = ({
     );
 };
 
+const STOCK_COUNTRY_NAMES = Object.values(COUNTRY_NAMES);
+
 const HistoricalTrackingModal = ({
     open,
     onClose,
     settings,
     onChange,
     world,
+    identity,
     playerCountry,
     currentCountry,
+    statSheetDefinition,
+    onAssess,
 }) => {
     const [search, setSearch] = useState("");
     // As Advanced Statistics: a phone gets the whole screen and one column that
@@ -1300,33 +1677,50 @@ const HistoricalTrackingModal = ({
         };
     }, [open, onClose]);
 
-    const candidates = useMemo(() => {
-        const collected = new Map();
-        const add = (value) => {
-            const key = canonicalPolityKey(value, world);
-            if (!key || collected.has(lowerText(key))) return;
-            if (world && isPolityLandless(world, key)) return;
-            collected.set(lowerText(key), key);
-        };
-        add(playerCountry);
-        add(currentCountry);
-        Object.keys(world?.countryStats || {}).forEach(add);
-        Object.keys(world?.polityOverrides || {}).forEach(add);
-        return [...collected.values()].sort((a, b) => polityDisplayName(world, a).localeCompare(polityDisplayName(world, b)));
-    }, [world, playerCountry, currentCountry]);
+    // One bounded index for the whole modal. The previous implementation rebuilt
+    // polity identity and normalized/scanned the region ledger once per candidate,
+    // then resolved every label again on EVERY keystroke. On detailed scenarios
+    // that turned a country search into tens of seconds of synchronous work.
+    const trackingCandidates = useMemo(() => buildHistoricalTrackingCandidateRows({
+        world,
+        playerCountry,
+        currentCountry,
+        index: identity,
+        stockNames: STOCK_COUNTRY_NAMES,
+    }), [world, identity, playerCountry, currentCountry]);
+    const candidateRows = trackingCandidates.rows;
 
     const trackedPolities = settings?.trackedPolities || [];
-    const filteredCandidates = useMemo(() => {
-        const query = lowerText(search);
-        if (!query) return candidates;
-        return candidates.filter((key) => {
-            const label = polityDisplayName(world, key);
-            return lowerText(key).includes(query) || lowerText(label).includes(query);
-        });
-    }, [candidates, search, world]);
+    // Which countries the automatic refresh can carry, by the scheduler's own
+    // rule (isTrackedStatSheetReady) under the key it looks sheets up by. A
+    // country without one is skipped every turn until its first reading, which
+    // the label used to hide by calling any sheet at all ready. The key is exact,
+    // as the scheduler's is: a polity's name is its identity.
+    const customSheetKeys = useMemo(
+        () => (statSheetDefinition?.custom ? statSheetKeys(statSheetDefinition) : null),
+        [statSheetDefinition],
+    );
+    const sheetReady = useCallback(
+        (key) => isTrackedStatSheetReady(world?.countryStats?.[trackingCandidates.index.canonicalKey(key) || key], customSheetKeys),
+        [world, customSheetKeys, trackingCandidates],
+    );
+    // When the refresh last ran, per country and for the whole batch — written
+    // by the scheduler after every skip, and shown nowhere until now.
+    const refreshRecord = useMemo(
+        () => normalizeCountryStatsTracking(world?.countryStatsTracking, { playerCountry }),
+        [world, playerCountry],
+    );
+    const lastRefreshOf = useCallback(
+        (key) => refreshRecord.lastAutoRefreshByPolity?.[trackingCandidates.index.canonicalKey(key) || key] || "",
+        [refreshRecord, trackingCandidates],
+    );
+    const filteredCandidates = useMemo(
+        () => filterHistoricalTrackingCandidateRows(candidateRows, search),
+        [candidateRows, search],
+    );
 
     const toggleCountry = useCallback((key) => {
-        const canonical = canonicalPolityKey(key, world) || key;
+        const canonical = trackingCandidates.index.canonicalKey(key) || key;
         const current = normalizeCountryStatsTracking(settings, { playerCountry });
         const alreadyTracked = current.trackedPolities.some((item) => lowerText(item) === lowerText(canonical));
         let nextTracked = current.trackedPolities;
@@ -1336,7 +1730,7 @@ const HistoricalTrackingModal = ({
             nextTracked = [...current.trackedPolities, canonical];
         }
         onChange({ ...current, trackedPolities: nextTracked });
-    }, [settings, onChange, playerCountry, world]);
+    }, [settings, onChange, playerCountry, trackingCandidates]);
 
     const setIntervalMonths = useCallback((intervalMonths) => {
         onChange({ ...(settings || {}), intervalMonths });
@@ -1418,7 +1812,7 @@ const HistoricalTrackingModal = ({
 
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.7rem" }}>
                                 {trackedPolities.map((key) => {
-                                    const label = polityDisplayName(world, key);
+                                    const label = trackingCandidates.index.displayName(key);
                                     const isPlayer = lowerText(key) === lowerText(playerCountry);
                                     return (
                                         <button
@@ -1432,6 +1826,7 @@ const HistoricalTrackingModal = ({
                                         >
                                             <span>{label}</span>
                                             {isPlayer && <span style={{ color: "#fbbf24", fontSize: "0.62rem", fontWeight: 800 }}>you</span>}
+                                            {!sheetReady(key) && <span style={{ color: "#fbbf24", fontSize: "0.62rem", fontWeight: 800 }}>baseline needed</span>}
                                             <span style={{ color: "rgba(255,255,255,0.45)" }}>×</span>
                                         </button>
                                     );
@@ -1442,7 +1837,8 @@ const HistoricalTrackingModal = ({
                             </div>
 
                             <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: "0.35rem", marginTop: "0.85rem", minHeight: 0, overflowY: "auto", paddingTop: "0.85rem", ...(fit ? { flex: "0 0 auto", maxHeight: `calc(${APP_HEIGHT} * 0.5)` } : null) }}>
-                                {filteredCandidates.map((key) => {
+                                {filteredCandidates.map((row) => {
+                                    const key = row.key;
                                     const tracked = trackedPolities.some((item) => lowerText(item) === lowerText(key));
                                     const isPlayer = lowerText(key) === lowerText(playerCountry);
                                     const isViewed = lowerText(key) === lowerText(currentCountry);
@@ -1472,14 +1868,14 @@ const HistoricalTrackingModal = ({
                                             <span style={{ minWidth: 0 }}>
                                                 <span style={{ alignItems: "center", display: "flex", gap: "0.4rem", minWidth: 0 }}>
                                                     <span aria-hidden="true" style={{ alignItems: "center", backgroundColor: tracked ? "#22c55e" : "rgba(255,255,255,0.06)", border: `1px solid ${tracked ? "#22c55e" : "rgba(255,255,255,0.12)"}`, borderRadius: "4px", color: "#121214", display: "inline-flex", flexShrink: 0, fontSize: "0.55rem", fontWeight: 1000, height: "14px", justifyContent: "center", width: "14px" }}>{tracked ? "✓" : ""}</span>
-                                                    <span style={{ fontSize: "0.74rem", fontWeight: tracked ? 800 : 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{polityDisplayName(world, key)}</span>
+                                                    <span style={{ fontSize: "0.74rem", fontWeight: tracked ? 800 : 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
                                                 </span>
                                                 <span style={{ alignItems: "center", color: "rgba(255,255,255,0.42)", display: "flex", flexWrap: "wrap", fontSize: "0.62rem", gap: "0.35rem", marginTop: "0.18rem" }}>
                                                     {isPlayer && <span style={{ color: "#fbbf24" }}>your country</span>}
                                                     {isViewed && !isPlayer && <span style={{ color: "#93c5fd" }}>currently viewed</span>}
                                                     {!isPlayer && !isViewed && <span>{cleanText(key)}</span>}
-                                                    <span style={{ color: world?.countryStats?.[key] ? "#86efac" : "#fbbf24" }}>
-                                                        {world?.countryStats?.[key] ? "Stats ready" : "baseline needed"}
+                                                    <span style={{ color: sheetReady(key) ? "#86efac" : "#fbbf24" }}>
+                                                        {sheetReady(key) ? "Stats ready" : "baseline needed"}
                                                     </span>
                                                 </span>
                                             </span>
@@ -1501,6 +1897,51 @@ const HistoricalTrackingModal = ({
                                 {" "}When tracked countries become due, Continuum refreshes all initialized sheets in one bounded AI batch after a completed turn. Countries marked <span style={{ color: "#fbbf24" }}>baseline needed</span> begin auto-refreshing after their first normal Stats sheet exists.
                             </div>
                         </div>
+                        {trackedPolities.length > 0 && (
+                            <div style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px", padding: "0.85rem 0.9rem" }}>
+                                <div style={{ color: "rgba(255,255,255,0.8)", fontSize: "0.74rem", fontWeight: 800 }}>Refresh status</div>
+                                <div style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.67rem", lineHeight: 1.5, marginTop: "0.3rem" }}>
+                                    {refreshRecord.lastBatchDate
+                                        ? `The last automatic refresh ran on ${formatGameDateReadable(refreshRecord.lastBatchDate)}.`
+                                        : "No automatic refresh has run yet."}
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginTop: "0.55rem" }}>
+                                    {trackedPolities.map((key) => {
+                                        const label = trackingCandidates.index.displayName(key);
+                                        const ready = sheetReady(key);
+                                        const last = lastRefreshOf(key);
+                                        return (
+                                            <div key={key} style={{ alignItems: "center", display: "flex", gap: "0.5rem", justifyContent: "space-between" }}>
+                                                <span style={{ minWidth: 0 }}>
+                                                    <span style={{ color: "rgba(255,255,255,0.82)", display: "block", fontSize: "0.7rem", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                                                    <span style={{ color: ready ? "rgba(255,255,255,0.42)" : "#fbbf24", display: "block", fontSize: "0.62rem" }}>
+                                                        {!ready
+                                                            ? "Needs a first reading"
+                                                            : last
+                                                                ? `Last refreshed on ${formatGameDateReadable(last)}`
+                                                                : "Not refreshed automatically yet"}
+                                                    </span>
+                                                </span>
+                                                {!ready && typeof onAssess === "function" && (
+                                                    <button
+                                                        type="button"
+                                                        className="oh-tap-row"
+                                                        onClick={() => onAssess(trackingCandidates.index.canonicalKey(key) || key)}
+                                                        aria-label={`Assess ${label} now`}
+                                                        style={{ backgroundColor: "rgba(43,193,243,0.1)", border: "1px solid rgba(43,193,243,0.3)", borderRadius: "999px", color: "#2bc1f3", cursor: "pointer", flexShrink: 0, fontSize: "0.64rem", fontWeight: 800, padding: "0.3rem 0.6rem" }}
+                                                    >
+                                                        Assess now
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div style={{ color: "rgba(255,255,255,0.38)", fontSize: "0.62rem", lineHeight: 1.45, marginTop: "0.55rem" }}>
+                                    A country without a complete Stats sheet is skipped by the automatic refresh. Assessing it opens its Stats, which builds the first sheet with one request.
+                                </div>
+                            </div>
+                        )}
                         <div style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px", padding: "0.85rem 0.9rem" }}>
                             <div style={{ color: "rgba(255,255,255,0.8)", fontSize: "0.74rem", fontWeight: 800 }}>Suggested approach</div>
                             <ul style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.67rem", lineHeight: 1.5, margin: "0.5rem 0 0", paddingLeft: "1rem" }}>
@@ -1521,17 +1962,176 @@ const HistoricalTrackingModal = ({
     );
 };
 
-const StatsPaneBody = ({ active }) => {
+// ---- the ranking ---------------------------------------------------------------------
+// "A cross-country ranking tab in Stats." The countries of the game ranked by
+// one figure at a time (countryRanking.js). A row opens that country in the
+// pane. A figure only an assessed country has leaves the rest out and says how
+// many: nothing is ranked on a guess.
+
+const RANKING_ROWS_FIRST = 25;
+
+const formatRankingValue = (metric, value) => {
+    if (metric.stat) return formatCustomStatValue(metric.stat, value);
+    if (metric.kind === "money") return formatEuroTotal(value);
+    if (metric.kind === "money each") return formatEuroPerCapita(value);
+    if (metric.kind === "index") return String(Math.round(value));
+    if (metric.kind === "weight") return (Math.round(value * 10) / 10).toLocaleString();
+    return formatCompactNumber(value);
+};
+
+const rankingMetricStyle = (selected, touch) => ({
+    backgroundColor: selected ? "rgba(43,193,243,0.16)" : "rgba(255,255,255,0.04)",
+    border: `1px solid ${selected ? "rgba(43,193,243,0.6)" : "rgba(255,255,255,0.1)"}`,
+    borderRadius: "999px",
+    color: selected ? "#e8f8fe" : "rgba(255,255,255,0.62)",
+    cursor: "pointer",
+    fontSize: "0.7rem",
+    fontWeight: 700,
+    minHeight: touch ? "2.4rem" : undefined,
+    padding: "0.3rem 0.65rem",
+});
+
+const rankingRowStyle = (open, mine) => ({
+    alignItems: "center",
+    backgroundColor: open ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+    border: `1px solid ${mine ? "rgba(43,193,243,0.6)" : open ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)"}`,
+    borderRadius: "8px",
+    color: "#f4f4f5",
+    cursor: "pointer",
+    display: "grid",
+    gap: "0.15rem 0.5rem",
+    gridTemplateColumns: "1.7rem 1.5rem minmax(0, 1fr) auto",
+    padding: "0.4rem 0.55rem",
+    textAlign: "left",
+    width: "100%",
+});
+
+const RankingSection = ({ world, definition, index, playerCode, targetCountry, onPick, flags, touch }) => {
+    const [metricKey, setMetricKey] = useState("");
+    const [showAll, setShowAll] = useState(false);
+    const metrics = useMemo(
+        () => rankingMetricsFor({ definition, rows: definition?.custom ? flattenStatSheetRows(definition) : [], world }),
+        [definition, world],
+    );
+    const countries = useMemo(
+        () => buildHistoricalTrackingCandidateRows({ world: world ?? {}, playerCountry: playerCode, currentCountry: targetCountry, index, stockNames: STOCK_COUNTRY_NAMES }).rows,
+        [world, playerCode, targetCountry, index],
+    );
+    // (Until one is picked: the first figure a few countries have, so the tab does not open on an empty list.)
+    const opening = useMemo(
+        () => openingMetric({ world: world ?? {}, countries, metrics, catalog: getPrimedScenarioRegionCatalog() ?? [] }),
+        [world, countries, metrics],
+    );
+    const metric = metrics.find((entry) => entry.key === metricKey) ?? opening;
+    const ranking = useMemo(
+        () => (metric ? buildRanking({ world: world ?? {}, countries, metric, catalog: getPrimedScenarioRegionCatalog() ?? [] }) : null),
+        [world, countries, metric],
+    );
+    // Ranked by military power: the countries it has no figure for (nobody knows their people) or whose figures were
+    // never rated are rated against the others, twenty to a request, as background AI (militaryRating.js): "if it is
+    // not pregenerated, it should just generate it whenever it is needed for the game for a country" (the owner,
+    // 2026-10-16). Nobody's sheet is assessed.
+    const unrated = useMemo(() => {
+        if (metric?.key !== "military" || !ranking) return [];
+        const ranked = new Set(ranking.rows.map((row) => row.key));
+        const lookup = warSettingsOf(world ?? {}).mechanics.military ? militaryLookup(world ?? {}) : null;
+        return countries.map((country) => country.key).filter((key) => !ranked.has(key) || (lookup !== null && wantsRating(lookup(key))));
+    }, [metric?.key, ranking, countries, world]);
+    const unratedKey = unrated.join("|");
+    useEffect(() => {
+        if (unrated.length > 0) void ensureMilitaryFigures(unrated, { reason: "the military ranking" });
+        // (Asked again only when the list changes.)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [unratedKey]);
+    if (!metric || !ranking) return null;
+    const shown = showAll ? ranking.rows : ranking.rows.slice(0, RANKING_ROWS_FIRST);
+    return (
+        <div>
+            <div style={sectionTitleStyle}>Ranked by</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                {metrics.map((entry) => (
+                    <button
+                        key={entry.key}
+                        type="button"
+                        aria-pressed={entry.key === metric.key}
+                        onClick={() => { setMetricKey(entry.key); setShowAll(false); }}
+                        style={rankingMetricStyle(entry.key === metric.key, touch)}
+                    >{entry.label}</button>
+                ))}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginTop: "0.75rem" }}>
+                {shown.map((row) => {
+                    const flagUrl = flags?.[row.key] || world?.polityOverrides?.[row.key]?.flag || flagImageUrlFromGid(row.key);
+                    const mine = Boolean(playerCode) && row.key === playerCode;
+                    const open = row.key === targetCountry;
+                    return (
+                        <button
+                            key={row.key}
+                            type="button"
+                            className="oh-tap-row"
+                            aria-current={open ? "true" : undefined}
+                            title={mine ? "Your country" : undefined}
+                            onClick={() => onPick(row.key)}
+                            style={rankingRowStyle(open, mine)}
+                        >
+                            <span data-no-translate style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.72rem", fontVariantNumeric: "tabular-nums", fontWeight: 800 }}>{row.rank}</span>
+                            <span style={{ backgroundColor: "rgba(255,255,255,0.08)", borderRadius: "3px", display: "block", height: "1rem", overflow: "hidden", width: "1.5rem" }}>
+                                {flagUrl ? <img alt="" src={bundledFlagUrl(flagUrl)} style={{ display: "block", height: "100%", objectFit: "cover", width: "100%" }} /> : null}
+                            </span>
+                            <span data-no-translate style={{ fontSize: "0.78rem", fontWeight: mine ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
+                            <span data-no-translate style={{ fontSize: "0.78rem", fontVariantNumeric: "tabular-nums", fontWeight: 800 }}>{formatRankingValue(metric, row.value)}</span>
+                            <span style={{ backgroundColor: "rgba(255,255,255,0.08)", borderRadius: "999px", gridColumn: "1 / -1", height: "3px", overflow: "hidden" }}>
+                                <span style={{ backgroundColor: "#2bc1f3", display: "block", height: "100%", width: `${ranking.most > 0 ? Math.max(2, Math.round((Math.abs(row.value) / ranking.most) * 100)) : 0}%` }} />
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+            {ranking.rows.length > shown.length && (
+                <button type="button" className="oh-tap-row" onClick={() => setShowAll(true)} style={{ ...refreshMenuButtonStyle, marginTop: "0.6rem", width: "100%" }}>Show every country</button>
+            )}
+            {ranking.rows.length === 0 && (
+                <p style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.76rem", marginTop: "0.8rem" }}>No country has this figure yet.</p>
+            )}
+            {ranking.unranked > 0 && (
+                <p style={{ color: "rgba(255,255,255,0.42)", fontSize: "0.7rem", lineHeight: 1.45, marginTop: "0.7rem" }}>
+                    {metric.sheet
+                        ? "Countries that have not been assessed are left out. Open a country's sheet, or track it, to add it here."
+                        : metric.key === "military"
+                            ? "Countries whose military has not been rated yet are left out until the AI rates them against the others."
+                            : "Countries the game has no figure for are left out."}
+                    {" "}<span data-no-translate>({ranking.rows.length}/{ranking.total})</span>
+                </p>
+            )}
+        </div>
+    );
+};
+
+// `requestedTarget`: a polity to show instead of the player's own (a map card's
+// Stats button); `onConsumeTarget` is called once it has been taken.
+const StatsPaneBody = ({ active, mapRef, requestedTarget = "", onConsumeTarget }) => {
     const { activeGameId, runtimeScenario, token: libraryToken } = useLibraryState();
     const [player, setPlayer] = useState({ code: "", date: "", startDate: "", round: 0, gameKey: "game" });
     const [targetCountry, setTargetCountry] = useState("");
+    // A requested polity that arrived before the game was read: the first
+    // applyGame targets it instead of the player's country.
+    const requestedTargetRef = useRef("");
+    const playerLoadedRef = useRef(false);
     const [polity, setPolity] = useState(null); // world.polityOverrides[target]
     const [worldSnapshot, setWorldSnapshot] = useState(null);
     const worldSnapshotRef = useRef(null);
     const statsLoadRef = useRef({ sequence: 0, controller: null });
-    const [statsView, setStatsView] = useState("diplomacy");
+    // The sheet this pane is generating itself: { code, sequence } while one runs.
+    const generatingRef = useRef(null);
+    const [statsView, setStatsView] = useState("politics");
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const [trackingOpen, setTrackingOpen] = useState(false);
+    // The tracking settings live in the world a running turn writes back, so
+    // they wait for it (persistTrackingSettings).
+    const turnRunning = useTurnRunning(active);
+    // The ↻ menu, open for one polity only: `step` is "open" or "confirm" (the
+    // rebuild asked for, not yet confirmed). Pointing the pane elsewhere closes it.
+    const [refreshMenu, setRefreshMenu] = useState({ target: "", step: "" });
     // On a phone, Back closes the statistics sheet on top, not the advisor under it.
     useBackToClose(advancedOpen, () => setAdvancedOpen(false));
     useBackToClose(trackingOpen, () => setTrackingOpen(false));
@@ -1547,6 +2147,8 @@ const StatsPaneBody = ({ active }) => {
     // Author-set flags from the scenario (flags.json). Memoized in assets.js, so
     // this is one fetch per scenario; {} for every scenario that sets none.
     const [customFlags, setCustomFlags] = useState({});
+    const [baseTags, setBaseTags] = useState({});
+    const [politicalKnowledge, setPoliticalKnowledge] = useState({ target: "", view: null });
     const [statSheetDefinition, setStatSheetDefinition] = useState({ custom: false, sections: [] });
     const [statSheetDefinitionReady, setStatSheetDefinitionReady] = useState(false);
     const [statSheetDefinitionError, setStatSheetDefinitionError] = useState("");
@@ -1578,9 +2180,46 @@ const StatsPaneBody = ({ active }) => {
     useEffect(() => {
         worldSnapshotRef.current = worldSnapshot;
     }, [worldSnapshot]);
+    // Every name the pane resolves in its own world goes through one identity
+    // index, built once per world snapshot.
+    const polityIndex = useMemo(
+        () => (worldSnapshot ? buildHistoricalTrackingIndex(worldSnapshot) : null),
+        [worldSnapshot],
+    );
+    const polityIndexRef = useRef(null);
+    useEffect(() => {
+        polityIndexRef.current = polityIndex;
+    }, [polityIndex]);
     const displayName = useCountryDisplayName(targetCountry);
 
+    // Political Actors are canonical political truth. Stats remains a separate,
+    // scenario-customizable projection; the Politics tab reads only the bounded
+    // player-knowledge view and never copies political truth into Stats fields.
+    useEffect(() => {
+        if (!active || !worldSnapshot || !targetCountry) {
+            setPoliticalKnowledge({ target: "", view: null });
+            return undefined;
+        }
+        let cancelled = false;
+        const publicView = buildPublicPoliticalView(worldSnapshot, targetCountry);
+        setPoliticalKnowledge({ target: targetCountry, view: publicView ? { level: "public", public: publicView } : null });
+        readOpenedIntercepts()
+            .then((intercepts) => {
+                if (cancelled) return;
+                const view = buildPlayerPoliticalKnowledgeView(worldSnapshot, targetCountry, {
+                    viewerPolity: player.code,
+                    intercepts,
+                });
+                setPoliticalKnowledge({ target: targetCountry, view });
+            })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [active, targetCountry, player.code, player.round, worldSnapshot]);
+
     const persistTrackingSettings = useCallback((next) => {
+        // A turn running writes back the world it read, settings and all, so a
+        // change now would show on the chips and be gone when it landed.
+        if (isSimulationBusy()) return;
         const normalized = normalizeCountryStatsTracking(next, { playerCountry: player.code });
         setTrackingSettings(normalized);
         storeTrackingSettingsFallback(player.gameKey, normalized, player.code);
@@ -1644,9 +2283,14 @@ const StatsPaneBody = ({ active }) => {
     // Which game and which date are we in? Also seeds the target: your country.
     useEffect(() => {
         let cancelled = false;
-        getNationFlags()
-            .then((flags) => { if (!cancelled) setCustomFlags(flags || {}); })
-            .catch(() => {});
+        Promise.all([
+            getNationFlags().catch(() => ({})),
+            getNationTags().catch(() => ({})),
+        ]).then(([flags, tags]) => {
+            if (cancelled) return;
+            setCustomFlags(flags || {});
+            setBaseTags(tags || {});
+        });
         return () => { cancelled = true; };
     }, [activeGameId]);
 
@@ -1657,6 +2301,9 @@ const StatsPaneBody = ({ active }) => {
         const applyGame = (game) => {
             if (cancelled || !game) return;
             const code = String(game?.country || "").trim();
+            const requested = requestedTargetRef.current;
+            requestedTargetRef.current = "";
+            playerLoadedRef.current = true;
             const nextPlayer = {
                 code,
                 date: String(game?.gameDate || game?.startDate || ""),
@@ -1666,11 +2313,11 @@ const StatsPaneBody = ({ active }) => {
             };
             setPlayer((current) => {
                 if (current.gameKey !== nextPlayer.gameKey) {
-                    setTargetCountry(code);
+                    setTargetCountry(requested || code);
                     setState({ status: "idle", sheet: null, error: "" });
                     setWorldSnapshot(null);
                 } else {
-                    setTargetCountry((target) => target || code);
+                    setTargetCountry((target) => target || requested || code);
                 }
                 return current.code === nextPlayer.code &&
                     current.date === nextPlayer.date &&
@@ -1704,22 +2351,45 @@ const StatsPaneBody = ({ active }) => {
         };
     }, [active, activeGameId]);
 
-    // While the pane is showing, clicking any country on the map inspects it.
     useEffect(() => {
-        if (!active) return undefined;
-        setRegionClickObserver((props) => {
-            // One namespace: the owning country's NAME. The gid0/GID_0 tail is the
-            // region's GADM provenance — a code — so falling through to it used to
-            // hand this pane "RUS" for an unowned region while every owned one gave
-            // a name. The sheet is keyed by country, and the two never matched.
-            const gid0 = String(props?.gid0 || props?.GID_0 || "").trim();
-            const country = String(props?.owner || "").trim() || COUNTRY_NAMES[gid0] || gid0;
+        const requested = cleanText(requestedTarget);
+        if (!requested) return;
+        const country = polityIndexRef.current?.canonicalKey(requested) || requested;
+        if (playerLoadedRef.current) setTargetCountry(country);
+        else requestedTargetRef.current = country;
+        onConsumeTarget?.();
+    }, [requestedTarget, onConsumeTarget]);
+
+    // While the pane is showing, clicking any country on the map inspects it.
+    // Listen through the committed browser event rather than the old module-global
+    // callback seam: the map and Country pane can live in separate lazy/HMR module
+    // instances, while the window event remains one stable runtime boundary.
+    useEffect(() => {
+        if (!active || typeof window === "undefined") return undefined;
+        const onRegionSelected = (event) => {
+            const props = event?.detail;
+            if (!props || typeof props !== "object") return;
+
+            // Prefer live ownership, but normalize stock ISO/GADM codes back into
+            // the same canonical polity namespace the Stats sheet uses. COUNTRY is
+            // retained as a safe fallback for stock regions without an owner field.
+            const gid0 = cleanText(props.gid0 || props.GID_0);
+            const owner = cleanText(props.owner);
+            const ownerName = COUNTRY_NAMES[owner] || owner;
+            const rawCountry = ownerName || cleanText(props.COUNTRY) || COUNTRY_NAMES[gid0] || gid0;
+            const country = (polityIndexRef.current
+                ? polityIndexRef.current.canonicalKey(rawCountry)
+                : canonicalPolityKey(rawCountry, worldSnapshotRef.current)) || rawCountry;
             if (country) setTargetCountry(country);
-        });
-        return () => setRegionClickObserver(null);
+        };
+        window.addEventListener(REGION_SELECTED_EVENT, onRegionSelected);
+        return () => window.removeEventListener(REGION_SELECTED_EVENT, onRegionSelected);
     }, [active]);
 
-    const loadSheet = useCallback(async ({ force = false, forceReassess = false } = {}) => {
+    // `generate: false` shows a sheet that already exists and never asks the
+    // model: the Politics and Diplomacy views, which leave generation to
+    // background AI (see the effect below).
+    const loadSheet = useCallback(async ({ force = false, forceReassess = false, generate = true } = {}) => {
         const code = targetCountry;
         if (!code) return;
         const cacheKey = `${player.gameKey}:${code}`;
@@ -1762,6 +2432,13 @@ const StatsPaneBody = ({ active }) => {
                 setState({ status: "ready", sheet, error: "" });
                 return;
             }
+            // Already generating this polity's sheet: that run fills the card.
+            // Starting another would abort it after its request was paid for.
+            if (generatingRef.current?.code === code) return;
+            if (!generate) {
+                setState({ status: "idle", sheet: null, error: "" });
+                return;
+            }
         }
         statsLoadRef.current.controller?.abort?.(
             new DOMException("Superseded by another country selection.", "AbortError")
@@ -1769,6 +2446,7 @@ const StatsPaneBody = ({ active }) => {
         const controller = new AbortController();
         const sequence = statsLoadRef.current.sequence + 1;
         statsLoadRef.current = { sequence, controller };
+        generatingRef.current = { code, sequence };
 
         // `waiting` says why the card may sit for minutes (issue #724): the sheet
         // now holds off until the world is idle, and a spinner that gives no
@@ -1786,6 +2464,23 @@ const StatsPaneBody = ({ active }) => {
         });
 
         try {
+            // A background first reading (the Politics or Diplomacy view) may be
+            // generating this very sheet. Wait for it rather than paying twice;
+            // if it produced nothing usable, generate here as before.
+            if (!force) {
+                const pending = await pendingCountryStatSheet(code).catch(() => null);
+                if (statsLoadRef.current.sequence !== sequence || controller.signal.aborted) return;
+                const pendingUsable = pending &&
+                    isValidStatSheet(pending, statSheetDefinition) &&
+                    (statSheetDefinition.custom || (!needsLegacyComponentCapAudit(pending) && !needsStartPopulationCalibrationAudit(pending, player)));
+                if (pendingUsable) {
+                    const sheet = finalizeCountryStatSheet(pending);
+                    rememberSheet(cacheKey, { date: player.date, sheet });
+                    setState((current) => (targetCountry === code ? { status: "ready", sheet, error: "" } : current));
+                    return;
+                }
+            }
+
             // targetCountry is the stable campaign identity key. A polity rename keeps
             // that key on purpose, so resolve the CURRENT display name separately for
             // the human-facing header and the Stats generation prompt. Identity and
@@ -1803,7 +2498,7 @@ const StatsPaneBody = ({ active }) => {
                     throw new Error("The scenario-defined stat sheet was incomplete.");
                 }
             } else {
-                const validation = validateGameplayPayload("countryStatSheet", generated);
+                const validation = validateGameplayPayload("countryStatSheet", withoutBackendFields(generated));
                 if (!validation.valid) throw new Error(`The stat sheet failed validation: ${validation.error}`);
             }
             // generateCountryStatSheet already receives the previous persistent sheet as
@@ -1826,6 +2521,8 @@ const StatsPaneBody = ({ active }) => {
                 targetCountry === code
                     ? { status: "error", sheet: null, error: error?.message || "The stat sheet failed." }
                     : current);
+        } finally {
+            if (generatingRef.current?.sequence === sequence) generatingRef.current = null;
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [targetCountry, player.gameKey, player.date, player.startDate, player.round, displayName, statSheetDefinition]);
@@ -1939,20 +2636,35 @@ const StatsPaneBody = ({ active }) => {
     }, [active, targetCountry, player.code, worldSnapshot]);
 
     // Opening the pane on a polity is what gets that polity its numbers: the
-    // stat sheet (loadSheet generates one when nothing persisted is valid) and,
-    // once the sheet is in, a first reading of its intelligence service. Both
-    // used to wait for the Economy sub-tab, which left every service the
-    // player looked at on the same "ordinary" default; the Diplomacy tab now
-    // pays for the sheet too, in the background, rather than showing stats
-    // that were never assessed.
+    // stat sheet and, once the sheet is in, a first reading of its
+    // intelligence service. Which view is open decides who pays for them.
+    //
+    // Economy (National) shows the sheet: opening it is the player asking, so a
+    // missing sheet is generated at once as the player's request (loadSheet).
+    // Politics and Diplomacy do not show it. There the sheet and the service
+    // reading go through ensureCountryAssessed, which is background AI: off
+    // until the player turns Background AI on, under its daily cap, and asked
+    // once per polity however often the map is clicked. They used to generate
+    // directly on every tab, so browsing Politics on a free-tier key spent a
+    // request per country clicked, whatever the Background AI switch said.
     useEffect(() => {
         if (!active || !targetCountry || !statSheetDefinitionReady) return undefined;
         let cancelled = false;
-        loadSheet().finally(() => {
-            if (!cancelled) void ensureIntelligenceRated(targetCountry, { reason: "stats pane" });
-        });
+        if (statsView === "economy") {
+            loadSheet().finally(() => {
+                if (!cancelled) void ensureIntelligenceRated(targetCountry, { reason: "stats pane" });
+            });
+        } else if (statsView === "ranking") {
+            // (Going down a ranking is not asking for each country it lists to be assessed: no request is made.)
+            void loadSheet({ generate: false });
+        } else {
+            loadSheet({ generate: false }).finally(() => {
+                if (cancelled || generatingRef.current?.code === targetCountry) return;
+                void ensureCountryAssessed(targetCountry, { reason: "stats pane" });
+            });
+        }
         return () => { cancelled = true; };
-    }, [active, targetCountry, loadSheet, statSheetDefinitionReady]);
+    }, [active, targetCountry, loadSheet, statSheetDefinitionReady, statsView]);
 
     useEffect(() => {
         if (!active || typeof window === "undefined") return undefined;
@@ -1983,7 +2695,6 @@ const StatsPaneBody = ({ active }) => {
                     readWorldStateView({ force: false }),
                     readJson(JSON_URLS.snapshots, {
                         defaultValue: [],
-                        force: true,
                         clone: false,
                     }).catch(() => []),
                 ]);
@@ -2014,12 +2725,18 @@ const StatsPaneBody = ({ active }) => {
                     round: player.round,
                 });
 
-                const samples = merged[targetCountry] || [];
-                const recoveredCount = Math.max(0, samples.length - persistentCount);
+                // Stored history keeps only readings that changed; the chart
+                // still runs to today through the current sheet (not stored).
+                const stored = merged[targetCountry] || [];
+                const samples = withCurrentCountryStatSample(stored, currentSheet, {
+                    date: player.date,
+                    round: player.round,
+                });
+                const recoveredCount = Math.max(0, stored.length - persistentCount);
                 setHistoryState({ status: "ready", samples, error: "", recoveredCount, persistentCount });
 
                 const persistedSeries = persistent[targetCountry] || [];
-                if (JSON.stringify(persistedSeries) !== JSON.stringify(samples)) {
+                if (JSON.stringify(persistedSeries) !== JSON.stringify(stored)) {
                     try {
                         // Re-read immediately before the best-effort migration write so
                         // opening a chart cannot put a stale pre-turn world object back
@@ -2057,11 +2774,32 @@ const StatsPaneBody = ({ active }) => {
     }, [active, advancedOpen, targetCountry, player.date, player.round, state.sheet]);
 
     const sheet = state.sheet;
+    const refreshMenuStep = refreshMenu.target === targetCountry && statsView === "economy" && state.status !== "loading"
+        ? refreshMenu.step
+        : "";
     // Header identity can safely use the already-loaded canonical world's shallow
     // stat metadata while Economy itself waits for the validated/migrated sheet.
     // This preserves capital/government/leader text without triggering heavy Stats
     // generation on the default Diplomacy tab.
-    const headerSheet = sheet || worldSnapshot?.countryStats?.[targetCountry] || null;
+    const resolvedTargetKey = targetCountry && polityIndex
+        ? (polityIndex.canonicalKey(targetCountry) || targetCountry)
+        : targetCountry;
+    const headerSheet = sheet
+        || worldSnapshot?.countryStats?.[resolvedTargetKey]
+        || worldSnapshot?.countryStats?.[targetCountry]
+        || null;
+    const currentPoliticalKnowledge = politicalKnowledge.target === targetCountry ? politicalKnowledge.view : null;
+    const publicPoliticalProfile = currentPoliticalKnowledge?.public
+        || (worldSnapshot && targetCountry ? buildPublicPoliticalView(worldSnapshot, targetCountry) : null);
+    const politicalKey = publicPoliticalProfile?.polityKey || resolvedTargetKey || targetCountry;
+    const politicalTags = resolveCountryTags(baseTags, worldSnapshot, politicalKey);
+    const powerStatusRows = worldSnapshot?.powerStatus?.byPolity
+        || (worldSnapshot?.powerStatus && typeof worldSnapshot.powerStatus === "object" ? worldSnapshot.powerStatus : {});
+    const hasPowerTierRecord = Boolean(politicalKey) && Object.keys(powerStatusRows || {}).some((key) => (
+        key !== "schemaVersion" && String(key).toLowerCase() === String(politicalKey).toLowerCase()
+    ));
+    const powerTier = hasPowerTierRecord ? powerTierForPolity(worldSnapshot, politicalKey) : "";
+    const powerTierLabel = POWER_TIER_LABELS[powerTier] || "";
     const intelligence = targetCountry && worldSnapshot ? intelligenceOf(worldSnapshot, targetCountry) : null;
     const isPlayer = targetCountry && targetCountry.toUpperCase() === String(player.code).toUpperCase();
     // An author-set flag (scenario flags.json) wins over the code-derived one, so a
@@ -2102,7 +2840,7 @@ const StatsPaneBody = ({ active }) => {
         : "Whole polity";
 
     const trackingNames = trackingSettings.trackedPolities
-        .map((key) => polityDisplayName(worldSnapshot, key))
+        .map((key) => (polityIndex ? polityIndex.displayName(key) : cleanText(key)))
         .filter(Boolean);
     const trackingPreview = !trackingNames.length
         ? "No tracked countries yet"
@@ -2128,7 +2866,7 @@ const StatsPaneBody = ({ active }) => {
             {flagUrl && !flagFailed ? (
                 <img
                 alt=""
-                src={flagUrl}
+                src={bundledFlagUrl(flagUrl)}
                 onError={() => setFlagFailed(true)}
                 style={{ height: "100%", objectFit: "cover", width: "100%" }}
                 />
@@ -2150,31 +2888,114 @@ const StatsPaneBody = ({ active }) => {
                 <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.76rem", marginTop: "0.15rem" }}>
                 {[headerSheet.capital, headerSheet.continent].filter(Boolean).join(" · ")}
                 </div>
-                {headerSheet.government && (
+                {!publicPoliticalProfile && headerSheet.government && (
                     <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.72rem", marginTop: "0.1rem" }}>
                     {headerSheet.government}
                     </div>
                 )}
-                {headerSheet.leader && (
+                {!publicPoliticalProfile && headerSheet.leader && (
                     <div style={{ color: "#fbbf24", fontSize: "0.72rem", marginTop: "0.1rem" }}>
                     Leader: {headerSheet.leader}
                     </div>
                 )}
                 </>
             )}
+            {(powerTierLabel || politicalTags.length > 0) && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem", marginTop: "0.28rem" }}>
+                    {powerTierLabel && (
+                        <span
+                            data-power-tier={powerTier}
+                            style={{ background: "rgba(59,130,246,0.16)", border: "1px solid rgba(96,165,250,0.38)", borderRadius: "999px", color: "#bfdbfe", fontSize: "0.61rem", fontWeight: 700, padding: "0.1rem 0.38rem" }}
+                        >
+                            {powerTierLabel}
+                        </span>
+                    )}
+                    {politicalTags.map((tag) => (
+                        <span key={tag} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--oh-grey-border)", borderRadius: "999px", color: "rgba(255,255,255,0.76)", fontSize: "0.61rem", padding: "0.1rem 0.38rem" }}>{tag}</span>
+                    ))}
+                </div>
+            )}
             </div>
             {statsView === "economy" && state.status !== "loading" && (
                 <button
+                type="button"
                 className="oh-tap"
-                onClick={(event) => loadSheet({ force: true, forceReassess: event.shiftKey })}
-                title="Refresh stat sheet · Shift+click = force fresh baseline"
-                aria-label="Refresh stat sheet; hold Shift while clicking to force a fresh baseline"
-                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: "1rem", padding: 0 }}
+                onClick={() => setRefreshMenu(refreshMenuStep ? { target: "", step: "" } : { target: targetCountry, step: "open" })}
+                title="Refresh options"
+                aria-label="Refresh options"
+                aria-expanded={Boolean(refreshMenuStep)}
+                style={{ background: "none", border: "none", color: refreshMenuStep ? "#2bc1f3" : "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: "1rem", padding: 0 }}
                 >↻</button>
             )}
             </div>
 
+            {/* The hard audit used to be Shift+click on ↻: out of reach on a
+                touch screen, and nothing said what either refresh costs. */}
+            {refreshMenuStep && (
+                <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: "0.55rem", marginTop: "0.7rem" }}>
+                <div>
+                <button
+                type="button"
+                className="oh-tap-row"
+                onClick={() => {
+                    setRefreshMenu({ target: "", step: "" });
+                    loadSheet({ force: true });
+                }}
+                style={refreshMenuButtonStyle}
+                >Refresh</button>
+                <div style={refreshMenuHintStyle}>
+                {statSheetDefinition.custom
+                    ? "Uses 1 request."
+                    : "Uses a request only if something has changed since the last assessment."}
+                </div>
+                </div>
+                {!statSheetDefinition.custom && refreshMenuStep === "open" && (
+                    <div>
+                    <button
+                    type="button"
+                    className="oh-tap-row"
+                    onClick={() => setRefreshMenu({ target: targetCountry, step: "confirm" })}
+                    style={refreshMenuButtonStyle}
+                    >Rebuild baseline from scratch</button>
+                    <div style={refreshMenuHintStyle}>
+                    Uses 1 request and replaces the current numbers with a fresh assessment of the country as it stands now.
+                    </div>
+                    </div>
+                )}
+                {!statSheetDefinition.custom && refreshMenuStep === "confirm" && (
+                    <div>
+                    <div style={{ color: "rgba(255,255,255,0.82)", fontSize: "0.74rem", lineHeight: 1.45 }}>
+                    Rebuild this country's baseline from scratch? It uses 1 request and replaces the current numbers.
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", marginTop: "0.45rem" }}>
+                    <button
+                    type="button"
+                    className="oh-tap-row"
+                    onClick={() => {
+                        setRefreshMenu({ target: "", step: "" });
+                        loadSheet({ force: true, forceReassess: true });
+                    }}
+                    style={{ ...refreshMenuButtonStyle, borderColor: "rgba(248,113,113,0.45)", color: "#fca5a5" }}
+                    >Rebuild baseline</button>
+                    <button
+                    type="button"
+                    className="oh-tap-row"
+                    onClick={() => setRefreshMenu({ target: targetCountry, step: "open" })}
+                    style={refreshMenuButtonStyle}
+                    >Cancel</button>
+                    </div>
+                    </div>
+                )}
+                </div>
+            )}
+
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.9rem" }}>
+            <button
+            type="button"
+            aria-pressed={statsView === "politics"}
+            onClick={() => setStatsView("politics")}
+            style={statsSubtabStyle(statsView === "politics")}
+            >🏛 Politics</button>
             <button
             type="button"
             aria-pressed={statsView === "diplomacy"}
@@ -2193,7 +3014,26 @@ const StatsPaneBody = ({ active }) => {
             onClick={() => setStatsView("economy")}
             style={statsSubtabStyle(statsView === "economy", touch)}
             >{statSheetDefinition.custom ? "📊 National" : "📈 Economy"}</button>
+            <button
+            type="button"
+            aria-pressed={statsView === "ranking"}
+            onClick={() => setStatsView("ranking")}
+            style={statsSubtabStyle(statsView === "ranking", touch)}
+            >🏆 Ranking</button>
             </div>
+
+            {statsView === "politics" && (
+                <PoliticalOverview
+                    profile={publicPoliticalProfile}
+                    fallbackGovernment={headerSheet?.government || ""}
+                    fallbackLeader={headerSheet?.leader || ""}
+                    intelligence={currentPoliticalKnowledge?.intelligence || null}
+                    institutions={worldSnapshot ? institutionPortfolioForPolity(worldSnapshot, targetCountry, { viewerPolity: player.code }) : []}
+                />
+            )}
+            {statsView === "politics" && (
+                <GroupsOnTerritory world={worldSnapshot} targetCountry={targetCountry} isPlayer={Boolean(player.code) && targetCountry === player.code} mapRef={mapRef} />
+            )}
 
             {statsView === "economy" && statSheetDefinitionError && (
                 <div style={{ backgroundColor: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", fontSize: "0.8rem", marginTop: "1rem", padding: "0.7rem 0.8rem" }}>
@@ -2219,7 +3059,20 @@ const StatsPaneBody = ({ active }) => {
             )}
 
             {statsView === "diplomacy" && worldSnapshot && (
-                <DiplomacySection world={worldSnapshot} targetCountry={targetCountry} />
+                <DiplomacySection world={worldSnapshot} identity={polityIndex} targetCountry={targetCountry} viewerPolity={player.code} />
+            )}
+
+            {statsView === "ranking" && (
+                <RankingSection
+                    world={worldSnapshot}
+                    definition={statSheetDefinition}
+                    index={polityIndex}
+                    playerCode={player.code}
+                    targetCountry={targetCountry}
+                    onPick={setTargetCountry}
+                    flags={customFlags}
+                    touch={touch}
+                />
             )}
 
             {statsView === "politics" && worldSnapshot && (
@@ -2235,7 +3088,14 @@ const StatsPaneBody = ({ active }) => {
             {statsView === "economy" && !statSheetDefinitionError && sheet && state.status === "ready" && (
                 <>
                 {statSheetDefinition.custom ? (
-                    <CustomStatsSheet definition={statSheetDefinition} sheet={sheet} />
+                    <>
+                    {intelligence !== null && <IntelligenceServiceCard value={intelligence} style={{ marginTop: "1rem" }} />}
+                    <CustomStatsSheet
+                    definition={statSheetDefinition}
+                    sheet={sheet}
+                    hiddenKeys={intelligence !== null ? LIVE_INTELLIGENCE_STAT_KEYS : []}
+                    />
+                    </>
                 ) : (
                     <>
                 {/* National stability */}
@@ -2251,17 +3111,7 @@ const StatsPaneBody = ({ active }) => {
                 <Bar value={sheet.stability} color={stabilityColor(clamp01(sheet.stability))} />
                 </div>
 
-                {intelligence !== null && (
-                <div style={{ ...cardStyle, marginTop: "0.6rem" }}>
-                <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between", marginBottom: "0.45rem" }}>
-                <span style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.68rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                🕵 Intelligence service
-                </span>
-                <span data-no-translate style={{ fontSize: "0.85rem", fontWeight: 800 }}>{intelligence}/100</span>
-                </div>
-                <Bar value={intelligence} color="#38bdf8" />
-                </div>
-                )}
+                {intelligence !== null && <IntelligenceServiceCard value={intelligence} style={{ marginTop: "0.6rem" }} />}
 
                 {/* Strategic indices */}
                 <div style={sectionTitleStyle}>⚑ Strategic indices</div>
@@ -2351,6 +3201,16 @@ const StatsPaneBody = ({ active }) => {
                     </>
                 )}
 
+                {/* Its military power and the figures it is read from, on the
+                    standard sheet and on a scenario's own alike: the game works
+                    them out for every country (MilitaryCard). */}
+                {worldSnapshot && (
+                    <>
+                    <div style={sectionTitleStyle}>⚔ Military</div>
+                    <MilitaryCard world={worldSnapshot} country={resolvedTargetKey || targetCountry} />
+                    </>
+                )}
+
                 <button
                 type="button"
                 onClick={() => setAdvancedOpen(true)}
@@ -2369,7 +3229,9 @@ const StatsPaneBody = ({ active }) => {
                 <button
                 type="button"
                 onClick={() => setTrackingOpen(true)}
-                style={{ alignItems: "center", background: "rgba(255,255,255,0.045)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "11px", color: "#e7e7e9", cursor: "pointer", display: "flex", gap: "0.7rem", justifyContent: "space-between", marginTop: "0.55rem", padding: "0.72rem 0.8rem", textAlign: "left", width: "100%" }}
+                disabled={turnRunning}
+                title={turnRunning ? TURN_RUNNING_NOTE : undefined}
+                style={{ alignItems: "center", background: "rgba(255,255,255,0.045)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "11px", color: "#e7e7e9", cursor: turnRunning ? "not-allowed" : "pointer", display: "flex", opacity: turnRunning ? 0.55 : 1, gap: "0.7rem", justifyContent: "space-between", marginTop: "0.55rem", padding: "0.72rem 0.8rem", textAlign: "left", width: "100%" }}
                 >
                     <span style={{ alignItems: "center", display: "flex", gap: "0.65rem", minWidth: 0 }}>
                         <span style={{ alignItems: "center", backgroundColor: "rgba(234,179,8,0.12)", border: "1px solid rgba(250,204,21,0.22)", borderRadius: "8px", color: "#fbbf24", display: "inline-flex", flexShrink: 0, fontSize: "0.98rem", height: "2rem", justifyContent: "center", width: "2rem" }}>⚙</span>
@@ -2381,6 +3243,11 @@ const StatsPaneBody = ({ active }) => {
                             <span style={{ color: "rgba(255,255,255,0.34)", display: "block", fontSize: "0.6rem", marginTop: "0.14rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {trackingPreview}
                             </span>
+                            {turnRunning && (
+                                <span style={{ color: "rgba(255,255,255,0.46)", display: "block", fontSize: "0.6rem", marginTop: "0.14rem" }}>
+                                    {TURN_RUNNING_NOTE}
+                                </span>
+                            )}
                         </span>
                     </span>
                     <span style={{ color: "rgba(255,255,255,0.5)", flexShrink: 0, fontSize: "0.95rem" }}>›</span>
@@ -2389,7 +3256,7 @@ const StatsPaneBody = ({ active }) => {
             )}
 
             <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.7rem", marginTop: "1rem" }}>
-            Click any country on the map to inspect it.
+            Click any country on the map to inspect it, or open its card and choose Stats.
             </p>
             </>
         )}
@@ -2417,8 +3284,17 @@ const StatsPaneBody = ({ active }) => {
             settings={trackingSettings}
             onChange={persistTrackingSettings}
             world={worldSnapshot}
+            identity={polityIndex}
             playerCountry={player.code}
             currentCountry={targetCountry}
+            statSheetDefinition={statSheetDefinition}
+            // Opening a country's sheet is how its first reading is built: the
+            // same request the Stats pane makes for any country it opens.
+            onAssess={(key) => {
+                setTrackingOpen(false);
+                setTargetCountry(key);
+                setStatsView("economy");
+            }}
             />
         )}
         </div>
@@ -2429,11 +3305,11 @@ const reportStatsRender = (id, phase, actualDuration) => {
     reportPerfOperation(`React ${id} ${phase}`, Number(actualDuration) || 0, { warnAt: 30 });
 };
 
-const StatsPane = memo(function StatsPane({ active }) {
+const StatsPane = memo(function StatsPane({ active, mapRef, requestedTarget, onConsumeTarget }) {
     if (!active) return null;
     return (
         <React.Profiler id="StatsPane" onRender={reportStatsRender}>
-            <StatsPaneBody active />
+            <StatsPaneBody active mapRef={mapRef} requestedTarget={requestedTarget} onConsumeTarget={onConsumeTarget} />
         </React.Profiler>
     );
 });

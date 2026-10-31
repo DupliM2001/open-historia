@@ -5,11 +5,24 @@ import Nations from "./Nations";
 import Cities from "./Cities";
 import MarkersLayer from "./MarkersLayer.jsx";
 import Units from "./Units";
+import FrontLayers from "./FrontLayers.jsx";
+import WarRoomLayers from "./WarRoomLayers.jsx";
+import WarRoomMarks from "./WarRoomMarks.jsx";
+import WarRoomTools from "./WarRoomTools.jsx";
+import TransportLayers from "./TransportLayers.jsx";
+import AirLayers from "./AirLayers.jsx";
+import StrikeLayers from "./StrikeLayers.jsx";
+import SeaBattleLayers from "./SeaBattleLayers.jsx";
+import SeasonLayers from "./SeasonLayers.jsx";
+import IceLayers from "./IceLayers.jsx";
+import WarGeographyLayers from "./WarGeographyLayers.jsx";
+import FrontWeatherLayers from "./FrontWeatherLayers.jsx";
 import GlobeEffects from "./GlobeEffects.jsx";
 import RegionPopup from "../Selection/Regions";
 import CountryInfoPanel from "../Selection/CountryPanel.jsx";
 import UnitPopup from "../Selection/Units";
 import FeaturePopup from "../Selection/Features.jsx";
+import ListenInPhone from "../GameUI/ListenInPhone.jsx";
 
 // Opt-in only (?mapFillProbe=1, or localStorage oh:mapFillProbe = "1"): a
 // diagnostic, not something every player's console and window should carry.
@@ -146,14 +159,27 @@ const MapScene = ({ isGlobe = false }) => {
     <>
       {fillProbeEnabled && <MapFillProbe />}
       <Nations isGlobe={isGlobe} />
+      <SeasonLayers isGlobe={isGlobe} />
+      <IceLayers />
+      <WarGeographyLayers />
       <Cities />
       <MarkersLayer />
+      <WarRoomLayers />
+      <WarRoomMarks />
+      <FrontLayers />
+      <WarRoomTools />
+      <TransportLayers />
+      <StrikeLayers />
+      <SeaBattleLayers />
+      <FrontWeatherLayers />
+      <AirLayers />
       <Units />
       <GlobeEffects active={isGlobe} />
       <RegionPopup />
       <CountryInfoPanel />
       <UnitPopup />
       <FeaturePopup />
+      <ListenInPhone />
     </>
   );
 };

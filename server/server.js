@@ -1,5 +1,7 @@
 /*! Open Historia — portions (CORS, AI relay, shutdown endpoint, hub proxy) © 2026 Nicholas Krol, AGPL-3.0-or-later (see LICENSE). */
+import { spawn } from "child_process";
 import crypto from "crypto";
+import dns from "dns";
 import express from "express";
 import fs from "fs";
 import http from "http";
@@ -12,6 +14,7 @@ import {
   createScenario,
   deleteGame,
   deleteScenario,
+  emptyTrash,
   ensureGameStore,
   ensureScenarioStore,
   exportGameBundle,
@@ -23,24 +26,38 @@ import {
   getScenarioDetails,
   importGameBundle,
   importScenarioBundle,
+  listScenariosNamingTiledBasemap,
+  migrateEmbeddedTiledArchives,
+  listTrash,
+  purgeOldTrash,
+  restoreFromTrash,
+  restoreScenarioBasemap,
+  TRASH_KEEP_DAYS,
   updateScenarioFromBundle,
   readGameSnapshots,
+  readGameParkedTurn,
   readRuntimeJsonAsset,
   resolveRuntimeGeojsonAsset,
+  resolveRuntimeRestorePoint,
   removeGameAsset,
+  removeGameParkedTurn,
   removeScenarioAsset,
   resolveGameUploadAsset,
   resolveScenarioCoarseRegionsAsset,
   resolveScenarioUploadAsset,
   resolveRuntimeBinaryAsset,
+  resolveEarlierBuiltInMap,
   setActiveGame,
+  setActiveGameHold,
   setSelectedScenario,
   updateGame,
   updateScenario,
   uploadGameAsset,
   uploadScenarioAsset,
   writeGameSnapshots,
+  writeGameParkedTurn,
   writeRuntimeJsonAsset,
+  writeRuntimeTurnState,
 } from "./libraryStore.js";
 import {
   createMapEditorDocument,
@@ -54,17 +71,60 @@ import {
   createBasemap,
   deleteBasemap,
   ensureBasemapStore,
+  clearInterruptedDownloads,
+  createTiledBasemap,
+  findBasemapMetaByHash,
+  findOfficialBasemapMeta,
+  getBasemapArchivePath,
   getBasemapCatalog,
   getBasemapPayload,
+  getBasemapMeta,
+  incomingArchivePath,
+  setTiledBasemapFallback,
+  tagOfficialBasemaps,
 } from "./basemapStore.js";
+import {
+  TooLargeError,
+  cancelInstallJob,
+  downloadToFile,
+  getInstallJob,
+  receiveToFile,
+  startInstallJob,
+} from "./tiledBasemaps.js";
+import {
+  createOfficialCatalogReader,
+  findOfficialEntry,
+  isOfficialReleaseUrl,
+  latestOfficialVersion,
+} from "./officialBasemaps.js";
 import { listFlags, createFlag, deleteFlag } from "./flagStore.js";
-import { renameHubCacheBundles, renameScenarioBundleBytes, writeFileAtomic } from "./scenarioBundleNames.js";
+import { HUB_CACHE_NAMES_MARKER, renameHubCacheBundles, renameScenarioBundleBytes, writeFileAtomic } from "./scenarioBundleNames.js";
+import {
+  clearHubCache,
+  hubCacheUsage,
+  pruneHubCache,
+  saveCappedBody,
+  sweepHubCache,
+  tooLargeError,
+  touchEntry,
+} from "./hubCache.js";
+import {
+  MUSIC_LIBRARY_DIR,
+  clearMusicLibrary,
+  createMusicLibrary,
+  musicLibraryUsage,
+  tidyMusicLibrary,
+} from "./musicLibrary.js";
 import {
   allowedCorsOrigin,
+  allowedHostNames,
   crossOriginWriteAllowed,
+  isAllowedHostHeader,
   isAllowedHubUrl,
   isLoopbackAddress,
+  metadataGuardedLookup,
   parseByteRange,
+  RELAY_BLOCKED_CODE,
   relayTargetAllowed,
   sanitizeRelayHeaders,
 } from "./security.js";
@@ -72,7 +132,11 @@ import { appendLog, clearLog, readLogSince } from "./logStore.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 import { DATA_DIR } from "./dataDir.js";
+import { AGENT_REQUESTS_DIR, writeAgentFolder, writeAgentSubagents } from "./agentFolder.js";
+import { handleMcpMessage, tokenMatches } from "./agentMcp.js";
+import { AGENT_WAIT_MS, createAgentQueue } from "./agentQueue.js";
 import { appKindOf } from "./appKind.js";
+import { createClockOffsetCache } from "./clockOffset.js";
 import { createDiscordPresence, DISCORD_APPLICATION_ID, normalizePresence } from "./discordPresence.js";
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -109,16 +173,20 @@ const ALL_INTERFACES_HOST = "0.0.0.0";
 
 const isLanHost = (host) => host !== LOOPBACK_HOST && host !== "localhost" && host !== "::1";
 
+// lanAccess: the listener's binding. relayForLan: whether the AI relay answers
+// other devices too (see ALLOW_REMOTE_RELAY by the relay).
 const readNetworkSettings = () => {
   try {
     const parsed = JSON.parse(fs.readFileSync(NETWORK_SETTINGS_FILE, "utf8"));
-    return { lanAccess: parsed?.lanAccess === true };
+    return { lanAccess: parsed?.lanAccess === true, relayForLan: parsed?.relayForLan === true };
   } catch {
-    return { lanAccess: false };
+    return { lanAccess: false, relayForLan: false };
   }
 };
 
-const writeNetworkSettings = (settings) => {
+// Merged into what is saved, so changing one setting keeps the other.
+const writeNetworkSettings = (changes) => {
+  const settings = { ...readNetworkSettings(), ...changes };
   fs.mkdirSync(path.dirname(NETWORK_SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(NETWORK_SETTINGS_FILE, `${JSON.stringify(settings, null, 2)}\n`);
 };
@@ -127,6 +195,12 @@ const writeNetworkSettings = (settings) => {
 const HOST_FROM_ENV = process.env.OH_HOST || "";
 let HOST = HOST_FROM_ENV || (readNetworkSettings().lanAccess ? ALL_INTERFACES_HOST : LOOPBACK_HOST);
 let LAN_ENABLED = isLanHost(HOST);
+// What the toggle last asked for. HOST only changes once a rebind has landed,
+// a moment after the reply, so a second flip compared against HOST saw the old
+// binding, matched it and did nothing: on-then-off left the switch showing Off
+// and network-settings.json saying on while the server went to 0.0.0.0.
+let requestedHost = HOST;
+let rebindTimer = null;
 
 // The addresses a phone or another computer would actually type in. Doing this
 // here is the difference between "enable LAN play" being a setting and being a
@@ -146,6 +220,27 @@ const lanAddresses = () =>
 const jsonParser = express.json({ limit: "64mb" });
 const largeJsonParser = express.json({ limit: "512mb" });
 const uploadParser = express.raw({ type: () => true, limit: "512mb" });
+
+// DNS rebinding: a web page that re-points its own name at 127.0.0.1 reaches
+// this server over loopback with an Origin and Host that match each other, so
+// every check below would wave it through. Refuse a Host this server does not
+// answer to before anything else runs (server/security.js isAllowedHostHeader).
+// IP addresses and localhost always work; a name someone types on the LAN
+// (this computer's own name, or one behind a proxy) goes in OH_ALLOWED_HOSTS.
+const ALLOWED_HOST_NAMES = allowedHostNames([
+  ...String(process.env.OH_ALLOWED_HOSTS || "").split(","),
+  HOST_FROM_ENV,
+  os.hostname(),
+  `${os.hostname()}.local`,
+]);
+app.use((req, res, next) => {
+  if (isAllowedHostHeader(req.headers.host, ALLOWED_HOST_NAMES)) return next();
+  return sendError(
+    res,
+    403,
+    new Error("This server only answers to localhost, its IP addresses and the names listed in OH_ALLOWED_HOSTS."),
+  );
+});
 
 // The Android app's connect screen lives on the WebView's own origin, so its
 // probe of this server is a cross-origin request — without these headers the
@@ -184,8 +279,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Per-IP fixed-window rate limit for requests that arrive over the network, the
-// same shape the content node already uses. Loopback is exempt: the game itself
+// Per-IP fixed-window rate limit for requests that arrive over the network.
+// Loopback is exempt: the game itself
 // polls runtime state briskly and it is not the traffic this is here for. Only
 // meaningful when OH_HOST opens the server up at all, which is exactly when an
 // unauthenticated API benefits from a ceiling on how fast it can be hammered.
@@ -210,8 +305,23 @@ ensureScenarioStore();
 ensureGameStore();
 ensureMapEditorStore();
 ensureBasemapStore();
+clearInterruptedDownloads();
+// A scenario or game still carrying a tiled archive inside it (the first cut of
+// scenario relief) moves it into the Basemap library (docs/adr/0005).
+migrateEmbeddedTiledArchives().catch((error) => console.warn("[basemaps] moving embedded archives into the library failed:", error.message));
 
-const sendError = (res, statusCode, error) => {
+// What was deleted more than TRASH_KEEP_DAYS ago goes for good.
+try {
+  const purged = purgeOldTrash();
+  if (purged.removed) console.log(`[trash] deleted ${purged.removed} item(s) older than ${TRASH_KEEP_DAYS} days for good`);
+} catch (error) {
+  console.warn(`[trash] purge failed: ${error.message}`);
+}
+
+// `extra`: fields to send beside the message, for a caller that has to tell
+// one failure from another without reading the words (the AI relay marks an
+// endpoint it could not connect to).
+const sendError = (res, statusCode, error, extra = undefined) => {
   const message = error instanceof Error ? error.message : String(error);
   // Node hides WHAT failed behind a bare "fetch failed" / "socket hang up" and
   // puts the real cause on error.cause — which is the difference between a
@@ -233,9 +343,22 @@ const sendError = (res, statusCode, error) => {
     message: reported,
     data: error instanceof Error && error.stack ? { stack: error.stack } : undefined,
   });
-  res.status(statusCode).json({ error: reported });
+  res.status(statusCode).json({ error: reported, ...extra });
 };
 
+// An optional asset a scenario or game simply does not have — its stats sheet,
+// flags, tags — is an answer, not a failure: the client asks for each on every
+// read and falls back to the default. Logged as a warning with a stack, the
+// stats sheet alone put eight entries a turn into a player's diagnostics log.
+// Anything else (an unknown scenario, an unsupported key) is still an error.
+const sendAssetMissing = (res, error) => {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/^Asset not found: /.test(message)) {
+    res.status(404).json({ error: message });
+    return;
+  }
+  sendError(res, 404, error);
+};
 // Block cross-origin state-changing requests (CSRF / drive-by protection).
 // The CORS allowlist above lets the Android connect screen (on the WebView's own
 // origin) *probe* this server — a GET. Without this guard, any web page the
@@ -293,6 +416,30 @@ const streamBinaryFile = (req, res, sourcePath, contentType = "application/octet
   res.setHeader("Content-Length", clampedEnd - clampedStart + 1);
   res.setHeader("Content-Range", `bytes ${clampedStart}-${clampedEnd}/${totalSize}`);
   fs.createReadStream(sourcePath, { end: clampedEnd, start: clampedStart }).pipe(res);
+};
+
+const INSTITUTION_LOGO_DATA_URL = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/i;
+const MAX_INSTITUTION_LOGO_BYTES = 512 * 1024;
+
+const sendInstitutionLogo = (res, dataUrl) => {
+  const match = INSTITUTION_LOGO_DATA_URL.exec(String(dataUrl || ""));
+  if (!match) throw new Error("Institution logo is missing or invalid.");
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > MAX_INSTITUTION_LOGO_BYTES) {
+    throw new Error("Institution logo is empty or exceeds the server size limit.");
+  }
+  const subtype = match[1].toLowerCase();
+  const contentType = subtype === "jpg" ? "image/jpeg" : `image/${subtype}`;
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Length", buffer.length);
+  res.send(buffer);
+};
+
+const readScenarioInstitutionLogoMap = (scenarioId) => {
+  const asset = resolveScenarioUploadAsset(scenarioId, "institutionLogos");
+  const parsed = JSON.parse(fs.readFileSync(asset.sourcePath, "utf8"));
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 };
 
 // Global client preferences (currently the UI language) shared by every
@@ -484,6 +631,19 @@ app.post("/api/presence", jsonParser, (req, res) => {
   res.status(204).end();
 });
 
+// A shared game a friend invited this player to on Discord, and requests from
+// Discord to join this player's shared game (server/discordPresence.js). This
+// computer's player only.
+app.get("/api/presence/inbox", (req, res) => {
+  if (!isLoopbackAddress(req.socket?.remoteAddress)) return res.json({ join: null, requests: [] });
+  res.json(discordPresence.takeInbox?.() ?? { join: null, requests: [] });
+});
+app.post("/api/presence/answer", jsonParser, (req, res) => {
+  if (!isLoopbackAddress(req.socket?.remoteAddress)) return res.status(204).end();
+  const sent = discordPresence.answer?.(req.body?.userId, req.body?.accept === true) ?? false;
+  res.json({ sent });
+});
+
 // Which application this is: the desktop app (and whether it is the stable one,
 // the beta or the multiplayer build) or the server started by hand. Asked once by
 // the page's visit counter (src/runtime/visitCount.js), which counts each apart.
@@ -570,6 +730,58 @@ app.post("/api/app-update/restart", (req, res) => {
   updater.restart();
 });
 
+// A shared game's hidden engine window (electron/main.cjs), desktop only: the
+// host's page opens it when the host shares its game, and closes it when the host
+// stops. Like the updater, the handle is on globalThis because this server runs
+// inside the desktop app's own process; everywhere else there is none.
+const sharedGameEngine = () => globalThis.__ohSharedGameEngine || null;
+
+// While the engine window is open this computer is hosting, and the game it
+// hosts stays the open one (libraryStore.js setActiveGameHold): no page this
+// server serves may open, make-and-open or delete another in its place. Read
+// each time, so a window that closed by itself holds nothing.
+export const HOSTING_HOLDS_THE_GAME = "This computer is hosting a shared game, and the game it hosts stays its open game. Stop sharing first.";
+setActiveGameHold(() => (sharedGameEngine()?.status?.().open ? HOSTING_HOLDS_THE_GAME : ""));
+
+// How far this computer's clock is from the signaling relays' (clockOffset.js):
+// { offsetMs, sources }. A shared game asks before it joins or hosts, and
+// stamps its signaling by the relays' time (src/multiplayer/client/clock.js).
+const clockOffset = createClockOffsetCache();
+app.get("/api/multiplayer/clock", async (_req, res) => {
+  try {
+    res.json(await clockOffset());
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get("/api/multiplayer/engine", (req, res) => {
+  const engine = sharedGameEngine();
+  res.json(engine ? { supported: true, ...engine.status() } : { supported: false });
+});
+
+app.post("/api/multiplayer/engine/open", async (req, res) => {
+  const engine = sharedGameEngine();
+  if (!engine) {
+    res.status(404).json({ error: "Only the desktop app can host a shared game." });
+    return;
+  }
+  try {
+    res.json(await engine.open());
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post("/api/multiplayer/engine/close", (req, res) => {
+  const engine = sharedGameEngine();
+  if (!engine) {
+    res.status(404).json({ error: "Only the desktop app can host a shared game." });
+    return;
+  }
+  res.json(engine.close());
+});
+
 app.get("/api/scenarios/:scenarioId", (req, res) => {
   try {
     res.json(getScenarioDetails(req.params.scenarioId));
@@ -619,9 +831,13 @@ app.get("/api/scenarios/:scenarioId/export", (req, res) => {
   }
 });
 
-app.post("/api/scenarios/import", largeJsonParser, (req, res) => {
+app.post("/api/scenarios/import", largeJsonParser, async (req, res) => {
   try {
-    res.status(201).json(importScenarioBundle(req.body ?? {}, { setSelected: true }));
+    const imported = importScenarioBundle(req.body ?? {}, { setSelected: true });
+    // A bundle from the first cut of scenario relief carries its archive; it
+    // becomes a Tiled Basemap before anyone reads the scenario back.
+    await migrateEmbeddedTiledArchives();
+    res.status(201).json(getScenarioDetails(imported.scenario.id));
   } catch (error) {
     sendError(res, 400, error);
   }
@@ -629,9 +845,21 @@ app.post("/api/scenarios/import", largeJsonParser, (req, res) => {
 
 // Replace an existing scenario's content with a fresh bundle — the community
 // hub's "Update" button for scenarios imported unmodified from a post.
-app.put("/api/scenarios/:scenarioId/import", largeJsonParser, (req, res) => {
+app.put("/api/scenarios/:scenarioId/import", largeJsonParser, async (req, res) => {
   try {
-    res.json(updateScenarioFromBundle(req.params.scenarioId, req.body ?? {}));
+    updateScenarioFromBundle(req.params.scenarioId, req.body ?? {});
+    await migrateEmbeddedTiledArchives();
+    res.json(getScenarioDetails(req.params.scenarioId));
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
+// The community basemap an import or Update could not download, downloaded
+// since: { payload: { dataUrl } | { geojson } }.
+app.put("/api/scenarios/:scenarioId/basemap", largeJsonParser, (req, res) => {
+  try {
+    res.json(restoreScenarioBasemap(req.params.scenarioId, req.body?.payload));
   } catch (error) {
     sendError(res, 400, error);
   }
@@ -647,7 +875,7 @@ app.get("/api/scenarios/:scenarioId/assets/:assetKey", (req, res) => {
       : resolveScenarioUploadAsset(req.params.scenarioId, req.params.assetKey);
     streamBinaryFile(req, res, asset.sourcePath, asset.contentType);
   } catch (error) {
-    sendError(res, 404, error);
+    sendAssetMissing(res, error);
   }
 });
 
@@ -666,6 +894,15 @@ app.put("/api/scenarios/:scenarioId/assets/:assetKey", uploadParser, (req, res) 
     );
   } catch (error) {
     sendError(res, 400, error);
+  }
+});
+
+app.get("/api/scenarios/:scenarioId/institution-logo/:institutionId", (req, res) => {
+  try {
+    const logos = readScenarioInstitutionLogoMap(req.params.scenarioId);
+    sendInstitutionLogo(res, logos?.[req.params.institutionId]);
+  } catch (error) {
+    sendError(res, 404, error);
   }
 });
 
@@ -725,6 +962,33 @@ app.put("/api/games/:gameId/snapshots", largeJsonParser, (req, res) => {
   }
 });
 
+// A time skip that finished while another game was open, kept for this one
+// (src/Game/AI/parkedTurn.js). By game id: it is written while another game is
+// the active one. null when there is none.
+app.get("/api/games/:gameId/parked-turn", (req, res) => {
+  try {
+    res.json(readGameParkedTurn(req.params.gameId));
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
+app.put("/api/games/:gameId/parked-turn", largeJsonParser, (req, res) => {
+  try {
+    res.json(writeGameParkedTurn(req.params.gameId, req.body));
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
+app.delete("/api/games/:gameId/parked-turn", (req, res) => {
+  try {
+    res.json(removeGameParkedTurn(req.params.gameId));
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
 app.post("/api/games", jsonParser, (req, res) => {
   try {
     res.status(201).json(createGame(req.body ?? {}));
@@ -754,7 +1018,7 @@ app.get("/api/games/:gameId/assets/:assetKey", (req, res) => {
     const asset = resolveGameUploadAsset(req.params.gameId, req.params.assetKey);
     streamBinaryFile(req, res, asset.sourcePath, asset.contentType);
   } catch (error) {
-    sendError(res, 404, error);
+    sendAssetMissing(res, error);
   }
 });
 
@@ -784,6 +1048,42 @@ app.delete("/api/games/:gameId", (req, res) => {
   }
 });
 
+// What delete moved to .trash: listed, restored and emptied from this machine
+// only. The trash holds whole saves, and restoring or destroying them is for
+// the person at the computer, not for whoever else is on the network.
+const refuseRemoteTrash = (req, res) => {
+  if (isLoopbackAddress(req.socket?.remoteAddress)) return false;
+  sendError(res, 403, new Error("Only the machine running the server can use its trash."));
+  return true;
+};
+
+app.get("/api/trash", (req, res) => {
+  if (refuseRemoteTrash(req, res)) return;
+  try {
+    res.json({ entries: listTrash(), keepDays: TRASH_KEEP_DAYS });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post("/api/trash/:entry/restore", (req, res) => {
+  if (refuseRemoteTrash(req, res)) return;
+  try {
+    res.json(restoreFromTrash(req.params.entry));
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
+app.delete("/api/trash", (req, res) => {
+  if (refuseRemoteTrash(req, res)) return;
+  try {
+    res.json(emptyTrash({ kind: ["game", "scenario"].includes(req.query.kind) ? req.query.kind : "" }));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
 app.delete("/api/games/:gameId/assets/:assetKey", (req, res) => {
   try {
     res.json(removeGameAsset(req.params.gameId, req.params.assetKey));
@@ -808,6 +1108,15 @@ app.delete("/api/scenarios/:scenarioId", (req, res) => {
   }
 });
 
+app.get("/api/runtime/institution-logo/:institutionId", (req, res) => {
+  try {
+    const logos = readRuntimeJsonAsset("institutionLogos")?.data || {};
+    sendInstitutionLogo(res, logos?.[req.params.institutionId]);
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
 app.get("/api/runtime/json/:assetKey", (req, res) => {
   try {
     // Scenario geometry is served untransformed, so parsing it only to
@@ -824,6 +1133,36 @@ app.get("/api/runtime/json/:assetKey", (req, res) => {
     res.send(JSON.stringify(asset.data));
   } catch (error) {
     sendError(res, 404, error);
+  }
+});
+
+// One of the active game's restore points, by id: the staged reveal needs the
+// world one turn started from, not the whole archive of twelve. Sent from its
+// file as stored, never parsed here.
+app.get("/api/runtime/snapshots/:snapshotId", (req, res) => {
+  try {
+    const sourcePath = resolveRuntimeRestorePoint(req.params.snapshotId);
+    if (!sourcePath) {
+      sendError(res, 404, new Error(`Restore point not found: ${req.params.snapshotId}`));
+      return;
+    }
+    streamBinaryFile(req, res, sourcePath, "application/json; charset=utf-8");
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
+app.put("/api/runtime/turn-commit", jsonParser, (req, res) => {
+  try {
+    if (!Number(req.headers["content-length"])) {
+      return sendError(res, 400, new Error("Refusing to commit turn: the request had no body."));
+    }
+    const committed = writeRuntimeTurnState(req.body);
+    res.setHeader("Cache-Control", "no-store");
+    res.type("application/json");
+    res.send(JSON.stringify(committed));
+  } catch (error) {
+    sendError(res, 400, error);
   }
 });
 
@@ -851,6 +1190,14 @@ app.put("/api/runtime/json/:assetKey", jsonParser, (req, res) => {
     res.send(JSON.stringify(asset.data));
   } catch (error) {
     sendError(res, 400, error);
+  }
+});
+
+app.get("/api/runtime/earlier-maps/:stamp", (req, res) => {
+  try {
+    streamBinaryFile(req, res, resolveEarlierBuiltInMap(req.params.stamp), "application/geo+json");
+  } catch (error) {
+    sendError(res, 404, error);
   }
 });
 
@@ -890,7 +1237,16 @@ const HUB_DOWNLOAD_HOSTS = new Set([
   "user-attachments.githubusercontent.com",
   "github-production-user-asset-6210df.s3.amazonaws.com",
 ]);
-const HUB_MAX_BUNDLE_BYTES = 200 * 1024 * 1024;
+// Caps: a scenario bundle, and a Tiled Basemap (docs/adr/0005). Both downloads
+// stream to disk, so a cap bounds disk use and accidents, not memory. The env
+// overrides exist for the tests, which scale them down to kilobytes.
+const HUB_MAX_BUNDLE_BYTES = Number(process.env.OH_HUB_MAX_BUNDLE_BYTES) || 200 * 1024 * 1024;
+const TILED_BASEMAP_MAX_BYTES = Number(process.env.OH_TILED_BASEMAP_MAX_BYTES) || 500 * 1024 * 1024;
+// Tests and local checks only: one exact origin (a fake "release" on this
+// machine) the hub download guard also accepts. Unset in every real run.
+const HUB_TEST_ORIGIN = process.env.OH_HUB_TEST_ORIGIN || "";
+const isHubDownloadUrl = (candidate) =>
+  isAllowedHubUrl(candidate, HUB_DOWNLOAD_HOSTS) || (Boolean(HUB_TEST_ORIGIN) && candidate.origin === HUB_TEST_ORIGIN);
 
 // One hop of a hub download. fetch() has no timeout of its own, so a connection
 // that never opens — an IPv6 route that blackholes, a proxy that drops the SYN —
@@ -904,14 +1260,23 @@ const HUB_TRANSIENT_CODES = new Set([
   "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "EPIPE",
   "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET", "TimeoutError",
 ]);
-const fetchHubHop = async (url) => {
+// Each hop:
+// the timeout covers the wait for the response's headers only. A Tiled Basemap
+// can take far longer than that to arrive on a slow link, and a body that stalls
+// is caught by the download's own idle timer (tiledBasemaps.js).
+const fetchHubHop = async (url, signal) => {
   for (let attempt = 0; ; attempt += 1) {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(new DOMException("Timed out", "TimeoutError")), HUB_HOP_TIMEOUT_MS);
     try {
-      return await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(HUB_HOP_TIMEOUT_MS) });
+      return await fetch(url, { redirect: "manual", signal: signal ? AbortSignal.any([timeout.signal, signal]) : timeout.signal });
     } catch (error) {
+      if (signal?.aborted) throw error;
       const code = error?.cause?.code || error?.code || error?.name || "";
       if (attempt >= 1 || !HUB_TRANSIENT_CODES.has(code)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 750));
+    } finally {
+      clearTimeout(timer);
     }
   }
 };
@@ -943,15 +1308,31 @@ const setHubFileGuards = (res) => {
 // fenced in three other ways instead:
 //   1. LOOPBACK ONLY by default. A relay reachable from the network is an open
 //      proxy for everyone on it. The desktop app, Termux-on-the-same-phone and a
-//      browser on the host all come from loopback and are unaffected; a phone
-//      talking to a desktop needs OH_ALLOW_REMOTE_RELAY=1, which is a deliberate
-//      "yes, proxy for my LAN" and is stated as such.
-//   2. Cloud metadata endpoints refused (relayTargetAllowed) — never an AI
-//      endpoint, always credentials.
+//      browser on the host all come from loopback and are unaffected; a browser
+//      on another device needs the player to say "yes, proxy for my LAN":
+//      Settings → Network → "Let other devices send AI calls through this
+//      server" (relayForLan in network-settings.json, applied at once), or
+//      OH_ALLOW_REMOTE_RELAY=1, which wins and locks that switch. The Android
+//      app never needs it: it calls the model natively, with no relay.
+//   2. Cloud metadata endpoints refused (relayTargetAllowed on the URL, and
+//      relayLookup on where a name resolves) — never an AI endpoint, always
+//      credentials.
 //   3. Caller headers filtered, redirects not followed, response size and time
 //      bounded, so it cannot be aimed at an internal service and used to walk a
 //      redirect chain or stream something unbounded back.
 const ALLOW_REMOTE_RELAY = process.env.OH_ALLOW_REMOTE_RELAY === "1";
+let RELAY_FOR_LAN = readNetworkSettings().relayForLan;
+const relaySettingState = () => ({
+  relayForLan: ALLOW_REMOTE_RELAY || RELAY_FOR_LAN,
+  relayLockedByEnv: ALLOW_REMOTE_RELAY,
+});
+// Marks the relay's own refusal, so the page can tell it from an AI endpoint
+// that answered 403 itself (src/Game/AI/relayResponse.js isRelayRefusal). And,
+// with the value "unreachable", a 502 that means the relay could not connect to
+// the endpoint at all, so the page can tell that from a gateway's own 502: the
+// game waits and asks a busy gateway again, and must not do that to a server
+// that is not running (isRelayUnreachable).
+const RELAY_REFUSED_HEADER = "X-OH-Relay";
 const RELAY_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 const RELAY_TIMEOUT_MS = Number(process.env.OH_RELAY_TIMEOUT_MS) || 600000;
 
@@ -972,6 +1353,8 @@ const RELAY_TIMEOUT_MS = Number(process.env.OH_RELAY_TIMEOUT_MS) || 600000;
 // the browser now sees tokens as they arrive rather than one blob at the end,
 // so a local model notices a cancelled request on its next write.
 const relayTransport = (target) => (target.protocol === "https:" ? https : http);
+// Checks where a NAME resolves, which relayTargetAllowed cannot (security.js).
+const relayLookup = metadataGuardedLookup(dns.lookup);
 
 app.post("/api/ai/relay", largeJsonParser, async (req, res) => {
   const controller = new AbortController();
@@ -982,19 +1365,28 @@ app.post("/api/ai/relay", largeJsonParser, async (req, res) => {
   };
   req.once("aborted", abortUpstream);
   res.once("close", abortUpstream);
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    abortUpstream();
-  }, RELAY_TIMEOUT_MS);
+  // A deadline on SILENCE, restarted by every chunk: the first byte gets the
+  // whole window (prompt evaluation on a local model), and a model that is
+  // still streaming tokens is never cut off for being long.
+  let timeout = null;
+  const armTimeout = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      timedOut = true;
+      abortUpstream();
+    }, RELAY_TIMEOUT_MS);
+  };
+  armTimeout();
 
   try {
-    if (!ALLOW_REMOTE_RELAY && !isLoopbackAddress(req.socket?.remoteAddress)) {
+    if (!ALLOW_REMOTE_RELAY && !RELAY_FOR_LAN && !isLoopbackAddress(req.socket?.remoteAddress)) {
+      res.setHeader(RELAY_REFUSED_HEADER, "refused");
       return sendError(
         res,
         403,
         new Error(
-          "The AI relay only answers this machine. Set OH_ALLOW_REMOTE_RELAY=1 to let other "
-            + "devices on your network relay AI calls through this server.",
+          "The AI relay only answers the computer running the server. To let this device use it, turn on "
+            + "Settings → Advanced → Network → \"Let other devices send AI calls through this server\" on that computer.",
         ),
       );
     }
@@ -1034,8 +1426,15 @@ app.post("/api/ai/relay", largeJsonParser, async (req, res) => {
         method: requestMethod,
         headers: upstreamHeaders,
         signal: controller.signal,
+        lookup: relayLookup,
       }, resolve);
-      upstreamRequest.on("error", reject);
+      // Whatever fails before the endpoint has answered is the connection's
+      // (refused, no such host, reset, a broken handshake), and is said so
+      // below; a throw from building the request is not, and is left alone.
+      upstreamRequest.on("error", (error) => {
+        if (error && typeof error === "object") error.relayCouldNotConnect = true;
+        reject(error);
+      });
       upstreamRequest.end(body);
     });
 
@@ -1053,6 +1452,7 @@ app.post("/api/ai/relay", largeJsonParser, async (req, res) => {
     let received = 0;
     await new Promise((resolve, reject) => {
       upstream.on("data", (chunk) => {
+        armTimeout();
         received += chunk.length;
         if (received > RELAY_MAX_RESPONSE_BYTES) {
           upstream.destroy(new Error("The AI endpoint's response is too large to relay."));
@@ -1067,37 +1467,178 @@ app.post("/api/ai/relay", largeJsonParser, async (req, res) => {
       });
       upstream.on("end", resolve);
       upstream.on("error", reject);
+      // The endpoint's connection dropping mid-answer is not always an error
+      // on the response; without this the relay waited out its deadline.
+      upstream.on("close", () => {
+        if (!upstream.complete) reject(new Error("The AI endpoint closed the connection before its answer was complete."));
+      });
     });
 
     completed = true;
     res.end();
   } catch (error) {
+    // Headers are already out, so there is no status left to set. Ending the
+    // response here used to write a clean end of stream, and the game took a
+    // cut-off answer for a complete one: it failed to parse half a tool call,
+    // spent a second request that was cut the same way, and the advisor kept
+    // truncated replies as finished. Breaking the connection makes the
+    // browser's reader fail instead (src/Game/AI/relayResponse.js says why).
+    // A client that went away has destroyed it already.
+    const cutOff = (reason) => {
+      if (res.writableEnded || res.destroyed) return;
+      appendLog({ level: "warn", source: "server", event: "relay.cut", message: reason.message });
+      res.destroy(reason);
+    };
     // The relay's own deadline used to abort the upstream and then send
     // NOTHING: no status, no body, no res.end(), so the game sat on an open
     // socket forever instead of failing. Answer it.
     if (timedOut) {
-      if (!res.headersSent) {
-        sendError(res, 504, new Error(
-          `The AI endpoint did not finish within ${Math.round(RELAY_TIMEOUT_MS / 1000)}s. `
-            + "Set OH_RELAY_TIMEOUT_MS to allow longer generations.",
-        ));
-      } else if (!res.writableEnded && !res.destroyed) {
-        res.end();
-      }
+      const late = new Error(
+        `The AI endpoint did not finish within ${Math.round(RELAY_TIMEOUT_MS / 1000)}s. `
+          + "Set OH_RELAY_TIMEOUT_MS to allow longer generations.",
+      );
+      if (!res.headersSent) sendError(res, 504, late);
+      else cutOff(late);
       return;
     }
     if (!controller.signal.aborted && !res.headersSent) {
-      sendError(res, 502, error);
+      if (error?.code === RELAY_BLOCKED_CODE) {
+        sendError(res, 400, error);
+      } else if (error?.relayCouldNotConnect) {
+        // Still a 502, for anything that reads only the status; the header and
+        // the two fields say it is the connection, not a busy gateway. `code`
+        // is what the player needs to see: ECONNREFUSED is a server that is not
+        // running, ENOTFOUND an address that is wrong.
+        res.setHeader(RELAY_REFUSED_HEADER, "unreachable");
+        sendError(res, 502, error, {
+          unreachable: true,
+          code: String(error.code || error.cause?.code || error.errors?.[0]?.code || ""),
+        });
+      } else {
+        sendError(res, 502, error);
+      }
+    } else if (res.headersSent) {
+      cutOff(error instanceof Error ? error : new Error(String(error)));
     } else if (!res.writableEnded && !res.destroyed) {
-      // Headers are already out, so there is no status left to set — end the
-      // response rather than leaking the socket. (A client that went away has
-      // destroyed it already; there is nothing to answer.)
       res.end();
     }
   } finally {
     clearTimeout(timeout);
   }
 });
+
+// --- The Agent queue (docs/adr/0008-subscription-agents-answer-through-the-game.md)
+// An Agent Connection's requests wait here for the player's own Agent, which
+// answers them through the MCP server below. The Agent folder is written at
+// every start with this run's address and a new token; the MCP server refuses
+// a call without that token. Both sides are this machine only: the game's page
+// and the Agent the player opened in the folder.
+const AGENT_FOLDER = path.join(DATA_DIR, "agent");
+const AGENT_TOKEN = crypto.randomBytes(32).toString("base64url");
+const agentQueue = createAgentQueue({
+  folder: path.join(AGENT_FOLDER, AGENT_REQUESTS_DIR),
+  waitMs: Number(process.env.OH_AGENT_WAIT_MS) || AGENT_WAIT_MS,
+  ...(process.env.OH_AGENT_FOLLOW_UP_MS ? { followUpMs: Number(process.env.OH_AGENT_FOLLOW_UP_MS) } : {}),
+  log: (event, data) => appendLog({ level: "info", source: "server", event, message: event, data }),
+});
+try {
+  writeAgentFolder(AGENT_FOLDER, { url: `http://127.0.0.1:${PORT}/api/agent/mcp`, token: AGENT_TOKEN });
+} catch (error) {
+  console.warn(`[agent] could not write the Agent folder: ${error.message}`);
+}
+
+const agentLocalOnly = (req, res, next) => {
+  if (isLoopbackAddress(req.socket?.remoteAddress)) return next();
+  return sendError(res, 403, new Error("The Agent queue only answers this computer."));
+};
+
+app.get("/api/agent/folder", agentLocalOnly, (_req, res) => {
+  res.json({ path: AGENT_FOLDER });
+});
+
+// Opens the folder in the system's file manager. The game opens a folder; it
+// never starts an Agent.
+app.post("/api/agent/folder/open", agentLocalOnly, (_req, res) => {
+  const opener = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  try {
+    spawn(opener, [AGENT_FOLDER], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+    res.json({ ok: true });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post("/api/agent/skips", agentLocalOnly, jsonParser, (req, res) => {
+  res.json({ skipId: agentQueue.openSkip(req.body?.skipId) });
+});
+
+// A page that loads afresh: whatever an earlier page left waiting is over.
+app.delete("/api/agent/skips", agentLocalOnly, (_req, res) => {
+  agentQueue.dropAll();
+  res.json({ ok: true });
+});
+
+app.delete("/api/agent/skips/:skipId", agentLocalOnly, (req, res) => {
+  agentQueue.finishSkip(req.params.skipId);
+  res.json({ ok: true });
+});
+
+app.post("/api/agent/requests", agentLocalOnly, largeJsonParser, (req, res) => {
+  const { skipId, task, system, prompt, lookupTools } = req.body || {};
+  if (typeof prompt !== "string" || !prompt) return sendError(res, 400, new Error("A request needs its prompt."));
+  try {
+    const request = agentQueue.ask({ skipId, task, system: typeof system === "string" ? system : "", prompt, lookupTools });
+    res.json({ id: request.id });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+// The game's wait: answers once the request changes, or after `waitMs` (at
+// most AGENT_WAIT_MS) with it still waiting, and the game asks again.
+app.get("/api/agent/requests/:id", agentLocalOnly, async (req, res) => {
+  const waitMs = Math.min(AGENT_WAIT_MS, Math.max(0, Number(req.query.waitMs) || 0));
+  const polled = await agentQueue.poll(req.params.id, waitMs);
+  if (!polled) return res.status(404).json({ error: "This request is not in the Agent queue." });
+  res.json(polled);
+});
+
+// The game's answer to a lookup the Agent asked (GET above hands them over).
+app.post("/api/agent/requests/:id/lookups/:callId", agentLocalOnly, largeJsonParser, (req, res) => {
+  const taken = agentQueue.answerLookup(req.params.id, req.params.callId, req.body?.result);
+  if (!taken) return res.status(404).json({ error: "That lookup is not waiting for an answer." });
+  res.json({ ok: true });
+});
+
+app.delete("/api/agent/requests/:id", agentLocalOnly, (req, res) => {
+  agentQueue.cancel(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post("/api/agent/mcp", agentLocalOnly, jsonParser, async (req, res) => {
+  if (!tokenMatches(req.headers.authorization, AGENT_TOKEN)) {
+    return res.status(401).json({
+      jsonrpc: "2.0",
+      id: req.body?.id ?? null,
+      error: { code: -32001, message: "Refused: this is not the token the game wrote for this run. Start the Agent again in the Agent folder." },
+    });
+  }
+  // Models the player picked since the last call reach the sub-agents now.
+  try {
+    writeAgentSubagents(AGENT_FOLDER);
+  } catch (error) {
+    console.warn(`[agent] could not update the sub-agents: ${error.message}`);
+  }
+  const messages = Array.isArray(req.body) ? req.body : [req.body];
+  const replies = (await Promise.all(messages.map((message) => handleMcpMessage(agentQueue, message)))).filter(Boolean);
+  if (!replies.length) return res.status(202).end();
+  res.json(Array.isArray(req.body) ? replies : replies[0]);
+});
+
+// Streamable HTTP's optional server-to-Agent stream: this server sends nothing
+// unasked, so there is none.
+app.get("/api/agent/mcp", agentLocalOnly, (_req, res) => res.status(405).set("Allow", "POST").end());
+app.delete("/api/agent/mcp", agentLocalOnly, (_req, res) => res.status(405).set("Allow", "POST").end());
 
 // --- LAN sharing, from the UI ---------------------------------------------
 // Reading it is harmless (the page shows the toggle's state); the ADDRESSES are
@@ -1111,6 +1652,7 @@ app.get("/api/server/network", (req, res) => {
     port: Number(PORT),
     lockedByEnv: Boolean(HOST_FROM_ENV),
     addresses: local ? lanAddresses() : [],
+    ...relaySettingState(),
   });
 });
 
@@ -1124,6 +1666,31 @@ app.post("/api/server/network", jsonParser, (req, res) => {
   if (!isLoopbackAddress(req.socket?.remoteAddress)) {
     return sendError(res, 403, new Error("Only the machine running the server can change this."));
   }
+  // The relay switch on its own ({ relayForLan }): applied at once, no rebind,
+  // and not OH_HOST's business, which only decides the binding.
+  if (typeof req.body?.relayForLan === "boolean" && !("lanEnabled" in req.body)) {
+    if (ALLOW_REMOTE_RELAY) {
+      return sendError(
+        res,
+        409,
+        new Error("OH_ALLOW_REMOTE_RELAY is set, so it decides who can use the AI relay. Unset it to use this switch."),
+      );
+    }
+    try {
+      writeNetworkSettings({ relayForLan: req.body.relayForLan });
+    } catch (error) {
+      return sendError(res, 500, error);
+    }
+    RELAY_FOR_LAN = req.body.relayForLan;
+    return res.json({
+      lanEnabled: isLanHost(requestedHost),
+      host: requestedHost,
+      port: Number(PORT),
+      lockedByEnv: Boolean(HOST_FROM_ENV),
+      addresses: lanAddresses(),
+      ...relaySettingState(),
+    });
+  }
   if (HOST_FROM_ENV) {
     return sendError(
       res,
@@ -1134,14 +1701,13 @@ app.post("/api/server/network", jsonParser, (req, res) => {
 
   const lanEnabled = req.body?.lanEnabled === true;
   const nextHost = lanEnabled ? ALL_INTERFACES_HOST : LOOPBACK_HOST;
-  if (nextHost === HOST) {
-    return res.json({ lanEnabled: LAN_ENABLED, host: HOST, port: Number(PORT), lockedByEnv: false, addresses: lanAddresses() });
-  }
-
-  try {
-    writeNetworkSettings({ lanAccess: lanEnabled });
-  } catch (error) {
-    return sendError(res, 500, error);
+  if (nextHost !== requestedHost) {
+    try {
+      writeNetworkSettings({ lanAccess: lanEnabled });
+    } catch (error) {
+      return sendError(res, 500, error);
+    }
+    requestedHost = nextHost;
   }
 
   // Answer BEFORE rebinding: the reply travels over a connection this is about
@@ -1154,9 +1720,26 @@ app.post("/api/server/network", jsonParser, (req, res) => {
     port: Number(PORT),
     lockedByEnv: false,
     addresses: lanEnabled ? lanAddresses() : [],
+    ...relaySettingState(),
   });
-  setTimeout(() => rebindListener(nextHost), 250);
+  scheduleRebind();
 });
+
+// Moves the listener to requestedHost a moment after the reply has gone. A
+// later flip restarts the wait, so a double click settles on its last answer,
+// and one that lands while a rebind is still in flight waits for it to finish
+// and then looks again.
+const scheduleRebind = () => {
+  clearTimeout(rebindTimer);
+  rebindTimer = setTimeout(() => {
+    rebindTimer = null;
+    if (rebinding) {
+      scheduleRebind();
+      return;
+    }
+    if (requestedHost !== HOST) rebindListener(requestedHost);
+  }, 250);
+};
 
 // Shut the server down from the UI (the ⏻ button in the top bar) — handy on
 // phones/Termux and headless installs where no terminal is in sight. Responds
@@ -1179,7 +1762,8 @@ app.post("/api/server/shutdown", (req, res) => {
 // Cache fetched bundles on disk so re-importing the same scenario doesn't keep
 // bumping its GitHub download count — the second import onward is served locally
 // and never touches GitHub. Bundle URLs are immutable (a new version gets a new
-// URL), so a cached copy can't go stale. Keyed on the requested URL.
+// URL), so a cached copy can't go stale. Keyed on the requested URL, and capped
+// by total size: the entries used longest ago go first (server/hubCache.js).
 const HUB_CACHE_DIR = path.join(DATA_DIR, "hub-cache");
 const hubCachePaths = (fileUrl) => {
   const hash = crypto.createHash("sha256").update(fileUrl).digest("hex");
@@ -1192,11 +1776,61 @@ renameHubCacheBundles(HUB_CACHE_DIR)
   .then((count) => { if (count) console.log(`[hub] ${count} downloaded scenario(s) renamed to the current bundle name.`); })
   .catch((error) => console.warn("[hub] cache rename failed:", error.message));
 
+// Leftover downloads from a crash, and anything past the size cap, go at
+// startup (server/hubCache.js).
+sweepHubCache(HUB_CACHE_DIR);
+
+// Serves a downloaded file from disk, with the guards every hub file gets.
+// Sized before any header is set: a file cleared between the cache check and
+// here throws into the route's error reply, which must not go out under the
+// bundle's content type.
+const sendHubFile = (res, filePath, contentType, { removeAfter = false } = {}) => {
+  const { size } = fs.statSync(filePath);
+  res.setHeader("Cache-Control", "no-store");
+  setHubFileGuards(res);
+  // Pass the upstream content type through untouched. JSON bundles still parse
+  // via response.json() (which ignores the header), while binary bundles (.zip)
+  // and raw basemap images (.png/.jpg) arrive byte-for-byte.
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Length", size);
+  const stream = fs.createReadStream(filePath);
+  stream.once("error", (error) => res.destroy(error));
+  if (removeAfter) stream.once("close", () => fs.rm(filePath, { force: true }, () => {}));
+  stream.pipe(res);
+};
+
+// Opens a hub download and hands back its response, ready to be read. The
+// redirects are followed here, one hop at a time, so every hop is re-checked
+// against the host allowlist: `redirect: "follow"` would chase a github.com
+// redirect to an attacker-controlled host (SSRF); GitHub's own release redirect
+// (github.com -> objects.githubusercontent.com) stays inside the allowlist.
+// What it refuses, it throws with the status to answer with. One loop for both
+// routes that download from the hub (/api/hub/file and /api/music), so the
+// allowlist cannot come to differ between them.
+const HUB_REFUSAL_STATUSES = new Set([400, 413]);
+const hubRefusal = (status, message) => Object.assign(new Error(message), { status });
+const openHubDownload = async (start) => {
+  let current = start;
+  let upstream;
+  for (let hop = 0; ; hop += 1) {
+    if (hop > 5) throw hubRefusal(502, "Too many redirects fetching scenario file.");
+    upstream = await fetchHubHop(current);
+    if (upstream.status < 300 || upstream.status >= 400) break;
+    const location = upstream.headers.get("location");
+    if (!location) break;
+    const next = new URL(location, current);
+    if (!isHubDownloadUrl(next)) throw hubRefusal(400, "Scenario file redirected off GitHub.");
+    current = next;
+  }
+  if (!upstream.ok) throw hubRefusal(502, `Hub file fetch failed (HTTP ${upstream.status}).`);
+  return upstream;
+};
+
 app.get("/api/hub/file", async (req, res) => {
   try {
     const fileUrl = String(req.query.url ?? "");
-    let current = new URL(fileUrl);
-    if (!isAllowedHubUrl(current, HUB_DOWNLOAD_HOSTS)) {
+    const current = new URL(fileUrl);
+    if (!isHubDownloadUrl(current)) {
       return sendError(res, 400, new Error("Only GitHub-hosted scenario files can be fetched."));
     }
 
@@ -1206,68 +1840,138 @@ app.get("/api/hub/file", async (req, res) => {
     if (fs.existsSync(cache.body)) {
       let cachedType = "application/octet-stream";
       try { cachedType = fs.readFileSync(cache.type, "utf8") || cachedType; } catch { /* default */ }
-      // A copy cached before the startup rename reached it is renamed now.
-      const cached = await renameScenarioBundleBytes(fs.readFileSync(cache.body));
-      if (cached.changed) {
-        try { writeFileAtomic(cache.body, cached.bytes); } catch { /* served renamed either way */ }
+      touchEntry(cache.body);
+      // A copy cached before the startup rename reached it is renamed now;
+      // once that pass has left its marker, every copy carries the name.
+      if (!fs.existsSync(path.join(HUB_CACHE_DIR, HUB_CACHE_NAMES_MARKER))) {
+        const cached = await renameScenarioBundleBytes(fs.readFileSync(cache.body));
+        if (cached.changed) {
+          try {
+            writeFileAtomic(cache.body, cached.bytes);
+          } catch {
+            // Served renamed either way.
+            res.setHeader("Cache-Control", "no-store");
+            setHubFileGuards(res);
+            res.setHeader("Content-Type", cachedType);
+            return res.send(cached.bytes);
+          }
+        }
       }
-      res.setHeader("Cache-Control", "no-store");
-      setHubFileGuards(res);
-      res.setHeader("Content-Type", cachedType);
-      return res.send(cached.bytes);
+      return sendHubFile(res, cache.body, cachedType);
     }
 
-    // Follow redirects manually so every hop is re-checked against the host
-    // allowlist. `redirect: "follow"` would chase a github.com redirect to an
-    // attacker-controlled host (SSRF); GitHub's own release redirect
-    // (github.com -> objects.githubusercontent.com) stays inside the allowlist.
-    let upstream;
-    for (let hop = 0; ; hop += 1) {
-      if (hop > 5) {
-        return sendError(res, 502, new Error("Too many redirects fetching scenario file."));
-      }
-      upstream = await fetchHubHop(current);
-      if (upstream.status < 300 || upstream.status >= 400) break;
-      const location = upstream.headers.get("location");
-      if (!location) break;
-      const next = new URL(location, current);
-      if (!isAllowedHubUrl(next, HUB_DOWNLOAD_HOSTS)) {
-        return sendError(res, 400, new Error("Scenario file redirected off GitHub."));
-      }
-      current = next;
-    }
-    if (!upstream.ok) {
-      return sendError(res, 502, new Error(`Hub file fetch failed (HTTP ${upstream.status}).`));
-    }
+    const upstream = await openHubDownload(current);
 
-    const downloaded = Buffer.from(await upstream.arrayBuffer());
-    if (downloaded.length > HUB_MAX_BUNDLE_BYTES) {
-      return sendError(res, 413, new Error("Scenario bundle is too large."));
+    // Refuse before reading a byte when the size is declared; saveCappedBody
+    // stops mid-body when it is not.
+    const declared = Number(upstream.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > HUB_MAX_BUNDLE_BYTES) {
+      await upstream.body?.cancel().catch(() => {});
+      return sendError(res, 413, tooLargeError());
     }
-    // Kept and handed on under the current bundle name, whatever the post says.
-    const buffer = (await renameScenarioBundleBytes(downloaded)).bytes;
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
-    // Cache for next time — best-effort; a cache write failure must not fail the
-    // import. Temp file + rename so a concurrent serve never sees a half-written body.
+    // Downloaded to a temp file of its own (two imports of the same file at
+    // once must not share one), then renamed into the cache so a concurrent
+    // serve never sees a half-written body. Failing to cache must not fail the
+    // import: the temp file is served and removed instead.
+    fs.mkdirSync(HUB_CACHE_DIR, { recursive: true });
+    const download = `${cache.body}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    await saveCappedBody(upstream.body, download, HUB_MAX_BUNDLE_BYTES);
+    // Kept and handed on under the current bundle name, whatever the post says.
+    const renamed = await renameScenarioBundleBytes(fs.readFileSync(download));
+    if (renamed.changed) fs.writeFileSync(download, renamed.bytes);
     try {
-      fs.mkdirSync(HUB_CACHE_DIR, { recursive: true });
-      fs.writeFileSync(`${cache.body}.tmp`, buffer);
-      fs.renameSync(`${cache.body}.tmp`, cache.body);
       fs.writeFileSync(cache.type, contentType);
+      fs.renameSync(download, cache.body);
     } catch (cacheError) {
       console.warn("[hub] cache write failed:", cacheError.message);
+      return sendHubFile(res, download, contentType, { removeAfter: true });
     }
-
-    res.setHeader("Cache-Control", "no-store");
-    setHubFileGuards(res);
-    // Pass the upstream content type through untouched. JSON bundles still parse
-    // via response.json() (which ignores the header), while binary bundles (.zip)
-    // and raw basemap images (.png/.jpg) arrive byte-for-byte.
-    res.setHeader("Content-Type", contentType);
-    res.send(buffer);
+    sendHubFile(res, cache.body, contentType);
+    pruneHubCache(HUB_CACHE_DIR, undefined, { keep: cache.body });
   } catch (error) {
-    sendError(res, 502, error);
+    sendError(res, HUB_REFUSAL_STATUSES.has(error?.status) ? error.status : 502, error);
+  }
+});
+
+// Settings → Storage: how much the download cache holds, and emptying it. A
+// cleared file downloads again (and counts on GitHub again) next time.
+app.get("/api/hub/cache", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(hubCacheUsage(HUB_CACHE_DIR));
+});
+
+app.delete("/api/hub/cache", (_req, res) => {
+  res.json(clearHubCache(HUB_CACHE_DIR));
+});
+
+// ---- Music a scenario plays ------------------------------------------------
+// A hub track is downloaded once and kept in the server's own music folder by
+// its sha256 (server/musicLibrary.js), so the same song is never fetched again
+// for another scenario, another track id or another day. The page's <audio>
+// plays it from here: served from disk with byte ranges and its own audio type,
+// which is what lets it seek and start at once (the hub proxy above sends
+// neither, and its cache would have dropped the songs to make room for bundles).
+//
+// The download is the hub proxy's own: only a file in the hub's releases
+// (musicLibrary.js checks the address before anything is asked), every redirect
+// hop re-checked against the same allowlist, and stopped at the size a track may
+// be. Like the proxy, the GET answers whoever the server listens to (a phone
+// playing over the LAN needs its music too).
+const downloadHubTrack = async (fileUrl, destination, maxBytes) => {
+  const upstream = await openHubDownload(new URL(fileUrl));
+  const declared = Number(upstream.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await upstream.body?.cancel().catch(() => {});
+    throw hubRefusal(413, "That track is too large to keep.");
+  }
+  return saveCappedBody(upstream.body, destination, maxBytes);
+};
+const musicLibrary = createMusicLibrary({ download: downloadHubTrack });
+// Downloads a crash cut short, and anything past the limit, go at startup.
+tidyMusicLibrary(MUSIC_LIBRARY_DIR);
+
+app.get("/api/music/:sha256", async (req, res) => {
+  try {
+    const kept = await musicLibrary.keep({
+      sha256: req.params.sha256,
+      url: String(req.query.url ?? ""),
+      // Which hub track it is asked for as, so the kept file is known to be a
+      // scenario's; a preview in the scenario editor says so and is nobody's.
+      trackId: String(req.query.track ?? ""),
+      preview: req.query.preview === "1",
+    });
+    // The type is the library's own, from the file's first bytes; nothing is
+    // left for a browser to guess.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    streamBinaryFile(req, res, kept.filePath, kept.contentType);
+  } catch (error) {
+    sendError(res, HUB_REFUSAL_STATUSES.has(error?.status) ? error.status : 502, error);
+  }
+});
+
+// Settings → General → Sound: how much music is kept, and deleting it. From
+// this machine only, like the trash: what is on its disk is for the person at
+// the computer.
+const refuseRemoteMusic = (req, res) => {
+  if (isLoopbackAddress(req.socket?.remoteAddress)) return false;
+  sendError(res, 403, new Error("Only the machine running the server can manage its downloaded music."));
+  return true;
+};
+
+app.get("/api/music", (req, res) => {
+  if (refuseRemoteMusic(req, res)) return;
+  res.setHeader("Cache-Control", "no-store");
+  res.json(musicLibraryUsage(MUSIC_LIBRARY_DIR));
+});
+
+app.delete("/api/music", (req, res) => {
+  if (refuseRemoteMusic(req, res)) return;
+  try {
+    res.json(clearMusicLibrary(MUSIC_LIBRARY_DIR));
+  } catch (error) {
+    sendError(res, 500, error);
   }
 });
 
@@ -1373,6 +2077,172 @@ app.get("/api/basemaps/:id/payload", (req, res) => {
   }
 });
 
+// ---- Tiled Basemaps (docs/adr/0005, docs/adr/0006) -------------------------
+// Detailed maps come only from the official list (server/officialBasemaps.js):
+// the game reads which maps and versions exist, and installs one as a
+// background job the client polls. The archive streams to disk, must match the
+// list's checksum, and only then joins the library, replacing any other
+// version of the same map.
+const OFFICIAL_LIST_FILE = path.join(DATA_DIR, "basemaps-official.json");
+const readOfficialCatalog = createOfficialCatalogReader({
+  fetchHop: (url) => fetchHubHop(url),
+  isAllowed: isHubDownloadUrl,
+  readSaved: () => JSON.parse(fs.readFileSync(OFFICIAL_LIST_FILE, "utf8")),
+  save: (catalog) => fs.writeFileSync(OFFICIAL_LIST_FILE, JSON.stringify(catalog)),
+  cap: TILED_BASEMAP_MAX_BYTES,
+});
+
+// The official maps, each with the version this player has (if any), so the
+// game can offer a download or an update. Reading it also marks any copy the
+// player already has, byte for byte, as that official version.
+app.get("/api/basemaps/official", async (req, res) => {
+  try {
+    const catalog = await readOfficialCatalog({ force: req.query.refresh === "1" });
+    tagOfficialBasemaps(catalog);
+    const basemaps = catalog.basemaps.map((entry) => {
+      const installed = findOfficialBasemapMeta(entry.id);
+      return { ...entry, installed: installed ? { libraryId: installed.id, version: installed.official.version } : null };
+    });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ basemaps, stale: Boolean(catalog.stale), ...(catalog.error ? { error: catalog.error } : {}) });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+// The player's copy of an official map, whatever its version, or 404.
+app.get("/api/basemaps/official/:officialId", (req, res) => {
+  const meta = findOfficialBasemapMeta(String(req.params.officialId));
+  if (!meta) return sendError(res, 404, new Error("This map is not downloaded."));
+  res.setHeader("Cache-Control", "no-store");
+  res.json(meta);
+});
+
+// Installs an official map: `{ id, version? }`, the newest version when none is
+// given. A version the player already has (or a newer one) is not downloaded
+// again, and asking twice while it downloads joins the download in progress.
+app.post("/api/basemaps/official/install", jsonParser, async (req, res) => {
+  try {
+    const officialId = String(req.body?.id || "");
+    const catalog = await readOfficialCatalog();
+    const entry = findOfficialEntry(catalog, officialId);
+    if (!entry) {
+      return sendError(res, 404, new Error(catalog.error
+        ? `The official map list could not be read (${catalog.error}).`
+        : "That map is not on the official list."));
+    }
+    if (entry.withdrawn || !entry.versions.length) {
+      return sendError(res, 404, new Error("This map is no longer available from the official list."));
+    }
+    const asked = req.body?.version === undefined ? null : Number(req.body.version);
+    const version = asked === null ? latestOfficialVersion(entry) : entry.versions.find((v) => v.version === asked);
+    if (!version) return sendError(res, 404, new Error(`Version ${asked} of that map is not on the official list.`));
+    // The list was checked as it was read; checked again here, where it is used.
+    if (!isOfficialReleaseUrl(version.url)) return sendError(res, 400, new Error("That map's link is not an official release."));
+    const installed = findOfficialBasemapMeta(entry.id);
+    const jobId = startInstallJob({
+      key: `${entry.id}@${version.version}`,
+      run: async ({ signal, onProgress }) => {
+        if (installed && installed.official.version >= version.version) return installed;
+        const file = incomingArchivePath();
+        await downloadToFile({
+          url: version.url,
+          dest: file,
+          cap: TILED_BASEMAP_MAX_BYTES,
+          isAllowed: isHubDownloadUrl,
+          fetchHop: fetchHubHop,
+          onProgress,
+          signal,
+        });
+        // createTiledBasemap removes the file if it is refused or cancelled.
+        return createTiledBasemap({
+          file,
+          name: entry.name,
+          author: entry.author,
+          source: { official: true, url: version.url },
+          expectedHash: version.sha256,
+          official: { id: entry.id, version: version.version },
+          signal,
+        });
+      },
+    });
+    res.status(202).json({ jobId, version: version.version });
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
+app.get("/api/basemaps/tiled/install/:jobId", (req, res) => {
+  const job = getInstallJob(req.params.jobId);
+  if (!job) return sendError(res, 404, new Error("No such download."));
+  res.setHeader("Cache-Control", "no-store");
+  res.json(job);
+});
+
+app.delete("/api/basemaps/tiled/install/:jobId", (req, res) => {
+  const job = cancelInstallJob(req.params.jobId);
+  if (!job) return sendError(res, 404, new Error("No such download."));
+  res.json(job);
+});
+
+// An author's own archive, from a file on their machine: the request body is
+// streamed to disk, never parsed or held, then checked like a download.
+app.put("/api/basemaps/tiled", async (req, res) => {
+  const file = incomingArchivePath();
+  try {
+    await receiveToFile(req, file, TILED_BASEMAP_MAX_BYTES);
+    const meta = await createTiledBasemap({ file, name: req.query.name, author: req.query.author });
+    res.status(201).json(meta);
+  } catch (error) {
+    sendError(res, error instanceof TooLargeError ? 413 : 400, error);
+  }
+});
+
+app.get("/api/basemaps/by-hash/:hash", (req, res) => {
+  const meta = findBasemapMetaByHash(String(req.params.hash));
+  if (!meta) return sendError(res, 404, new Error("Basemap not in the library."));
+  res.setHeader("Cache-Control", "no-store");
+  res.json(meta);
+});
+
+// A Tiled Basemap's vector fallback (small GeoJSON).
+app.put("/api/basemaps/:id/payload", largeJsonParser, (req, res) => {
+  try {
+    res.json(setTiledBasemapFallback(req.params.id, req.body?.geojson));
+  } catch (error) {
+    sendError(res, 400, error);
+  }
+});
+
+// Which scenarios name it: what deleting it would leave on their painted fallback.
+app.get("/api/basemaps/:id/users", (req, res) => {
+  const meta = getBasemapMeta(req.params.id);
+  if (!meta) return sendError(res, 404, new Error("Basemap not in the library."));
+  res.json(meta.kind === "tiled" ? listScenariosNamingTiledBasemap(meta) : []);
+});
+
+// The archive itself, by byte range, for the map's pmtiles reader.
+app.get("/api/basemaps/:id/archive", (req, res) => {
+  try {
+    streamBinaryFile(req, res, getBasemapArchivePath(req.params.id));
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
+app.head("/api/basemaps/:id/archive", (req, res) => {
+  try {
+    const stats = fs.statSync(getBasemapArchivePath(req.params.id));
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Length", stats.size);
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).end();
+  } catch (error) {
+    sendError(res, 404, error);
+  }
+});
+
 app.delete("/api/basemaps/:id", (req, res) => {
   try {
     res.json(deleteBasemap(req.params.id));
@@ -1431,6 +2301,14 @@ export const httpServer = app.listen(PORT, HOST, () => {
   describeBinding();
 });
 
+// Every open connection, so a rebind can cut the network's and leave this
+// machine's requests running (rebindListener).
+const openSockets = new Set();
+httpServer.on("connection", (socket) => {
+  openSockets.add(socket);
+  socket.once("close", () => openSockets.delete(socket));
+});
+
 // Move the listener to a different interface in place, so the LAN toggle takes
 // effect immediately instead of asking the player to restart a game they are in
 // the middle of. Node lets a closed server listen() again; if the new bind
@@ -1470,6 +2348,7 @@ const rebindListener = (nextHost) => {
     httpServer.removeListener("error", onError);
     HOST = previousHost;
     LAN_ENABLED = isLanHost(HOST);
+    requestedHost = HOST;
     try {
       writeNetworkSettings({ lanAccess: LAN_ENABLED });
     } catch { /* the binding is what matters; the file is a hint for next boot */ }
@@ -1482,10 +2361,24 @@ const rebindListener = (nextHost) => {
   };
 
   rebinding = true;
-  // Keep-alive connections would hold close() open indefinitely, and one of them
-  // is the page that just flipped the switch.
-  httpServer.closeAllConnections?.();
-  httpServer.close(() => {
+  // close() stops taking new connections at once and lets the open ones run to
+  // their end; idle keep-alive ones are closed now. This used to be
+  // closeAllConnections(), which also killed every request in flight — a local
+  // model's relayed generation minutes into a time skip, a turn being saved —
+  // whenever the switch was flipped. Turning sharing OFF still cuts the
+  // network's connections, busy or not: shutting those devices out is what
+  // the player asked for.
+  httpServer.closeIdleConnections?.();
+  if (!isLanHost(nextHost)) {
+    for (const socket of openSockets) {
+      if (!isLoopbackAddress(socket.remoteAddress)) socket.destroy();
+    }
+  }
+  // The new bind does not wait for close()'s callback, which only comes once
+  // the last of those requests has finished; one event-loop turn is enough for
+  // the old listening socket to let go of the port.
+  httpServer.close();
+  setImmediate(() => {
     httpServer.once("error", onError);
     httpServer.once("listening", onListening);
     httpServer.listen(PORT, nextHost);

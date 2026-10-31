@@ -497,12 +497,20 @@ const targetOf = (thing, from) => {
     return regions.reduce((best, region) => (distanceKm(centreOf(region), from) < distanceKm(centreOf(best), from) ? region : best)).geometry;
 };
 
+// Open sea: where no land region is (the gazetteer counts a region of a water
+// type as sea), and on the map. Past the Mercator square's top or bottom no
+// region is either, and a fleet put there stood below the bottom of the map: a
+// coast that runs along the map's southern edge stepped out over it (a fantasy
+// scenario's Discord game, 2026-10-26).
+const MAP_EDGE_LAT = 85.0511;
+export const isOpenSea = (point, gazetteer) => Math.abs(point[1]) < MAP_EDGE_LAT && !gazetteer.regionAt(point);
+
 // Is this stretch of a region's edge the sea? Step outward from it; on this map
-// the sea is simply where no region is.
+// the sea is where no land region is (isOpenSea).
 const seawardPoint = (region, vertex, inner, gazetteer, km) => {
     const bearing = (Math.atan2((vertex[0] - inner[0]) * kmPerDegLng(vertex[1]), (vertex[1] - inner[1]) * KM_PER_DEG_LAT) * 180) / Math.PI;
     const out = offsetPoint(vertex, bearing, km);
-    return gazetteer.regionAt(out) ? null : out;
+    return isOpenSea(out, gazetteer) ? out : null;
 };
 
 const coastOf = (region, gazetteer, { toward = null, seed = 0 } = {}) => {
@@ -914,7 +922,9 @@ const countryInPhrase = (phrase, gazetteer) => {
         const country = landedPolity(gazetteer.find(token, { exact: true }));
         if (country) return country;
     }
-    for (const token of named) {
+    // Then the holder of a town a feature in the phrase is called after
+    // (featureTownsIn): "Manila Bay" is in the Philippines.
+    for (const token of [...named, ...featureTownsIn(phrase)]) {
         const thing = gazetteer.find(token, { exact: true });
         const holder = asText(thing?.region?.owner ?? (thing?.point ? gazetteer.regionAt(thing.point)?.owner : ""));
         const country = holder ? landedPolity(gazetteer.find(holder, { exact: true })) : null;
@@ -925,6 +935,23 @@ const countryInPhrase = (phrase, gazetteer) => {
 
 // Every name a phrase gives, the last part first: "Djibo, Burkina Faso" gives
 // Burkina Faso, then Djibo; "in" and a possessive give the name they carry.
+//
+// And the town a feature is called after, when the map has no such feature:
+// "Manila Bay" gives Manila, "Port of Odesa" Odesa, "Clark Air Base" Clark. The
+// map names no bays and few bases, and these are what a model sites a fleet or
+// a wing at. Seen in a player's log (2026-10-12): squadrons put at Manila Bay
+// and at an air base by the city. Only an anchor for an approximate placement,
+// always after the name as it was written.
+const FEATURE_AFTER = /^(.+?)\s+(?:bay|gulf|strait|straits|sound|harbou?r|roads|port|coast|naval\s+base|naval\s+station|air\s+base|air\s+force\s+base|air\s+station|airbase|airfield|airport|international\s+airport|metropolitan\s+area|city|province)$/i;
+const FEATURE_BEFORE = /^(?:bay|gulf|strait|straits|port|coast|city|province)\s+of\s+(.+)$|^(?:metro|greater|port)\s+(.+)$/i;
+const featureTown = (name) => {
+    const text = stripArticle(name);
+    const after = text.match(FEATURE_AFTER);
+    if (after) return stripArticle(after[1]);
+    const before = text.match(FEATURE_BEFORE);
+    return before ? stripArticle(before[1] ?? before[2]) : "";
+};
+
 const namedInPhrase = (phrase) => {
     const parts = asText(phrase).split(",").map((part) => stripArticle(part.trim())).filter(Boolean);
     const named = [];
@@ -938,12 +965,20 @@ const namedInPhrase = (phrase) => {
     return named;
 };
 
+// The towns the features of a phrase are called after, asked only once every
+// name as it was written has named nothing: "Panama City, Florida" is in
+// Florida, not in Panama.
+const featureTownsIn = (phrase) => {
+    const written = namedInPhrase(phrase);
+    return [...new Set(written.map((part) => featureTown(part.replace(/^(?:off|near|outside|by)\s+/i, ""))).filter((town) => town && !written.includes(town)))];
+};
+
 const insideAny = (point, regions) => asArray(regions).some((region) => pointInGeometry(point, region.geometry));
 
 // A province or city the phrase names beside the unknown town: "Stranraer,
 // Scotland".
 const anchorInPhrase = (phrase, gazetteer) => {
-    for (const token of namedInPhrase(phrase)) {
+    for (const token of [...namedInPhrase(phrase), ...featureTownsIn(phrase)]) {
         const thing = gazetteer.find(token, { exact: true });
         if (thing?.kind === "region" || thing?.kind === "city") return thing;
     }
@@ -1016,10 +1051,64 @@ const withKinds = (gazetteer, kinds) => (kinds.size
     ? { ...gazetteer, find: (name, options = {}) => gazetteer.find(name, { ...options, kind: kindOfName(kinds, name) }) }
     : gazetteer);
 
-export const resolvePlacement = (written, mapGazetteer, { seedText = "", owner = "", home = owner, approximate = false, context = "" } = {}) => {
+//
+// The kind is a strong preference and not a wall. Where the name is on the map
+// as the kind it was given, that is the answer and nothing else is looked at.
+// Where it is not, and the map has the name as something else, that is used
+// and said (`otherKind`), before the address's country stands in for it and
+// before anything is approximated or dropped: "city: Tablas, country:
+// Philippines" is the province Tablas, "sea: Manila" the water off the city.
+// The address's own rule still holds for the name read that way, so "region:
+// Georgia, country: United States" is never the country in the Caucasus.
+//
+// One reading is held back for a unit that is only being moved (`raising`
+// off): a region or a city that the map has only as a whole country. A new
+// unit or structure has to stand somewhere, and the country of that name is a
+// better guess than its owner's capital; a division ordered to "region:
+// Georgia" on a map with no such state is better left where it stands than
+// marched to the Caucasus (the 45-skip test, 2026-10-09).
+const KIND_WORDS = { polity: "country", marker: "structure" };
+const readAsAnotherKind = (phrase, kinds, mapGazetteer, { raising = false, ...options } = {}) => {
+    if (!kinds.size) return null;
+    let loose = null;
+    try {
+        loose = resolveExactly(phrase, mapGazetteer, { ...options, contained: false });
+    } catch {
+        loose = null; // one odd polygon must not cost the turn its other placements
+    }
+    if (!loose || loose.error) return null;
+    // Which name the map has as something other than what it was called.
+    for (const part of namedInPhrase(phrase)) {
+        const name = part.replace(/^(?:off|near|outside|by)\s+/i, "");
+        const said = kindOfName(kinds, name);
+        if (!said) continue;
+        if (mapGazetteer.find(name, { exact: true, kind: said })) continue;
+        const found = mapGazetteer.find(name, { exact: true }) ?? mapGazetteer.find(name);
+        if (!found) continue;
+        if (found.kind === "polity" && (said === "region" || said === "city") && !raising) return null;
+        return { ...loose, otherKind: { name, said, is: KIND_WORDS[found.kind] ?? asText(found.kind), used: asText(found.name) || name } };
+    }
+    return { ...loose, otherKind: { name: asText(phrase), said: [...kinds.values()][0], is: "", used: asText(loose.label) } };
+};
+
+// What the model is told when a name was read as another kind than it said.
+export const describeOtherKind = ({ title = "", name = "", phrase = "", placed } = {}) => {
+    const mark = placed?.otherKind;
+    if (!mark) return "";
+    const what = mark.is && mark.used ? `the ${mark.is} ${mark.used} was used` : "the place of that name the map does have was used";
+    return `${asText(title) ? `Event "${asText(title)}": ` : ""}${asText(name) || "a unit"} was placed at "${asText(phrase)}", but this map has no ${mark.said} called "${mark.name}": ${what}.`
+        + `${mark.is && mark.used ? ` Write it as "${mark.is}: ${mark.used}".` : ""}`;
+};
+
+// `raising`: the thing is new (a spawn, a build) and not one being moved; see
+// readAsAnotherKind. An approximate placement is only ever for a new thing.
+export const resolvePlacement = (written, mapGazetteer, { seedText = "", owner = "", home = owner, approximate = false, context = "", raising = approximate } = {}) => {
     const { text: phrase, kinds } = stripKindTags(written);
     const gazetteer = withKinds(mapGazetteer, kinds);
     const exact = resolveExactly(phrase, gazetteer, { seedText, owner, home, contained: !approximate });
+    if (!exact.error && !exact.contained) return exact;
+    const another = readAsAnotherKind(phrase, kinds, mapGazetteer, { seedText, owner, home, raising });
+    if (another) return another;
     if (!exact.error || !approximate) return exact;
     const unmarked = () => (asText(phrase).includes(",") ? resolveExactly(phrase, gazetteer, { seedText, owner, home }) : exact);
     try {
@@ -1216,14 +1305,14 @@ const SEA_PART = /^(?:the\s+)?(?:far\s+)?(?:(?:north|south)(?:[- ]?(?:east|west)
 // to a port by its name moved about on land.
 const SEA_RINGS_KM = [8, 16, 25, 35, 50, 70, 100, 140, 200, 300, 400];
 export const nearestSea = (point, gazetteer, { seed = 0, maxKm = 400 } = {}) => {
-    if (!gazetteer.regionAt(point)) return point;
+    if (isOpenSea(point, gazetteer)) return point;
     for (const km of SEA_RINGS_KM.filter((ring) => ring <= maxKm)) {
         for (let step = 0; step < 16; step += 1) {
             const bearing = (seed + step * 22.5) % 360;
             const out = offsetPoint(point, bearing, km);
-            if (gazetteer.regionAt(out)) continue;
+            if (!isOpenSea(out, gazetteer)) continue;
             const further = offsetPoint(point, bearing, km + 12);
-            return gazetteer.regionAt(further) ? out : further;
+            return isOpenSea(further, gazetteer) ? further : out;
         }
     }
     return null;
