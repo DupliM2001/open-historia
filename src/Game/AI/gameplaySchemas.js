@@ -1927,7 +1927,7 @@ const chatActionSchema = {
       enum: ["send_message", "add_reaction", "rename_chat", "add_member", "remove_member", "create_poll", "add_poll_option", "poll_vote", ...INSTITUTION_CHAT_ACTION_KINDS],
     },
     actorName: nonEmptyTextSchema("The AI participant acting, by exact display name. NEVER a human-controlled one."),
-    content: textSchema("send_message: spoken message only, in the actor's own voice, written TO the others (never the player's words, never addressed to the actor's own government, capital or leader). Provide a natural, substantive diplomatic reply with realistic depth (typically 2-4 sentences explaining position, leverage, or conditions); avoid clipped robotic one-liners. actorName already identifies the speaker; never prefix content with the polity name plus a colon or dash."),
+    content: textSchema("send_message: spoken message only, in the actor's own voice, written TO the others (never the player's words, never addressed to the actor's own government, capital or leader). Match the length and tone of what it answers. actorName already identifies the speaker; never prefix content with the polity name plus a colon or dash."),
     targetEntryId: textSchema("add_reaction: the id of the message reacted to, copied from the transcript."),
     emoji: textSchema("add_reaction: one emoji."),
     title: textSchema("rename_chat: the new title."),

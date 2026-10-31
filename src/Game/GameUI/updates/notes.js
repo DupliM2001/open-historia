@@ -53,6 +53,23 @@ import { PAST_UPDATES } from "./notesPast.js";
 // make UPDATES, newest first by date.
 const NEW_UPDATES = [
   {
+    // Group diplomacy: countries added to a conversation, conversations renamed, members tagged (PR #917, 2026-10-31).
+    id: "2026-10-group-diplomacy",
+    kind: "minor",
+    date: "2026-10-31",
+    channel: "beta",
+    banners: [
+      {
+        title: "Group diplomacy",
+        items: [
+          "Add countries to a diplomatic conversation with Add Country in its header.",
+          "Rename a conversation with the pencil beside its title.",
+          "In a group conversation, tag countries with the @ chips above the message box: only the countries you tag answer.",
+        ],
+      },
+    ],
+  },
+  {
     // Peace offered through the diplomatic chats, when the AI decides it, with each country's war in its diplomacy (2026-10-30).
     id: "2026-10-peace-in-the-chats",
     kind: "minor",
@@ -121,14 +138,10 @@ const NEW_UPDATES = [
     channel: "beta",
     banners: [
       {
-        title: "Renamed regions and group diplomacy",
+        title: "Renamed regions and a tidier top bar",
         items: [
           "A region renamed by an event shows its new name on its place card and in each country's list of territory, for every player in a shared game.",
           "On a computer, the menu button at the top left is now the same height as the game's name and the Exit Game button beside it.",
-          "Add countries directly into existing diplomatic conversations with the + Add Country button in the header.",
-          "Rename diplomatic conversations and group channels with the new title edit button.",
-          "Tag specific countries in group conversations using @Country chips so only those leaders reply to your message.",
-          "Diplomatic leaders now respond with natural depth and substance rather than clipped single-sentence answers.",
         ],
       },
     ],

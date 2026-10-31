@@ -25,8 +25,3 @@ Before you finish any task, check:
 The complete guide is **[docs/update-notices.md](docs/update-notices.md)**: when to write one, the entry format with examples, how to build a theme, the kit, the house rules and how devices are shown updates. Follow it exactly.
 
 When a feature is promoted to another branch (alpha, then beta, then main), its notice entry goes with it. Promote only the lines for what was promoted.
-
-## Local Dev Server & CORS Proxy
-
-When running the Vite dev server (`npm run dev` on port 5173) against the local backend server (`http://localhost:3000`), state-changing requests (`PUT`, `POST`, `DELETE`) require the backend's `Origin` check to pass (`crossOriginWriteAllowed` in `server/security.js`). `vite.config.ts` must configure the `/api` proxy with `changeOrigin: true` and `headers: { origin: 'http://localhost:3000' }`, otherwise the server blocks cross-origin writes with a 403 error.
-
