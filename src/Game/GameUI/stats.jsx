@@ -981,8 +981,8 @@ const ROLE_TONES = {
     coalition: "#fcd34d",
     opposition: "#93c5fd",
     extraParliamentary: "#94a3b8",
-    underground: "#a78bfa",
-    exile: "#a78bfa",
+    underground: "#9aa1ab",
+    exile: "#9aa1ab",
     banned: "#f87171",
 };
 

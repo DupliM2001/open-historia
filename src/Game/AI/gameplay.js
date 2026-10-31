@@ -14495,8 +14495,7 @@ export const assessPoliticalLandscape = async (target, { signal } = {}) => {
   await waitForSimulationIdle({ signal });
   throwIfAborted(signal);
   if (activeCampaignId() !== campaign) throw new Error("The campaign changed while the parties were being compiled.");
-  const fresh = normalizeWorldState(await readWorldState({ force: true }));
-  await writeWorldState({ ...fresh, politics: { ...(fresh.politics ?? {}), [name]: entry } });
+  await mutateWorldState((latest) => ({ ...latest, politics: { ...(latest?.politics ?? {}), [name]: entry } }));
   return entry;
 };
 
@@ -14531,10 +14530,13 @@ export const assessGoalProgress = async ({ signal } = {}) => {
   await waitForSimulationIdle({ signal });
   throwIfAborted(signal);
   if (activeCampaignId() !== campaign) throw new Error("The campaign changed while the goal was being assessed.");
-  const fresh = normalizeWorldState(await readWorldState({ force: true }));
-  const next = withGoalProgress(fresh, player, goal.text, { ...payload, asOf: variables.date || "", round: bundle.game?.round });
-  if (next === fresh) throw new Error("The goal was changed while it was being assessed.");
-  await writeWorldState(next);
+  let next = null;
+  await mutateWorldState((latest) => {
+    const fresh = normalizeWorldState(latest);
+    next = withGoalProgress(fresh, player, goal.text, { ...payload, asOf: variables.date || "", round: bundle.game?.round });
+    return next === fresh ? latest : next;
+  });
+  if (!next || playerGoalEntryOf(next, player)?.progress == null) throw new Error("The goal was changed while it was being assessed.");
   return playerGoalEntryOf(next, player)?.progress ?? null;
 };
 
